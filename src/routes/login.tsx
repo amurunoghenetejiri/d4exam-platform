@@ -1,19 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Eye, EyeOff, ShieldCheck, Loader2 } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck, Loader2, Building2 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -21,29 +14,21 @@ export const Route = createFileRoute("/login")({
       { title: "Login — D4EXAM" },
       {
         name: "description",
-        content: "Sign in to your institution's D4EXAM account with your school code and credentials.",
+        content:
+          "Sign in to your institution's D4EXAM account with your school code and credentials.",
       },
     ],
   }),
   component: LoginPage,
 });
 
-const destinations = [
-  { value: "/student", label: "Student portal" },
-  { value: "/teacher", label: "Teacher portal" },
-  { value: "/admin", label: "School admin portal" },
-  { value: "/officer", label: "Examination officer portal" },
-  { value: "/super-admin", label: "Super admin portal" },
-];
-
 function LoginPage() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [dest, setDest] = useState("/student");
-  const [code, setCode] = useState("ESU");
-  const [identifier, setIdentifier] = useState("CSC/2021/0184");
+  const [code, setCode] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
 
   function submit(e: React.FormEvent) {
@@ -54,9 +39,11 @@ function LoginPage() {
       return;
     }
     setLoading(true);
+    // Phase 1 mock: role is detected server-side in production.
+    // Demo navigates to the student portal after a successful form check.
     setTimeout(() => {
       setLoading(false);
-      navigate({ to: dest });
+      navigate({ to: "/student" });
     }, 900);
   }
 
@@ -69,8 +56,20 @@ function LoginPage() {
 
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-10">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-            <h1 className="text-2xl font-extrabold text-slate-900 sm:text-3xl">Welcome Back!</h1>
-            <p className="mt-2 text-sm text-slate-600">Sign in to continue</p>
+            {/* Institution mark */}
+            <div className="mb-6 flex flex-col items-center text-center">
+              <div className="grid h-16 w-16 place-items-center rounded-2xl border border-slate-200 bg-slate-50 text-primary shadow-sm">
+                <Building2 className="h-8 w-8" aria-hidden />
+              </div>
+              <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Institutional sign-in
+              </p>
+            </div>
+
+            <h1 className="text-center text-2xl font-extrabold text-slate-900 sm:text-3xl">
+              Welcome Back!
+            </h1>
+            <p className="mt-2 text-center text-sm text-slate-600">Sign in to continue</p>
 
             {error && (
               <Alert variant="destructive" className="mt-5">
@@ -87,7 +86,7 @@ function LoginPage() {
                   id="school-code"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  placeholder="Enter school code"
+                  placeholder="e.g. your school code"
                   className="h-11 rounded-lg border-slate-200 bg-white"
                   autoComplete="organization"
                 />
@@ -95,13 +94,13 @@ function LoginPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="identifier" className="font-semibold text-slate-700">
-                  Username / Email / Matric / Staff ID
+                  Username / Matric / Staff ID / Email
                 </Label>
                 <Input
                   id="identifier"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="Enter your username or email"
+                  placeholder="Enter username, matric number, staff ID or email"
                   className="h-11 rounded-lg border-slate-200 bg-white"
                   autoComplete="username"
                 />
@@ -134,33 +133,22 @@ function LoginPage() {
 
               <div className="flex items-center justify-between gap-3">
                 <label className="flex items-center gap-2 text-sm text-slate-600">
-                  <Checkbox id="remember" defaultChecked />
+                  <Checkbox id="remember" />
                   <span>Remember me</span>
                 </label>
-                <Link to="/forgot-password" className="text-sm font-semibold text-primary hover:underline">
+                <Link
+                  to="/forgot-password"
+                  className="text-sm font-semibold text-primary hover:underline"
+                >
                   Forgot Password?
                 </Link>
               </div>
 
-              <div className="space-y-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3">
-                <Label htmlFor="dest" className="text-xs font-medium text-slate-500">
-                  Phase 1 preview destination
-                </Label>
-                <Select value={dest} onValueChange={setDest}>
-                  <SelectTrigger id="dest" className="bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {destinations.map((d) => (
-                      <SelectItem key={d.value} value={d.value}>
-                        {d.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Button type="submit" className="h-11 w-full rounded-lg text-base font-semibold" disabled={loading}>
+              <Button
+                type="submit"
+                className="h-11 w-full rounded-lg text-base font-semibold"
+                disabled={loading}
+              >
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
                 {loading ? "Signing in…" : "Login"}
               </Button>
