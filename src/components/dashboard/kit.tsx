@@ -125,7 +125,7 @@ const statusTones: Record<string, string> = {
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
-  const tone = statusTones[status.toLowerCase()] ?? statusTones.draft;
+  const tone = statusTones[status.toLowerCase()] ?? statusTones['draft'];
   return (
     <span
       className={cn(
