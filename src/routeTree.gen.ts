@@ -11,14 +11,33 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ApplicationStatusRouteImport } from './routes/application-status'
 import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as OfficerRouteImport } from './routes/officer'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SchoolApplicationRouteImport } from './routes/school-application'
+import { Route as StudentRouteImport } from './routes/student'
+import { Route as SuperAdminRouteImport } from './routes/super-admin'
 import { Route as SupportRouteImport } from './routes/support'
+import { Route as TeacherRouteImport } from './routes/teacher'
+import { Route as AdminNotificationsRouteImport } from './routes/admin.notifications'
+import { Route as AdminProfileRouteImport } from './routes/admin.profile'
+import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
+import { Route as OfficerNotificationsRouteImport } from './routes/officer.notifications'
+import { Route as OfficerSettingsRouteImport } from './routes/officer.settings'
+import { Route as StudentNotificationsRouteImport } from './routes/student.notifications'
+import { Route as StudentProfileRouteImport } from './routes/student.profile'
+import { Route as StudentSettingsRouteImport } from './routes/student.settings'
+import { Route as SuperAdminNotificationsRouteImport } from './routes/super-admin.notifications'
+import { Route as SuperAdminProfileRouteImport } from './routes/super-admin.profile'
+import { Route as SuperAdminSettingsRouteImport } from './routes/super-admin.settings'
+import { Route as TeacherNotificationsRouteImport } from './routes/teacher.notifications'
+import { Route as TeacherProfileRouteImport } from './routes/teacher.profile'
+import { Route as TeacherSettingsRouteImport } from './routes/teacher.settings'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,6 +47,11 @@ const IndexRoute = IndexRouteImport.update({
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApplicationStatusRoute = ApplicationStatusRouteImport.update({
@@ -50,6 +74,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OfficerRoute = OfficerRouteImport.update({
+  id: '/officer',
+  path: '/officer',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
@@ -65,99 +94,303 @@ const SchoolApplicationRoute = SchoolApplicationRouteImport.update({
   path: '/school-application',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StudentRoute = StudentRouteImport.update({
+  id: '/student',
+  path: '/student',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SuperAdminRoute = SuperAdminRouteImport.update({
+  id: '/super-admin',
+  path: '/super-admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SupportRoute = SupportRouteImport.update({
   id: '/support',
   path: '/support',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TeacherRoute = TeacherRouteImport.update({
+  id: '/teacher',
+  path: '/teacher',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminNotificationsRoute = AdminNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminProfileRoute = AdminProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSettingsRoute = AdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AdminRoute,
+} as any)
+const OfficerNotificationsRoute = OfficerNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerSettingsRoute = OfficerSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const StudentNotificationsRoute = StudentNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => StudentRoute,
+} as any)
+const StudentProfileRoute = StudentProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => StudentRoute,
+} as any)
+const StudentSettingsRoute = StudentSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => StudentRoute,
+} as any)
+const SuperAdminNotificationsRoute = SuperAdminNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => SuperAdminRoute,
+} as any)
+const SuperAdminProfileRoute = SuperAdminProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => SuperAdminRoute,
+} as any)
+const SuperAdminSettingsRoute = SuperAdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => SuperAdminRoute,
+} as any)
+const TeacherNotificationsRoute = TeacherNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => TeacherRoute,
+} as any)
+const TeacherProfileRoute = TeacherProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => TeacherRoute,
+} as any)
+const TeacherSettingsRoute = TeacherSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => TeacherRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/admin': typeof AdminRouteWithChildren
   '/application-status': typeof ApplicationStatusRoute
   '/features': typeof FeaturesRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/officer': typeof OfficerRouteWithChildren
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/school-application': typeof SchoolApplicationRoute
+  '/student': typeof StudentRouteWithChildren
+  '/super-admin': typeof SuperAdminRouteWithChildren
   '/support': typeof SupportRoute
+  '/teacher': typeof TeacherRouteWithChildren
+  '/admin/notifications': typeof AdminNotificationsRoute
+  '/admin/profile': typeof AdminProfileRoute
+  '/admin/settings': typeof AdminSettingsRoute
+  '/officer/notifications': typeof OfficerNotificationsRoute
+  '/officer/settings': typeof OfficerSettingsRoute
+  '/student/notifications': typeof StudentNotificationsRoute
+  '/student/profile': typeof StudentProfileRoute
+  '/student/settings': typeof StudentSettingsRoute
+  '/super-admin/notifications': typeof SuperAdminNotificationsRoute
+  '/super-admin/profile': typeof SuperAdminProfileRoute
+  '/super-admin/settings': typeof SuperAdminSettingsRoute
+  '/teacher/notifications': typeof TeacherNotificationsRoute
+  '/teacher/profile': typeof TeacherProfileRoute
+  '/teacher/settings': typeof TeacherSettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/admin': typeof AdminRouteWithChildren
   '/application-status': typeof ApplicationStatusRoute
   '/features': typeof FeaturesRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/officer': typeof OfficerRouteWithChildren
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/school-application': typeof SchoolApplicationRoute
+  '/student': typeof StudentRouteWithChildren
+  '/super-admin': typeof SuperAdminRouteWithChildren
   '/support': typeof SupportRoute
+  '/teacher': typeof TeacherRouteWithChildren
+  '/admin/notifications': typeof AdminNotificationsRoute
+  '/admin/profile': typeof AdminProfileRoute
+  '/admin/settings': typeof AdminSettingsRoute
+  '/officer/notifications': typeof OfficerNotificationsRoute
+  '/officer/settings': typeof OfficerSettingsRoute
+  '/student/notifications': typeof StudentNotificationsRoute
+  '/student/profile': typeof StudentProfileRoute
+  '/student/settings': typeof StudentSettingsRoute
+  '/super-admin/notifications': typeof SuperAdminNotificationsRoute
+  '/super-admin/profile': typeof SuperAdminProfileRoute
+  '/super-admin/settings': typeof SuperAdminSettingsRoute
+  '/teacher/notifications': typeof TeacherNotificationsRoute
+  '/teacher/profile': typeof TeacherProfileRoute
+  '/teacher/settings': typeof TeacherSettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/admin': typeof AdminRouteWithChildren
   '/application-status': typeof ApplicationStatusRoute
   '/features': typeof FeaturesRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/officer': typeof OfficerRouteWithChildren
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/school-application': typeof SchoolApplicationRoute
+  '/student': typeof StudentRouteWithChildren
+  '/super-admin': typeof SuperAdminRouteWithChildren
   '/support': typeof SupportRoute
+  '/teacher': typeof TeacherRouteWithChildren
+  '/admin/notifications': typeof AdminNotificationsRoute
+  '/admin/profile': typeof AdminProfileRoute
+  '/admin/settings': typeof AdminSettingsRoute
+  '/officer/notifications': typeof OfficerNotificationsRoute
+  '/officer/settings': typeof OfficerSettingsRoute
+  '/student/notifications': typeof StudentNotificationsRoute
+  '/student/profile': typeof StudentProfileRoute
+  '/student/settings': typeof StudentSettingsRoute
+  '/super-admin/notifications': typeof SuperAdminNotificationsRoute
+  '/super-admin/profile': typeof SuperAdminProfileRoute
+  '/super-admin/settings': typeof SuperAdminSettingsRoute
+  '/teacher/notifications': typeof TeacherNotificationsRoute
+  '/teacher/profile': typeof TeacherProfileRoute
+  '/teacher/settings': typeof TeacherSettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/about'
+    | '/admin'
     | '/application-status'
     | '/features'
     | '/forgot-password'
     | '/login'
+    | '/officer'
     | '/privacy'
     | '/reset-password'
     | '/school-application'
+    | '/student'
+    | '/super-admin'
     | '/support'
+    | '/teacher'
+    | '/admin/notifications'
+    | '/admin/profile'
+    | '/admin/settings'
+    | '/officer/notifications'
+    | '/officer/settings'
+    | '/student/notifications'
+    | '/student/profile'
+    | '/student/settings'
+    | '/super-admin/notifications'
+    | '/super-admin/profile'
+    | '/super-admin/settings'
+    | '/teacher/notifications'
+    | '/teacher/profile'
+    | '/teacher/settings'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/about'
+    | '/admin'
     | '/application-status'
     | '/features'
     | '/forgot-password'
     | '/login'
+    | '/officer'
     | '/privacy'
     | '/reset-password'
     | '/school-application'
+    | '/student'
+    | '/super-admin'
     | '/support'
+    | '/teacher'
+    | '/admin/notifications'
+    | '/admin/profile'
+    | '/admin/settings'
+    | '/officer/notifications'
+    | '/officer/settings'
+    | '/student/notifications'
+    | '/student/profile'
+    | '/student/settings'
+    | '/super-admin/notifications'
+    | '/super-admin/profile'
+    | '/super-admin/settings'
+    | '/teacher/notifications'
+    | '/teacher/profile'
+    | '/teacher/settings'
   id:
     | '__root__'
     | '/'
     | '/about'
+    | '/admin'
     | '/application-status'
     | '/features'
     | '/forgot-password'
     | '/login'
+    | '/officer'
     | '/privacy'
     | '/reset-password'
     | '/school-application'
+    | '/student'
+    | '/super-admin'
     | '/support'
+    | '/teacher'
+    | '/admin/notifications'
+    | '/admin/profile'
+    | '/admin/settings'
+    | '/officer/notifications'
+    | '/officer/settings'
+    | '/student/notifications'
+    | '/student/profile'
+    | '/student/settings'
+    | '/super-admin/notifications'
+    | '/super-admin/profile'
+    | '/super-admin/settings'
+    | '/teacher/notifications'
+    | '/teacher/profile'
+    | '/teacher/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
+  AdminRoute: typeof AdminRouteWithChildren
   ApplicationStatusRoute: typeof ApplicationStatusRoute
   FeaturesRoute: typeof FeaturesRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
+  OfficerRoute: typeof OfficerRouteWithChildren
   PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SchoolApplicationRoute: typeof SchoolApplicationRoute
+  StudentRoute: typeof StudentRouteWithChildren
+  SuperAdminRoute: typeof SuperAdminRouteWithChildren
   SupportRoute: typeof SupportRoute
+  TeacherRoute: typeof TeacherRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -174,6 +407,13 @@ declare module '@tanstack/react-router' {
       path: '/about'
       fullPath: '/about'
       preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/application-status': {
@@ -204,6 +444,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/officer': {
+      id: '/officer'
+      path: '/officer'
+      fullPath: '/officer'
+      preLoaderRoute: typeof OfficerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/privacy': {
       id: '/privacy'
       path: '/privacy'
@@ -225,6 +472,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SchoolApplicationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/student': {
+      id: '/student'
+      path: '/student'
+      fullPath: '/student'
+      preLoaderRoute: typeof StudentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/super-admin': {
+      id: '/super-admin'
+      path: '/super-admin'
+      fullPath: '/super-admin'
+      preLoaderRoute: typeof SuperAdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/support': {
       id: '/support'
       path: '/support'
@@ -232,20 +493,203 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SupportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/teacher': {
+      id: '/teacher'
+      path: '/teacher'
+      fullPath: '/teacher'
+      preLoaderRoute: typeof TeacherRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/notifications': {
+      id: '/admin/notifications'
+      path: '/notifications'
+      fullPath: '/admin/notifications'
+      preLoaderRoute: typeof AdminNotificationsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/profile': {
+      id: '/admin/profile'
+      path: '/profile'
+      fullPath: '/admin/profile'
+      preLoaderRoute: typeof AdminProfileRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/settings': {
+      id: '/admin/settings'
+      path: '/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AdminSettingsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/officer/notifications': {
+      id: '/officer/notifications'
+      path: '/notifications'
+      fullPath: '/officer/notifications'
+      preLoaderRoute: typeof OfficerNotificationsRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/officer/settings': {
+      id: '/officer/settings'
+      path: '/settings'
+      fullPath: '/officer/settings'
+      preLoaderRoute: typeof OfficerSettingsRouteImport
+      parentRoute: typeof OfficerRoute
+    }
+    '/student/notifications': {
+      id: '/student/notifications'
+      path: '/notifications'
+      fullPath: '/student/notifications'
+      preLoaderRoute: typeof StudentNotificationsRouteImport
+      parentRoute: typeof StudentRoute
+    }
+    '/student/profile': {
+      id: '/student/profile'
+      path: '/profile'
+      fullPath: '/student/profile'
+      preLoaderRoute: typeof StudentProfileRouteImport
+      parentRoute: typeof StudentRoute
+    }
+    '/student/settings': {
+      id: '/student/settings'
+      path: '/settings'
+      fullPath: '/student/settings'
+      preLoaderRoute: typeof StudentSettingsRouteImport
+      parentRoute: typeof StudentRoute
+    }
+    '/super-admin/notifications': {
+      id: '/super-admin/notifications'
+      path: '/notifications'
+      fullPath: '/super-admin/notifications'
+      preLoaderRoute: typeof SuperAdminNotificationsRouteImport
+      parentRoute: typeof SuperAdminRoute
+    }
+    '/super-admin/profile': {
+      id: '/super-admin/profile'
+      path: '/profile'
+      fullPath: '/super-admin/profile'
+      preLoaderRoute: typeof SuperAdminProfileRouteImport
+      parentRoute: typeof SuperAdminRoute
+    }
+    '/super-admin/settings': {
+      id: '/super-admin/settings'
+      path: '/settings'
+      fullPath: '/super-admin/settings'
+      preLoaderRoute: typeof SuperAdminSettingsRouteImport
+      parentRoute: typeof SuperAdminRoute
+    }
+    '/teacher/notifications': {
+      id: '/teacher/notifications'
+      path: '/notifications'
+      fullPath: '/teacher/notifications'
+      preLoaderRoute: typeof TeacherNotificationsRouteImport
+      parentRoute: typeof TeacherRoute
+    }
+    '/teacher/profile': {
+      id: '/teacher/profile'
+      path: '/profile'
+      fullPath: '/teacher/profile'
+      preLoaderRoute: typeof TeacherProfileRouteImport
+      parentRoute: typeof TeacherRoute
+    }
+    '/teacher/settings': {
+      id: '/teacher/settings'
+      path: '/settings'
+      fullPath: '/teacher/settings'
+      preLoaderRoute: typeof TeacherSettingsRouteImport
+      parentRoute: typeof TeacherRoute
+    }
   }
 }
+
+interface AdminRouteChildren {
+  AdminNotificationsRoute: typeof AdminNotificationsRoute
+  AdminProfileRoute: typeof AdminProfileRoute
+  AdminSettingsRoute: typeof AdminSettingsRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminNotificationsRoute: AdminNotificationsRoute,
+  AdminProfileRoute: AdminProfileRoute,
+  AdminSettingsRoute: AdminSettingsRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
+interface OfficerRouteChildren {
+  OfficerNotificationsRoute: typeof OfficerNotificationsRoute
+  OfficerSettingsRoute: typeof OfficerSettingsRoute
+}
+
+const OfficerRouteChildren: OfficerRouteChildren = {
+  OfficerNotificationsRoute: OfficerNotificationsRoute,
+  OfficerSettingsRoute: OfficerSettingsRoute,
+}
+
+const OfficerRouteWithChildren =
+  OfficerRoute._addFileChildren(OfficerRouteChildren)
+
+interface StudentRouteChildren {
+  StudentNotificationsRoute: typeof StudentNotificationsRoute
+  StudentProfileRoute: typeof StudentProfileRoute
+  StudentSettingsRoute: typeof StudentSettingsRoute
+}
+
+const StudentRouteChildren: StudentRouteChildren = {
+  StudentNotificationsRoute: StudentNotificationsRoute,
+  StudentProfileRoute: StudentProfileRoute,
+  StudentSettingsRoute: StudentSettingsRoute,
+}
+
+const StudentRouteWithChildren =
+  StudentRoute._addFileChildren(StudentRouteChildren)
+
+interface SuperAdminRouteChildren {
+  SuperAdminNotificationsRoute: typeof SuperAdminNotificationsRoute
+  SuperAdminProfileRoute: typeof SuperAdminProfileRoute
+  SuperAdminSettingsRoute: typeof SuperAdminSettingsRoute
+}
+
+const SuperAdminRouteChildren: SuperAdminRouteChildren = {
+  SuperAdminNotificationsRoute: SuperAdminNotificationsRoute,
+  SuperAdminProfileRoute: SuperAdminProfileRoute,
+  SuperAdminSettingsRoute: SuperAdminSettingsRoute,
+}
+
+const SuperAdminRouteWithChildren = SuperAdminRoute._addFileChildren(
+  SuperAdminRouteChildren,
+)
+
+interface TeacherRouteChildren {
+  TeacherNotificationsRoute: typeof TeacherNotificationsRoute
+  TeacherProfileRoute: typeof TeacherProfileRoute
+  TeacherSettingsRoute: typeof TeacherSettingsRoute
+}
+
+const TeacherRouteChildren: TeacherRouteChildren = {
+  TeacherNotificationsRoute: TeacherNotificationsRoute,
+  TeacherProfileRoute: TeacherProfileRoute,
+  TeacherSettingsRoute: TeacherSettingsRoute,
+}
+
+const TeacherRouteWithChildren =
+  TeacherRoute._addFileChildren(TeacherRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
+  AdminRoute: AdminRouteWithChildren,
   ApplicationStatusRoute: ApplicationStatusRoute,
   FeaturesRoute: FeaturesRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
+  OfficerRoute: OfficerRouteWithChildren,
   PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SchoolApplicationRoute: SchoolApplicationRoute,
+  StudentRoute: StudentRouteWithChildren,
+  SuperAdminRoute: SuperAdminRouteWithChildren,
   SupportRoute: SupportRoute,
+  TeacherRoute: TeacherRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
