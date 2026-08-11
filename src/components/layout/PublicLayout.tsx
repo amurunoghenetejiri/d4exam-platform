@@ -8,9 +8,9 @@ import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/s
 const links = [
   { to: "/features", label: "Features" },
   { to: "/school-application", label: "For Schools" },
-  { to: "/features", label: "For Teachers" },
-  { to: "/features", label: "For Students" },
+  { to: "/pricing", label: "Pricing" },
   { to: "/about", label: "About Us" },
+  { to: "/support", label: "Support" },
 ];
 
 export function PublicLayout({ children }: { children: ReactNode }) {
@@ -56,12 +56,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
               <SheetTitle className="sr-only">Main navigation</SheetTitle>
               <div className="flex h-16 items-center justify-between border-b border-slate-200 px-4">
                 <Logo size="md" />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="Close menu"
-                  onClick={() => setOpen(false)}
-                >
+                <Button variant="ghost" size="icon" aria-label="Close menu" onClick={() => setOpen(false)}>
                   <X className="h-5 w-5" />
                 </Button>
               </div>
@@ -104,8 +99,8 @@ export function PublicLayout({ children }: { children: ReactNode }) {
             title="Platform"
             items={[
               { to: "/features", label: "Features" },
+              { to: "/pricing", label: "Pricing" },
               { to: "/school-application", label: "For Schools" },
-              { to: "/application-status", label: "Application Status" },
             ]}
           />
           <FooterCol
@@ -135,13 +130,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
   );
 }
 
-function FooterCol({
-  title,
-  items,
-}: {
-  title: string;
-  items: { to: string; label: string }[];
-}) {
+function FooterCol({ title, items }: { title: string; items: { to: string; label: string }[] }) {
   return (
     <div>
       <h3 className="text-sm font-bold text-slate-900">{title}</h3>
