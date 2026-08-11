@@ -51,7 +51,7 @@ function Page() {
                   <p className="mt-1 text-xs text-muted-foreground">{e.date} · {e.questions} questions · {e.duration} minutes</p>
                 </div>
                 <Button size="sm" asChild>
-                  <Link to="/student/examinations/$examId" params={{ examId: e.id }}>View exam</Link>
+                  <Link to="/student/examinations">View exam</Link>
                 </Button>
               </li>
             ))}
