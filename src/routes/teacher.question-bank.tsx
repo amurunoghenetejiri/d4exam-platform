@@ -191,10 +191,19 @@ function Page() {
   const [importDrafts, setImportDrafts] = useState<DraftQuestion[]>([]);
   const [importBusy, setImportBusy] = useState(false);
 
-  // When opened from a course card, force that course filter
   useEffect(() => {
     if (lockedCourseId) setCourseFilter(lockedCourseId);
   }, [lockedCourseId]);
+
+  // Lock body scroll while import sheet is open (mobile)
+  useEffect(() => {
+    if (!importOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [importOpen]);
 
   const listQ = useQuery({
     queryKey: [
@@ -215,7 +224,6 @@ function Page() {
 
   const filtered = useMemo(() => {
     let list = items;
-    // Always respect active course filter (locked or user-selected)
     const activeCourse = lockedCourseId ?? (courseFilter !== "all" ? courseFilter : null);
     if (activeCourse) list = list.filter((i) => i.course_id === activeCourse);
     if (statusFilter !== "all") list = list.filter((i) => i.status === statusFilter);
@@ -230,6 +238,8 @@ function Page() {
     }
     return list;
   }, [items, courseFilter, statusFilter, typeFilter, search, lockedCourseId]);
+
+  const importSelectedCount = importDrafts.filter((d) => d.selected).length;
 
   async function refreshList() {
     await qc.invalidateQueries({ queryKey: ["teacher-questions"] });
@@ -296,7 +306,7 @@ function Page() {
     try {
       await supabase.from("question_options").delete().eq("question_id", questionId);
     } catch {
-      /* table may not exist */
+      /* optional */
     }
     const needs = ed.question_type === "mcq" || ed.question_type === "true_false";
     if (!needs) return;
@@ -339,7 +349,7 @@ function Page() {
       return;
     }
     if (lockedCourseId && editing.course_id !== lockedCourseId) {
-      toast.error("This bank is locked to one course. Open Question Bank from that course card.");
+      toast.error("This bank is locked to one course.");
       return;
     }
     if (!editing.question_text.trim()) {
@@ -505,13 +515,17 @@ function Page() {
       setImportDrafts(validateAll(drafts));
       setImportCourseId(defaultCourseId());
       setImportOpen(true);
-      toast.message(`Extracted ${drafts.length} question(s) — review, then Confirm import`);
+      toast.message(`Extracted ${drafts.length} question(s) — scroll, edit, then Confirm`);
     } catch (err) {
       toast.error((err as Error).message || "Import failed");
     } finally {
       setImportBusy(false);
       if (fileRef.current) fileRef.current.value = "";
     }
+  }
+
+  function setAllImportSelected(selected: boolean) {
+    setImportDrafts((rows) => rows.map((r) => ({ ...r, selected })));
   }
 
   async function confirmImport() {
@@ -521,7 +535,7 @@ function Page() {
       return;
     }
     if (lockedCourseId && importCourseId !== lockedCourseId) {
-      toast.error("Imports are locked to this course while you are in its question bank.");
+      toast.error("Imports are locked to this course.");
       return;
     }
     const selected = validateAll(importDrafts).filter((d) => d.selected);
@@ -646,7 +660,7 @@ function Page() {
             <input
               ref={fileRef}
               type="file"
-              accept=".csv,.xlsx,.xls,.docx,.pdf"
+              accept=".csv,.xlsx,.xls,.docx,.pdf,application/pdf"
               className="hidden"
               onChange={(e) => void onFilePicked(e.target.files?.[0] ?? null)}
             />
@@ -667,8 +681,7 @@ function Page() {
         <>
           {lockedCourse && (
             <div className="mb-4 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-slate-800">
-              Viewing <strong>{lockedCourse.code}</strong> only. New and imported questions go into{" "}
-              this course. You will not see CPE 111 questions while you are in MTH 101.
+              Viewing <strong>{lockedCourse.code}</strong> only. Imports save into this course.
             </div>
           )}
 
@@ -679,12 +692,6 @@ function Page() {
               question(s)
               {lockedCourse ? ` in ${lockedCourse.code}` : " matching view"}
             </span>
-            {!lockedCourse && items.length !== filtered.length && (
-              <span className="text-slate-600">
-                {" · "}
-                {items.length} total across your courses
-              </span>
-            )}
             {listQ.isFetching && (
               <span className="ml-2 text-xs text-slate-400">Refreshing…</span>
             )}
@@ -827,29 +834,13 @@ function Page() {
                         </div>
                       </div>
                       <div className="flex shrink-0 gap-0.5">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => loadIntoEditor(item)}
-                          aria-label="Edit"
-                        >
+                        <Button size="icon" variant="ghost" onClick={() => loadIntoEditor(item)} aria-label="Edit">
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => void duplicateQuestion(item)}
-                          aria-label="Duplicate"
-                        >
+                        <Button size="icon" variant="ghost" onClick={() => void duplicateQuestion(item)} aria-label="Duplicate">
                           <Copy className="h-4 w-4" />
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="text-red-500"
-                          onClick={() => void removeQuestion(item.id)}
-                          aria-label="Delete"
-                        >
+                        <Button size="icon" variant="ghost" className="text-red-500" onClick={() => void removeQuestion(item.id)} aria-label="Delete">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -860,10 +851,8 @@ function Page() {
               {!listQ.isLoading && filtered.length === 0 && (
                 <p className="rounded-2xl border border-dashed border-slate-200 py-12 text-center text-sm text-slate-500">
                   {lockedCourse
-                    ? `No questions for ${lockedCourse.code} yet. Import or create questions for this course only.`
-                    : items.length === 0
-                      ? "No questions yet. Open a course from My Courses → Questions, or create one here."
-                      : "No questions match your filters."}
+                    ? `No questions for ${lockedCourse.code} yet.`
+                    : "No questions yet."}
                 </p>
               )}
             </div>
@@ -874,8 +863,9 @@ function Page() {
                   <p>
                     {lockedCourse
                       ? `Questions listed are only for ${lockedCourse.code}.`
-                      : "Filter by course or open Questions from a course card on My Courses."}
+                      : "Filter by course or open Questions from a course card."}
                   </p>
+                  <p className="text-xs">Import supports CSV, Excel, Word, and PDF.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -887,7 +877,6 @@ function Page() {
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
-
                   <div className="space-y-2">
                     <Label className="font-semibold">Course</Label>
                     {lockedCourse ? (
@@ -912,7 +901,6 @@ function Page() {
                       </Select>
                     )}
                   </div>
-
                   <div className="space-y-2">
                     <Label className="font-semibold">Question</Label>
                     <Textarea
@@ -921,7 +909,6 @@ function Page() {
                       onChange={(e) => setEditing({ ...editing, question_text: e.target.value })}
                     />
                   </div>
-
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label className="font-semibold">Type</Label>
@@ -952,42 +939,7 @@ function Page() {
                         }
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label className="font-semibold">Difficulty</Label>
-                      <Select
-                        value={editing.difficulty}
-                        onValueChange={(v) => setEditing({ ...editing, difficulty: v })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="easy">Easy</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="hard">Hard</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="font-semibold">Status</Label>
-                      <Select
-                        value={editing.status}
-                        onValueChange={(v) => setEditing({ ...editing, status: v })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {STATUSES.map((s) => (
-                            <SelectItem key={s} value={s}>
-                              {s.replaceAll("_", " ")}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
                   </div>
-
                   {needsOpts && (
                     <div className="space-y-2">
                       <Label className="font-semibold">Options & correct answer</Label>
@@ -1000,18 +952,13 @@ function Page() {
                               type="radio"
                               name="correct"
                               checked={editing.correct_answer.toUpperCase() === letter}
-                              onChange={() =>
-                                setEditing({ ...editing, correct_answer: letter })
-                              }
+                              onChange={() => setEditing({ ...editing, correct_answer: letter })}
                               className="h-4 w-4 accent-primary"
-                              aria-label={`Mark ${letter} correct`}
                             />
                             <span className="w-5 text-xs font-bold">{letter}.</span>
                             <Input
                               value={editing[field]}
-                              onChange={(e) =>
-                                setEditing({ ...editing, [field]: e.target.value })
-                              }
+                              onChange={(e) => setEditing({ ...editing, [field]: e.target.value })}
                               placeholder={`Option ${letter}`}
                             />
                           </div>
@@ -1019,40 +966,18 @@ function Page() {
                       })}
                     </div>
                   )}
-
                   {!needsOpts && (
                     <div className="space-y-2">
                       <Label className="font-semibold">Correct answer</Label>
                       <Input
                         value={editing.correct_answer}
-                        onChange={(e) =>
-                          setEditing({ ...editing, correct_answer: e.target.value })
-                        }
-                        placeholder="Expected answer"
+                        onChange={(e) => setEditing({ ...editing, correct_answer: e.target.value })}
                       />
                     </div>
                   )}
-
-                  <div className="space-y-2">
-                    <Label className="font-semibold">Explanation (optional)</Label>
-                    <Textarea
-                      rows={2}
-                      value={editing.explanation}
-                      onChange={(e) => setEditing({ ...editing, explanation: e.target.value })}
-                    />
-                  </div>
-
                   <div className="flex flex-wrap gap-2 pt-1">
-                    <Button
-                      className="font-semibold"
-                      disabled={busy}
-                      onClick={() => void saveQuestion()}
-                    >
-                      {busy ? (
-                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Save className="mr-1.5 h-4 w-4" />
-                      )}
+                    <Button className="font-semibold" disabled={busy} onClick={() => void saveQuestion()}>
+                      {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}
                       Save to bank
                     </Button>
                     <Button variant="outline" onClick={() => setEditing(null)}>
@@ -1064,39 +989,51 @@ function Page() {
             </div>
           </div>
 
+          {/* ── Import sheet: full-screen on mobile, scrollable ── */}
           {importOpen && (
-            <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
-              <div className="flex max-h-[92dvh] w-full max-w-3xl flex-col rounded-t-2xl border border-slate-200 bg-white shadow-xl sm:rounded-2xl">
-                <div className="flex items-center justify-between border-b px-4 py-3">
-                  <div>
-                    <h2 className="text-base font-extrabold">Import preview</h2>
-                    <p className="text-xs text-slate-500">
-                      {importDrafts.length} question(s) → will save under the course below only.
+            <div
+              className="fixed inset-0 z-[100] flex items-stretch justify-center bg-black/50 sm:items-center sm:p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="import-title"
+            >
+              <div className="flex h-[100dvh] w-full max-w-3xl flex-col bg-white shadow-2xl sm:h-auto sm:max-h-[min(92dvh,880px)] sm:rounded-2xl sm:border sm:border-slate-200">
+                {/* Header — fixed */}
+                <div className="flex shrink-0 items-start gap-3 border-b border-slate-200 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+                  <div className="min-w-0 flex-1">
+                    <h2 id="import-title" className="text-base font-extrabold text-slate-900">
+                      Import preview
+                    </h2>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {importDrafts.length} extracted · {importSelectedCount} selected · scroll to
+                      review all
                     </p>
                   </div>
                   <Button
                     size="icon"
                     variant="ghost"
+                    className="shrink-0"
                     onClick={() => {
                       setImportOpen(false);
                       setImportDrafts([]);
                     }}
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-5 w-5" />
                   </Button>
                 </div>
 
-                <div className="space-y-3 overflow-y-auto px-4 py-3">
-                  <div className="space-y-1.5">
-                    <Label className="font-semibold">Save under course</Label>
+                {/* Scrollable body */}
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
+                  <div className="mb-4 space-y-1.5">
+                    <Label className="text-sm font-semibold">Save under course</Label>
                     {lockedCourse ? (
-                      <p className="rounded-lg border bg-slate-50 px-3 py-2 text-sm font-semibold">
+                      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold">
                         {lockedCourse.code} — {lockedCourse.name}
                       </p>
                     ) : (
                       <Select value={importCourseId} onValueChange={setImportCourseId}>
-                        <SelectTrigger>
-                          <SelectValue />
+                        <SelectTrigger className="h-11 w-full">
+                          <SelectValue placeholder="Choose course" />
                         </SelectTrigger>
                         <SelectContent>
                           {teacher.courses.map((c) => (
@@ -1109,16 +1046,36 @@ function Page() {
                     )}
                   </div>
 
-                  {importDrafts.map((d, idx) => (
-                    <div
-                      key={d.localId}
-                      className={cn(
-                        "rounded-xl border p-3",
-                        d.errors.length ? "border-red-200 bg-red-50/40" : "border-slate-200",
-                      )}
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="font-semibold"
+                      onClick={() => setAllImportSelected(true)}
                     >
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <label className="flex items-center gap-2 text-xs font-semibold">
+                      Select all
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setAllImportSelected(false)}
+                    >
+                      Clear all
+                    </Button>
+                  </div>
+
+                  <div className="space-y-4 pb-6">
+                    {importDrafts.map((d, idx) => (
+                      <div
+                        key={d.localId}
+                        className={cn(
+                          "rounded-xl border p-3",
+                          d.errors.length ? "border-red-200 bg-red-50/50" : "border-slate-200 bg-white",
+                        )}
+                      >
+                        <div className="mb-2 flex items-start gap-2">
                           <Checkbox
                             checked={d.selected}
                             onCheckedChange={(v) => {
@@ -1128,113 +1085,141 @@ function Page() {
                                 ),
                               );
                             }}
+                            className="mt-0.5"
                           />
-                          Question {idx + 1}
-                        </label>
-                        {d.errors.length > 0 && (
-                          <span className="text-[11px] font-semibold text-red-600">
-                            {d.errors.join(" · ")}
-                          </span>
-                        )}
-                      </div>
-                      <Textarea
-                        rows={2}
-                        className="mb-2"
-                        value={d.question_text}
-                        onChange={(e) => {
-                          setImportDrafts((rows) =>
-                            validateAll(
-                              rows.map((r, i) =>
-                                i === idx ? { ...r, question_text: e.target.value } : r,
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-slate-700">Question {idx + 1}</p>
+                            {d.errors.length > 0 && (
+                              <p className="mt-0.5 break-words text-[11px] font-semibold leading-snug text-red-600">
+                                {d.errors.join(" · ")}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <Textarea
+                          rows={3}
+                          className="mb-2 text-sm"
+                          value={d.question_text}
+                          onChange={(e) => {
+                            setImportDrafts((rows) =>
+                              validateAll(
+                                rows.map((r, i) =>
+                                  i === idx ? { ...r, question_text: e.target.value } : r,
+                                ),
                               ),
-                            ),
-                          );
-                        }}
-                      />
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {(["a", "b", "c", "d"] as const).map((k) => (
-                          <Input
-                            key={k}
-                            placeholder={`Option ${k.toUpperCase()}`}
-                            value={d[`option_${k}`]}
-                            onChange={(e) => {
-                              setImportDrafts((rows) =>
-                                validateAll(
-                                  rows.map((r, i) =>
-                                    i === idx ? { ...r, [`option_${k}`]: e.target.value } : r,
+                            );
+                          }}
+                        />
+
+                        {/* Options stacked on mobile */}
+                        <div className="grid grid-cols-1 gap-2">
+                          {(["a", "b", "c", "d"] as const).map((k) => (
+                            <div key={k} className="flex items-center gap-2">
+                              <span className="w-5 shrink-0 text-xs font-bold text-slate-500">
+                                {k.toUpperCase()}.
+                              </span>
+                              <Input
+                                className="h-10 flex-1 text-sm"
+                                placeholder={`Option ${k.toUpperCase()}`}
+                                value={d[`option_${k}`]}
+                                onChange={(e) => {
+                                  setImportDrafts((rows) =>
+                                    validateAll(
+                                      rows.map((r, i) =>
+                                        i === idx
+                                          ? { ...r, [`option_${k}`]: e.target.value }
+                                          : r,
+                                      ),
+                                    ),
+                                  );
+                                }}
+                              />
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Meta: one column on mobile */}
+                        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          <div className="space-y-1">
+                            <Label className="text-xs text-slate-500">Correct answer</Label>
+                            <Input
+                              className="h-10"
+                              placeholder="A–D or text"
+                              value={d.correct_answer}
+                              onChange={(e) => {
+                                setImportDrafts((rows) =>
+                                  validateAll(
+                                    rows.map((r, i) =>
+                                      i === idx ? { ...r, correct_answer: e.target.value } : r,
+                                    ),
                                   ),
-                                ),
-                              );
-                            }}
-                          />
-                        ))}
+                                );
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-slate-500">Type</Label>
+                            <Select
+                              value={d.question_type}
+                              onValueChange={(v) => {
+                                setImportDrafts((rows) =>
+                                  validateAll(
+                                    rows.map((r, i) =>
+                                      i === idx
+                                        ? {
+                                            ...r,
+                                            question_type: v as DraftQuestion["question_type"],
+                                          }
+                                        : r,
+                                    ),
+                                  ),
+                                );
+                              }}
+                            >
+                              <SelectTrigger className="h-10">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="mcq">MCQ</SelectItem>
+                                <SelectItem value="true_false">True/False</SelectItem>
+                                <SelectItem value="short_answer">Short Answer</SelectItem>
+                                <SelectItem value="essay">Essay</SelectItem>
+                                <SelectItem value="numerical">Numerical</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-slate-500">Marks</Label>
+                            <Input
+                              className="h-10"
+                              type="number"
+                              min={1}
+                              value={d.marks}
+                              onChange={(e) => {
+                                setImportDrafts((rows) =>
+                                  validateAll(
+                                    rows.map((r, i) =>
+                                      i === idx
+                                        ? { ...r, marks: Number(e.target.value) || 1 }
+                                        : r,
+                                    ),
+                                  ),
+                                );
+                              }}
+                            />
+                          </div>
+                        </div>
                       </div>
-                      <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                        <Input
-                          placeholder="Correct (A–D or text)"
-                          value={d.correct_answer}
-                          onChange={(e) => {
-                            setImportDrafts((rows) =>
-                              validateAll(
-                                rows.map((r, i) =>
-                                  i === idx ? { ...r, correct_answer: e.target.value } : r,
-                                ),
-                              ),
-                            );
-                          }}
-                        />
-                        <Select
-                          value={d.question_type}
-                          onValueChange={(v) => {
-                            setImportDrafts((rows) =>
-                              validateAll(
-                                rows.map((r, i) =>
-                                  i === idx
-                                    ? {
-                                        ...r,
-                                        question_type: v as DraftQuestion["question_type"],
-                                      }
-                                    : r,
-                                ),
-                              ),
-                            );
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="mcq">MCQ</SelectItem>
-                            <SelectItem value="true_false">True/False</SelectItem>
-                            <SelectItem value="short_answer">Short Answer</SelectItem>
-                            <SelectItem value="essay">Essay</SelectItem>
-                            <SelectItem value="numerical">Numerical</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={d.marks}
-                          onChange={(e) => {
-                            setImportDrafts((rows) =>
-                              validateAll(
-                                rows.map((r, i) =>
-                                  i === idx
-                                    ? { ...r, marks: Number(e.target.value) || 1 }
-                                    : r,
-                                ),
-                              ),
-                            );
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap justify-end gap-2 border-t px-4 py-3">
+                {/* Footer — fixed above home indicator */}
+                <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 bg-white px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:justify-end">
                   <Button
                     variant="outline"
+                    className="h-11 w-full sm:w-auto"
                     onClick={() => {
                       setImportOpen(false);
                       setImportDrafts([]);
@@ -1243,22 +1228,23 @@ function Page() {
                     Cancel
                   </Button>
                   <Button
-                    className="font-semibold"
-                    disabled={importBusy}
+                    className="h-11 w-full font-semibold sm:w-auto"
+                    disabled={importBusy || importSelectedCount === 0}
                     onClick={() => void confirmImport()}
                   >
                     {importBusy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-                    Confirm import
+                    Confirm import ({importSelectedCount})
                   </Button>
                 </div>
               </div>
             </div>
           )}
 
-          <SectionCard className="mt-6" title="Course separation">
+          <SectionCard className="mt-6" title="Import tip">
             <p className="text-sm text-slate-600">
-              Best path: <strong>My Courses</strong> → open a course → <strong>Questions</strong>.
-              That page only shows that course’s bank (e.g. MTH 101 vs CPE 111).
+              PDF, Word, CSV and Excel are supported. For best PDF results use numbered questions
+              (1. … A. B. C. D.). After import, scroll the preview, fix answers, Select all, then
+              Confirm.
             </p>
           </SectionCard>
         </>
