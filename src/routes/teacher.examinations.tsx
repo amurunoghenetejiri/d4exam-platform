@@ -27,6 +27,7 @@ import { useTeacherContext } from "@/lib/teacher";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  embedSecurityInDescription,
   loadTeacherSecurityDefaults,
   securitySummaryLines,
   toExamSettingsRow,
@@ -78,14 +79,23 @@ function endFromStart(startLocal: string, durationMin: number) {
   return toLocalInput(d.toISOString());
 }
 
-async function upsertExamSettings(examId: string, teacherId: string, totalMarks = 0) {
+/** Try exam_settings table; never block exam create if table is missing. */
+async function tryUpsertExamSettings(examId: string, teacherId: string) {
   const security = loadTeacherSecurityDefaults(teacherId);
-  const row = toExamSettingsRow(examId, security, totalMarks);
-  const { error } = await supabase.from("exam_settings").upsert(row as never, {
-    onConflict: "exam_id",
-  });
-  if (error) throw error;
-  return security;
+  try {
+    const row = toExamSettingsRow(examId, security, 0);
+    const { error } = await supabase.from("exam_settings").upsert(row as never, {
+      onConflict: "exam_id",
+    });
+    if (error) {
+      console.warn("exam_settings upsert skipped:", error.message);
+      return { security, savedToTable: false, error: error.message };
+    }
+    return { security, savedToTable: true as const, error: null };
+  } catch (e) {
+    console.warn("exam_settings upsert failed", e);
+    return { security, savedToTable: false, error: (e as Error).message };
+  }
 }
 
 function Page() {
@@ -104,9 +114,12 @@ function Page() {
   const [courseId, setCourseId] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [duration, setDuration] = useState(60);
+  // String so user can clear and type any duration freely
+  const [durationText, setDurationText] = useState("60");
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
+
+  const durationMinutes = Math.max(1, Number.parseInt(durationText, 10) || 0);
 
   useEffect(() => {
     if (lockedCourseId) setCourseId(lockedCourseId);
@@ -142,7 +155,7 @@ function Page() {
     setCourseId(lockedCourseId ?? teacher.courses[0].id);
     setTitle("");
     setDescription("");
-    setDuration(60);
+    setDurationText("60");
     setStartAt("");
     setEndAt("");
     setStep(1);
@@ -151,12 +164,16 @@ function Page() {
 
   function onStartChange(v: string) {
     setStartAt(v);
-    if (v) setEndAt(endFromStart(v, duration));
+    if (v) setEndAt(endFromStart(v, durationMinutes || 60));
   }
 
-  function onDurationChange(n: number) {
-    setDuration(n);
-    if (startAt) setEndAt(endFromStart(startAt, n));
+  function onDurationTextChange(raw: string) {
+    // Allow empty and digits only while typing
+    if (raw === "" || /^\d+$/.test(raw)) {
+      setDurationText(raw);
+      const n = Number.parseInt(raw, 10);
+      if (startAt && n >= 1) setEndAt(endFromStart(startAt, n));
+    }
   }
 
   function validateStep(s: number) {
@@ -173,7 +190,7 @@ function Page() {
         toast.error("Title is required");
         return false;
       }
-      if (duration < 5) {
+      if (!durationText || durationMinutes < 5) {
         toast.error("Duration must be at least 5 minutes");
         return false;
       }
@@ -189,8 +206,11 @@ function Page() {
     if (!teacher || !session || !validateStep(1)) return;
     setBusy(true);
     try {
+      const security = loadTeacherSecurityDefaults(teacher.teacherId);
+      const descWithSecurity = embedSecurityInDescription(description.trim() || null, security);
       const computedEnd =
-        endAt || (startAt ? endFromStart(startAt, duration) : "");
+        endAt || (startAt ? endFromStart(startAt, durationMinutes) : "");
+
       const { data: created, error } = await supabase
         .from("examinations")
         .insert({
@@ -198,8 +218,8 @@ function Page() {
           course_id: courseId,
           created_by: session.userId,
           title: title.trim(),
-          description: description.trim() || null,
-          duration_minutes: duration,
+          description: descWithSecurity,
+          duration_minutes: durationMinutes,
           scheduled_start: startAt ? new Date(startAt).toISOString() : null,
           scheduled_end: computedEnd ? new Date(computedEnd).toISOString() : null,
           status,
@@ -209,12 +229,16 @@ function Page() {
       if (error) throw error;
       if (!created?.id) throw new Error("Examination was not created");
 
-      await upsertExamSettings(created.id, teacher.teacherId);
+      const settingsResult = await tryUpsertExamSettings(created.id, teacher.teacherId);
 
       toast.success(
         status === "draft"
-          ? "Draft saved with security settings"
-          : "Submitted for Examination Officer approval (security attached)",
+          ? settingsResult.savedToTable
+            ? "Draft saved with security settings"
+            : "Draft saved (security stored on exam; create exam_settings table for full storage)"
+          : settingsResult.savedToTable
+            ? "Submitted for Examination Officer approval"
+            : "Submitted for approval (security attached to exam record)",
       );
       setBuilder(false);
       await qc.invalidateQueries({ queryKey: ["teacher-exams"] });
@@ -229,21 +253,30 @@ function Page() {
   async function submitExisting(id: string) {
     if (!teacher) return;
     try {
+      const security = loadTeacherSecurityDefaults(teacher.teacherId);
+      const { data: existing } = await supabase
+        .from("examinations")
+        .select("description")
+        .eq("id", id)
+        .maybeSingle();
+      const desc = embedSecurityInDescription(
+        (existing as { description?: string } | null)?.description ?? null,
+        security,
+      );
       const { error } = await supabase
         .from("examinations")
-        .update({ status: "pending_approval" } as never)
+        .update({ status: "pending_approval", description: desc } as never)
         .eq("id", id)
         .eq("school_id", teacher.schoolId);
       if (error) throw error;
-      await upsertExamSettings(id, teacher.teacherId);
-      toast.success("Submitted for officer approval (security saved)");
+      await tryUpsertExamSettings(id, teacher.teacherId);
+      toast.success("Submitted for officer approval");
       await listQ.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not submit");
     }
   }
 
-  /** Withdraw from officer queue back to draft so teacher can edit. */
   async function cancelSubmit(id: string) {
     if (!teacher) return;
     if (!confirm("Withdraw this examination from officer review? It will return to draft.")) return;
@@ -354,11 +387,14 @@ function Page() {
               <div className="space-y-2">
                 <Label className="font-semibold">Duration (minutes)</Label>
                 <Input
-                  type="number"
-                  min={5}
-                  value={duration}
-                  onChange={(e) => onDurationChange(Number(e.target.value) || 60)}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={durationText}
+                  onChange={(e) => onDurationTextChange(e.target.value)}
+                  placeholder="e.g. 20"
                 />
+                <p className="text-xs text-slate-500">Clear the box and type any number (minimum 5).</p>
               </div>
             </div>
           )}
@@ -366,11 +402,10 @@ function Page() {
           {step === 2 && (
             <div className="mx-auto max-w-xl space-y-4">
               <p className="text-sm text-slate-600">
-                Proposed schedule. End time auto-fills from start + duration. Officer may reschedule on
-                approval.
+                Set date and time (hour and minutes). End auto-fills from start + duration.
               </p>
               <div className="space-y-2">
-                <Label className="font-semibold">Start</Label>
+                <Label className="font-semibold">Start (date & time)</Label>
                 <Input
                   type="datetime-local"
                   value={startAt}
@@ -378,7 +413,7 @@ function Page() {
                 />
               </div>
               <div className="space-y-2">
-                <Label className="font-semibold">End (auto from duration)</Label>
+                <Label className="font-semibold">End (date & time)</Label>
                 <Input
                   type="datetime-local"
                   value={endAt}
@@ -401,7 +436,7 @@ function Page() {
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt>Duration</dt>
-                    <dd className="font-semibold text-slate-900">{duration} min</dd>
+                    <dd className="font-semibold text-slate-900">{durationMinutes} min</dd>
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt>Start</dt>
