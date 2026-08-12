@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RecordsPage } from "@/components/pages/RecordsPage";
+import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
 import { StatusBadge } from "@/components/dashboard/kit";
-import * as mock from "@/data/mock";
 
 export const Route = createFileRoute("/super-admin/applications")({
   head: () => ({
@@ -17,13 +16,20 @@ export const Route = createFileRoute("/super-admin/applications")({
 
 function Page() {
   return (
-    <RecordsPage
+    <DbRecordsPage
       title="School Applications"
       description="New institutions awaiting verification and approval."
-      stats={[]}
-      rows={mock.schoolApplications}
-      columns={[{ key: "name", header: "Institution" }, { key: "country", header: "Country", hideOnMobile: true }, { key: "contact", header: "Contact", hideOnMobile: true }, { key: "date", header: "Submitted" }, { key: "status", header: "Status", render: (r: any) => <StatusBadge status={r.status} /> }]}
+      table="school_applications"
+      select="id, school_name, country, applicant_email, status, created_at"
+      order={{ column: "created_at", ascending: false }}
       tableTitle="School Applications"
+      columns={[
+      { key: "school_name", header: "School" },
+      { key: "country", header: "Country", hideOnMobile: true },
+      { key: "applicant_email", header: "Contact", hideOnMobile: true },
+      { key: "created_at", header: "Received", hideOnMobile: true, render: (r: Row) => new Date(r.created_at).toLocaleDateString() },
+      { key: "status", header: "Status", render: (r: Row) => <StatusBadge status={r.status} /> },
+      ]}
     />
   );
 }

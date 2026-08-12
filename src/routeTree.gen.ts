@@ -17,6 +17,7 @@ import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OfficerRouteImport } from './routes/officer'
+import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SchoolApplicationRouteImport } from './routes/school-application'
@@ -80,6 +81,7 @@ import { Route as TeacherQuestionBankRouteImport } from './routes/teacher.questi
 import { Route as TeacherResultsRouteImport } from './routes/teacher.results'
 import { Route as TeacherSettingsRouteImport } from './routes/teacher.settings'
 import { Route as TeacherSubmissionsRouteImport } from './routes/teacher.submissions'
+import { Route as StudentExamIdRouteImport } from './routes/student.exam.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -119,6 +121,11 @@ const LoginRoute = LoginRouteImport.update({
 const OfficerRoute = OfficerRouteImport.update({
   id: '/officer',
   path: '/officer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PricingRoute = PricingRouteImport.update({
+  id: '/pricing',
+  path: '/pricing',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PrivacyRoute = PrivacyRouteImport.update({
@@ -436,6 +443,11 @@ const TeacherSubmissionsRoute = TeacherSubmissionsRouteImport.update({
   path: '/submissions',
   getParentRoute: () => TeacherRoute,
 } as any)
+const StudentExamIdRoute = StudentExamIdRouteImport.update({
+  id: '/exam/$id',
+  path: '/exam/$id',
+  getParentRoute: () => StudentRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -446,6 +458,7 @@ export interface FileRoutesByFullPath {
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/officer': typeof OfficerRouteWithChildren
+  '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/school-application': typeof SchoolApplicationRoute
@@ -509,6 +522,7 @@ export interface FileRoutesByFullPath {
   '/student/': typeof StudentIndexRoute
   '/super-admin/': typeof SuperAdminIndexRoute
   '/teacher/': typeof TeacherIndexRoute
+  '/student/exam/$id': typeof StudentExamIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -517,6 +531,7 @@ export interface FileRoutesByTo {
   '/features': typeof FeaturesRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/school-application': typeof SchoolApplicationRoute
@@ -577,6 +592,7 @@ export interface FileRoutesByTo {
   '/student': typeof StudentIndexRoute
   '/super-admin': typeof SuperAdminIndexRoute
   '/teacher': typeof TeacherIndexRoute
+  '/student/exam/$id': typeof StudentExamIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -588,6 +604,7 @@ export interface FileRoutesById {
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
   '/officer': typeof OfficerRouteWithChildren
+  '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
   '/school-application': typeof SchoolApplicationRoute
@@ -651,6 +668,7 @@ export interface FileRoutesById {
   '/student/': typeof StudentIndexRoute
   '/super-admin/': typeof SuperAdminIndexRoute
   '/teacher/': typeof TeacherIndexRoute
+  '/student/exam/$id': typeof StudentExamIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -663,6 +681,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/login'
     | '/officer'
+    | '/pricing'
     | '/privacy'
     | '/reset-password'
     | '/school-application'
@@ -726,6 +745,7 @@ export interface FileRouteTypes {
     | '/student/'
     | '/super-admin/'
     | '/teacher/'
+    | '/student/exam/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -734,6 +754,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/forgot-password'
     | '/login'
+    | '/pricing'
     | '/privacy'
     | '/reset-password'
     | '/school-application'
@@ -794,6 +815,7 @@ export interface FileRouteTypes {
     | '/student'
     | '/super-admin'
     | '/teacher'
+    | '/student/exam/$id'
   id:
     | '__root__'
     | '/'
@@ -804,6 +826,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/login'
     | '/officer'
+    | '/pricing'
     | '/privacy'
     | '/reset-password'
     | '/school-application'
@@ -867,6 +890,7 @@ export interface FileRouteTypes {
     | '/student/'
     | '/super-admin/'
     | '/teacher/'
+    | '/student/exam/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -878,6 +902,7 @@ export interface RootRouteChildren {
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
   OfficerRoute: typeof OfficerRouteWithChildren
+  PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SchoolApplicationRoute: typeof SchoolApplicationRoute
@@ -943,6 +968,13 @@ declare module '@tanstack/react-router' {
       path: '/officer'
       fullPath: '/officer'
       preLoaderRoute: typeof OfficerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pricing': {
+      id: '/pricing'
+      path: '/pricing'
+      fullPath: '/pricing'
+      preLoaderRoute: typeof PricingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/privacy': {
@@ -1386,6 +1418,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TeacherSubmissionsRouteImport
       parentRoute: typeof TeacherRoute
     }
+    '/student/exam/$id': {
+      id: '/student/exam/$id'
+      path: '/exam/$id'
+      fullPath: '/student/exam/$id'
+      preLoaderRoute: typeof StudentExamIdRouteImport
+      parentRoute: typeof StudentRoute
+    }
   }
 }
 
@@ -1464,6 +1503,7 @@ interface StudentRouteChildren {
   StudentResultsRoute: typeof StudentResultsRoute
   StudentSettingsRoute: typeof StudentSettingsRoute
   StudentIndexRoute: typeof StudentIndexRoute
+  StudentExamIdRoute: typeof StudentExamIdRoute
 }
 
 const StudentRouteChildren: StudentRouteChildren = {
@@ -1474,6 +1514,7 @@ const StudentRouteChildren: StudentRouteChildren = {
   StudentResultsRoute: StudentResultsRoute,
   StudentSettingsRoute: StudentSettingsRoute,
   StudentIndexRoute: StudentIndexRoute,
+  StudentExamIdRoute: StudentExamIdRoute,
 }
 
 const StudentRouteWithChildren =
@@ -1555,6 +1596,7 @@ const rootRouteChildren: RootRouteChildren = {
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
   OfficerRoute: OfficerRouteWithChildren,
+  PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SchoolApplicationRoute: SchoolApplicationRoute,

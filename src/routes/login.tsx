@@ -1,5 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { signInWithSchoolCode } from "@/lib/auth.functions";
+import { fetchSessionUser, roleHome } from "@/lib/session";
+
 import { Eye, EyeOff, ShieldCheck, Loader2, Building2 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
@@ -30,8 +35,9 @@ function LoginPage() {
   const [code, setCode] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const signIn = useServerFn(signInWithSchoolCode);
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     if (!code.trim() || !identifier.trim() || !password.trim()) {
@@ -39,13 +45,32 @@ function LoginPage() {
       return;
     }
     setLoading(true);
-    // Phase 1 mock: role is detected server-side in production.
-    // Demo navigates to the student portal after a successful form check.
-    setTimeout(() => {
+    try {
+      const result = await signIn({
+        data: { schoolCode: code.trim(), identifier: identifier.trim(), password },
+      });
+      if ("error" in result && result.error) {
+        setError(result.error);
+        return;
+      }
+      if (!("session" in result) || !result.session) {
+        setError("Unable to sign in. Please try again.");
+        return;
+      }
+      await supabase.auth.setSession(result.session);
+      const user = await fetchSessionUser();
+      if (!user?.role) {
+        setError("No role has been assigned to this account yet. Contact your administrator.");
+        return;
+      }
+      navigate({ to: roleHome[user.role] as never });
+    } catch {
+      setError("Unable to sign in right now. Please try again.");
+    } finally {
       setLoading(false);
-      navigate({ to: "/student" });
-    }, 900);
+    }
   }
+
 
   return (
     <div className="grid min-h-dvh bg-white lg:grid-cols-2">

@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RecordsPage } from "@/components/pages/RecordsPage";
+import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
 import { StatusBadge } from "@/components/dashboard/kit";
-import * as mock from "@/data/mock";
 
 export const Route = createFileRoute("/admin/courses")({
   head: () => ({
@@ -17,13 +16,20 @@ export const Route = createFileRoute("/admin/courses")({
 
 function Page() {
   return (
-    <RecordsPage
+    <DbRecordsPage
       title="Courses"
       description="Courses offered across departments and levels."
-      stats={[]}
-      rows={mock.studentCourses.map((c) => ({ ...c, id: c.code }))}
-      columns={[{ key: "code", header: "Code" }, { key: "title", header: "Course title" }, { key: "units", header: "Units", hideOnMobile: true }, { key: "lecturer", header: "Lecturer", hideOnMobile: true }]}
+      table="courses"
+      select="id, code, name, credit_units, status, departments(name)"
+      order={{ column: "created_at", ascending: false }}
       tableTitle="Courses"
+      columns={[
+      { key: "code", header: "Code" },
+      { key: "name", header: "Course" },
+      { key: "department", header: "Department", hideOnMobile: true, render: (r: Row) => r.departments?.name ?? "—" },
+      { key: "credit_units", header: "Units", hideOnMobile: true },
+      { key: "status", header: "Status", render: (r: Row) => <StatusBadge status={r.status} /> },
+      ]}
     />
   );
 }

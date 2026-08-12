@@ -7,81 +7,42 @@ import {
   superAdminNav,
   teacherNav,
 } from "@/components/navigation/navConfig";
-import {
-  currentAdmin,
-  currentOfficer,
-  currentStudent,
-  currentSuperAdmin,
-  currentTeacher,
-} from "@/data/mock";
+import type { RoleConfig } from "@/components/navigation/navConfig";
+import { initials, useSessionUser } from "@/lib/session";
 
-export function StudentLayout({ children }: { children: ReactNode }) {
+function RoleShell({ config, children }: { config: RoleConfig; children: ReactNode }) {
+  const { data: user } = useSessionUser();
+
   return (
     <AppShell
-      config={studentNav}
+      config={config}
       user={{
-        name: currentStudent.name,
-        avatar: currentStudent.avatar,
-        subtitle: currentStudent.matric,
+        name: user?.fullName ?? "…",
+        avatar: initials(user?.fullName ?? ""),
+        subtitle: user?.identifier ?? user?.schoolName ?? "",
       }}
     >
       {children}
     </AppShell>
   );
+}
+
+export function StudentLayout({ children }: { children: ReactNode }) {
+  return <RoleShell config={studentNav}>{children}</RoleShell>;
 }
 
 export function TeacherLayout({ children }: { children: ReactNode }) {
-  return (
-    <AppShell
-      config={teacherNav}
-      user={{
-        name: currentTeacher.name,
-        avatar: currentTeacher.avatar,
-        subtitle: currentTeacher.department,
-      }}
-    >
-      {children}
-    </AppShell>
-  );
+  return <RoleShell config={teacherNav}>{children}</RoleShell>;
 }
 
 export function AdminLayout({ children }: { children: ReactNode }) {
-  return (
-    <AppShell
-      config={adminNav}
-      user={{ name: currentAdmin.name, avatar: currentAdmin.avatar, subtitle: currentAdmin.role }}
-    >
-      {children}
-    </AppShell>
-  );
+  return <RoleShell config={adminNav}>{children}</RoleShell>;
 }
 
 export function OfficerLayout({ children }: { children: ReactNode }) {
-  return (
-    <AppShell
-      config={officerNav}
-      user={{
-        name: currentOfficer.name,
-        avatar: currentOfficer.avatar,
-        subtitle: currentOfficer.role,
-      }}
-    >
-      {children}
-    </AppShell>
-  );
+  return <RoleShell config={officerNav}>{children}</RoleShell>;
 }
 
 export function SuperAdminLayout({ children }: { children: ReactNode }) {
-  return (
-    <AppShell
-      config={superAdminNav}
-      user={{
-        name: currentSuperAdmin.name,
-        avatar: currentSuperAdmin.avatar,
-        subtitle: currentSuperAdmin.role,
-      }}
-    >
-      {children}
-    </AppShell>
-  );
+  return <RoleShell config={superAdminNav}>{children}</RoleShell>;
 }

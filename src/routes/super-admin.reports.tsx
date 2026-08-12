@@ -1,7 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RecordsPage } from "@/components/pages/RecordsPage";
-import { StatusBadge } from "@/components/dashboard/kit";
-import * as mock from "@/data/mock";
+import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
 
 export const Route = createFileRoute("/super-admin/reports")({
   head: () => ({
@@ -17,13 +15,13 @@ export const Route = createFileRoute("/super-admin/reports")({
 
 function Page() {
   return (
-    <RecordsPage
+    <DbRecordsPage
       title="Platform Reports"
       description="Usage, delivery and growth reporting across institutions."
-      stats={[]}
-      rows={mock.schools}
-      columns={[{ key: "name", header: "School" }, { key: "code", header: "Code" }, { key: "country", header: "Country", hideOnMobile: true }, { key: "students", header: "Students", hideOnMobile: true }, { key: "status", header: "Status", render: (r: any) => <StatusBadge status={r.status} /> }]}
       tableTitle="Platform Reports"
+      columns={[
+      { key: "name", header: "Report" },
+      ]}
     />
   );
 }
