@@ -18,6 +18,16 @@ function generateTempPassword() {
   return out;
 }
 
+function normalizeName(s: string) {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function studentSyntheticEmail(schoolCode: string, matric: string) {
+  const safeMatric = matric.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const safeCode = schoolCode.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return `${safeMatric}@${safeCode || "school"}.student.d4exam.local`;
+}
+
 export const signInWithSchoolCode = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => loginSchema.parse(data))
   .handler(async ({ data }) => {
@@ -25,23 +35,184 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
     const { createClient } = await import("@supabase/supabase-js");
 
     const code = data.schoolCode.toUpperCase();
-    const ident = data.identifier;
+    const ident = data.identifier.trim();
+    const password = data.password;
 
     let schoolId: string | null = null;
+    let schoolCodeResolved = code;
     if (code) {
       const { data: school } = await supabaseAdmin
         .from("schools")
-        .select("id, status")
+        .select("id, status, school_code")
         .eq("school_code", code)
         .maybeSingle();
       if (school) {
         if (school.status !== "active") {
           return { error: "This school account is not active. Contact D4EXAM support." };
         }
-        schoolId = school.id;
+        schoolId = school.id as string;
+        schoolCodeResolved = (school.school_code as string) || code;
       }
     }
 
+    // ─── Student path: Username = full name (or matric), Password = matric ───
+    if (schoolId) {
+      const { data: studentRows } = await supabaseAdmin
+        .from("students")
+        .select("id, student_id, matric_number, full_name, status, profile_id")
+        .eq("school_id", schoolId)
+        .limit(2000);
+
+      const wantName = normalizeName(ident);
+      const student = (studentRows ?? []).find((s) => {
+        const matric = (s.matric_number || s.student_id || "").trim();
+        const name = normalizeName(s.full_name || "");
+        return (
+          normalizeName(matric) === wantName ||
+          name === wantName ||
+          (name.length > 0 && name.includes(wantName) && wantName.length >= 3)
+        );
+      });
+
+      if (student) {
+        if (student.status === "suspended" || student.status === "deactivated" || student.status === "locked") {
+          return { error: "This student account is suspended. Contact your school administrator." };
+        }
+
+        const matric = (student.matric_number || student.student_id || "").trim();
+        if (!matric || password !== matric) {
+          return { error: "Invalid school code, name or matric password." };
+        }
+
+        // Ensure auth user + profile + role exist
+        let profileEmail: string | null = null;
+        let authUserId: string | null = null;
+
+        if (student.profile_id) {
+          const { data: profile } = await supabaseAdmin
+            .from("profiles")
+            .select("id, email, auth_user_id, status")
+            .eq("id", student.profile_id)
+            .maybeSingle();
+          if (profile) {
+            profileEmail = profile.email as string;
+            authUserId = profile.auth_user_id as string;
+          }
+        }
+
+        if (!profileEmail || !authUserId) {
+          const email = studentSyntheticEmail(schoolCodeResolved, matric);
+          const fullName = (student.full_name || matric).trim();
+
+          // Try create; if email exists, look up user
+          const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
+            email,
+            password: matric,
+            email_confirm: true,
+            user_metadata: { full_name: fullName, role: "student" },
+          });
+
+          if (createError || !created.user) {
+            // User may already exist — try list by email
+            const { data: listed } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+            const existing = listed?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+            if (!existing) {
+              return { error: createError?.message ?? "Could not prepare student login." };
+            }
+            authUserId = existing.id;
+            // Reset password to matric so login always works
+            await supabaseAdmin.auth.admin.updateUserById(existing.id, { password: matric });
+          } else {
+            authUserId = created.user.id;
+          }
+
+          profileEmail = email;
+
+          // Upsert profile
+          const { data: existingProfile } = await supabaseAdmin
+            .from("profiles")
+            .select("id")
+            .eq("auth_user_id", authUserId)
+            .maybeSingle();
+
+          let profileId = existingProfile?.id as string | undefined;
+          if (!profileId) {
+            const { data: newProfile, error: pErr } = await supabaseAdmin
+              .from("profiles")
+              .insert({
+                auth_user_id: authUserId,
+                school_id: schoolId,
+                full_name: fullName,
+                email,
+                status: "active",
+              })
+              .select("id")
+              .single();
+            if (pErr || !newProfile) {
+              return { error: pErr?.message ?? "Could not create student profile." };
+            }
+            profileId = newProfile.id as string;
+          }
+
+          await supabaseAdmin
+            .from("students")
+            .update({ profile_id: profileId, status: "active" } as never)
+            .eq("id", student.id);
+
+          // Ensure student role
+          const { data: roleRow } = await supabaseAdmin
+            .from("user_roles")
+            .select("id")
+            .eq("user_id", authUserId)
+            .eq("role", "student")
+            .eq("school_id", schoolId)
+            .maybeSingle();
+          if (!roleRow) {
+            await supabaseAdmin.from("user_roles").insert({
+              user_id: authUserId,
+              school_id: schoolId,
+              role: "student",
+            });
+          }
+        } else {
+          // Keep password in sync with matric for structure-imported students
+          await supabaseAdmin.auth.admin.updateUserById(authUserId, { password: matric });
+        }
+
+        const anon = createClient(
+          process.env["SUPABASE_URL"]!,
+          process.env["SUPABASE_PUBLISHABLE_KEY"]!,
+          { auth: { persistSession: false, autoRefreshToken: false } },
+        );
+
+        const { data: signIn, error } = await anon.auth.signInWithPassword({
+          email: profileEmail!,
+          password: matric,
+        });
+
+        if (error || !signIn.session) {
+          return { error: "Invalid school code, name or matric password." };
+        }
+
+        await supabaseAdmin.from("audit_logs").insert({
+          school_id: schoolId,
+          actor_user_id: signIn.user?.id ?? null,
+          action: "login",
+          entity_type: "student",
+          entity_id: student.id,
+          description: "Student signed in (name + matric)",
+        });
+
+        return {
+          session: {
+            access_token: signIn.session.access_token,
+            refresh_token: signIn.session.refresh_token,
+          },
+        };
+      }
+    }
+
+    // ─── Staff / email path (existing behaviour) ───
     const profileQuery = supabaseAdmin
       .from("profiles")
       .select("id, email, status, school_id")
@@ -66,7 +237,7 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
           .or(or)
           .maybeSingle();
         if (row?.profile_id) {
-          profileId = row.profile_id;
+          profileId = row.profile_id as string;
           break;
         }
       }
