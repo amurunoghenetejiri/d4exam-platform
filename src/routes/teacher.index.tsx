@@ -93,10 +93,10 @@ function Page() {
       />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Stat label="Assigned courses" value={String(teacher.courses.length)} icon={BookOpen} />
-        <Stat label="Questions" value={String(questionsQ.data ?? 0)} icon={Layers} />
-        <Stat label="Examinations" value={String(exams.length)} icon={FileText} />
-        <Stat label="Awaiting officer" value={String(pending)} icon={Clock} />
+        <Stat to="/teacher/courses" label="Assigned courses" value={String(teacher.courses.length)} icon={BookOpen} />
+        <Stat to="/teacher/question-bank" label="Questions" value={String(questionsQ.data ?? 0)} icon={Layers} />
+        <Stat to="/teacher/examinations" label="Examinations" value={String(exams.length)} icon={FileText} />
+        <Stat to="/teacher/examinations" label="Awaiting officer" value={String(pending)} icon={Clock} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -178,16 +178,21 @@ function Page() {
 }
 
 function Stat({
+  to,
   label,
   value,
   icon: Icon,
 }: {
+  to: string;
   label: string;
   value: string;
   icon: typeof BookOpen;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+    <Link
+      to={to}
+      className="block rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm transition hover:border-primary/40 hover:shadow-md"
+    >
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs font-semibold text-slate-500">{label}</p>
@@ -197,6 +202,6 @@ function Stat({
           <Icon className="h-4 w-4" />
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
