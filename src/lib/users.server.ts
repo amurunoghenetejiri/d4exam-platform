@@ -22,20 +22,17 @@ export interface CreatePersonResult {
 }
 
 /**
- * Stable password everyone can remember without admin copy-paste:
- * - Students: matric / student ID
- * - Teachers / officers: staff / officer ID
- * Padded if shorter than 6 characters (Auth minimum).
+ * Password rule (simple for schools):
+ * - Students: password = matric / student ID (what they already know)
+ * - Teachers / officers: password = staff ID / officer ID
+ * No random passwords to copy for hundreds of users.
  */
-export function stablePasswordFromId(identifier: string) {
-  const base = identifier.trim();
-  if (base.length >= 6) return base;
-  return `${base}@D4Exam`;
-}
-
-/** Creates auth user with identifier-based password, profile, role, and role record. */
 export async function createPerson(schoolId: string, data: PersonInput): Promise<CreatePersonResult> {
-  const password = stablePasswordFromId(data.identifier);
+  const password = data.identifier.trim();
+  if (password.length < 4) {
+    throw new Error("Identifier (matric/staff ID) must be at least 4 characters — it is also the login password.");
+  }
+
   const fullName = `${data.firstName} ${data.lastName}`.trim();
 
   const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({

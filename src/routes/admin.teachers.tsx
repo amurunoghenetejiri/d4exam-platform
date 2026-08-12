@@ -50,7 +50,10 @@ function Page() {
 
   async function addTeacher(e: React.FormEvent) {
     e.preventDefault();
-    if (!schoolId) return toast.error("Not linked to a school");
+    if (!schoolId) {
+      toast.error("Your account is not linked to a school.");
+      return;
+    }
     setBusy(true);
     try {
       await createOne({
@@ -63,13 +66,14 @@ function Page() {
         },
       });
       toast.success(
-        `Teacher created. Login: school code ${schoolCode || "…"}, email or staff ID, password = staff ID (${staffId.trim()}).`,
+        `Teacher created. They log in with school code + email/staff ID, password = staff ID (${staffId.trim()}).`,
       );
       setFirstName("");
       setLastName("");
       setEmail("");
       setStaffId("");
       await qc.invalidateQueries({ queryKey: ["rows"] });
+      await qc.invalidateQueries({ queryKey: ["count"] });
       await list.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not create teacher");
@@ -82,17 +86,17 @@ function Page() {
     <>
       <PageHeader
         title="Teachers"
-        description="Add teachers. Password is always their Staff ID — tell them once, no bulk password list."
+        description="Add teachers. Password is always their Staff ID — no password list to copy."
       />
 
       <SectionCard title="How teachers log in">
         <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
           <li>
-            School code: <strong>{schoolCode || "(your school code)"}</strong>
+            School code: <strong>{schoolCode || "—"}</strong>
           </li>
-          <li>Username: email OR staff ID</li>
+          <li>Username: email or Staff ID</li>
           <li>
-            Password: <strong>their staff ID</strong>
+            Password: <strong>their Staff ID</strong>
           </li>
         </ol>
       </SectionCard>
@@ -116,7 +120,7 @@ function Page() {
             </div>
             <div className="space-y-1.5">
               <Label>Staff ID (also their password)</Label>
-              <Input value={staffId} onChange={(e) => setStaffId(e.target.value)} required />
+              <Input value={staffId} onChange={(e) => setStaffId(e.target.value)} required minLength={4} />
             </div>
             <Button type="submit" disabled={busy || !schoolId} className="font-semibold">
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -127,7 +131,7 @@ function Page() {
 
         <SectionCard title="Teacher list">
           {(list.data ?? []).length === 0 ? (
-            <EmptyState title="No teachers yet" description="Create a teacher with the form." />
+            <EmptyState title="No teachers yet" description="Create a teacher to see them here." />
           ) : (
             <ul className="divide-y divide-slate-100">
               {(list.data ?? []).map((t) => (
