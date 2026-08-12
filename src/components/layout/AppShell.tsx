@@ -2,6 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { Bell, LogOut, Menu, Search, X } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
+import { Watermark } from "@/components/brand/Watermark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -115,8 +116,11 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
+      <div className="relative lg:pl-64">
+        {/* Subtle brand watermark behind all dashboard content */}
+        <Watermark opacity={0.04} size="xl" className="z-0" />
+
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
           <div className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <Sheet open={open} onOpenChange={setOpen}>
@@ -213,7 +217,7 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-[1200px] px-4 pb-28 pt-6 sm:px-6 lg:pb-10">
+        <main className="relative z-10 mx-auto w-full max-w-[1200px] px-4 pb-28 pt-6 sm:px-6 lg:pb-10">
           {children}
         </main>
       </div>
