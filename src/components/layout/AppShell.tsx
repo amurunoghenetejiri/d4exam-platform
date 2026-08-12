@@ -117,8 +117,8 @@ export function AppShell({
       </aside>
 
       <div className="relative lg:pl-64">
-        {/* Subtle brand watermark behind all dashboard content */}
-        <Watermark opacity={0.04} size="xl" className="z-0" />
+        {/* Brand watermark behind dashboard content */}
+        <Watermark opacity={0.09} size="xl" />
 
         <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
           <div className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
