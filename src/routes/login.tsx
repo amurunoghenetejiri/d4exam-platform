@@ -1,5 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { signInWithSchoolCode } from "@/lib/auth.functions";
+import { fetchSessionUser, roleHome } from "@/lib/session";
+
 import { Eye, EyeOff, ShieldCheck, Loader2, Building2 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
