@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Send, Save, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
@@ -21,6 +21,9 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/teacher/examinations")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    course: typeof search.course === "string" ? search.course : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Examinations — D4EXAM" },
@@ -46,12 +49,17 @@ type ExamRow = {
 };
 
 function Page() {
+  const { course: courseFromUrl } = Route.useSearch();
   const { data: teacher, isLoading: tLoading } = useTeacherContext();
   const { data: session } = useSessionUser();
   const qc = useQueryClient();
   const [builder, setBuilder] = useState(false);
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
+
+  const lockedCourseId =
+    courseFromUrl && teacher?.courseIds.includes(courseFromUrl) ? courseFromUrl : null;
+  const lockedCourse = teacher?.courses.find((c) => c.id === lockedCourseId) ?? null;
 
   const [courseId, setCourseId] = useState("");
   const [title, setTitle] = useState("");
@@ -60,20 +68,25 @@ function Page() {
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
 
+  useEffect(() => {
+    if (lockedCourseId) setCourseId(lockedCourseId);
+  }, [lockedCourseId]);
+
   const listQ = useQuery({
-    queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds],
+    queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds, lockedCourseId],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
     queryFn: async () => {
       if (!teacher) return [] as ExamRow[];
-      const { data, error } = await supabase
+      let q = supabase
         .from("examinations")
         .select(
           "id, title, status, duration_minutes, scheduled_start, scheduled_end, course_id, description, courses(code, name)",
         )
         .eq("school_id", teacher.schoolId)
-        .in("course_id", teacher.courseIds)
+        .in("course_id", lockedCourseId ? [lockedCourseId] : teacher.courseIds)
         .order("created_at", { ascending: false })
         .limit(100);
+      const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as ExamRow[];
     },
@@ -84,7 +97,7 @@ function Page() {
       toast.error("No courses assigned");
       return;
     }
-    setCourseId(teacher.courses[0].id);
+    setCourseId(lockedCourseId ?? teacher.courses[0].id);
     setTitle("");
     setDescription("");
     setDuration(60);
@@ -98,6 +111,10 @@ function Page() {
     if (s === 1) {
       if (!courseId || !teacher?.courseIds.includes(courseId)) {
         toast.error("Select an assigned course");
+        return false;
+      }
+      if (lockedCourseId && courseId !== lockedCourseId) {
+        toast.error("This view is locked to one course.");
         return false;
       }
       if (!title.trim()) {
@@ -175,7 +192,11 @@ function Page() {
       <>
         <PageHeader
           title="Create examination"
-          description="Only for courses assigned to you. Submit for officer approval — you cannot self-approve."
+          description={
+            lockedCourse
+              ? `For ${lockedCourse.code} only. Submit for officer approval.`
+              : "Only for courses assigned to you. Submit for officer approval."
+          }
           actions={
             <Button variant="outline" onClick={() => setBuilder(false)}>
               Cancel
@@ -212,18 +233,24 @@ function Page() {
             <div className="mx-auto max-w-xl space-y-4">
               <div className="space-y-2">
                 <Label className="font-semibold">Assigned course</Label>
-                <Select value={courseId} onValueChange={setCourseId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select course" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {teacher.courses.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.code} — {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {lockedCourse ? (
+                  <p className="rounded-lg border bg-slate-50 px-3 py-2 text-sm font-semibold">
+                    {lockedCourse.code} — {lockedCourse.name}
+                  </p>
+                ) : (
+                  <Select value={courseId} onValueChange={setCourseId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select course" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {teacher.courses.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.code} — {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">Title</Label>
@@ -364,17 +391,28 @@ function Page() {
   return (
     <>
       <PageHeader
-        title="Examinations"
-        description={`Create exams for your assigned courses · ${teacher.fullName}`}
+        title={lockedCourse ? `Exams · ${lockedCourse.code}` : "Examinations"}
+        description={
+          lockedCourse
+            ? `Only exams for ${lockedCourse.code} — ${lockedCourse.name}`
+            : `Create exams for your assigned courses · ${teacher.fullName}`
+        }
         actions={
-          <Button
-            className="font-semibold"
-            onClick={openBuilder}
-            disabled={!teacher.courses.length}
-          >
-            <Plus className="mr-1.5 h-4 w-4" />
-            Create examination
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {lockedCourse && (
+              <Button variant="outline" className="font-semibold" asChild>
+                <Link to="/teacher/courses">All courses</Link>
+              </Button>
+            )}
+            <Button
+              className="font-semibold"
+              onClick={openBuilder}
+              disabled={!teacher.courses.length}
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              Create examination
+            </Button>
+          </div>
         }
       />
 
@@ -384,13 +422,15 @@ function Page() {
           description="School Admin must assign courses before you can create examinations."
         />
       ) : (
-        <SectionCard title="Your examinations (live)">
+        <SectionCard
+          title={lockedCourse ? `${lockedCourse.code} examinations` : "Your examinations (live)"}
+        >
           {listQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading…</p>
           ) : exams.length === 0 ? (
             <EmptyState
-              title="No examinations yet"
-              description="Create one for an assigned course."
+              title={lockedCourse ? `No exams for ${lockedCourse.code}` : "No examinations yet"}
+              description="Create one for this course."
               actionLabel="Create examination"
               onAction={openBuilder}
             />
