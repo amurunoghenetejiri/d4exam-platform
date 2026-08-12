@@ -268,7 +268,8 @@ export const createSchoolUser = createServerFn({ method: "POST" })
     if (!canManage) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const result = await createPerson(supabaseAdmin, schoolId, data);
+    const { createPerson } = await import("@/lib/users.server");
+    const result = await createPerson(schoolId, data);
 
     await supabaseAdmin.from("audit_logs").insert({
       school_id: schoolId,
@@ -304,12 +305,13 @@ export const importStudents = createServerFn({ method: "POST" })
     if (!canManage) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { createPerson } = await import("@/lib/users.server");
 
     let created = 0;
     const failures: { identifier: string; reason: string }[] = [];
     for (const row of data.rows) {
       try {
-        await createPerson(supabaseAdmin, schoolId, { ...row, role: "student" as const });
+        await createPerson(schoolId, { ...row, role: "student" as const });
         created += 1;
       } catch (e) {
         failures.push({ identifier: row.identifier, reason: (e as Error).message });
@@ -327,83 +329,3 @@ export const importStudents = createServerFn({ method: "POST" })
 
     return { created, failed: failures.length, failures };
   });
-
-type PersonInput = z.infer<typeof personSchema>;
-
-async function createPerson(
-  admin: Awaited<typeof import("@/integrations/supabase/client.server")>["supabaseAdmin"],
-  schoolId: string,
-  data: PersonInput,
-) {
-  const { data: invited, error: inviteError } = await admin.auth.admin.inviteUserByEmail(data.email);
-  if (inviteError || !invited.user) {
-    throw new Error(inviteError?.message ?? "Could not invite this user");
-  }
-
-  const { data: profile, error: profileError } = await admin
-    .from("profiles")
-    .insert({
-      auth_user_id: invited.user.id,
-      school_id: schoolId,
-      first_name: data.firstName,
-      last_name: data.lastName,
-      full_name: `${data.firstName} ${data.lastName}`,
-      email: data.email,
-      status: "invited",
-    })
-    .select("id")
-    .single();
-  if (profileError || !profile) throw new Error(profileError?.message ?? "Could not create profile");
-
-  await admin
-    .from("user_roles")
-    .insert({ user_id: invited.user.id, school_id: schoolId, role: data.role });
-
-  if (data.role === "student") {
-    const { data: row, error } = await admin
-      .from("students")
-      .insert({
-        profile_id: profile.id,
-        school_id: schoolId,
-        student_id: data.identifier,
-        matric_number: data.matricNumber ?? data.identifier,
-        department_id: data.departmentId ?? null,
-        faculty_id: data.facultyId ?? null,
-        level_id: data.levelId ?? null,
-        status: "invited",
-      })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    return { id: row.id };
-  }
-
-  if (data.role === "teacher") {
-    const { data: row, error } = await admin
-      .from("teachers")
-      .insert({
-        profile_id: profile.id,
-        school_id: schoolId,
-        staff_id: data.identifier,
-        department_id: data.departmentId ?? null,
-        faculty_id: data.facultyId ?? null,
-      })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    return { id: row.id };
-  }
-
-  const { data: row, error } = await admin
-    .from("examination_officers")
-    .insert({
-      profile_id: profile.id,
-      school_id: schoolId,
-      officer_id: data.identifier,
-      status: "invited",
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
-  return { id: row.id };
-}
