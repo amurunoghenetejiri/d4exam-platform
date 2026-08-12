@@ -1,35 +1,24 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
-import { StatusBadge } from "@/components/dashboard/kit";
+import { SchoolEntityPage } from "@/components/pages/SchoolEntityPage";
 
 export const Route = createFileRoute("/admin/courses")({
-  head: () => ({
-    meta: [
-      { title: "Courses — D4EXAM" },
-      { name: "description", content: "Courses offered across departments and levels." },
-      { property: "og:title", content: "Courses — D4EXAM" },
-      { property: "og:description", content: "Courses offered across departments and levels." },
-    ],
-  }),
-  component: Page,
-});
-
-function Page() {
-  return (
-    <DbRecordsPage
+  head: () => ({ meta: [{ title: "Courses — D4EXAM" }] }),
+  component: () => (
+    <SchoolEntityPage
       title="Courses"
-      description="Courses offered across departments and levels."
+      description="Courses offered in your institution."
       table="courses"
-      select="id, code, name, credit_units, status, departments(name)"
-      order={{ column: "created_at", ascending: false }}
-      tableTitle="Courses"
+      select="id, code, name, credit_units, status, created_at"
+      fields={[
+        { key: "code", label: "Course code", required: true, placeholder: "e.g. CSC101" },
+        { key: "name", label: "Course title", required: true, placeholder: "e.g. Introduction to Computing" },
+        { key: "credit_units", label: "Credit units", type: "number", placeholder: "3" },
+      ]}
       columns={[
-      { key: "code", header: "Code" },
-      { key: "name", header: "Course" },
-      { key: "department", header: "Department", hideOnMobile: true, render: (r: Row) => r.departments?.name ?? "—" },
-      { key: "credit_units", header: "Units", hideOnMobile: true },
-      { key: "status", header: "Status", render: (r: Row) => <StatusBadge status={r.status} /> },
+        { key: "code", header: "Code" },
+        { key: "name", header: "Title", render: (r) => r.name },
+        { key: "credit_units", header: "Units", render: (r) => `${r.credit_units ?? 0} units` },
       ]}
     />
-  );
-}
+  ),
+});

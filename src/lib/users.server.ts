@@ -21,18 +21,21 @@ export interface CreatePersonResult {
   fullName: string;
 }
 
-function generateTempPassword() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  let out = "D4-";
-  for (let i = 0; i < 10; i++) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return out + "!";
+/**
+ * Stable password everyone can remember without admin copy-paste:
+ * - Students: matric / student ID
+ * - Teachers / officers: staff / officer ID
+ * Padded if shorter than 6 characters (Auth minimum).
+ */
+export function stablePasswordFromId(identifier: string) {
+  const base = identifier.trim();
+  if (base.length >= 6) return base;
+  return `${base}@D4Exam`;
 }
 
-/** Creates auth user with a password (no email invite), profile, role row, and role record. */
+/** Creates auth user with identifier-based password, profile, role, and role record. */
 export async function createPerson(schoolId: string, data: PersonInput): Promise<CreatePersonResult> {
-  const password = generateTempPassword();
+  const password = stablePasswordFromId(data.identifier);
   const fullName = `${data.firstName} ${data.lastName}`.trim();
 
   const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({

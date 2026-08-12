@@ -1,33 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
-import { StatusBadge } from "@/components/dashboard/kit";
+import { SchoolEntityPage } from "@/components/pages/SchoolEntityPage";
 
 export const Route = createFileRoute("/admin/faculties")({
-  head: () => ({
-    meta: [
-      { title: "Faculties — D4EXAM" },
-      { name: "description", content: "Academic faculties within your institution." },
-      { property: "og:title", content: "Faculties — D4EXAM" },
-      { property: "og:description", content: "Academic faculties within your institution." },
-    ],
-  }),
-  component: Page,
-});
-
-function Page() {
-  return (
-    <DbRecordsPage
+  head: () => ({ meta: [{ title: "Faculties — D4EXAM" }] }),
+  component: () => (
+    <SchoolEntityPage
       title="Faculties"
-      description="Academic faculties within your institution."
+      description="Create and manage faculties in your institution."
       table="faculties"
-      select="id, name, code, status"
-      order={{ column: "created_at", ascending: false }}
-      tableTitle="Faculties"
+      fields={[
+        { key: "name", label: "Faculty name", required: true, placeholder: "e.g. Faculty of Science" },
+        { key: "code", label: "Code", placeholder: "e.g. SCI" },
+      ]}
       columns={[
-      { key: "name", header: "Faculty" },
-      { key: "code", header: "Code", hideOnMobile: true },
-      { key: "status", header: "Status", render: (r: Row) => <StatusBadge status={r.status} /> },
+        { key: "name", header: "Name" },
+        { key: "code", header: "Code", render: (r) => r.code || "—" },
       ]}
     />
-  );
-}
+  ),
+});

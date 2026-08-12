@@ -1,34 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
-import { StatusBadge } from "@/components/dashboard/kit";
+import { SchoolEntityPage } from "@/components/pages/SchoolEntityPage";
 
 export const Route = createFileRoute("/admin/sessions")({
-  head: () => ({
-    meta: [
-      { title: "Academic Sessions — D4EXAM" },
-      { name: "description", content: "Sessions configured for examinations and results." },
-      { property: "og:title", content: "Academic Sessions — D4EXAM" },
-      { property: "og:description", content: "Sessions configured for examinations and results." },
-    ],
-  }),
-  component: Page,
-});
-
-function Page() {
-  return (
-    <DbRecordsPage
-      title="Academic Sessions"
-      description="Sessions configured for examinations and results."
+  head: () => ({ meta: [{ title: "Sessions — D4EXAM" }] }),
+  component: () => (
+    <SchoolEntityPage
+      title="Sessions"
+      description="Academic sessions (e.g. 2025/2026)."
       table="academic_sessions"
-      select="id, name, start_date, end_date, status"
-      order={{ column: "created_at", ascending: false }}
-      tableTitle="Academic Sessions"
-      columns={[
-      { key: "name", header: "Session" },
-      { key: "start_date", header: "Starts", hideOnMobile: true },
-      { key: "end_date", header: "Ends", hideOnMobile: true },
-      { key: "status", header: "Status", render: (r: Row) => <StatusBadge status={r.status} /> },
-      ]}
+      select="id, name, status, created_at"
+      fields={[{ key: "name", label: "Session name", required: true, placeholder: "e.g. 2025/2026" }]}
+      columns={[{ key: "name", header: "Session" }]}
     />
-  );
-}
+  ),
+});

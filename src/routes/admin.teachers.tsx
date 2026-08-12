@@ -10,7 +10,7 @@ import { createSchoolUser } from "@/lib/auth.functions";
 import { useSessionUser } from "@/lib/session";
 import { useRows } from "@/lib/queries";
 import { toast } from "sonner";
-import { Copy, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/teachers")({
   head: () => ({
@@ -24,13 +24,6 @@ type TeacherRow = {
   staff_id: string;
   employment_status: string;
   profiles: { full_name: string; email?: string } | null;
-};
-
-type Cred = {
-  fullName: string;
-  identifier: string;
-  email: string;
-  password: string;
 };
 
 function Page() {
@@ -54,17 +47,13 @@ function Page() {
   const [email, setEmail] = useState("");
   const [staffId, setStaffId] = useState("");
   const [busy, setBusy] = useState(false);
-  const [lastCred, setLastCred] = useState<Cred | null>(null);
 
   async function addTeacher(e: React.FormEvent) {
     e.preventDefault();
-    if (!schoolId) {
-      toast.error("Your account is not linked to a school.");
-      return;
-    }
+    if (!schoolId) return toast.error("Not linked to a school");
     setBusy(true);
     try {
-      const result = await createOne({
+      await createOne({
         data: {
           role: "teacher",
           firstName: firstName.trim(),
@@ -73,19 +62,14 @@ function Page() {
           identifier: staffId.trim(),
         },
       });
-      setLastCred({
-        fullName: `${firstName} ${lastName}`.trim(),
-        identifier: staffId.trim(),
-        email: email.trim().toLowerCase(),
-        password: (result as { password?: string }).password ?? "",
-      });
-      toast.success("Teacher created. Copy login details below.");
+      toast.success(
+        `Teacher created. Login: school code ${schoolCode || "…"}, email or staff ID, password = staff ID (${staffId.trim()}).`,
+      );
       setFirstName("");
       setLastName("");
       setEmail("");
       setStaffId("");
       await qc.invalidateQueries({ queryKey: ["rows"] });
-      await qc.invalidateQueries({ queryKey: ["count"] });
       await list.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not create teacher");
@@ -94,48 +78,24 @@ function Page() {
     }
   }
 
-  function copyCred() {
-    if (!lastCred) return;
-    const text = [
-      `Teacher: ${lastCred.fullName}`,
-      `School code: ${schoolCode}`,
-      `Staff ID: ${lastCred.identifier}`,
-      `Email: ${lastCred.email}`,
-      `Password: ${lastCred.password}`,
-      `Login at /login then open Teacher dashboard`,
-    ].join("\n");
-    void navigator.clipboard.writeText(text);
-    toast.success("Credentials copied");
-  }
-
   return (
     <>
       <PageHeader
         title="Teachers"
-        description="Add teachers. They log in with school code + email (or staff ID) + password and open the Teacher dashboard."
+        description="Add teachers. Password is always their Staff ID — tell them once, no bulk password list."
       />
 
-      {!schoolId && (
-        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Your account is not linked to a school yet.
-        </p>
-      )}
-
-      {lastCred && (
-        <SectionCard title="Teacher login details">
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 font-mono text-sm">
-            <p className="font-sans font-bold text-emerald-900">{lastCred.fullName}</p>
-            <p className="mt-2">School code: {schoolCode || "(your school code)"}</p>
-            <p>Staff ID: {lastCred.identifier}</p>
-            <p>Email: {lastCred.email}</p>
-            <p>Password: {lastCred.password}</p>
-          </div>
-          <Button type="button" size="sm" className="mt-3 gap-2 font-semibold" onClick={copyCred}>
-            <Copy className="h-3.5 w-3.5" />
-            Copy message
-          </Button>
-        </SectionCard>
-      )}
+      <SectionCard title="How teachers log in">
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
+          <li>
+            School code: <strong>{schoolCode || "(your school code)"}</strong>
+          </li>
+          <li>Username: email OR staff ID</li>
+          <li>
+            Password: <strong>their staff ID</strong>
+          </li>
+        </ol>
+      </SectionCard>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <SectionCard title="Add teacher">
@@ -155,7 +115,7 @@ function Page() {
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
             </div>
             <div className="space-y-1.5">
-              <Label>Staff ID</Label>
+              <Label>Staff ID (also their password)</Label>
               <Input value={staffId} onChange={(e) => setStaffId(e.target.value)} required />
             </div>
             <Button type="submit" disabled={busy || !schoolId} className="font-semibold">
@@ -167,7 +127,7 @@ function Page() {
 
         <SectionCard title="Teacher list">
           {(list.data ?? []).length === 0 ? (
-            <EmptyState title="No teachers yet" description="Create a teacher to see them here." />
+            <EmptyState title="No teachers yet" description="Create a teacher with the form." />
           ) : (
             <ul className="divide-y divide-slate-100">
               {(list.data ?? []).map((t) => (
