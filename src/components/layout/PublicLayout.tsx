@@ -18,8 +18,11 @@ export function PublicLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-white">
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+    <div className="relative flex min-h-dvh flex-col bg-white">
+      {/* Fixed watermark — does not scroll with the page */}
+      <Watermark opacity={0.1} size="xl" />
+
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-16 w-full max-w-[1180px] items-center justify-between gap-4 px-4 sm:px-6">
           <Link to="/" aria-label="D4EXAM home" className="shrink-0">
             <Logo size="md" />
@@ -74,10 +77,14 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                 ))}
                 <div className="mt-4 flex flex-col gap-2">
                   <Button variant="outline" className="w-full" asChild>
-                    <Link to="/login" onClick={() => setOpen(false)}>Login</Link>
+                    <Link to="/login" onClick={() => setOpen(false)}>
+                      Login
+                    </Link>
                   </Button>
                   <Button className="w-full" asChild>
-                    <Link to="/school-application" onClick={() => setOpen(false)}>Apply Now</Link>
+                    <Link to="/school-application" onClick={() => setOpen(false)}>
+                      Apply Now
+                    </Link>
                   </Button>
                 </div>
               </div>
@@ -86,12 +93,9 @@ export function PublicLayout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className="relative flex-1 overflow-hidden">
-        <Watermark opacity={0.09} size="xl" />
-        <div className="relative z-10">{children}</div>
-      </main>
+      <main className="relative z-10 flex-1">{children}</main>
 
-      <footer className="border-t border-slate-200 bg-slate-50">
+      <footer className="relative z-10 border-t border-slate-200 bg-slate-50/95">
         <div className="mx-auto grid w-full max-w-[1180px] gap-8 px-4 py-12 sm:px-6 md:grid-cols-[1.4fr_repeat(3,1fr)]">
           <div>
             <Logo size="lg" showTagline />
