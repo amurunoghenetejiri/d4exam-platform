@@ -9,6 +9,7 @@ import {
   FileText,
   CalendarDays,
   Loader2,
+  ShieldCheck,
 } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -87,11 +88,30 @@ function Page() {
 
   const exams = listQ.data ?? [];
 
+  const qCountsQ = useQuery({
+    queryKey: ["officer-approval-qcounts", schoolId, exams.map((e) => e.course_id).join(",")],
+    enabled: Boolean(schoolId && exams.length),
+    queryFn: async () => {
+      if (!schoolId) return {} as Record<string, number>;
+      const courseIds = [...new Set(exams.map((e) => e.course_id).filter(Boolean))] as string[];
+      if (!courseIds.length) return {};
+      const { data } = await supabase
+        .from("questions")
+        .select("course_id")
+        .eq("school_id", schoolId)
+        .in("course_id", courseIds);
+      const map: Record<string, number> = {};
+      for (const q of data ?? []) {
+        const c = (q as { course_id: string }).course_id;
+        map[c] = (map[c] ?? 0) + 1;
+      }
+      return map;
+    },
+  });
+  const qCounts = qCountsQ.data ?? {};
+
   const activeQueue = useMemo(
-    () =>
-      exams.filter((q) =>
-        ["pending_approval", "changes_requested"].includes(q.status),
-      ),
+    () => exams.filter((q) => ["pending_approval", "changes_requested"].includes(q.status)),
     [exams],
   );
 
@@ -164,7 +184,6 @@ function Page() {
         if (scheduleStart) update.scheduled_start = new Date(scheduleStart).toISOString();
         if (scheduleEnd) update.scheduled_end = new Date(scheduleEnd).toISOString();
       }
-      // Store officer note in description appendix (no dedicated review_notes column)
       if (comment.trim()) {
         const prefix =
           action === "approve"
@@ -196,7 +215,6 @@ function Page() {
         description: `${selected.title} → ${nextStatus}${comment.trim() ? `: ${comment.trim()}` : ""}`,
       } as never);
 
-      // Notify teacher if we know created_by
       if (selected.created_by) {
         const titles = {
           approve: "Examination approved",
@@ -243,17 +261,12 @@ function Page() {
     <>
       <PageHeader
         title="Examination Approvals"
-        description={`${user?.fullName ?? "Officer"} · Live queue from teachers in ${user?.schoolName ?? "your school"}`}
+        description={`${user?.fullName ?? "Officer"} · Review schedule, questions and security before approving`}
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-3">
         <Stat label="Pending approval" value={stats.pending} icon={Clock} tone="warning" />
-        <Stat
-          label="Changes requested"
-          value={stats.changes}
-          icon={MessageSquareWarning}
-          tone="info"
-        />
+        <Stat label="Changes requested" value={stats.changes} icon={MessageSquareWarning} tone="info" />
         <Stat label="In queue" value={stats.total} icon={FileText} tone="primary" />
       </div>
 
@@ -273,16 +286,17 @@ function Page() {
           ) : activeQueue.length === 0 ? (
             <EmptyState
               title="No examinations awaiting approval"
-              description="When a teacher submits an exam (status: pending approval), it appears here."
+              description="When a teacher submits an exam, it appears here."
             />
           ) : (
             <ul className="space-y-4">
-              {activeQueue.map((item) => (
-                <li
-                  key={item.id}
-                  className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+              {activeQueue.map((item) => {
+                const qn = item.course_id ? qCounts[item.course_id] ?? 0 : 0;
+                return (
+                  <li
+                    key={item.id}
+                    className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm"
+                  >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-extrabold text-slate-900">{item.title}</p>
@@ -301,49 +315,53 @@ function Page() {
                           {item.scheduled_start
                             ? new Date(item.scheduled_start).toLocaleString()
                             : "Not scheduled"}
+                          {item.scheduled_end
+                            ? ` → ${new Date(item.scheduled_end).toLocaleString()}`
+                            : ""}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <FileText className="h-3.5 w-3.5" />
+                          {qn} question(s) in course bank
                         </span>
                         <span className="text-slate-400">
                           Submitted {new Date(item.created_at).toLocaleString()}
                         </span>
                       </div>
                       {item.description && (
-                        <p className="mt-2 line-clamp-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                          {item.description}
-                        </p>
+                        <div className="mt-2 space-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                          <p className="line-clamp-4 whitespace-pre-wrap">{item.description}</p>
+                          {/security|tab|fullscreen|lockdown/i.test(item.description) && (
+                            <p className="inline-flex items-center gap-1 font-semibold text-primary">
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                              Security notes included in description
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
-                  </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      className="font-semibold"
-                      onClick={() => openAction(item, "approve")}
-                    >
-                      <CheckCircle2 className="mr-1.5 h-4 w-4" />
-                      Approve
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="font-semibold"
-                      onClick={() => openAction(item, "changes")}
-                    >
-                      <MessageSquareWarning className="mr-1.5 h-4 w-4" />
-                      Request changes
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="font-semibold text-red-600 hover:bg-red-50 hover:text-red-700"
-                      onClick={() => openAction(item, "reject")}
-                    >
-                      <XCircle className="mr-1.5 h-4 w-4" />
-                      Reject
-                    </Button>
-                  </div>
-                </li>
-              ))}
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button size="sm" className="font-semibold" onClick={() => openAction(item, "approve")}>
+                        <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                        Approve
+                      </Button>
+                      <Button size="sm" variant="outline" className="font-semibold" onClick={() => openAction(item, "changes")}>
+                        <MessageSquareWarning className="mr-1.5 h-4 w-4" />
+                        Request changes
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="font-semibold text-red-600 hover:bg-red-50 hover:text-red-700"
+                        onClick={() => openAction(item, "reject")}
+                      >
+                        <XCircle className="mr-1.5 h-4 w-4" />
+                        Reject
+                      </Button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </SectionCard>
@@ -382,6 +400,9 @@ function Page() {
             </DialogTitle>
             <DialogDescription>
               {selected?.title} · {selected?.courses?.code}
+              {selected?.course_id && qCounts[selected.course_id]
+                ? ` · ${qCounts[selected.course_id]} questions`
+                : ""}
             </DialogDescription>
           </DialogHeader>
 
