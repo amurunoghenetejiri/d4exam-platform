@@ -137,7 +137,7 @@ export const adminNav: RoleConfig = {
     {
       label: "Academics",
       items: [
-        { label: "Faculty / Department", to: "/admin/faculties", icon: Building2 },
+        { label: "Faculty / College", to: "/admin/faculties", icon: Building2 },
         { label: "Departments", to: "/admin/departments", icon: Blocks },
         { label: "Levels", to: "/admin/levels", icon: Layers },
         { label: "Courses", to: "/admin/courses", icon: BookOpen },
