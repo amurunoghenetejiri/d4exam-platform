@@ -2,31 +2,31 @@ import logo from "@/assets/d4exam-logo.png.asset.json";
 import { cn } from "@/lib/utils";
 
 /**
- * Subtle brand watermark using the official D4EXAM logo.
- * Low opacity, soft grayscale — sits behind content without competing.
+ * Brand watermark using the official D4EXAM logo.
+ * Soft grayscale, positioned behind content so it is visible but never competes.
  */
 export function Watermark({
   className,
-  opacity = 0.045,
+  opacity = 0.09,
   size = "lg",
 }: {
   className?: string;
-  /** 0–1 opacity. Keep very low (0.03–0.07) so it never overpowers content. */
+  /** 0–1 opacity. Default is visible but soft on light backgrounds. */
   opacity?: number;
   size?: "md" | "lg" | "xl";
 }) {
   const sizeClass =
     size === "xl"
-      ? "h-[min(78vh,640px)] max-w-[92%]"
+      ? "h-[min(80vh,680px)] max-w-[94%]"
       : size === "md"
-        ? "h-[min(50vh,380px)] max-w-[70%]"
-        : "h-[min(68vh,520px)] max-w-[85%]";
+        ? "h-[min(52vh,400px)] max-w-[72%]"
+        : "h-[min(70vh,560px)] max-w-[88%]";
 
   return (
     <div
       aria-hidden
       className={cn(
-        "pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden",
+        "pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden",
         className,
       )}
     >
@@ -36,9 +36,9 @@ export function Watermark({
         className={cn("w-auto select-none object-contain", sizeClass)}
         style={{
           opacity,
-          filter: "grayscale(1) brightness(0.55) contrast(0.9)",
+          filter: "grayscale(1) brightness(0.9) contrast(0.85)",
         }}
-        loading="lazy"
+        loading="eager"
         decoding="async"
       />
     </div>
