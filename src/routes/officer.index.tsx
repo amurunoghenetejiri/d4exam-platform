@@ -93,30 +93,10 @@ function Page() {
       />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Stat
-          label="Pending approvals"
-          value={fmt(pending)}
-          icon={CheckSquare}
-          color="bg-violet-50 text-violet-600"
-        />
-        <Stat
-          label="Live examinations"
-          value={fmt(live)}
-          icon={Radio}
-          color="bg-blue-50 text-blue-600"
-        />
-        <Stat
-          label="Total exams"
-          value={fmt(totalExams)}
-          icon={FileText}
-          color="bg-slate-100 text-slate-700"
-        />
-        <Stat
-          label="Ongoing (integrity)"
-          value={fmt(live)}
-          icon={ShieldAlert}
-          color="bg-red-50 text-red-600"
-        />
+        <Stat to="/officer/approvals" label="Pending approvals" value={fmt(pending)} icon={CheckSquare} color="bg-violet-50 text-violet-600" />
+        <Stat to="/officer/live-monitor" label="Live examinations" value={fmt(live)} icon={Radio} color="bg-blue-50 text-blue-600" />
+        <Stat to="/officer/approvals" label="Total exams" value={fmt(totalExams)} icon={FileText} color="bg-slate-100 text-slate-700" />
+        <Stat to="/officer/integrity" label="Ongoing (integrity)" value={fmt(live)} icon={ShieldAlert} color="bg-red-50 text-red-600" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -195,18 +175,23 @@ function fmt(q: { isLoading: boolean; data?: number }) {
 }
 
 function Stat({
+  to,
   label,
   value,
   icon: Icon,
   color,
 }: {
+  to: string;
   label: string;
   value: string;
   icon: typeof CheckSquare;
   color: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+    <Link
+      to={to}
+      className="block rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm transition hover:border-primary/40 hover:shadow-md"
+    >
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs font-semibold text-slate-500">{label}</p>
@@ -216,6 +201,6 @@ function Stat({
           <Icon className="h-4 w-4" />
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
