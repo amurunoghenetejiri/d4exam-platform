@@ -18,9 +18,6 @@ function generateTempPassword() {
   return out;
 }
 
-/**
- * Resolves the account from (school code + identifier) server side, then signs in.
- */
 export const signInWithSchoolCode = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => loginSchema.parse(data))
   .handler(async ({ data }) => {
@@ -127,7 +124,6 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
     };
   });
 
-/** Super admin reviews school applications. Approve creates school + admin with instant password. */
 export const reviewSchoolApplication = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) =>
@@ -338,10 +334,23 @@ export const importStudents = createServerFn({ method: "POST" })
 
     let created = 0;
     const failures: { identifier: string; reason: string }[] = [];
+    const credentials: {
+      fullName: string;
+      identifier: string;
+      email: string;
+      password: string;
+    }[] = [];
+
     for (const row of data.rows) {
       try {
-        await createPerson(schoolId, { ...row, role: "student" as const });
+        const person = await createPerson(schoolId, { ...row, role: "student" as const });
         created += 1;
+        credentials.push({
+          fullName: person.fullName,
+          identifier: person.identifier,
+          email: person.email,
+          password: person.password,
+        });
       } catch (e) {
         failures.push({ identifier: row.identifier, reason: (e as Error).message });
       }
@@ -356,5 +365,5 @@ export const importStudents = createServerFn({ method: "POST" })
       description: `Imported ${created} of ${data.rows.length} students`,
     });
 
-    return { created, failed: failures.length, failures };
+    return { created, failed: failures.length, failures, credentials };
   });
