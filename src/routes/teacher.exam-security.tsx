@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ShieldCheck, Save } from "lucide-react";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTeacherContext } from "@/lib/teacher";
+import {
+  DEFAULT_EXAM_SECURITY,
+  loadTeacherSecurityDefaults,
+  saveTeacherSecurityDefaults,
+} from "@/lib/exam-security";
 import { toast } from "sonner";
 import type { ExamSecuritySettings } from "@/types";
 
@@ -32,27 +37,33 @@ export const Route = createFileRoute("/teacher/exam-security")({
 
 function Page() {
   const { data: teacher, isLoading } = useTeacherContext();
-  const [settings, setSettings] = useState<ExamSecuritySettings>({
-    fullscreen: true,
-    tabMonitoring: true,
-    maxTabSwitches: 5,
-    blockCopyPaste: true,
-    randomizeQuestions: true,
-    randomizeOptions: true,
-    requireCamera: false,
-    requireMicrophone: false,
-    thresholdAction: "flag",
-  });
+  const [settings, setSettings] = useState<ExamSecuritySettings>({ ...DEFAULT_EXAM_SECURITY });
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!teacher?.teacherId) return;
+    setSettings(loadTeacherSecurityDefaults(teacher.teacherId));
+    setLoaded(true);
+  }, [teacher?.teacherId]);
 
   function save() {
-    toast.success("Security defaults saved for your next examinations.");
+    if (!teacher?.teacherId) {
+      toast.error("Teacher profile not found");
+      return;
+    }
+    if (settings.tabMonitoring && (settings.maxTabSwitches < 1 || settings.maxTabSwitches > 20)) {
+      toast.error("Max tab switches must be between 1 and 20");
+      return;
+    }
+    saveTeacherSecurityDefaults(teacher.teacherId, settings);
+    toast.success("Security defaults saved. They will apply when you create or submit examinations.");
   }
 
   function toggle<K extends keyof ExamSecuritySettings>(key: K, value: ExamSecuritySettings[K]) {
     setSettings((s) => ({ ...s, [key]: value }));
   }
 
-  if (isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (isLoading || !loaded) return <p className="text-sm text-slate-500">Loading…</p>;
   if (!teacher) {
     return <EmptyState title="Teacher profile not found" description="Contact School Admin." />;
   }
@@ -61,7 +72,7 @@ function Page() {
     <>
       <PageHeader
         title="Exam Security"
-        description={`Defaults for ${teacher.fullName}. Applied when you build new examinations.`}
+        description={`Defaults for ${teacher.fullName}. Saved settings are attached to every examination you create or submit.`}
         actions={
           <Button className="font-semibold" onClick={save}>
             <Save className="mr-1.5 h-4 w-4" />
@@ -154,8 +165,9 @@ function Page() {
           <div className="mt-6 flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
             <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <p className="text-sm text-slate-700">
-              These defaults apply when you create examinations for your assigned courses. Officer
-              approval is still required before students can sit the exam.
+              Click <strong>Save defaults</strong> to store these settings. When you create or submit
+              an examination, the same security rules are saved on that exam so the Examination
+              Officer can review them before approval.
             </p>
           </div>
         </SectionCard>
