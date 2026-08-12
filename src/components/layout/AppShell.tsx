@@ -83,8 +83,6 @@ export function AppShell({
     session?.userId
       ? [
           { column: "recipient_user_id", value: session.userId },
-          // head count cannot filter IS NULL easily via useCount eq only;
-          // badge uses total for recipient; inbox page shows unread accurately
         ]
       : [],
     Boolean(session?.userId),
@@ -94,7 +92,10 @@ export function AppShell({
   const showDot = (unread.data ?? 0) > 0;
 
   return (
-    <div className="min-h-dvh bg-slate-50">
+    <div className="relative min-h-dvh bg-slate-50">
+      {/* Fixed brand watermark — stays still while content scrolls */}
+      <Watermark opacity={0.1} size="xl" className="lg:left-64" />
+
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-[#0b1b3a] lg:flex">
         <div className="flex h-16 items-center border-b border-white/10 px-4">
           <Link to="/" aria-label="D4EXAM home">
@@ -116,11 +117,8 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className="relative lg:pl-64">
-        {/* Brand watermark behind dashboard content */}
-        <Watermark opacity={0.09} size="xl" />
-
-        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <div className="relative z-10 lg:pl-64">
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
           <div className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <Sheet open={open} onOpenChange={setOpen}>
@@ -166,7 +164,7 @@ export function AppShell({
                   type="search"
                   placeholder="Search exams, courses, students…"
                   aria-label="Search"
-                  className="h-10 rounded-full border-slate-200 bg-slate-50 pl-9"
+                  className="h-10 rounded-full border-slate-200 bg-slate-50/90 pl-9"
                 />
               </div>
             </div>
