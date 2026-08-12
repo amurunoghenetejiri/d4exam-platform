@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -40,6 +40,9 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/teacher/question-bank")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    course: typeof search.course === "string" ? search.course : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Question Bank — D4EXAM" },
@@ -91,14 +94,12 @@ type EditorState = {
 
 const STATUSES = ["draft", "ready_for_review", "approved", "rejected", "archived", "active"] as const;
 
-/** Load questions even if optional columns / options table are missing. */
 async function fetchTeacherQuestions(
   schoolId: string,
   courseIds: string[],
 ): Promise<QRow[]> {
   if (!courseIds.length) return [];
 
-  // Prefer full shape; fall back so list still works without migrations
   const attempts = [
     "id, question_text, question_type, marks, difficulty, course_id, status, explanation, correct_answer, created_at, courses(code, name)",
     "id, question_text, question_type, marks, difficulty, course_id, status, created_at, courses(code, name)",
@@ -131,7 +132,6 @@ async function fetchTeacherQuestions(
 
   if (!rows) throw lastError ?? new Error("Could not load questions");
 
-  // Attach options in a second query (won’t break list if table missing)
   try {
     const ids = rows.map((r) => r.id);
     if (ids.length) {
@@ -168,10 +168,15 @@ async function fetchTeacherQuestions(
 }
 
 function Page() {
+  const { course: courseFromUrl } = Route.useSearch();
   const { data: teacher, isLoading: tLoading } = useTeacherContext();
   const { data: session } = useSessionUser();
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const lockedCourseId =
+    courseFromUrl && teacher?.courseIds.includes(courseFromUrl) ? courseFromUrl : null;
+  const lockedCourse = teacher?.courses.find((c) => c.id === lockedCourseId) ?? null;
 
   const [search, setSearch] = useState("");
   const [courseFilter, setCourseFilter] = useState("all");
@@ -186,12 +191,23 @@ function Page() {
   const [importDrafts, setImportDrafts] = useState<DraftQuestion[]>([]);
   const [importBusy, setImportBusy] = useState(false);
 
+  // When opened from a course card, force that course filter
+  useEffect(() => {
+    if (lockedCourseId) setCourseFilter(lockedCourseId);
+  }, [lockedCourseId]);
+
   const listQ = useQuery({
-    queryKey: ["teacher-questions", teacher?.schoolId, teacher?.courseIds?.join(",")],
+    queryKey: [
+      "teacher-questions",
+      teacher?.schoolId,
+      teacher?.courseIds?.join(","),
+      lockedCourseId ?? "all",
+    ],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
     queryFn: async () => {
       if (!teacher) return [] as QRow[];
-      return fetchTeacherQuestions(teacher.schoolId, teacher.courseIds);
+      const scopeIds = lockedCourseId ? [lockedCourseId] : teacher.courseIds;
+      return fetchTeacherQuestions(teacher.schoolId, scopeIds);
     },
   });
 
@@ -199,7 +215,9 @@ function Page() {
 
   const filtered = useMemo(() => {
     let list = items;
-    if (courseFilter !== "all") list = list.filter((i) => i.course_id === courseFilter);
+    // Always respect active course filter (locked or user-selected)
+    const activeCourse = lockedCourseId ?? (courseFilter !== "all" ? courseFilter : null);
+    if (activeCourse) list = list.filter((i) => i.course_id === activeCourse);
     if (statusFilter !== "all") list = list.filter((i) => i.status === statusFilter);
     if (typeFilter !== "all") list = list.filter((i) => i.question_type === typeFilter);
     if (search.trim()) {
@@ -211,11 +229,16 @@ function Page() {
       );
     }
     return list;
-  }, [items, courseFilter, statusFilter, typeFilter, search]);
+  }, [items, courseFilter, statusFilter, typeFilter, search, lockedCourseId]);
 
   async function refreshList() {
     await qc.invalidateQueries({ queryKey: ["teacher-questions"] });
+    await qc.invalidateQueries({ queryKey: ["teacher-course-stats"] });
     await listQ.refetch();
+  }
+
+  function defaultCourseId() {
+    return lockedCourseId ?? teacher?.courses[0]?.id ?? "";
   }
 
   function emptyEditor(courseId: string): EditorState {
@@ -240,7 +263,7 @@ function Page() {
       toast.error("No courses assigned");
       return;
     }
-    setEditing(emptyEditor(teacher.courses[0].id));
+    setEditing(emptyEditor(defaultCourseId()));
   }
 
   function loadIntoEditor(item: QRow) {
@@ -254,7 +277,7 @@ function Page() {
     });
     setEditing({
       id: item.id,
-      course_id: item.course_id ?? teacher!.courses[0].id,
+      course_id: item.course_id ?? defaultCourseId(),
       question_text: item.question_text,
       question_type: item.question_type,
       marks: item.marks,
@@ -294,16 +317,11 @@ function Page() {
       }))
       .filter((r) => r.option_text);
     if (rows.length) {
-      const { error } = await supabase.from("question_options").insert(rows as never);
-      if (error) {
-        // Non-fatal for bank list; warn teacher
-        console.warn(error.message);
-      }
+      await supabase.from("question_options").insert(rows as never);
     }
   }
 
   async function insertQuestionRow(payload: Record<string, unknown>) {
-    // Try with optional columns, then without
     let res = await supabase.from("questions").insert(payload as never).select("id").single();
     if (res.error && /explanation|correct_answer/i.test(res.error.message)) {
       const slim = { ...payload };
@@ -318,6 +336,10 @@ function Page() {
     if (!editing || !teacher || !session) return;
     if (!teacher.courseIds.includes(editing.course_id)) {
       toast.error("Select an assigned course");
+      return;
+    }
+    if (lockedCourseId && editing.course_id !== lockedCourseId) {
+      toast.error("This bank is locked to one course. Open Question Bank from that course card.");
       return;
     }
     if (!editing.question_text.trim()) {
@@ -375,7 +397,7 @@ function Page() {
         qid = (data as { id: string }).id;
       }
       if (qid) await saveOptions(qid, editing);
-      toast.success(editing.id ? "Question updated" : "Question saved — it now appears in your bank");
+      toast.success(editing.id ? "Question updated" : "Question saved for this course");
       setEditing(null);
       await refreshList();
     } catch (err) {
@@ -481,7 +503,7 @@ function Page() {
         return;
       }
       setImportDrafts(validateAll(drafts));
-      setImportCourseId(teacher.courses[0]?.id ?? "");
+      setImportCourseId(defaultCourseId());
       setImportOpen(true);
       toast.message(`Extracted ${drafts.length} question(s) — review, then Confirm import`);
     } catch (err) {
@@ -496,6 +518,10 @@ function Page() {
     if (!teacher || !session || !importCourseId) return;
     if (!teacher.courseIds.includes(importCourseId)) {
       toast.error("Select an assigned course");
+      return;
+    }
+    if (lockedCourseId && importCourseId !== lockedCourseId) {
+      toast.error("Imports are locked to this course while you are in its question bank.");
       return;
     }
     const selected = validateAll(importDrafts).filter((d) => d.selected);
@@ -549,8 +575,7 @@ function Page() {
         saved++;
       }
 
-      // Reset filters so drafts are visible
-      setCourseFilter("all");
+      if (!lockedCourseId) setCourseFilter(importCourseId);
       setStatusFilter("all");
       setTypeFilter("all");
       setSearch("");
@@ -560,17 +585,10 @@ function Page() {
       await refreshList();
 
       if (saved === 0) {
-        toast.error(
-          errors[0] ||
-            "Nothing was saved. Check that your teacher account can write questions for this school.",
-        );
+        toast.error(errors[0] || "Nothing was saved.");
       } else {
-        toast.success(
-          `Imported ${saved} question(s). They are listed below — edit anytime. (Not exam-approved.)`,
-        );
-        if (errors.length) {
-          toast.message(`${errors.length} row(s) failed: ${errors[0]}`);
-        }
+        toast.success(`Imported ${saved} question(s) into this course only.`);
+        if (errors.length) toast.message(`${errors.length} row(s) failed`);
       }
     } catch (err) {
       toast.error((err as Error).message || "Import save failed");
@@ -588,13 +606,26 @@ function Page() {
     editing &&
     (editing.question_type === "mcq" || editing.question_type === "true_false");
 
+  const titleCourse = lockedCourse
+    ? `${lockedCourse.code} — ${lockedCourse.name}`
+    : "Question Bank";
+
   return (
     <>
       <PageHeader
-        title="Question Bank"
-        description={`${teacher.fullName} · ${items.length} question(s) in bank · Assigned courses only`}
+        title={lockedCourse ? `Questions · ${lockedCourse.code}` : "Question Bank"}
+        description={
+          lockedCourse
+            ? `Only questions for ${titleCourse}. Other courses are hidden.`
+            : `${teacher.fullName} · Pick a course filter or open Questions from My Courses`
+        }
         actions={
           <div className="flex flex-wrap gap-2">
+            {lockedCourse && (
+              <Button variant="outline" className="font-semibold" asChild>
+                <Link to="/teacher/courses">All courses</Link>
+              </Button>
+            )}
             <Button variant="outline" className="font-semibold" onClick={downloadCsvTemplate}>
               <Download className="mr-1.5 h-4 w-4" />
               Template
@@ -634,13 +665,24 @@ function Page() {
         />
       ) : (
         <>
+          {lockedCourse && (
+            <div className="mb-4 rounded-xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-slate-800">
+              Viewing <strong>{lockedCourse.code}</strong> only. New and imported questions go into{" "}
+              this course. You will not see CPE 111 questions while you are in MTH 101.
+            </div>
+          )}
+
           <div className="mb-4 rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-sm shadow-sm">
-            <span className="font-extrabold text-slate-900">{items.length}</span>
-            <span className="text-slate-600"> total in bank</span>
-            {filtered.length !== items.length && (
+            <span className="font-extrabold text-slate-900">{filtered.length}</span>
+            <span className="text-slate-600">
+              {" "}
+              question(s)
+              {lockedCourse ? ` in ${lockedCourse.code}` : " matching view"}
+            </span>
+            {!lockedCourse && items.length !== filtered.length && (
               <span className="text-slate-600">
                 {" · "}
-                <span className="font-bold text-primary">{filtered.length}</span> matching filters
+                {items.length} total across your courses
               </span>
             )}
             {listQ.isFetching && (
@@ -661,19 +703,21 @@ function Page() {
               placeholder="Search questions…"
               className="max-w-md rounded-full"
             />
-            <Select value={courseFilter} onValueChange={setCourseFilter}>
-              <SelectTrigger className="w-full sm:w-[160px]">
-                <SelectValue placeholder="Course" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All courses</SelectItem>
-                {teacher.courses.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.code}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {!lockedCourse && (
+              <Select value={courseFilter} onValueChange={setCourseFilter}>
+                <SelectTrigger className="w-full sm:w-[180px]">
+                  <SelectValue placeholder="Course" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All my courses</SelectItem>
+                  {teacher.courses.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.code}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full sm:w-[160px]">
                 <SelectValue placeholder="Status" />
@@ -728,7 +772,8 @@ function Page() {
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
             <div className="space-y-3">
               <h2 className="text-sm font-extrabold text-slate-800">
-                Your questions ({filtered.length})
+                {lockedCourse ? `${lockedCourse.code} questions` : "Your questions"} (
+                {filtered.length})
               </h2>
               {listQ.isLoading && <p className="text-sm text-slate-500">Loading questions…</p>}
               {filtered.map((item) => {
@@ -757,7 +802,7 @@ function Page() {
                       />
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-bold uppercase tracking-wide text-primary">
-                          {item.courses?.code ?? "Course"}
+                          {item.courses?.code ?? lockedCourse?.code ?? "Course"}
                         </p>
                         <p className="mt-1 text-sm font-bold text-slate-900">{item.question_text}</p>
                         {opts.length > 0 && (
@@ -814,9 +859,11 @@ function Page() {
               })}
               {!listQ.isLoading && filtered.length === 0 && (
                 <p className="rounded-2xl border border-dashed border-slate-200 py-12 text-center text-sm text-slate-500">
-                  {items.length === 0
-                    ? "No questions in your bank yet. Import a file or create one — they will show up here."
-                    : "No questions match your filters. Set status/type filters to “All”."}
+                  {lockedCourse
+                    ? `No questions for ${lockedCourse.code} yet. Import or create questions for this course only.`
+                    : items.length === 0
+                      ? "No questions yet. Open a course from My Courses → Questions, or create one here."
+                      : "No questions match your filters."}
                 </p>
               )}
             </div>
@@ -825,12 +872,9 @@ function Page() {
               {!editing ? (
                 <div className="space-y-4 py-8 text-center text-sm text-slate-500">
                   <p>
-                    Your imported and created questions appear on the left. Click the pencil to
-                    edit any of them.
-                  </p>
-                  <p className="text-xs">
-                    Supported import: .xlsx .xls .csv .docx .pdf · Review answers before Confirm
-                    import.
+                    {lockedCourse
+                      ? `Questions listed are only for ${lockedCourse.code}.`
+                      : "Filter by course or open Questions from a course card on My Courses."}
                   </p>
                 </div>
               ) : (
@@ -846,21 +890,27 @@ function Page() {
 
                   <div className="space-y-2">
                     <Label className="font-semibold">Course</Label>
-                    <Select
-                      value={editing.course_id}
-                      onValueChange={(v) => setEditing({ ...editing, course_id: v })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {teacher.courses.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.code} — {c.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {lockedCourse ? (
+                      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold">
+                        {lockedCourse.code} — {lockedCourse.name}
+                      </p>
+                    ) : (
+                      <Select
+                        value={editing.course_id}
+                        onValueChange={(v) => setEditing({ ...editing, course_id: v })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {teacher.courses.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.code} — {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -1021,8 +1071,7 @@ function Page() {
                   <div>
                     <h2 className="text-base font-extrabold">Import preview</h2>
                     <p className="text-xs text-slate-500">
-                      {importDrafts.length} question(s) extracted. Edit, then Confirm — they will
-                      appear in your bank list.
+                      {importDrafts.length} question(s) → will save under the course below only.
                     </p>
                   </div>
                   <Button
@@ -1040,18 +1089,24 @@ function Page() {
                 <div className="space-y-3 overflow-y-auto px-4 py-3">
                   <div className="space-y-1.5">
                     <Label className="font-semibold">Save under course</Label>
-                    <Select value={importCourseId} onValueChange={setImportCourseId}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {teacher.courses.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.code} — {c.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {lockedCourse ? (
+                      <p className="rounded-lg border bg-slate-50 px-3 py-2 text-sm font-semibold">
+                        {lockedCourse.code} — {lockedCourse.name}
+                      </p>
+                    ) : (
+                      <Select value={importCourseId} onValueChange={setImportCourseId}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {teacher.courses.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.code} — {c.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
 
                   {importDrafts.map((d, idx) => (
@@ -1200,11 +1255,10 @@ function Page() {
             </div>
           )}
 
-          <SectionCard className="mt-6" title="How this fits exam creation">
+          <SectionCard className="mt-6" title="Course separation">
             <p className="text-sm text-slate-600">
-              After import, questions show in this bank. Edit them here, then attach them when
-              creating an examination and submit for officer approval. Import never auto-approves
-              an exam.
+              Best path: <strong>My Courses</strong> → open a course → <strong>Questions</strong>.
+              That page only shows that course’s bank (e.g. MTH 101 vs CPE 111).
             </p>
           </SectionCard>
         </>
