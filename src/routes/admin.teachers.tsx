@@ -1,34 +1,191 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
-import { StatusBadge } from "@/components/dashboard/kit";
+import { useServerFn } from "@tanstack/react-start";
+import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { createSchoolUser } from "@/lib/auth.functions";
+import { useSessionUser } from "@/lib/session";
+import { useRows } from "@/lib/queries";
+import { toast } from "sonner";
+import { Copy, Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/teachers")({
   head: () => ({
-    meta: [
-      { title: "Teachers — D4EXAM" },
-      { name: "description", content: "Teaching staff accounts and assigned courses." },
-      { property: "og:title", content: "Teachers — D4EXAM" },
-      { property: "og:description", content: "Teaching staff accounts and assigned courses." },
-    ],
+    meta: [{ title: "Teachers — D4EXAM" }],
   }),
   component: Page,
 });
 
+type TeacherRow = {
+  id: string;
+  staff_id: string;
+  employment_status: string;
+  profiles: { full_name: string; email?: string } | null;
+};
+
+type Cred = {
+  fullName: string;
+  identifier: string;
+  email: string;
+  password: string;
+};
+
 function Page() {
+  const { data: user } = useSessionUser();
+  const schoolId = user?.schoolId ?? null;
+  const schoolCode = user?.schoolCode ?? "";
+  const createOne = useServerFn(createSchoolUser);
+  const qc = useQueryClient();
+
+  const list = useRows<TeacherRow>({
+    table: "teachers",
+    select: "id, staff_id, employment_status, profiles(full_name, email)",
+    filters: schoolId ? [{ column: "school_id", value: schoolId }] : [],
+    order: { column: "created_at", ascending: false },
+    limit: 200,
+    enabled: Boolean(schoolId),
+  });
+
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [staffId, setStaffId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [lastCred, setLastCred] = useState<Cred | null>(null);
+
+  async function addTeacher(e: React.FormEvent) {
+    e.preventDefault();
+    if (!schoolId) {
+      toast.error("Your account is not linked to a school.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await createOne({
+        data: {
+          role: "teacher",
+          firstName: firstName.trim(),
+          lastName: lastName.trim() || "Teacher",
+          email: email.trim().toLowerCase(),
+          identifier: staffId.trim(),
+        },
+      });
+      setLastCred({
+        fullName: `${firstName} ${lastName}`.trim(),
+        identifier: staffId.trim(),
+        email: email.trim().toLowerCase(),
+        password: (result as { password?: string }).password ?? "",
+      });
+      toast.success("Teacher created. Copy login details below.");
+      setFirstName("");
+      setLastName("");
+      setEmail("");
+      setStaffId("");
+      await qc.invalidateQueries({ queryKey: ["rows"] });
+      await qc.invalidateQueries({ queryKey: ["count"] });
+      await list.refetch();
+    } catch (err) {
+      toast.error((err as Error).message || "Could not create teacher");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function copyCred() {
+    if (!lastCred) return;
+    const text = [
+      `Teacher: ${lastCred.fullName}`,
+      `School code: ${schoolCode}`,
+      `Staff ID: ${lastCred.identifier}`,
+      `Email: ${lastCred.email}`,
+      `Password: ${lastCred.password}`,
+      `Login at /login then open Teacher dashboard`,
+    ].join("\n");
+    void navigator.clipboard.writeText(text);
+    toast.success("Credentials copied");
+  }
+
   return (
-    <DbRecordsPage
-      title="Teachers"
-      description="Teaching staff accounts and assigned courses."
-      table="teachers"
-      select="id, staff_id, employment_status, profiles(full_name), departments(name)"
-      order={{ column: "created_at", ascending: false }}
-      tableTitle="Teachers"
-      columns={[
-      { key: "teacher", header: "Teacher", render: (r: Row) => r.profiles?.full_name ?? "—" },
-      { key: "staff_id", header: "Staff ID" },
-      { key: "department", header: "Department", hideOnMobile: true, render: (r: Row) => r.departments?.name ?? "—" },
-      { key: "employment_status", header: "Status", render: (r: Row) => <StatusBadge status={r.employment_status} /> },
-      ]}
-    />
+    <>
+      <PageHeader
+        title="Teachers"
+        description="Add teachers. They log in with school code + email (or staff ID) + password and open the Teacher dashboard."
+      />
+
+      {!schoolId && (
+        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Your account is not linked to a school yet.
+        </p>
+      )}
+
+      {lastCred && (
+        <SectionCard title="Teacher login details">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 font-mono text-sm">
+            <p className="font-sans font-bold text-emerald-900">{lastCred.fullName}</p>
+            <p className="mt-2">School code: {schoolCode || "(your school code)"}</p>
+            <p>Staff ID: {lastCred.identifier}</p>
+            <p>Email: {lastCred.email}</p>
+            <p>Password: {lastCred.password}</p>
+          </div>
+          <Button type="button" size="sm" className="mt-3 gap-2 font-semibold" onClick={copyCred}>
+            <Copy className="h-3.5 w-3.5" />
+            Copy message
+          </Button>
+        </SectionCard>
+      )}
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <SectionCard title="Add teacher">
+          <form className="space-y-3" onSubmit={addTeacher}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>First name</Label>
+                <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Last name</Label>
+                <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Email</Label>
+              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Staff ID</Label>
+              <Input value={staffId} onChange={(e) => setStaffId(e.target.value)} required />
+            </div>
+            <Button type="submit" disabled={busy || !schoolId} className="font-semibold">
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create teacher
+            </Button>
+          </form>
+        </SectionCard>
+
+        <SectionCard title="Teacher list">
+          {(list.data ?? []).length === 0 ? (
+            <EmptyState title="No teachers yet" description="Create a teacher to see them here." />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {(list.data ?? []).map((t) => (
+                <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+                  <div>
+                    <p className="font-semibold text-slate-900">{t.profiles?.full_name ?? "—"}</p>
+                    <p className="text-xs text-slate-500">
+                      {t.staff_id}
+                      {t.profiles?.email ? ` · ${t.profiles.email}` : ""}
+                    </p>
+                  </div>
+                  <StatusBadge status={t.employment_status || "active"} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
+      </div>
+    </>
   );
 }
