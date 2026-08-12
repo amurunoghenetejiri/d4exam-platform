@@ -124,7 +124,7 @@ function Page() {
         />
         <Tip
           icon={Clock}
-          title={`${pending.length} with officer"`}
+          title={`${pending.length} with officer`}
           body="Pending approval or changes requested."
           to="/teacher/examinations"
         />
