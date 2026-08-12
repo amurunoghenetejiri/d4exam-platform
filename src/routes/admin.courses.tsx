@@ -1,12 +1,19 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2, BookOpen } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useSessionUser } from "@/lib/session";
 import { useRows } from "@/lib/queries";
 import { supabase } from "@/integrations/supabase/client";
@@ -24,6 +31,8 @@ type Course = {
   name: string;
   credit_units: number | null;
   status: string;
+  department_id: string | null;
+  departments: { name: string; code: string | null } | null;
 };
 
 type Teacher = {
@@ -39,19 +48,41 @@ type TeacherCourse = {
   course_id: string;
 };
 
+type Dept = { id: string; name: string; code: string | null };
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
   const qc = useQueryClient();
   const enabled = Boolean(schoolId);
 
-  const coursesQ = useRows<Course>({
-    table: "courses",
-    select: "id, code, name, credit_units, status",
-    filters: schoolId ? [{ column: "school_id", value: schoolId }] : [],
-    order: { column: "created_at", ascending: false },
-    limit: 300,
+  const coursesQ = useQuery({
+    queryKey: ["admin-courses-live", schoolId],
     enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("courses")
+        .select("id, code, name, credit_units, status, department_id, departments(name, code)")
+        .eq("school_id", schoolId!)
+        .order("created_at", { ascending: false })
+        .limit(300);
+      if (error) throw error;
+      return (data ?? []) as Course[];
+    },
+  });
+
+  const deptsQ = useQuery({
+    queryKey: ["admin-courses-depts", schoolId],
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("departments")
+        .select("id, name, code")
+        .eq("school_id", schoolId!)
+        .order("name");
+      if (error) throw error;
+      return (data ?? []) as Dept[];
+    },
   });
 
   const teachersQ = useRows<Teacher>({
@@ -74,11 +105,11 @@ function Page() {
   const courses = coursesQ.data ?? [];
   const teachers = teachersQ.data ?? [];
   const links = linksQ.data ?? [];
+  const depts = deptsQ.data ?? [];
 
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const selectedCourse = courses.find((c) => c.id === selectedCourseId) ?? courses[0] ?? null;
 
-  // Local pending selection while editing assignment for selected course
   const assignedTeacherIds = useMemo(() => {
     if (!selectedCourse) return new Set<string>();
     return new Set(links.filter((l) => l.course_id === selectedCourse.id).map((l) => l.teacher_id));
@@ -87,7 +118,6 @@ function Page() {
   const [pendingTeachers, setPendingTeachers] = useState<Set<string> | null>(null);
   const effectiveAssigned = pendingTeachers ?? assignedTeacherIds;
 
-  // When course changes, reset pending
   function selectCourse(id: string) {
     setSelectedCourseId(id);
     setPendingTeachers(null);
@@ -96,6 +126,7 @@ function Page() {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [units, setUnits] = useState("3");
+  const [departmentId, setDepartmentId] = useState("");
   const [busy, setBusy] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
 
@@ -118,6 +149,7 @@ function Page() {
           code: code.trim().toUpperCase(),
           name: name.trim(),
           credit_units: Number(units) || 0,
+          department_id: departmentId || null,
           status: "active",
         } as never)
         .select("id")
@@ -157,7 +189,6 @@ function Page() {
       const desired = pendingTeachers ?? assignedTeacherIds;
       const current = links.filter((l) => l.course_id === selectedCourse.id);
 
-      // Remove unselected
       const toRemove = current.filter((l) => !desired.has(l.teacher_id));
       if (toRemove.length) {
         const { error } = await supabase
@@ -170,7 +201,6 @@ function Page() {
         if (error) throw error;
       }
 
-      // Add new
       const existingIds = new Set(current.map((l) => l.teacher_id));
       const toAdd = [...desired].filter((id) => !existingIds.has(id));
       if (toAdd.length) {
@@ -184,9 +214,7 @@ function Page() {
         if (error) throw error;
       }
 
-      toast.success(
-        `Teachers saved for ${selectedCourse.code}: ${desired.size} assigned`,
-      );
+      toast.success(`Teachers saved for ${selectedCourse.code}: ${desired.size} assigned`);
       setPendingTeachers(null);
       await qc.invalidateQueries({ queryKey: ["rows"] });
       await linksQ.refetch();
@@ -206,7 +234,12 @@ function Page() {
     <>
       <PageHeader
         title="Courses"
-        description="Create courses for your school, then assign live teachers. Teachers only see courses you assign here."
+        description="Create courses under a department, then assign teachers. Teachers only manage courses you assign."
+        actions={
+          <Button variant="outline" asChild>
+            <Link to="/admin/structure">Academic Structure</Link>
+          </Button>
+        }
       />
 
       {!schoolId && (
@@ -219,11 +252,31 @@ function Page() {
         <SectionCard title="Create course">
           <form className="space-y-3" onSubmit={createCourse}>
             <div className="space-y-1.5">
+              <Label>Department</Label>
+              <Select value={departmentId || "none"} onValueChange={(v) => setDepartmentId(v === "none" ? "" : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select department" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No department yet</SelectItem>
+                  {depts.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.code ? `${d.code} — ` : ""}
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-slate-500">
+                Create departments under Academic Structure first.
+              </p>
+            </div>
+            <div className="space-y-1.5">
               <Label>Course code</Label>
               <Input
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                placeholder="e.g. CSC101"
+                placeholder="e.g. CPE101"
                 required
               />
             </div>
@@ -232,7 +285,7 @@ function Page() {
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Introduction to Computing"
+                placeholder="e.g. Introduction to Computer Engineering"
                 required
               />
             </div>
@@ -284,12 +337,10 @@ function Page() {
                             {c.code} — {c.name}
                           </p>
                           <p className="text-xs text-slate-500">
-                            {c.credit_units ?? 0} units ·{" "}
+                            {c.departments?.name ?? "No department"} · {c.credit_units ?? 0} units ·{" "}
                             {assigned.length === 0
-                              ? "No teachers assigned"
-                              : assigned
-                                  .map((t) => t.profiles?.full_name ?? t.staff_id)
-                                  .join(", ")}
+                              ? "No teachers"
+                              : assigned.map((t) => t.profiles?.full_name ?? t.staff_id).join(", ")}
                           </p>
                         </div>
                         <StatusBadge status={c.status || "active"} />
@@ -306,17 +357,14 @@ function Page() {
       <SectionCard
         className="mt-6"
         title="Assign teachers to course"
-        description="Select a course above, tick the teachers who teach it, then save. Uses live teachers only."
+        description="Select a course, tick teachers, save. Teachers only manage assigned courses."
       >
         {!selectedCourse ? (
-          <EmptyState
-            title="Select or create a course first"
-            description="Courses you create appear in the list. Pick one to assign teachers."
-          />
+          <EmptyState title="Select or create a course first" description="Pick a course to assign teachers." />
         ) : teachers.length === 0 ? (
           <EmptyState
-            title="No teachers in this school yet"
-            description="Go to Teachers & Courses and create a teacher, then come back here."
+            title="No teachers yet"
+            description="Create teachers under Teachers & Courses, then return."
           />
         ) : (
           <div className="space-y-4">
@@ -325,9 +373,7 @@ function Page() {
               <span className="font-bold text-slate-900">
                 {selectedCourse.code} — {selectedCourse.name}
               </span>
-              <span className="text-slate-500">
-                · {effectiveAssigned.size} teacher(s) selected
-              </span>
+              <span className="text-slate-500">· {effectiveAssigned.size} teacher(s)</span>
             </div>
 
             <div className="grid max-h-[360px] gap-2 overflow-y-auto sm:grid-cols-2">
