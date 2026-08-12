@@ -1,7 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RecordsPage } from "@/components/pages/RecordsPage";
-import { StatusBadge } from "@/components/dashboard/kit";
-import * as mock from "@/data/mock";
+import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
 
 export const Route = createFileRoute("/officer/audit-logs")({
   head: () => ({
@@ -17,13 +15,19 @@ export const Route = createFileRoute("/officer/audit-logs")({
 
 function Page() {
   return (
-    <RecordsPage
+    <DbRecordsPage
       title="Audit Logs"
       description="Recorded administrative and examination actions."
-      stats={[]}
-      rows={mock.auditLogs}
-      columns={[{ key: "actor", header: "Actor" }, { key: "action", header: "Action" }, { key: "target", header: "Target", hideOnMobile: true }, { key: "time", header: "Time", hideOnMobile: true }, { key: "ip", header: "IP", hideOnMobile: true }]}
+      table="audit_logs"
+      select="id, action, entity_type, description, created_at"
+      order={{ column: "created_at", ascending: false }}
       tableTitle="Audit Logs"
+      columns={[
+      { key: "action", header: "Action" },
+      { key: "entity_type", header: "Entity", hideOnMobile: true },
+      { key: "description", header: "Description", hideOnMobile: true },
+      { key: "created_at", header: "When", render: (r: Row) => new Date(r.created_at).toLocaleString() },
+      ]}
     />
   );
 }

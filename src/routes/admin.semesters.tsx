@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RecordsPage } from "@/components/pages/RecordsPage";
+import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
 import { StatusBadge } from "@/components/dashboard/kit";
-import * as mock from "@/data/mock";
 
 export const Route = createFileRoute("/admin/semesters")({
   head: () => ({
@@ -17,13 +16,19 @@ export const Route = createFileRoute("/admin/semesters")({
 
 function Page() {
   return (
-    <RecordsPage
+    <DbRecordsPage
       title="Semesters"
       description="Semester periods within the active academic session."
-      stats={[]}
-      rows={[{ id: '1', name: 'First Semester', session: '2025/2026', status: 'active' }, { id: '2', name: 'Second Semester', session: '2025/2026', status: 'pending' }]}
-      columns={[{ key: "name", header: "Semester" }, { key: "session", header: "Session", hideOnMobile: true }, { key: "status", header: "Status", render: (r: any) => <StatusBadge status={r.status} /> }]}
+      table="semesters"
+      select="id, name, start_date, end_date, status"
+      order={{ column: "created_at", ascending: false }}
       tableTitle="Semesters"
+      columns={[
+      { key: "name", header: "Semester" },
+      { key: "start_date", header: "Starts", hideOnMobile: true },
+      { key: "end_date", header: "Ends", hideOnMobile: true },
+      { key: "status", header: "Status", render: (r: Row) => <StatusBadge status={r.status} /> },
+      ]}
     />
   );
 }

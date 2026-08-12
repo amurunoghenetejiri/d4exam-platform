@@ -1,7 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { RecordsPage } from "@/components/pages/RecordsPage";
-import { StatusBadge } from "@/components/dashboard/kit";
-import * as mock from "@/data/mock";
+import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
 
 export const Route = createFileRoute("/officer/live-monitor")({
   head: () => ({
@@ -17,13 +15,14 @@ export const Route = createFileRoute("/officer/live-monitor")({
 
 function Page() {
   return (
-    <RecordsPage
+    <DbRecordsPage
       title="Live Monitor"
       description="Examinations in progress and live candidate activity."
-      stats={[]}
-      rows={mock.studentExams.filter((e) => e.status === 'ongoing')}
-      columns={[{ key: "code", header: "Code" }, { key: "title", header: "Examination" }, { key: "date", header: "Schedule", hideOnMobile: true }, { key: "questions", header: "Questions", hideOnMobile: true }, { key: "status", header: "Status", render: (r: any) => <StatusBadge status={r.status} /> }]}
       tableTitle="Live Monitor"
+      columns={[
+      { key: "exam", header: "Examination" },
+      { key: "status", header: "Status" },
+      ]}
     />
   );
 }
