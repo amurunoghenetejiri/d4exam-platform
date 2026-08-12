@@ -44,10 +44,6 @@ export interface RoleConfig {
   bottomNav?: NavItem[];
 }
 
-/**
- * Student — only eligible exams, own results, enrolled courses.
- * Cannot create / approve / mark examinations.
- */
 export const studentNav: RoleConfig = {
   role: "student",
   label: "Student",
@@ -78,12 +74,6 @@ export const studentNav: RoleConfig = {
   ],
 };
 
-/**
- * Teacher — only assigned courses.
- * Create questions & exams → submit for officer approval.
- * Mark subjective · view results for permitted courses.
- * CANNOT approve own examinations.
- */
 export const teacherNav: RoleConfig = {
   role: "teacher",
   label: "Teacher",
@@ -130,11 +120,6 @@ export const teacherNav: RoleConfig = {
   ],
 };
 
-/**
- * School Admin — ONE school only.
- * Students, teachers, officers, academics, school settings.
- * Views exams/results; does not own the approval workflow.
- */
 export const adminNav: RoleConfig = {
   role: "admin",
   label: "School Admin",
@@ -152,7 +137,7 @@ export const adminNav: RoleConfig = {
     {
       label: "Academics",
       items: [
-        { label: "Faculties", to: "/admin/faculties", icon: Building2 },
+        { label: "Faculty / Department", to: "/admin/faculties", icon: Building2 },
         { label: "Departments", to: "/admin/departments", icon: Blocks },
         { label: "Levels", to: "/admin/levels", icon: Layers },
         { label: "Courses", to: "/admin/courses", icon: BookOpen },
@@ -185,11 +170,6 @@ export const adminNav: RoleConfig = {
   ],
 };
 
-/**
- * Examination Officer — school examination workflow owner.
- * Review / approve / reject / request changes · schedule · live monitor ·
- * integrity · result release. Does not create teacher question banks.
- */
 export const officerNav: RoleConfig = {
   role: "officer",
   label: "Examination Officer",
@@ -227,11 +207,6 @@ export const officerNav: RoleConfig = {
   ],
 };
 
-/**
- * Super Admin — entire platform only.
- * Schools, applications, platform users, subscriptions, audit.
- * Does NOT create normal school exams or mark student scripts.
- */
 export const superAdminNav: RoleConfig = {
   role: "super-admin",
   label: "Super Admin",
