@@ -44,6 +44,10 @@ export interface RoleConfig {
   bottomNav?: NavItem[];
 }
 
+/**
+ * Student — only eligible exams, own results, enrolled courses.
+ * Cannot create / approve / mark examinations.
+ */
 export const studentNav: RoleConfig = {
   role: "student",
   label: "Student",
@@ -54,7 +58,7 @@ export const studentNav: RoleConfig = {
         { label: "Dashboard", to: "/student", icon: LayoutDashboard },
         { label: "My Exams", to: "/student/examinations", icon: FileText },
         { label: "Results", to: "/student/results", icon: BarChart3 },
-        { label: "Courses", to: "/student/courses", icon: BookOpen },
+        { label: "My Courses", to: "/student/courses", icon: BookOpen },
       ],
     },
     {
@@ -74,6 +78,12 @@ export const studentNav: RoleConfig = {
   ],
 };
 
+/**
+ * Teacher — only assigned courses.
+ * Create questions & exams → submit for officer approval.
+ * Mark subjective · view results for permitted courses.
+ * CANNOT approve own examinations.
+ */
 export const teacherNav: RoleConfig = {
   role: "teacher",
   label: "Teacher",
@@ -92,7 +102,7 @@ export const teacherNav: RoleConfig = {
       items: [
         { label: "Live Exams", to: "/teacher/live-exams", icon: Radio },
         { label: "Exam Security", to: "/teacher/exam-security", icon: ShieldCheck },
-        { label: "Integrity Monitoring", to: "/teacher/integrity", icon: ShieldCheck },
+        { label: "Integrity", to: "/teacher/integrity", icon: ShieldCheck },
       ],
     },
     {
@@ -114,12 +124,17 @@ export const teacherNav: RoleConfig = {
   ],
   bottomNav: [
     { label: "Home", to: "/teacher", icon: Home },
-    { label: "Exams", to: "/teacher/examinations", icon: FileText },
+    { label: "Courses", to: "/teacher/courses", icon: BookOpen },
     { label: "Marking", to: "/teacher/marking", icon: PenSquare },
     { label: "Profile", to: "/teacher/profile", icon: User },
   ],
 };
 
+/**
+ * School Admin — ONE school only.
+ * Students, teachers, officers, academics, school settings.
+ * Views exams/results; does not own the approval workflow.
+ */
 export const adminNav: RoleConfig = {
   role: "admin",
   label: "School Admin",
@@ -170,6 +185,11 @@ export const adminNav: RoleConfig = {
   ],
 };
 
+/**
+ * Examination Officer — school examination workflow owner.
+ * Review / approve / reject / request changes · schedule · live monitor ·
+ * integrity · result release. Does not create teacher question banks.
+ */
 export const officerNav: RoleConfig = {
   role: "officer",
   label: "Examination Officer",
@@ -186,7 +206,7 @@ export const officerNav: RoleConfig = {
     {
       label: "Records",
       items: [
-        { label: "Results", to: "/officer/results", icon: BarChart3 },
+        { label: "Results Release", to: "/officer/results", icon: BarChart3 },
         { label: "Reports", to: "/officer/reports", icon: ScrollText },
         { label: "Audit Logs", to: "/officer/audit-logs", icon: ScrollText },
       ],
@@ -207,6 +227,11 @@ export const officerNav: RoleConfig = {
   ],
 };
 
+/**
+ * Super Admin — entire platform only.
+ * Schools, applications, platform users, subscriptions, audit.
+ * Does NOT create normal school exams or mark student scripts.
+ */
 export const superAdminNav: RoleConfig = {
   role: "super-admin",
   label: "Super Admin",
@@ -218,15 +243,15 @@ export const superAdminNav: RoleConfig = {
         { label: "Schools", to: "/super-admin/schools", icon: Building2 },
         { label: "School Applications", to: "/super-admin/applications", icon: ClipboardList },
         { label: "Platform Users", to: "/super-admin/users", icon: Users },
-        { label: "Examinations", to: "/super-admin/examinations", icon: FileText },
       ],
     },
     {
-      label: "Business",
+      label: "Platform",
       items: [
         { label: "Subscriptions", to: "/super-admin/subscriptions", icon: CreditCard },
-        { label: "Reports", to: "/super-admin/reports", icon: ScrollText },
+        { label: "Platform Reports", to: "/super-admin/reports", icon: ScrollText },
         { label: "Audit Logs", to: "/super-admin/audit-logs", icon: ScrollText },
+        { label: "All Examinations", to: "/super-admin/examinations", icon: FileText },
       ],
     },
     {
