@@ -81,8 +81,12 @@ function LoginPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (!code.trim()) {
+      setError("Enter your school / institution code.");
+      return;
+    }
     if (!identifier.trim() || !password.trim()) {
-      setError("Enter your ID / email and password to continue.");
+      setError("Enter your full name (or matric) and password to continue.");
       return;
     }
     setLoading(true);
@@ -189,7 +193,7 @@ function LoginPage() {
                 Welcome Back
               </h1>
               <p className="mt-1.5 text-sm text-slate-500">
-                Students, teachers, officers and admins — same login
+                Students: full name + matric · Staff: email / ID + password
               </p>
             </div>
 
@@ -211,21 +215,25 @@ function LoginPage() {
                   placeholder="Enter school code"
                   className="h-11 rounded-lg border-slate-200 bg-slate-50/80 focus-visible:bg-white"
                   autoComplete="organization"
+                  required
                 />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="identifier" className="text-sm font-semibold text-slate-700">
-                  Matric / Staff ID / Officer ID / Email
+                  Full name (students) / Staff ID / Email
                 </Label>
                 <Input
                   id="identifier"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="Enter your ID or email"
+                  placeholder="e.g. Ada Obi or staff email"
                   className="h-11 rounded-lg border-slate-200 bg-slate-50/80 focus-visible:bg-white"
                   autoComplete="username"
                 />
+                <p className="text-[11px] text-slate-500">
+                  Students: use the same full name as in the student list (or your matric number).
+                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -238,7 +246,7 @@ function LoginPage() {
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
+                    placeholder="Students: matric number"
                     autoComplete="current-password"
                     className="h-11 rounded-lg border-slate-200 bg-slate-50/80 pr-11 focus-visible:bg-white"
                   />
@@ -251,6 +259,7 @@ function LoginPage() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <p className="text-[11px] text-slate-500">Students: password is your matric number.</p>
               </div>
 
               <div className="flex items-center justify-between gap-3 pt-0.5">
