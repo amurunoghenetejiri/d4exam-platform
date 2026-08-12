@@ -118,7 +118,6 @@ function LoginPage() {
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-2">
-      {/* ── Left brand panel (desktop) ─────────────────────────────── */}
       <aside className="relative hidden flex-col justify-between overflow-hidden bg-[#070d1b] px-10 py-10 text-white lg:flex xl:px-14">
         <div
           aria-hidden
@@ -168,12 +167,9 @@ function LoginPage() {
         </p>
       </aside>
 
-      {/* ── Right / main form panel ────────────────────────────────── */}
       <div className="relative flex flex-col bg-slate-50">
-        {/* Visible but soft watermark behind the form */}
         <Watermark opacity={0.11} size="lg" />
 
-        {/* Mobile-only dark header */}
         <div className="relative z-10 bg-[#070d1b] px-5 pb-8 pt-6 text-center text-white lg:hidden">
           <Link to="/" className="inline-flex" aria-label="D4EXAM home">
             <Logo size="lg" className="[&_span]:text-white" />
@@ -192,7 +188,9 @@ function LoginPage() {
               <h1 className="mt-3 text-2xl font-extrabold tracking-tight text-slate-900 sm:text-[1.65rem]">
                 Welcome Back
               </h1>
-              <p className="mt-1.5 text-sm text-slate-500">Sign in to access your account</p>
+              <p className="mt-1.5 text-sm text-slate-500">
+                Students, teachers, officers and admins — same login
+              </p>
             </div>
 
             {error && (
@@ -218,7 +216,7 @@ function LoginPage() {
 
               <div className="space-y-1.5">
                 <Label htmlFor="identifier" className="text-sm font-semibold text-slate-700">
-                  Student ID / Matric No. / Staff ID / Email
+                  Matric / Staff ID / Officer ID / Email
                 </Label>
                 <Input
                   id="identifier"
