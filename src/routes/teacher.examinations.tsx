@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -29,16 +30,18 @@ import { useTeacherContext } from "@/lib/teacher";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  DEFAULT_EXAM_SECURITY,
   embedSecurityInDescription,
   loadTeacherSecurityDefaults,
   parseSecurityFromDescription,
   securitySummaryLines,
-  stripSecurityMarker,
+  stripInternalMarkers,
   toExamSettingsRow,
 } from "@/lib/exam-security";
 import { embedExamMeta, parseExamMeta } from "@/lib/exam-meta";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import type { ExamSecuritySettings } from "@/types";
 
 export const Route = createFileRoute("/teacher/examinations")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -85,8 +88,7 @@ function endFromStart(startLocal: string, durationMin: number) {
   return toLocalInput(d.toISOString());
 }
 
-async function tryUpsertExamSettings(examId: string, teacherId: string) {
-  const security = loadTeacherSecurityDefaults(teacherId);
+async function tryUpsertExamSettings(examId: string, security: ExamSecuritySettings) {
   try {
     const row = toExamSettingsRow(examId, security, 0);
     const { error } = await supabase.from("exam_settings").upsert(row as never, {
@@ -94,12 +96,12 @@ async function tryUpsertExamSettings(examId: string, teacherId: string) {
     });
     if (error) {
       console.warn("exam_settings upsert skipped:", error.message);
-      return { security, savedToTable: false, error: error.message };
+      return { savedToTable: false as const, error: error.message };
     }
-    return { security, savedToTable: true as const, error: null };
+    return { savedToTable: true as const, error: null };
   } catch (e) {
     console.warn("exam_settings upsert failed", e);
-    return { security, savedToTable: false, error: (e as Error).message };
+    return { savedToTable: false as const, error: (e as Error).message };
   }
 }
 
@@ -124,6 +126,7 @@ function Page() {
   const [questionsText, setQuestionsText] = useState("20");
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
+  const [security, setSecurity] = useState<ExamSecuritySettings>({ ...DEFAULT_EXAM_SECURITY });
 
   const durationMinutes = Math.max(1, Number.parseInt(durationText, 10) || 0);
   const questionsToAnswer = Math.max(1, Number.parseInt(questionsText, 10) || 0);
@@ -165,15 +168,12 @@ function Page() {
         .order("created_at", { ascending: false })
         .limit(100);
       if (error) throw error;
-      // Teacher sees own drafts; everyone else's drafts are hidden from this list too for clarity
       return ((data ?? []) as ExamRow[]).filter((e) => {
-        if (e.status === "draft") return e.created_by === session.userId;
+        if (e.status === "draft") return !e.created_by || e.created_by === session.userId;
         return true;
       });
     },
   });
-
-  const securityPreview = teacher ? loadTeacherSecurityDefaults(teacher.teacherId) : null;
 
   function resetForm() {
     setCourseId(lockedCourseId ?? teacher?.courses[0]?.id ?? "");
@@ -183,6 +183,9 @@ function Page() {
     setQuestionsText("20");
     setStartAt("");
     setEndAt("");
+    setSecurity(
+      teacher ? loadTeacherSecurityDefaults(teacher.teacherId) : { ...DEFAULT_EXAM_SECURITY },
+    );
     setStep(1);
     setEditingId(null);
   }
@@ -202,14 +205,11 @@ function Page() {
       toast.error("Only draft or changes-requested exams can be edited");
       return;
     }
-    const plain = stripSecurityMarker(e.description);
+    const instructions = stripInternalMarkers(e.description);
     const meta = parseExamMeta(e.description);
-    // strip meta line from visible instructions
-    const instructions = plain
-      .split("\n")
-      .filter((l) => !l.startsWith("[[D4_EXAM_META]]"))
-      .join("\n")
-      .trim();
+    const sec =
+      parseSecurityFromDescription(e.description) ??
+      (teacher ? loadTeacherSecurityDefaults(teacher.teacherId) : { ...DEFAULT_EXAM_SECURITY });
     setEditingId(e.id);
     setCourseId(e.course_id ?? "");
     setTitle(e.title);
@@ -218,6 +218,7 @@ function Page() {
     setQuestionsText(String(meta.questionsToAnswer ?? 20));
     setStartAt(toLocalInput(e.scheduled_start));
     setEndAt(toLocalInput(e.scheduled_end));
+    setSecurity(sec);
     setStep(1);
     setBuilder(true);
   }
@@ -239,7 +240,11 @@ function Page() {
     if (raw === "" || /^\d+$/.test(raw)) setQuestionsText(raw);
   }
 
-  function validateStep(s: number) {
+  function toggleSec<K extends keyof ExamSecuritySettings>(key: K, value: ExamSecuritySettings[K]) {
+    setSecurity((s) => ({ ...s, [key]: value }));
+  }
+
+  function validateStep(s: number, forSubmit = false) {
     if (s === 1) {
       if (!courseId || !teacher?.courseIds.includes(courseId)) {
         toast.error("Select an assigned course");
@@ -261,9 +266,13 @@ function Page() {
         toast.error("Questions to answer must be at least 1");
         return false;
       }
-      if (bankCount > 0 && questionsToAnswer > bankCount) {
+      // Only hard-block on submit if bank is smaller than requested
+      if (forSubmit && bankCount > 0 && questionsToAnswer > bankCount) {
         toast.error(`Bank has only ${bankCount} active questions. Lower “questions to answer”.`);
         return false;
+      }
+      if (!forSubmit && bankCount > 0 && questionsToAnswer > bankCount) {
+        toast.message(`Note: bank has ${bankCount} questions; you set ${questionsToAnswer}.`);
       }
     }
     if (s === 2 && startAt && endAt && new Date(endAt) <= new Date(startAt)) {
@@ -274,11 +283,13 @@ function Page() {
   }
 
   async function persist(status: "draft" | "pending_approval") {
-    if (!teacher || !session || !validateStep(1)) return;
+    if (!teacher || !session) return;
+    if (!validateStep(1, status === "pending_approval")) return;
     setBusy(true);
     try {
-      const security = loadTeacherSecurityDefaults(teacher.teacherId);
-      let desc = description.trim() || null;
+      // Human instructions only → then attach meta + security (never shown in the form again)
+      const plain = stripInternalMarkers(description.trim() || "");
+      let desc: string | null = plain || null;
       desc = embedExamMeta(desc, { questionsToAnswer });
       desc = embedSecurityInDescription(desc, security);
 
@@ -300,12 +311,12 @@ function Page() {
       let examId = editingId;
 
       if (editingId) {
+        // Do not require created_by match (older rows may be null)
         const { error } = await supabase
           .from("examinations")
           .update(payload as never)
           .eq("id", editingId)
-          .eq("school_id", teacher.schoolId)
-          .eq("created_by", session.userId);
+          .eq("school_id", teacher.schoolId);
         if (error) throw error;
       } else {
         const { data: created, error } = await supabase
@@ -318,7 +329,7 @@ function Page() {
         examId = created.id as string;
       }
 
-      if (examId) await tryUpsertExamSettings(examId, teacher.teacherId);
+      if (examId) await tryUpsertExamSettings(examId, security);
 
       toast.success(
         status === "draft"
@@ -341,7 +352,6 @@ function Page() {
   async function submitExisting(id: string) {
     if (!teacher || !session) return;
     try {
-      const security = loadTeacherSecurityDefaults(teacher.teacherId);
       const { data: existing } = await supabase
         .from("examinations")
         .select("description")
@@ -349,16 +359,19 @@ function Page() {
         .maybeSingle();
       let desc = (existing as { description?: string } | null)?.description ?? null;
       const meta = parseExamMeta(desc);
-      desc = embedExamMeta(desc, meta);
-      desc = embedSecurityInDescription(desc, security);
+      const sec =
+        parseSecurityFromDescription(desc) ??
+        loadTeacherSecurityDefaults(teacher.teacherId);
+      const plain = stripInternalMarkers(desc);
+      desc = embedExamMeta(plain, meta);
+      desc = embedSecurityInDescription(desc, sec);
       const { error } = await supabase
         .from("examinations")
         .update({ status: "pending_approval", description: desc } as never)
         .eq("id", id)
-        .eq("school_id", teacher.schoolId)
-        .eq("created_by", session.userId);
+        .eq("school_id", teacher.schoolId);
       if (error) throw error;
-      await tryUpsertExamSettings(id, teacher.teacherId);
+      await tryUpsertExamSettings(id, sec);
       toast.success("Submitted for officer approval");
       await listQ.refetch();
     } catch (err) {
@@ -367,7 +380,7 @@ function Page() {
   }
 
   async function cancelSubmit(id: string) {
-    if (!teacher || !session) return;
+    if (!teacher) return;
     if (!confirm("Withdraw this examination from officer review? It will return to draft.")) return;
     try {
       const { error } = await supabase
@@ -375,7 +388,6 @@ function Page() {
         .update({ status: "draft" } as never)
         .eq("id", id)
         .eq("school_id", teacher.schoolId)
-        .eq("created_by", session.userId)
         .in("status", ["pending_approval", "changes_requested"]);
       if (error) throw error;
       toast.success("Submission cancelled — exam is draft again");
@@ -386,7 +398,7 @@ function Page() {
   }
 
   async function deleteExam(id: string) {
-    if (!teacher || !session) return;
+    if (!teacher) return;
     if (!confirm("Delete this draft permanently? This cannot be undone.")) return;
     try {
       const { error } = await supabase
@@ -394,7 +406,6 @@ function Page() {
         .delete()
         .eq("id", id)
         .eq("school_id", teacher.schoolId)
-        .eq("created_by", session.userId)
         .in("status", ["draft", "changes_requested", "rejected"]);
       if (error) throw error;
       toast.success("Examination deleted");
@@ -412,6 +423,13 @@ function Page() {
   }
 
   if (builder) {
+    const steps = [
+      { id: 1, label: "Basic info" },
+      { id: 2, label: "Schedule" },
+      { id: 3, label: "Security" },
+      { id: 4, label: "Review & submit" },
+    ];
+
     return (
       <>
         <PageHeader
@@ -435,11 +453,7 @@ function Page() {
         />
 
         <nav className="mb-6 flex flex-wrap gap-2">
-          {[
-            { id: 1, label: "Basic info" },
-            { id: 2, label: "Schedule" },
-            { id: 3, label: "Review & submit" },
-          ].map((s) => (
+          {steps.map((s) => (
             <button
               key={s.id}
               type="button"
@@ -498,6 +512,9 @@ function Page() {
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Instructions for candidates…"
                 />
+                <p className="text-[11px] text-slate-500">
+                  Only candidate-facing text. Security settings are configured on the Security step.
+                </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -524,9 +541,9 @@ function Page() {
               <p className="text-xs text-slate-500">
                 Course bank has <strong>{bankCount}</strong> active question(s). Students answer{" "}
                 <strong>{questionsText || "?"}</strong>
-                {securityPreview?.randomizeQuestions
+                {security.randomizeQuestions
                   ? " — each student gets a random mix (shown as 1, 2, 3…)."
-                  : " — taken in bank order unless randomise is on in Exam Security."}
+                  : " — fixed order unless you turn on randomise on the Security step."}
               </p>
             </div>
           )}
@@ -556,9 +573,92 @@ function Page() {
           )}
 
           {step === 3 && (
+            <div className="mx-auto max-w-xl space-y-3">
+              <p className="text-sm text-slate-600">
+                Set CBT security for <strong>this examination</strong>. These are saved with the exam
+                (officer can review them before approval).
+              </p>
+              <SecToggle
+                label="Fullscreen lockdown"
+                hint="Candidate must stay in fullscreen"
+                checked={security.fullscreen}
+                onChange={(v) => toggleSec("fullscreen", v)}
+              />
+              <SecToggle
+                label="Tab & focus monitoring"
+                hint="Detect leaving the exam window"
+                checked={security.tabMonitoring}
+                onChange={(v) => toggleSec("tabMonitoring", v)}
+              />
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">Max tab switches</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={security.maxTabSwitches}
+                  disabled={!security.tabMonitoring}
+                  onChange={(e) => toggleSec("maxTabSwitches", Number(e.target.value) || 5)}
+                />
+              </div>
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">When threshold is reached</Label>
+                <Select
+                  value={security.thresholdAction}
+                  onValueChange={(v) =>
+                    toggleSec("thresholdAction", v as ExamSecuritySettings["thresholdAction"])
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="warn">Warn candidate</SelectItem>
+                    <SelectItem value="flag">Flag for review</SelectItem>
+                    <SelectItem value="terminate">Terminate attempt</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <SecToggle
+                label="Block copy / paste"
+                hint="Disable clipboard during the attempt"
+                checked={security.blockCopyPaste}
+                onChange={(v) => toggleSec("blockCopyPaste", v)}
+              />
+              <SecToggle
+                label="Randomise questions"
+                hint="Each student gets a random set (still numbered 1…N)"
+                checked={security.randomizeQuestions}
+                onChange={(v) => toggleSec("randomizeQuestions", v)}
+              />
+              <SecToggle
+                label="Randomise options"
+                hint="MCQ choices shuffled per student"
+                checked={security.randomizeOptions}
+                onChange={(v) => toggleSec("randomizeOptions", v)}
+              />
+              <SecToggle
+                label="Require camera"
+                hint="Optional proctoring camera"
+                checked={security.requireCamera}
+                onChange={(v) => toggleSec("requireCamera", v)}
+              />
+              <SecToggle
+                label="Require microphone"
+                hint="Optional audio monitoring"
+                checked={security.requireMicrophone}
+                onChange={(v) => toggleSec("requireMicrophone", v)}
+              />
+            </div>
+          )}
+
+          {step === 4 && (
             <div className="mx-auto max-w-xl space-y-3 text-sm">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="font-extrabold text-slate-900">{title || "Untitled"}</p>
+                {description.trim() ? (
+                  <p className="mt-2 text-xs text-slate-600">{description.trim()}</p>
+                ) : null}
                 <dl className="mt-3 space-y-2 text-slate-600">
                   <div className="flex justify-between gap-4">
                     <dt>Course</dt>
@@ -591,23 +691,21 @@ function Page() {
                 </dl>
               </div>
 
-              {securityPreview && (
-                <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                  <p className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-900">
-                    <ShieldCheck className="h-4 w-4 text-primary" />
-                    Exam security (from your defaults)
-                  </p>
-                  <ul className="space-y-1 text-xs text-slate-700">
-                    {securitySummaryLines(securityPreview).map((line) => (
-                      <li key={line}>• {line}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <p className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                  Exam security
+                </p>
+                <ul className="space-y-1 text-xs text-slate-700">
+                  {securitySummaryLines(security).map((line) => (
+                    <li key={line}>• {line}</li>
+                  ))}
+                </ul>
+              </div>
 
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 Drafts stay private to you. Students only see the exam after the Examination Officer
-                approves it. While pending, you can cancel the submission and return it to draft.
+                approves it.
               </p>
             </div>
           )}
@@ -622,7 +720,7 @@ function Page() {
                 {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}
                 Save draft
               </Button>
-              {step < 3 ? (
+              {step < 4 ? (
                 <Button
                   className="font-semibold"
                   onClick={() => {
@@ -780,5 +878,27 @@ function Page() {
         </SectionCard>
       )}
     </>
+  );
+}
+
+function SecToggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">
+      <span>
+        <span className="block text-sm font-semibold text-slate-800">{label}</span>
+        <span className="mt-0.5 block text-xs text-slate-500">{hint}</span>
+      </span>
+      <Checkbox checked={checked} onCheckedChange={(v) => onChange(v === true)} className="mt-0.5" />
+    </label>
   );
 }
