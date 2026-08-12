@@ -1,6 +1,6 @@
 /** Embedded exam metadata (questions to answer, etc.) stored in description. */
 
-const META_MARKER = "[[D4_EXAM_META]]";
+import { META_MARKER, stripInternalMarkers } from "@/lib/exam-security";
 
 export type ExamMeta = {
   questionsToAnswer: number | null;
@@ -10,15 +10,8 @@ export function embedExamMeta(
   description: string | null | undefined,
   meta: ExamMeta,
 ): string {
-  const without = (description || "")
-    .replace(new RegExp(`\n?${META_MARKER.replace(/[[\]]/g, "\\$&")}[\s\S]*?(?=\n\[\[|$)`), "")
-    .trim();
-  // Keep only our meta line; security marker handled separately
-  const cleaned = without
-    .split("\n")
-    .filter((line) => !line.startsWith(META_MARKER))
-    .join("\n")
-    .trim();
+  // Start from human text only (no security / meta markers)
+  const cleaned = stripInternalMarkers(description);
   const blob = `${META_MARKER}${JSON.stringify(meta)}`;
   return cleaned ? `${cleaned}\n${blob}` : blob;
 }
@@ -28,11 +21,23 @@ export function parseExamMeta(description: string | null | undefined): ExamMeta 
   const idx = description.indexOf(META_MARKER);
   if (idx < 0) return { questionsToAnswer: null };
   try {
-    // Meta may sit before security marker
     let raw = description.slice(idx + META_MARKER.length).trim();
-    const next = raw.indexOf("[[");
-    if (next >= 0) raw = raw.slice(0, next).trim();
-    const parsed = JSON.parse(raw) as Partial<ExamMeta>;
+    const start = raw.indexOf("{");
+    if (start < 0) return { questionsToAnswer: null };
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < raw.length; i++) {
+      if (raw[i] === "{") depth++;
+      if (raw[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end < 0) return { questionsToAnswer: null };
+    const parsed = JSON.parse(raw.slice(start, end + 1)) as Partial<ExamMeta>;
     const n =
       typeof parsed.questionsToAnswer === "number" && parsed.questionsToAnswer > 0
         ? Math.floor(parsed.questionsToAnswer)
@@ -85,6 +90,5 @@ export function pickExamQuestions<T extends { id: string }>(
     const shuffled = seededShuffle(bank, `${options.examId}:${options.studentKey}`);
     return shuffled.slice(0, limit);
   }
-  // Sequential take (first N of bank order)
   return bank.slice(0, limit);
 }
