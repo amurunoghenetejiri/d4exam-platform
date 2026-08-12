@@ -112,7 +112,13 @@ const statusTones: Record<string, string> = {
   scheduled: "border-info/30 bg-info/12 text-info",
   "under review": "border-info/30 bg-info/12 text-info",
   pending: "border-warning/30 bg-warning/12 text-warning",
+  "pending approval": "border-warning/30 bg-warning/12 text-warning",
+  pending_approval: "border-warning/30 bg-warning/12 text-warning",
+  "changes requested": "border-info/30 bg-info/12 text-info",
+  changes_requested: "border-info/30 bg-info/12 text-info",
   "awaiting marking": "border-warning/30 bg-warning/12 text-warning",
+  "awaiting release": "border-warning/30 bg-warning/12 text-warning",
+  awaiting_release: "border-warning/30 bg-warning/12 text-warning",
   trial: "border-warning/30 bg-warning/12 text-warning",
   draft: "border-muted-foreground/30 bg-muted text-muted-foreground",
   inactive: "border-muted-foreground/30 bg-muted text-muted-foreground",
@@ -125,7 +131,8 @@ const statusTones: Record<string, string> = {
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
-  const tone = statusTones[status.toLowerCase()] ?? statusTones['draft'];
+  const key = status.toLowerCase();
+  const tone = statusTones[key] ?? statusTones["draft"];
   return (
     <span
       className={cn(
