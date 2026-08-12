@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { PageHeader, SectionCard, StatusBadge } from "@/components/dashboard/kit";
+import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
-import * as mock from "@/data/mock";
-import { CheckSquare, Radio, ShieldAlert, FileText } from "lucide-react";
+import { CheckSquare, Radio, FileText, ShieldAlert } from "lucide-react";
+import { useCount, useRows } from "@/lib/queries";
+import { useSessionUser } from "@/lib/session";
 
 export const Route = createFileRoute("/officer/")({
   head: () => ({
@@ -11,111 +12,137 @@ export const Route = createFileRoute("/officer/")({
   component: Page,
 });
 
+type Exam = {
+  id: string;
+  title: string;
+  status: string;
+  scheduled_start: string | null;
+};
+
+type Audit = {
+  id: string;
+  action: string;
+  description: string | null;
+  created_at: string;
+};
+
 function Page() {
+  const { data: user } = useSessionUser();
+  const schoolId = user?.schoolId ?? null;
+  const enabled = Boolean(schoolId);
+
+  const pending = useCount(
+    "examinations",
+    schoolId
+      ? [
+          { column: "school_id", value: schoolId },
+          { column: "status", value: "pending" },
+        ]
+      : [],
+    enabled,
+  );
+  const live = useCount(
+    "examinations",
+    schoolId
+      ? [
+          { column: "school_id", value: schoolId },
+          { column: "status", value: "ongoing" },
+        ]
+      : [],
+    enabled,
+  );
+  const totalExams = useCount("examinations", schoolId ? [{ column: "school_id", value: schoolId }] : [], enabled);
+
+  const exams = useRows<Exam>({
+    table: "examinations",
+    select: "id, title, status, scheduled_start",
+    filters: schoolId ? [{ column: "school_id", value: schoolId }] : [],
+    order: { column: "created_at", ascending: false },
+    limit: 6,
+    enabled,
+  });
+
+  const logs = useRows<Audit>({
+    table: "audit_logs",
+    select: "id, action, description, created_at",
+    filters: schoolId ? [{ column: "school_id", value: schoolId }] : [],
+    order: { column: "created_at", ascending: false },
+    limit: 6,
+    enabled,
+  });
+
   return (
     <>
       <PageHeader
-        title="Welcome, Examination Officer"
-        description={`${mock.currentOfficer.name} · ${mock.currentOfficer.school}`}
+        title={`Welcome${user?.fullName ? `, ${user.fullName}` : ", Examination Officer"}`}
+        description={user?.schoolName ? `${user.schoolName} · Officer` : "Examination officer dashboard"}
       />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Stat label="Pending Approvals" value={12} icon={CheckSquare} color="bg-violet-50 text-violet-600" />
-        <Stat label="Live Examinations" value={7} icon={Radio} color="bg-blue-50 text-blue-600" />
-        <Stat label="Flagged Attempts" value={18} icon={ShieldAlert} color="bg-red-50 text-red-600" />
-        <Stat label="Results Pending" value={23} icon={FileText} color="bg-amber-50 text-amber-600" />
+        <Stat label="Pending approvals" value={fmt(pending)} icon={CheckSquare} color="bg-violet-50 text-violet-600" />
+        <Stat label="Live examinations" value={fmt(live)} icon={Radio} color="bg-blue-50 text-blue-600" />
+        <Stat label="Total exams" value={fmt(totalExams)} icon={FileText} color="bg-slate-100 text-slate-700" />
+        <Stat label="Integrity focus" value={fmt(live)} icon={ShieldAlert} color="bg-red-50 text-red-600" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <SectionCard
-          title="Live Examinations"
+          title="Examinations"
           action={
             <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
-              <Link to="/officer/live-monitor">View All</Link>
+              <Link to="/officer/approvals">Approvals</Link>
             </Button>
           }
         >
-          <ul className="space-y-3">
-            {mock.studentExams.slice(0, 3).map((e) => (
-              <li key={e.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-900">
-                    {e.code} — {e.title}
+          {(exams.data ?? []).length === 0 ? (
+            <EmptyState title="No examinations" description="School examinations will appear here." />
+          ) : (
+            <ul className="space-y-3">
+              {(exams.data ?? []).map((e) => (
+                <li key={e.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
+                    <p className="text-xs text-slate-500">
+                      {e.scheduled_start ? new Date(e.scheduled_start).toLocaleString() : "Not scheduled"}
+                    </p>
+                  </div>
+                  <StatusBadge status={e.status} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Recent audit activity"
+          action={
+            <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
+              <Link to="/officer/audit-logs">View All</Link>
+            </Button>
+          }
+        >
+          {(logs.data ?? []).length === 0 ? (
+            <EmptyState title="No audit logs" description="Officer and admin actions will appear here." />
+          ) : (
+            <ul className="space-y-3">
+              {(logs.data ?? []).map((l) => (
+                <li key={l.id} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                  <p className="text-sm font-semibold text-slate-900">{l.action}</p>
+                  <p className="text-xs text-slate-500">
+                    {l.description || "—"} · {new Date(l.created_at).toLocaleString()}
                   </p>
-                  <p className="text-xs text-slate-500">{e.questions} Students · In Progress</p>
-                </div>
-                <StatusBadge status="ongoing" />
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
-
-        <SectionCard
-          title="Integrity Alerts"
-          action={
-            <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
-              <Link to="/officer/integrity">View All</Link>
-            </Button>
-          }
-        >
-          <ul className="space-y-3">
-            {mock.integrityEvents.slice(0, 4).map((e) => (
-              <li key={e.id} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">
-                    {e.student} · {e.exam}
-                  </p>
-                  <p className="text-xs text-slate-500">{e.event}</p>
-                </div>
-                <StatusBadge status={e.severity} />
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
-      </div>
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <SectionCard
-          title="Examination Approvals"
-          action={
-            <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
-              <Link to="/officer/approvals">View All</Link>
-            </Button>
-          }
-        >
-          <ul className="space-y-3">
-            {mock.studentExams.slice(0, 2).map((e) => (
-              <li key={e.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 p-3">
-                <div>
-                  <p className="text-sm font-bold text-slate-900">{e.code} — {e.title}</p>
-                  <p className="text-xs text-slate-500">By {mock.currentTeacher.name}</p>
-                </div>
-                <StatusBadge status="pending" />
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
-
-        <SectionCard
-          title="Recent Reports"
-          action={
-            <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
-              <Link to="/officer/reports">View All</Link>
-            </Button>
-          }
-        >
-          <ul className="space-y-3">
-            {mock.auditLogs.slice(0, 3).map((l) => (
-              <li key={l.id} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-                <p className="text-sm font-semibold text-slate-900">{l.action}</p>
-                <p className="text-xs text-slate-500">{l.time}</p>
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
+          )}
         </SectionCard>
       </div>
     </>
   );
+}
+
+function fmt(q: { isLoading: boolean; data?: number }) {
+  return q.isLoading ? "…" : String(q.data ?? 0);
 }
 
 function Stat({
@@ -125,7 +152,7 @@ function Stat({
   color,
 }: {
   label: string;
-  value: number;
+  value: string;
   icon: any;
   color: string;
 }) {

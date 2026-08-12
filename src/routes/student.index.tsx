@@ -1,16 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-  CalendarClock,
-  CheckCircle2,
-  BookOpen,
-  TrendingUp,
-  MessageSquare,
-  Bell,
-  BarChart3,
-} from "lucide-react";
-import { PageHeader, SectionCard, StatusBadge } from "@/components/dashboard/kit";
+import { CalendarClock, CheckCircle2, BookOpen, Bell, BarChart3 } from "lucide-react";
+import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
-import { currentStudent, studentExams, studentResults, studentCourses, notifications } from "@/data/mock";
+import { useCount, useRows } from "@/lib/queries";
+import { useSessionUser } from "@/lib/session";
 
 export const Route = createFileRoute("/student/")({
   head: () => ({
@@ -19,93 +12,136 @@ export const Route = createFileRoute("/student/")({
   component: Page,
 });
 
+type Exam = {
+  id: string;
+  title: string;
+  status: string;
+  scheduled_start: string | null;
+  duration_minutes: number;
+};
+
+type Notif = {
+  id: string;
+  title: string;
+  created_at: string;
+  read_at: string | null;
+};
+
 function Page() {
-  const upcoming = studentExams.filter((e) => e.status !== "completed");
-  const completed = studentExams.filter((e) => e.status === "completed").length;
-  const average =
-    Math.round((studentResults.reduce((a, r) => a + r.score, 0) / studentResults.length) * 10) / 10;
+  const { data: user } = useSessionUser();
+  const schoolId = user?.schoolId ?? null;
+  const enabled = Boolean(schoolId);
+
+  const totalExams = useCount("examinations", schoolId ? [{ column: "school_id", value: schoolId }] : [], enabled);
+  const courses = useCount("courses", schoolId ? [{ column: "school_id", value: schoolId }] : [], enabled);
+
+  const exams = useRows<Exam>({
+    table: "examinations",
+    select: "id, title, status, scheduled_start, duration_minutes",
+    filters: schoolId ? [{ column: "school_id", value: schoolId }] : [],
+    order: { column: "scheduled_start", ascending: true },
+    limit: 8,
+    enabled,
+  });
+
+  const notifications = useRows<Notif>({
+    table: "notifications",
+    select: "id, title, created_at, read_at",
+    filters: user?.userId ? [{ column: "recipient_user_id", value: user.userId }] : [],
+    order: { column: "created_at", ascending: false },
+    limit: 20,
+    enabled: Boolean(user?.userId),
+  });
+
+  const upcoming = (exams.data ?? []).filter((e) => e.status !== "completed");
+  const completed = (exams.data ?? []).filter((e) => e.status === "completed").length;
+  const unread = (notifications.data ?? []).filter((n) => !n.read_at).length;
 
   return (
     <>
       <PageHeader
-        title={`Welcome back, ${currentStudent.name}`}
-        description={`${currentStudent.level} · ${currentStudent.department}`}
+        title={`Welcome back${user?.fullName ? `, ${user.fullName}` : ""}`}
+        description={[user?.identifier, user?.schoolName].filter(Boolean).join(" · ") || "Student dashboard"}
       />
 
-      {/* Stat tiles like reference */}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <MiniStat label="Upcoming Exams" value={upcoming.length} icon={CalendarClock} color="bg-blue-50 text-blue-600" />
-        <MiniStat label="Completed Exams" value={completed} icon={CheckCircle2} color="bg-emerald-50 text-emerald-600" />
-        <MiniStat label="Average Score" value={`${average}%`} icon={TrendingUp} color="bg-violet-50 text-violet-600" />
-        <MiniStat label="Total Courses" value={studentCourses.length} icon={BookOpen} color="bg-amber-50 text-amber-600" />
+        <MiniStat label="Upcoming exams" value={upcoming.length} icon={CalendarClock} color="bg-blue-50 text-blue-600" />
+        <MiniStat label="Completed (listed)" value={completed} icon={CheckCircle2} color="bg-emerald-50 text-emerald-600" />
+        <MiniStat label="School exams" value={totalExams.isLoading ? "…" : totalExams.data ?? 0} icon={BarChart3} color="bg-violet-50 text-violet-600" />
+        <MiniStat label="Courses" value={courses.isLoading ? "…" : courses.data ?? 0} icon={BookOpen} color="bg-amber-50 text-amber-600" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <SectionCard
-          title="Upcoming Examinations"
+          title="Examinations"
           action={
             <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
               <Link to="/student/examinations">View All</Link>
             </Button>
           }
         >
-          <ul className="space-y-3">
-            {upcoming.map((e) => (
-              <li
-                key={e.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3.5"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-bold text-slate-900">
-                      {e.code} — {e.title}
+          {(exams.data ?? []).length === 0 ? (
+            <EmptyState title="No examinations" description="When your school schedules exams, they will show here." />
+          ) : (
+            <ul className="space-y-3">
+              {(exams.data ?? []).map((e) => (
+                <li
+                  key={e.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-bold text-slate-900">{e.title}</p>
+                      <StatusBadge status={e.status} />
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {e.scheduled_start ? new Date(e.scheduled_start).toLocaleString() : "Not scheduled"} ·{" "}
+                      {e.duration_minutes} minutes
                     </p>
-                    <StatusBadge status={e.status} />
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {e.date} · {e.questions} Questions · {e.duration} Minutes
-                  </p>
-                </div>
-                <Button size="sm" className="shrink-0 font-semibold" asChild>
-                  <Link to="/student/exam/$id" params={{ id: e.code.toLowerCase() }}>
-                    Start Exam
-                  </Link>
-                </Button>
-              </li>
-            ))}
-          </ul>
+                  {e.status !== "completed" && (
+                    <Button size="sm" className="shrink-0 font-semibold" asChild>
+                      <Link to="/student/exam/$id" params={{ id: e.id }}>
+                        Start Exam
+                      </Link>
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </SectionCard>
 
         <SectionCard
-          title="Recent Results"
+          title="Notifications"
           action={
             <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
-              <Link to="/student/results">View All</Link>
+              <Link to="/student/notifications">View All</Link>
             </Button>
           }
         >
-          <ul className="divide-y divide-slate-100">
-            {studentResults.map((r) => (
-              <li key={r.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-                <div className="min-w-0">
-                  <p className="truncate font-semibold text-slate-900">{r.course}</p>
-                  <p className="truncate text-xs text-slate-500">{r.title}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-slate-900">{r.score}%</p>
-                  <p className="text-sm font-bold text-primary">{r.grade}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
+          {(notifications.data ?? []).length === 0 ? (
+            <EmptyState title="No notifications" description="Messages sent to your account will appear here." />
+          ) : (
+            <ul className="space-y-3">
+              {(notifications.data ?? []).slice(0, 6).map((n) => (
+                <li key={n.id} className="flex items-start gap-3 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                  <Bell className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{n.title}</p>
+                    <p className="text-xs text-slate-500">{new Date(n.created_at).toLocaleString()}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </SectionCard>
       </div>
 
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <QuickTile to="/student/courses" label="My Courses" value={studentCourses.length} icon={BookOpen} sub="Active Courses" />
-        <QuickTile to="/student/notifications" label="Messages" value={2} icon={MessageSquare} sub="Unread Messages" />
-        <QuickTile to="/student/notifications" label="Notifications" value={notifications.filter((n) => !n.read).length} icon={Bell} sub="New Notifications" />
-        <QuickTile to="/student/results" label="Results" value={studentResults.length} icon={BarChart3} sub="Released" />
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <QuickTile to="/student/courses" label="Courses" value={courses.data ?? 0} icon={BookOpen} sub="In school catalogue" />
+        <QuickTile to="/student/notifications" label="Unread" value={unread} icon={Bell} sub="Notifications" />
+        <QuickTile to="/student/examinations" label="Exams" value={totalExams.data ?? 0} icon={CalendarClock} sub="Listed for school" />
       </div>
     </>
   );
