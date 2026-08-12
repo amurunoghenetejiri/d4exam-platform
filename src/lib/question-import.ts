@@ -113,7 +113,6 @@ export function validateDraft(q: DraftQuestion): string[] {
       errors.push("Correct answer text is required (or enter during review)");
     }
   }
-  // essay may omit correct answer key
   return errors;
 }
 
@@ -133,8 +132,7 @@ export function validateAll(rows: DraftQuestion[]): DraftQuestion[] {
 
 function rowFromCells(cells: string[]): DraftQuestion {
   const get = (i: number) => (cells[i] ?? "").trim();
-  // Flexible header mapping by position matching template
-  const q: DraftQuestion = {
+  return {
     localId: uid(),
     question_text: get(0),
     option_a: get(1),
@@ -148,10 +146,8 @@ function rowFromCells(cells: string[]): DraftQuestion {
     errors: [],
     selected: true,
   };
-  return q;
 }
 
-/** Parse CSV text (handles quoted fields). */
 export function parseCsv(text: string): DraftQuestion[] {
   const lines = splitCsvLines(text);
   if (lines.length === 0) return [];
@@ -200,10 +196,20 @@ function splitCsvLines(text: string): string[][] {
   return rows;
 }
 
+/** Normalize PDF text that often loses line breaks. */
+function normalizePdfText(raw: string): string {
+  let t = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Insert newlines before markers when PDF joined everything into one line
+  t = t.replace(/\s*(QUESTION\s*\d+)/gi, "\n$1");
+  t = t.replace(/\s+([A-D])[\).:\-]\s+/g, "\n$1. ");
+  t = t.replace(/\s*(ANSWER\s*:)/gi, "\n$1");
+  return t;
+}
+
 /** Parse recommended Word/PDF plain-text pattern. */
 export function parseStructuredText(text: string): DraftQuestion[] {
-  const blocks = text
-    .replace(/\r\n/g, "\n")
+  const normalized = normalizePdfText(text);
+  const blocks = normalized
     .split(/\n(?=QUESTION\s*\d+)/i)
     .map((b) => b.trim())
     .filter(Boolean);
@@ -217,12 +223,15 @@ export function parseStructuredText(text: string): DraftQuestion[] {
       .filter(Boolean);
     if (lines.length === 0) continue;
 
-    // Drop "QUESTION N" header line
     let i = 0;
     if (/^QUESTION\s*\d+/i.test(lines[0])) i = 1;
 
     const questionLines: string[] = [];
-    while (i < lines.length && !/^[A-D][\).:\-\s]/i.test(lines[i]) && !/^ANSWER\s*:/i.test(lines[i])) {
+    while (
+      i < lines.length &&
+      !/^[A-D][\).:\-\s]/i.test(lines[i]) &&
+      !/^ANSWER\s*:/i.test(lines[i])
+    ) {
       questionLines.push(lines[i]);
       i++;
     }
@@ -261,10 +270,11 @@ export function parseStructuredText(text: string): DraftQuestion[] {
     });
   }
 
-  // Fallback: if no QUESTION N blocks, try whole file as one unstructured dump
-  if (out.length === 0 && text.trim()) {
-    // Line-based A/B/C/D detection without guessing answers
-    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (out.length === 0 && normalized.trim()) {
+    const lines = normalized
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     let curQ = "";
     const opts: Record<string, string> = { A: "", B: "", C: "", D: "" };
     let answer = "";
@@ -316,13 +326,15 @@ export async function parseSpreadsheetFile(file: File): Promise<DraftQuestion[]>
     const text = await file.text();
     return parseCsv(text);
   }
-  // .xlsx / .xls — dynamic import of SheetJS
   try {
     const XLSX = await import("xlsx");
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: "array" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: "" }) as string[][];
+    const rows = XLSX.utils.sheet_to_json<string[]>(sheet, {
+      header: 1,
+      defval: "",
+    }) as string[][];
     if (!rows.length) return [];
     let start = 0;
     const head = (rows[0] ?? []).map((c) => String(c).toLowerCase());
@@ -336,7 +348,7 @@ export async function parseSpreadsheetFile(file: File): Promise<DraftQuestion[]>
     return validateAll(out);
   } catch {
     throw new Error(
-      "Could not read Excel file. Install the xlsx package or export as CSV and try again.",
+      "Could not read Excel file. Export as CSV and try again, or use the Template button.",
     );
   }
 }
@@ -346,34 +358,93 @@ export async function parseDocxFile(file: File): Promise<DraftQuestion[]> {
     const mammoth = await import("mammoth");
     const buf = await file.arrayBuffer();
     const result = await mammoth.extractRawText({ arrayBuffer: buf });
-    return parseStructuredText(result.value || "");
-  } catch {
-    // Fallback: try as text
-    const text = await file.text();
-    return parseStructuredText(text);
+    const drafts = parseStructuredText(result.value || "");
+    if (!drafts.length) {
+      throw new Error(
+        "No questions found in Word file. Use format:\nQUESTION 1\n...\nA. ...\nANSWER: B",
+      );
+    }
+    return drafts;
+  } catch (e) {
+    if (e instanceof Error && e.message.includes("QUESTION 1")) throw e;
+    throw new Error(
+      "Could not read Word (.docx) file. Save as .docx (not .doc) or use CSV/Excel.",
+    );
   }
 }
 
 export async function parsePdfFile(file: File): Promise<DraftQuestion[]> {
+  let lastError: unknown;
   try {
     const pdfjs = await import("pdfjs-dist");
-    // Worker may not load in all hosts — use disableWorker path when needed
+
+    // Browser: point worker at CDN matching installed major version when possible
+    try {
+      const version = (pdfjs as { version?: string }).version ?? "5.1.91";
+      if (typeof window !== "undefined" && pdfjs.GlobalWorkerOptions) {
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
+      }
+    } catch {
+      /* worker optional in some builds */
+    }
+
     const buf = await file.arrayBuffer();
-    const loadingTask = pdfjs.getDocument({ data: buf, useSystemFonts: true });
+    const loadingTask = pdfjs.getDocument({
+      data: buf,
+      useSystemFonts: true,
+      isEvalSupported: false,
+      useWorkerFetch: false,
+    });
     const pdf = await loadingTask.promise;
+
     let text = "";
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
-      const pageText = content.items
-        .map((it) => ("str" in it ? it.str : ""))
-        .join(" ");
-      text += pageText + "\n";
+      // Rebuild approximate lines using Y position when available
+      type Item = { str?: string; transform?: number[] };
+      const items = content.items as Item[];
+      let lastY: number | null = null;
+      let line = "";
+      for (const it of items) {
+        const str = it.str ?? "";
+        const y = it.transform?.[5];
+        if (lastY !== null && y !== undefined && Math.abs(y - lastY) > 6) {
+          text += line.trim() + "\n";
+          line = "";
+        }
+        line += (line && !line.endsWith(" ") ? " " : "") + str;
+        if (y !== undefined) lastY = y;
+      }
+      if (line.trim()) text += line.trim() + "\n";
+      text += "\n";
     }
-    return parseStructuredText(text);
-  } catch {
+
+    if (!text.replace(/\s/g, "").length) {
+      throw new Error(
+        "This PDF has no selectable text (it may be a scanned image). Use a text PDF, Word, or CSV/Excel.",
+      );
+    }
+
+    const drafts = parseStructuredText(text);
+    if (!drafts.length) {
+      throw new Error(
+        "PDF text was read but no questions matched. Use this format:\n\nQUESTION 1\nWhat is …?\nA. …\nB. …\nC. …\nD. …\nANSWER: B",
+      );
+    }
+    return drafts;
+  } catch (e) {
+    lastError = e;
+    if (
+      e instanceof Error &&
+      (e.message.includes("QUESTION 1") ||
+        e.message.includes("no selectable text") ||
+        e.message.includes("scanned"))
+    ) {
+      throw e;
+    }
     throw new Error(
-      "Could not extract text from this PDF. Use the recommended QUESTION/ANSWER format, or import via CSV/Excel.",
+      `Could not import this PDF (${lastError instanceof Error ? lastError.message : "unknown error"}). Prefer CSV/Excel template, or a text-based PDF with QUESTION / ANSWER labels.`,
     );
   }
 }
