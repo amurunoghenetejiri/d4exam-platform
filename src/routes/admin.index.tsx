@@ -68,10 +68,10 @@ function Page() {
       )}
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Stat label="Total Students" value={fmt(students)} icon={GraduationCap} />
-        <Stat label="Total Teachers" value={fmt(teachers)} icon={Users} />
-        <Stat label="Total Courses" value={fmt(courses)} icon={BookOpen} />
-        <Stat label="Total Exams" value={fmt(exams)} icon={FileText} />
+        <Stat to="/admin/students" label="Total Students" value={fmt(students)} icon={GraduationCap} />
+        <Stat to="/admin/teachers" label="Total Teachers" value={fmt(teachers)} icon={Users} />
+        <Stat to="/admin/courses" label="Total Courses" value={fmt(courses)} icon={BookOpen} />
+        <Stat to="/admin/examinations" label="Total Exams" value={fmt(exams)} icon={FileText} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -136,9 +136,22 @@ function fmt(q: { isLoading: boolean; data?: number }) {
   return q.isLoading ? "…" : String(q.data ?? 0);
 }
 
-function Stat({ label, value, icon: Icon }: { label: string; value: string; icon: any }) {
+function Stat({
+  to,
+  label,
+  value,
+  icon: Icon,
+}: {
+  to: string;
+  label: string;
+  value: string;
+  icon: typeof GraduationCap;
+}) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <Link
+      to={to}
+      className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-primary/40 hover:shadow-md"
+    >
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs font-semibold text-slate-500">{label}</p>
@@ -148,6 +161,6 @@ function Stat({ label, value, icon: Icon }: { label: string; value: string; icon
           <Icon className="h-4 w-4" />
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
