@@ -10,6 +10,8 @@ import {
   ChevronRight,
   ShieldCheck,
   Undo2,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -29,9 +31,12 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   embedSecurityInDescription,
   loadTeacherSecurityDefaults,
+  parseSecurityFromDescription,
   securitySummaryLines,
+  stripSecurityMarker,
   toExamSettingsRow,
 } from "@/lib/exam-security";
+import { embedExamMeta, parseExamMeta } from "@/lib/exam-meta";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -60,6 +65,7 @@ type ExamRow = {
   scheduled_end: string | null;
   course_id: string | null;
   description: string | null;
+  created_by: string | null;
   courses: { code: string; name: string } | null;
 };
 
@@ -79,7 +85,6 @@ function endFromStart(startLocal: string, durationMin: number) {
   return toLocalInput(d.toISOString());
 }
 
-/** Try exam_settings table; never block exam create if table is missing. */
 async function tryUpsertExamSettings(examId: string, teacherId: string) {
   const security = loadTeacherSecurityDefaults(teacherId);
   try {
@@ -104,6 +109,7 @@ function Page() {
   const { data: session } = useSessionUser();
   const qc = useQueryClient();
   const [builder, setBuilder] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
 
@@ -114,50 +120,104 @@ function Page() {
   const [courseId, setCourseId] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  // String so user can clear and type any duration freely
   const [durationText, setDurationText] = useState("60");
+  const [questionsText, setQuestionsText] = useState("20");
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
 
   const durationMinutes = Math.max(1, Number.parseInt(durationText, 10) || 0);
+  const questionsToAnswer = Math.max(1, Number.parseInt(questionsText, 10) || 0);
 
   useEffect(() => {
     if (lockedCourseId) setCourseId(lockedCourseId);
   }, [lockedCourseId]);
 
+  const bankCountQ = useQuery({
+    queryKey: ["teacher-bank-count", teacher?.schoolId, courseId],
+    enabled: Boolean(teacher?.schoolId && courseId),
+    queryFn: async () => {
+      if (!teacher || !courseId) return 0;
+      const { count, error } = await supabase
+        .from("questions")
+        .select("*", { count: "exact", head: true })
+        .eq("school_id", teacher.schoolId)
+        .eq("course_id", courseId)
+        .eq("status", "active");
+      if (error) return 0;
+      return count ?? 0;
+    },
+  });
+  const bankCount = bankCountQ.data ?? 0;
+
   const listQ = useQuery({
-    queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds, lockedCourseId],
+    queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds, lockedCourseId, session?.userId],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
     refetchInterval: 20_000,
     queryFn: async () => {
-      if (!teacher) return [] as ExamRow[];
+      if (!teacher || !session) return [] as ExamRow[];
       const { data, error } = await supabase
         .from("examinations")
         .select(
-          "id, title, status, duration_minutes, scheduled_start, scheduled_end, course_id, description, courses(code, name)",
+          "id, title, status, duration_minutes, scheduled_start, scheduled_end, course_id, description, created_by, courses(code, name)",
         )
         .eq("school_id", teacher.schoolId)
         .in("course_id", lockedCourseId ? [lockedCourseId] : teacher.courseIds)
         .order("created_at", { ascending: false })
         .limit(100);
       if (error) throw error;
-      return (data ?? []) as ExamRow[];
+      // Teacher sees own drafts; everyone else's drafts are hidden from this list too for clarity
+      return ((data ?? []) as ExamRow[]).filter((e) => {
+        if (e.status === "draft") return e.created_by === session.userId;
+        return true;
+      });
     },
   });
 
   const securityPreview = teacher ? loadTeacherSecurityDefaults(teacher.teacherId) : null;
+
+  function resetForm() {
+    setCourseId(lockedCourseId ?? teacher?.courses[0]?.id ?? "");
+    setTitle("");
+    setDescription("");
+    setDurationText("60");
+    setQuestionsText("20");
+    setStartAt("");
+    setEndAt("");
+    setStep(1);
+    setEditingId(null);
+  }
 
   function openBuilder() {
     if (!teacher?.courses.length) {
       toast.error("No courses assigned");
       return;
     }
+    resetForm();
     setCourseId(lockedCourseId ?? teacher.courses[0].id);
-    setTitle("");
-    setDescription("");
-    setDurationText("60");
-    setStartAt("");
-    setEndAt("");
+    setBuilder(true);
+  }
+
+  function openEdit(e: ExamRow) {
+    if (e.status !== "draft" && e.status !== "changes_requested") {
+      toast.error("Only draft or changes-requested exams can be edited");
+      return;
+    }
+    const plain = stripSecurityMarker(e.description);
+    const meta = parseExamMeta(e.description);
+    // strip meta line from visible instructions
+    const instructions = plain
+      .split("\n")
+      .filter((l) => !l.startsWith("[[D4_EXAM_META]]"))
+      .join("\n")
+      .trim();
+    setEditingId(e.id);
+    setCourseId(e.course_id ?? "");
+    setTitle(e.title);
+    setDescription(instructions);
+    setDurationText(String(e.duration_minutes || 60));
+    setQuestionsText(String(meta.questionsToAnswer ?? 20));
+    setStartAt(toLocalInput(e.scheduled_start));
+    setEndAt(toLocalInput(e.scheduled_end));
     setStep(1);
     setBuilder(true);
   }
@@ -168,12 +228,15 @@ function Page() {
   }
 
   function onDurationTextChange(raw: string) {
-    // Allow empty and digits only while typing
     if (raw === "" || /^\d+$/.test(raw)) {
       setDurationText(raw);
       const n = Number.parseInt(raw, 10);
       if (startAt && n >= 1) setEndAt(endFromStart(startAt, n));
     }
+  }
+
+  function onQuestionsTextChange(raw: string) {
+    if (raw === "" || /^\d+$/.test(raw)) setQuestionsText(raw);
   }
 
   function validateStep(s: number) {
@@ -194,6 +257,14 @@ function Page() {
         toast.error("Duration must be at least 5 minutes");
         return false;
       }
+      if (!questionsText || questionsToAnswer < 1) {
+        toast.error("Questions to answer must be at least 1");
+        return false;
+      }
+      if (bankCount > 0 && questionsToAnswer > bankCount) {
+        toast.error(`Bank has only ${bankCount} active questions. Lower “questions to answer”.`);
+        return false;
+      }
     }
     if (s === 2 && startAt && endAt && new Date(endAt) <= new Date(startAt)) {
       toast.error("End must be after start");
@@ -207,40 +278,57 @@ function Page() {
     setBusy(true);
     try {
       const security = loadTeacherSecurityDefaults(teacher.teacherId);
-      const descWithSecurity = embedSecurityInDescription(description.trim() || null, security);
+      let desc = description.trim() || null;
+      desc = embedExamMeta(desc, { questionsToAnswer });
+      desc = embedSecurityInDescription(desc, security);
+
       const computedEnd =
         endAt || (startAt ? endFromStart(startAt, durationMinutes) : "");
 
-      const { data: created, error } = await supabase
-        .from("examinations")
-        .insert({
-          school_id: teacher.schoolId,
-          course_id: courseId,
-          created_by: session.userId,
-          title: title.trim(),
-          description: descWithSecurity,
-          duration_minutes: durationMinutes,
-          scheduled_start: startAt ? new Date(startAt).toISOString() : null,
-          scheduled_end: computedEnd ? new Date(computedEnd).toISOString() : null,
-          status,
-        } as never)
-        .select("id")
-        .single();
-      if (error) throw error;
-      if (!created?.id) throw new Error("Examination was not created");
+      const payload = {
+        school_id: teacher.schoolId,
+        course_id: courseId,
+        created_by: session.userId,
+        title: title.trim(),
+        description: desc,
+        duration_minutes: durationMinutes,
+        scheduled_start: startAt ? new Date(startAt).toISOString() : null,
+        scheduled_end: computedEnd ? new Date(computedEnd).toISOString() : null,
+        status,
+      };
 
-      const settingsResult = await tryUpsertExamSettings(created.id, teacher.teacherId);
+      let examId = editingId;
+
+      if (editingId) {
+        const { error } = await supabase
+          .from("examinations")
+          .update(payload as never)
+          .eq("id", editingId)
+          .eq("school_id", teacher.schoolId)
+          .eq("created_by", session.userId);
+        if (error) throw error;
+      } else {
+        const { data: created, error } = await supabase
+          .from("examinations")
+          .insert(payload as never)
+          .select("id")
+          .single();
+        if (error) throw error;
+        if (!created?.id) throw new Error("Examination was not created");
+        examId = created.id as string;
+      }
+
+      if (examId) await tryUpsertExamSettings(examId, teacher.teacherId);
 
       toast.success(
         status === "draft"
-          ? settingsResult.savedToTable
-            ? "Draft saved with security settings"
-            : "Draft saved (security stored on exam; create exam_settings table for full storage)"
-          : settingsResult.savedToTable
-            ? "Submitted for Examination Officer approval"
-            : "Submitted for approval (security attached to exam record)",
+          ? editingId
+            ? "Draft updated"
+            : "Draft saved"
+          : "Submitted for Examination Officer approval",
       );
       setBuilder(false);
+      setEditingId(null);
       await qc.invalidateQueries({ queryKey: ["teacher-exams"] });
       await listQ.refetch();
     } catch (err) {
@@ -251,7 +339,7 @@ function Page() {
   }
 
   async function submitExisting(id: string) {
-    if (!teacher) return;
+    if (!teacher || !session) return;
     try {
       const security = loadTeacherSecurityDefaults(teacher.teacherId);
       const { data: existing } = await supabase
@@ -259,15 +347,16 @@ function Page() {
         .select("description")
         .eq("id", id)
         .maybeSingle();
-      const desc = embedSecurityInDescription(
-        (existing as { description?: string } | null)?.description ?? null,
-        security,
-      );
+      let desc = (existing as { description?: string } | null)?.description ?? null;
+      const meta = parseExamMeta(desc);
+      desc = embedExamMeta(desc, meta);
+      desc = embedSecurityInDescription(desc, security);
       const { error } = await supabase
         .from("examinations")
         .update({ status: "pending_approval", description: desc } as never)
         .eq("id", id)
-        .eq("school_id", teacher.schoolId);
+        .eq("school_id", teacher.schoolId)
+        .eq("created_by", session.userId);
       if (error) throw error;
       await tryUpsertExamSettings(id, teacher.teacherId);
       toast.success("Submitted for officer approval");
@@ -278,7 +367,7 @@ function Page() {
   }
 
   async function cancelSubmit(id: string) {
-    if (!teacher) return;
+    if (!teacher || !session) return;
     if (!confirm("Withdraw this examination from officer review? It will return to draft.")) return;
     try {
       const { error } = await supabase
@@ -286,12 +375,32 @@ function Page() {
         .update({ status: "draft" } as never)
         .eq("id", id)
         .eq("school_id", teacher.schoolId)
+        .eq("created_by", session.userId)
         .in("status", ["pending_approval", "changes_requested"]);
       if (error) throw error;
       toast.success("Submission cancelled — exam is draft again");
       await listQ.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not cancel submission");
+    }
+  }
+
+  async function deleteExam(id: string) {
+    if (!teacher || !session) return;
+    if (!confirm("Delete this draft permanently? This cannot be undone.")) return;
+    try {
+      const { error } = await supabase
+        .from("examinations")
+        .delete()
+        .eq("id", id)
+        .eq("school_id", teacher.schoolId)
+        .eq("created_by", session.userId)
+        .in("status", ["draft", "changes_requested", "rejected"]);
+      if (error) throw error;
+      toast.success("Examination deleted");
+      await listQ.refetch();
+    } catch (err) {
+      toast.error((err as Error).message || "Could not delete");
     }
   }
 
@@ -306,14 +415,20 @@ function Page() {
     return (
       <>
         <PageHeader
-          title="Create examination"
+          title={editingId ? "Edit examination" : "Create examination"}
           description={
             lockedCourse
-              ? `For ${lockedCourse.code} only. Submit for officer approval.`
-              : "Only for courses assigned to you. Submit for officer approval."
+              ? `For ${lockedCourse.code} only. Save draft or submit for officer approval.`
+              : "Only for courses assigned to you. Save draft or submit for officer approval."
           }
           actions={
-            <Button variant="outline" onClick={() => setBuilder(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setBuilder(false);
+                setEditingId(null);
+              }}
+            >
               Cancel
             </Button>
           }
@@ -384,18 +499,35 @@ function Page() {
                   placeholder="Instructions for candidates…"
                 />
               </div>
-              <div className="space-y-2">
-                <Label className="font-semibold">Duration (minutes)</Label>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={durationText}
-                  onChange={(e) => onDurationTextChange(e.target.value)}
-                  placeholder="e.g. 20"
-                />
-                <p className="text-xs text-slate-500">Clear the box and type any number (minimum 5).</p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label className="font-semibold">Duration (minutes)</Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={durationText}
+                    onChange={(e) => onDurationTextChange(e.target.value)}
+                    placeholder="e.g. 20"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-semibold">Questions to answer</Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={questionsText}
+                    onChange={(e) => onQuestionsTextChange(e.target.value)}
+                    placeholder="e.g. 20"
+                  />
+                </div>
               </div>
+              <p className="text-xs text-slate-500">
+                Course bank has <strong>{bankCount}</strong> active question(s). Students answer{" "}
+                <strong>{questionsText || "?"}</strong>
+                {securityPreview?.randomizeQuestions
+                  ? " — each student gets a random mix (shown as 1, 2, 3…)."
+                  : " — taken in bank order unless randomise is on in Exam Security."}
+              </p>
             </div>
           )}
 
@@ -439,6 +571,12 @@ function Page() {
                     <dd className="font-semibold text-slate-900">{durationMinutes} min</dd>
                   </div>
                   <div className="flex justify-between gap-4">
+                    <dt>Questions to answer</dt>
+                    <dd className="font-semibold text-slate-900">
+                      {questionsToAnswer} of {bankCount} in bank
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
                     <dt>Start</dt>
                     <dd className="font-semibold text-slate-900">
                       {startAt ? new Date(startAt).toLocaleString() : "Not set"}
@@ -468,8 +606,8 @@ function Page() {
               )}
 
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                Students only see this exam after the Examination Officer approves it. While it is
-                pending, you can cancel the submission and return it to draft.
+                Drafts stay private to you. Students only see the exam after the Examination Officer
+                approves it. While pending, you can cancel the submission and return it to draft.
               </p>
             </div>
           )}
@@ -569,6 +707,9 @@ function Page() {
                 const approvedLike = ["approved", "scheduled", "published", "ongoing"].includes(
                   e.status,
                 );
+                const meta = parseExamMeta(e.description);
+                const canEdit = e.status === "draft" || e.status === "changes_requested";
+                const canDelete = ["draft", "changes_requested", "rejected"].includes(e.status);
                 return (
                   <li
                     key={e.id}
@@ -578,6 +719,7 @@ function Page() {
                       <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
                       <p className="text-xs text-slate-500">
                         {e.courses?.code ?? "—"} · {e.duration_minutes} min
+                        {meta.questionsToAnswer ? ` · ${meta.questionsToAnswer} questions` : ""}
                         {e.scheduled_start
                           ? ` · Starts ${new Date(e.scheduled_start).toLocaleString()}`
                           : " · Not scheduled"}
@@ -596,12 +738,14 @@ function Page() {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge status={String(e.status).replaceAll("_", " ")} />
+                      {canEdit && (
+                        <Button size="sm" variant="outline" className="font-semibold" onClick={() => openEdit(e)}>
+                          <Pencil className="mr-1 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                      )}
                       {e.status === "draft" && (
-                        <Button
-                          size="sm"
-                          className="font-semibold"
-                          onClick={() => void submitExisting(e.id)}
-                        >
+                        <Button size="sm" className="font-semibold" onClick={() => void submitExisting(e.id)}>
                           Submit
                         </Button>
                       )}
@@ -614,6 +758,17 @@ function Page() {
                         >
                           <Undo2 className="mr-1 h-3.5 w-3.5" />
                           Cancel submit
+                        </Button>
+                      )}
+                      {canDelete && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="font-semibold text-red-600 hover:bg-red-50"
+                          onClick={() => void deleteExam(e.id)}
+                        >
+                          <Trash2 className="mr-1 h-3.5 w-3.5" />
+                          Delete
                         </Button>
                       )}
                     </div>
