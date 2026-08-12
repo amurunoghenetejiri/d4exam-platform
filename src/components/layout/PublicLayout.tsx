@@ -87,7 +87,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
       </header>
 
       <main className="relative flex-1 overflow-hidden">
-        <Watermark opacity={0.035} size="xl" className="z-0" />
+        <Watermark opacity={0.09} size="xl" />
         <div className="relative z-10">{children}</div>
       </main>
 
