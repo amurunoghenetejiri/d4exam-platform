@@ -131,7 +131,7 @@ export const adminNav: RoleConfig = {
         { label: "Users", to: "/admin/users", icon: Users },
         { label: "Students", to: "/admin/students", icon: GraduationCap },
         { label: "Student Import", to: "/admin/student-import", icon: UploadCloud },
-        { label: "Teachers", to: "/admin/teachers", icon: Users },
+        { label: "Teachers & Courses", to: "/admin/teachers", icon: Users },
       ],
     },
     {
