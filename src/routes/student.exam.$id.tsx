@@ -7,7 +7,8 @@ import { Logo } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useStudentContext, canStartExam } from "@/lib/student";
-import { fromExamSettingsRow, type ExamSettingsRow } from "@/lib/exam-security";
+import { fromExamSettingsRow, parseSecurityFromDescription, type ExamSettingsRow } from "@/lib/exam-security";
+import { parseExamMeta, pickExamQuestions, seededShuffle } from "@/lib/exam-meta";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/student/exam/$id")({
@@ -95,12 +96,12 @@ function CbtExamPage() {
     },
   });
 
-  const questionsQ = useQuery({
-    queryKey: ["cbt-questions", id, examQ.data?.course_id],
+  const bankQ = useQuery({
+    queryKey: ["cbt-bank", id, examQ.data?.course_id],
     enabled: Boolean(examQ.data?.id),
     queryFn: async () => {
       const exam = examQ.data!;
-      // 1) Questions attached to THIS exam paper
+      // Prefer questions attached to this exam paper
       const { data: links } = await supabase
         .from("exam_questions")
         .select(
@@ -113,7 +114,6 @@ function CbtExamPage() {
         .filter(Boolean) as QRow[];
       if (fromPaper.length) return fromPaper;
 
-      // 2) Fallback: full course bank (if paper not set yet)
       if (!exam.course_id) return [] as QRow[];
       const { data, error } = await supabase
         .from("questions")
@@ -122,33 +122,66 @@ function CbtExamPage() {
         .eq("course_id", exam.course_id)
         .eq("status", "active")
         .order("created_at", { ascending: true })
-        .limit(200);
+        .limit(500);
       if (error) throw error;
       return (data ?? []) as QRow[];
     },
   });
 
-  const security = fromExamSettingsRow(settingsQ.data);
+  const security = useMemo(() => {
+    const fromTable = fromExamSettingsRow(settingsQ.data);
+    if (settingsQ.data) return fromTable;
+    const fromDesc = parseSecurityFromDescription(examQ.data?.description);
+    return fromDesc ?? fromTable;
+  }, [settingsQ.data, examQ.data?.description]);
+
+  const meta = useMemo(
+    () => parseExamMeta(examQ.data?.description),
+    [examQ.data?.description],
+  );
 
   const questions = useMemo(() => {
-    let list = (questionsQ.data ?? []).map((q) => {
+    const bank = (bankQ.data ?? []).map((q) => {
       const opts = decodeOptions(q.explanation);
       if (opts.length === 0 && q.question_type === "true_false") {
         return { ...q, options: ["True", "False"] };
       }
-      return { ...q, options: opts.length ? opts : ["Option A", "Option B", "Option C", "Option D"] };
-    });
-    if (security.randomizeQuestions) {
-      list = [...list].sort(() => Math.random() - 0.5);
-    }
-    if (security.randomizeOptions) {
-      list = list.map((q) => ({
+      return {
         ...q,
-        options: [...q.options].sort(() => Math.random() - 0.5),
+        options: opts.length ? opts : ["Option A", "Option B", "Option C", "Option D"],
+      };
+    });
+
+    const studentKey = student?.studentId ?? student?.matric ?? "anon";
+    const examId = examQ.data?.id ?? id;
+
+    let picked = pickExamQuestions(bank, {
+      questionsToAnswer: meta.questionsToAnswer,
+      randomize: security.randomizeQuestions,
+      studentKey,
+      examId,
+    });
+
+    // Randomise option order per student when enabled
+    if (security.randomizeOptions) {
+      picked = picked.map((q) => ({
+        ...q,
+        options: seededShuffle(q.options, `${examId}:${studentKey}:opts:${q.id}`),
       }));
     }
-    return list;
-  }, [questionsQ.data, security.randomizeQuestions, security.randomizeOptions]);
+
+    // Display order is always 1..N after pick — no gaps
+    return picked;
+  }, [
+    bankQ.data,
+    security.randomizeQuestions,
+    security.randomizeOptions,
+    meta.questionsToAnswer,
+    student?.studentId,
+    student?.matric,
+    examQ.data?.id,
+    id,
+  ]);
 
   const TOTAL = questions.length;
   const [index, setIndex] = useState(0);
@@ -238,7 +271,13 @@ function CbtExamPage() {
           submitted_at: new Date().toISOString(),
           tab_switch_count: tabSwitches,
           answers: answers as never,
-          metadata: { auto, answered: Object.keys(answers).length, total: TOTAL } as never,
+          metadata: {
+            auto,
+            answered: Object.keys(answers).length,
+            total: TOTAL,
+            questionsToAnswer: meta.questionsToAnswer,
+            questionIds: questions.map((q) => q.id),
+          } as never,
         } as never,
         { onConflict: "exam_id,student_id" },
       );
@@ -249,7 +288,7 @@ function CbtExamPage() {
     navigate({ to: "/student/examinations" });
   }
 
-  if (examQ.isLoading || questionsQ.isLoading) {
+  if (examQ.isLoading || bankQ.isLoading) {
     return (
       <div className="grid min-h-dvh place-items-center">
         <p className="flex items-center gap-2 text-sm text-slate-500">
@@ -303,12 +342,18 @@ function CbtExamPage() {
           </p>
           <ul className="mt-4 space-y-1 text-sm text-slate-600">
             <li>Duration: {exam.duration_minutes} minutes</li>
-            <li>Questions on paper: {TOTAL}</li>
+            <li>
+              Questions you will answer: {TOTAL}
+              {meta.questionsToAnswer && bankQ.data && bankQ.data.length > TOTAL
+                ? ` (from ${bankQ.data.length} in bank)`
+                : ""}
+            </li>
+            <li>Question order: {security.randomizeQuestions ? "Random per student" : "Fixed"}</li>
             <li>Fullscreen: {security.fullscreen ? "Required" : "Optional"}</li>
           </ul>
           {TOTAL === 0 ? (
             <p className="mt-4 text-sm text-amber-700">
-              No questions on this paper yet. Teacher must attach questions from the Question Bank.
+              No active questions in the course bank yet. Teacher must upload questions.
             </p>
           ) : (
             <Button
