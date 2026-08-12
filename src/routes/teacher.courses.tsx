@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { BookOpen, FileText, Layers, Users } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { BookOpen, FileText, Layers } from "lucide-react";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
-import * as mock from "@/data/mock";
+import { useTeacherContext } from "@/lib/teacher";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/teacher/courses")({
   head: () => ({
@@ -18,58 +20,90 @@ export const Route = createFileRoute("/teacher/courses")({
 });
 
 function Page() {
-  const assigned = mock.currentTeacher.assignedCourses;
-  const courses = mock.studentCourses.filter((c) => assigned.includes(c.code));
-  const exams = mock.teacherExams.filter((e) => assigned.includes(e.courseCode ?? e.code));
-  const questions = mock.questionBank.filter((q) =>
-    assigned.includes(q.courseCode ?? ""),
-  );
+  const { data: teacher, isLoading } = useTeacherContext();
+
+  const statsQ = useQuery({
+    queryKey: ["teacher-course-stats", teacher?.teacherId, teacher?.courseIds],
+    enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
+    queryFn: async () => {
+      if (!teacher) return {} as Record<string, { exams: number; questions: number }>;
+      const map: Record<string, { exams: number; questions: number }> = {};
+      for (const id of teacher.courseIds) {
+        map[id] = { exams: 0, questions: 0 };
+      }
+      const { data: exams } = await supabase
+        .from("examinations")
+        .select("course_id")
+        .eq("school_id", teacher.schoolId)
+        .in("course_id", teacher.courseIds);
+      for (const e of exams ?? []) {
+        if (e.course_id && map[e.course_id]) map[e.course_id].exams += 1;
+      }
+      const { data: qs } = await supabase
+        .from("questions")
+        .select("course_id")
+        .eq("school_id", teacher.schoolId)
+        .in("course_id", teacher.courseIds);
+      for (const q of qs ?? []) {
+        if (q.course_id && map[q.course_id]) map[q.course_id].questions += 1;
+      }
+      return map;
+    },
+  });
+
+  if (isLoading) return <p className="text-sm text-slate-500">Loading courses…</p>;
+
+  if (!teacher) {
+    return (
+      <EmptyState
+        title="Teacher profile not found"
+        description="Contact School Admin to link your account."
+      />
+    );
+  }
+
+  const stats = statsQ.data ?? {};
 
   return (
     <>
       <PageHeader
         title="My Courses"
-        description="Only courses assigned to you by School Admin appear here. You cannot create exams for unassigned courses."
+        description={`Assigned by School Admin · ${teacher.fullName} · ${teacher.staffId}`}
       />
 
-      {courses.length === 0 ? (
+      {teacher.courses.length === 0 ? (
         <EmptyState
           title="No courses assigned"
-          description="Ask your School Administrator to assign courses to your staff account."
+          description="School Admin must assign courses to your staff account under Teachers & Courses or Courses."
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {courses.map((c) => {
-            const courseExams = exams.filter((e) => (e.courseCode ?? e.code) === c.code);
-            const courseQs = questions.filter((q) => q.courseCode === c.code);
+          {teacher.courses.map((c) => {
+            const s = stats[c.id] ?? { exams: 0, questions: 0 };
             return (
               <article
-                key={c.code}
-                className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+                key={c.id}
+                className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-wide text-primary">{c.code}</p>
-                    <h2 className="mt-1 text-base font-extrabold text-slate-900">{c.title}</h2>
-                    <p className="mt-1 text-xs text-slate-500">{c.units} units · Assigned by admin</p>
+                    <h2 className="mt-1 text-base font-extrabold text-slate-900">{c.name}</h2>
+                    <p className="mt-1 text-xs text-slate-500">{c.credit_units} units</p>
                   </div>
                   <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary">
                     <BookOpen className="h-5 w-5" />
                   </span>
                 </div>
 
-                <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <dl className="mt-4 grid grid-cols-2 gap-2 text-center">
                   <div className="rounded-lg bg-slate-50 px-2 py-2">
                     <dt className="text-[10px] font-semibold uppercase text-slate-500">Exams</dt>
-                    <dd className="text-sm font-bold text-slate-900">{courseExams.length}</dd>
+                    <dd className="text-sm font-bold text-slate-900">{s.exams}</dd>
                   </div>
                   <div className="rounded-lg bg-slate-50 px-2 py-2">
                     <dt className="text-[10px] font-semibold uppercase text-slate-500">Questions</dt>
-                    <dd className="text-sm font-bold text-slate-900">{courseQs.length}</dd>
-                  </div>
-                  <div className="rounded-lg bg-slate-50 px-2 py-2">
-                    <dt className="text-[10px] font-semibold uppercase text-slate-500">Students</dt>
-                    <dd className="text-sm font-bold text-slate-900">—</dd>
+                    <dd className="text-sm font-bold text-slate-900">{s.questions}</dd>
                   </div>
                 </dl>
 
@@ -95,23 +129,10 @@ function Page() {
 
       <SectionCard className="mt-6" title="Assignment rule">
         <p className="text-sm text-slate-600">
-          School Admin assigns teachers to courses. You may only build questions and examinations for
-          those courses. Submitting an exam sends it to the Examination Officer — students only see
-          it after approval and scheduling.
+          Only School Admin can assign courses. You may create questions and examinations solely for
+          the courses listed above. Submitting an exam sends it to the Examination Officer for
+          approval before students can see it.
         </p>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-slate-500">
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
-            <Users className="h-3.5 w-3.5" />
-            Admin assigns courses
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
-            <FileText className="h-3.5 w-3.5" />
-            Teacher submits for approval
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1">
-            Officer approves → students see exam
-          </span>
-        </div>
       </SectionCard>
     </>
   );
