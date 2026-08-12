@@ -10,6 +10,8 @@ import {
   CalendarDays,
   Loader2,
   ShieldCheck,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,11 @@ import {
 } from "@/components/ui/dialog";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  fromExamSettingsRow,
+  securitySummaryLines,
+  type ExamSettingsRow,
+} from "@/lib/exam-security";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/officer/approvals")({
@@ -66,6 +73,7 @@ function Page() {
   const [scheduleStart, setScheduleStart] = useState("");
   const [scheduleEnd, setScheduleEnd] = useState("");
   const [busy, setBusy] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const listQ = useQuery({
     queryKey: ["officer-approvals", schoolId],
@@ -87,6 +95,7 @@ function Page() {
   });
 
   const exams = listQ.data ?? [];
+  const examIds = exams.map((e) => e.id);
 
   const qCountsQ = useQuery({
     queryKey: ["officer-approval-qcounts", schoolId, exams.map((e) => e.course_id).join(",")],
@@ -109,6 +118,26 @@ function Page() {
     },
   });
   const qCounts = qCountsQ.data ?? {};
+
+  const settingsQ = useQuery({
+    queryKey: ["officer-exam-settings", schoolId, examIds.join(",")],
+    enabled: Boolean(schoolId && examIds.length),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("exam_settings")
+        .select(
+          "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility",
+        )
+        .in("exam_id", examIds);
+      if (error) throw error;
+      const map: Record<string, ExamSettingsRow> = {};
+      for (const row of (data ?? []) as ExamSettingsRow[]) {
+        map[row.exam_id] = row;
+      }
+      return map;
+    },
+  });
+  const settingsMap = settingsQ.data ?? {};
 
   const activeQueue = useMemo(
     () => exams.filter((q) => ["pending_approval", "changes_requested"].includes(q.status)),
@@ -239,6 +268,7 @@ function Page() {
       );
       closeDialog();
       await qc.invalidateQueries({ queryKey: ["officer-approvals"] });
+      await qc.invalidateQueries({ queryKey: ["officer-exam-settings"] });
       await qc.invalidateQueries({ queryKey: ["count"] });
       await listQ.refetch();
     } catch (err) {
@@ -286,12 +316,15 @@ function Page() {
           ) : activeQueue.length === 0 ? (
             <EmptyState
               title="No examinations awaiting approval"
-              description="When a teacher submits an exam, it appears here."
+              description="When a teacher submits an exam, it appears here with security and schedule details."
             />
           ) : (
             <ul className="space-y-4">
               {activeQueue.map((item) => {
                 const qn = item.course_id ? qCounts[item.course_id] ?? 0 : 0;
+                const settingsRow = settingsMap[item.id];
+                const security = fromExamSettingsRow(settingsRow);
+                const open = expandedId === item.id;
                 return (
                   <li
                     key={item.id}
@@ -323,19 +356,92 @@ function Page() {
                           <FileText className="h-3.5 w-3.5" />
                           {qn} question(s) in course bank
                         </span>
+                        <span className="inline-flex items-center gap-1 text-primary">
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          {settingsRow ? "Security saved" : "No security row yet"}
+                        </span>
                         <span className="text-slate-400">
                           Submitted {new Date(item.created_at).toLocaleString()}
                         </span>
                       </div>
+
                       {item.description && (
-                        <div className="mt-2 space-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                          <p className="line-clamp-4 whitespace-pre-wrap">{item.description}</p>
-                          {/security|tab|fullscreen|lockdown/i.test(item.description) && (
-                            <p className="inline-flex items-center gap-1 font-semibold text-primary">
-                              <ShieldCheck className="h-3.5 w-3.5" />
-                              Security notes included in description
+                        <p className="mt-2 line-clamp-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 whitespace-pre-wrap">
+                          {item.description}
+                        </p>
+                      )}
+
+                      <button
+                        type="button"
+                        className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary"
+                        onClick={() => setExpandedId(open ? null : item.id)}
+                      >
+                        {open ? (
+                          <>
+                            <ChevronUp className="h-3.5 w-3.5" /> Hide details
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="h-3.5 w-3.5" /> View full details & security
+                          </>
+                        )}
+                      </button>
+
+                      {open && (
+                        <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3 text-xs text-slate-700">
+                          <div>
+                            <p className="font-bold text-slate-900">Examination details</p>
+                            <ul className="mt-1.5 space-y-1">
+                              <li>
+                                <strong>Title:</strong> {item.title}
+                              </li>
+                              <li>
+                                <strong>Course:</strong> {item.courses?.code ?? "—"} —{" "}
+                                {item.courses?.name ?? ""}
+                              </li>
+                              <li>
+                                <strong>Duration:</strong> {item.duration_minutes} minutes
+                              </li>
+                              <li>
+                                <strong>Start:</strong>{" "}
+                                {item.scheduled_start
+                                  ? new Date(item.scheduled_start).toLocaleString()
+                                  : "Not set"}
+                              </li>
+                              <li>
+                                <strong>End:</strong>{" "}
+                                {item.scheduled_end
+                                  ? new Date(item.scheduled_end).toLocaleString()
+                                  : "Not set"}
+                              </li>
+                              <li>
+                                <strong>Questions in bank (this course):</strong> {qn}
+                              </li>
+                              {settingsRow?.total_marks ? (
+                                <li>
+                                  <strong>Total marks (settings):</strong> {settingsRow.total_marks}
+                                </li>
+                              ) : null}
+                            </ul>
+                          </div>
+                          <div>
+                            <p className="flex items-center gap-1.5 font-bold text-slate-900">
+                              <ShieldCheck className="h-3.5 w-3.5 text-primary" />
+                              Exam security
                             </p>
-                          )}
+                            {settingsRow ? (
+                              <ul className="mt-1.5 space-y-1">
+                                {securitySummaryLines(security).map((line) => (
+                                  <li key={line}>• {line}</li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="mt-1.5 text-amber-800">
+                                Teacher has not saved security for this exam yet. Ask them to open
+                                Exam Security, save defaults, then submit the exam again.
+                              </p>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -403,6 +509,7 @@ function Page() {
               {selected?.course_id && qCounts[selected.course_id]
                 ? ` · ${qCounts[selected.course_id]} questions`
                 : ""}
+              {selected && settingsMap[selected.id] ? " · Security on file" : ""}
             </DialogDescription>
           </DialogHeader>
 
