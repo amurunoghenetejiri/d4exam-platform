@@ -6,11 +6,13 @@ import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/d
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { createSchoolUser } from "@/lib/auth.functions";
 import { useSessionUser } from "@/lib/session";
 import { useRows } from "@/lib/queries";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import * as mock from "@/data/mock";
 
 export const Route = createFileRoute("/admin/teachers")({
   head: () => ({
@@ -25,6 +27,9 @@ type TeacherRow = {
   employment_status: string;
   profiles: { full_name: string; email?: string } | null;
 };
+
+/** Local assignment state mirrors admin → teacher course linkage */
+const ALL_COURSES = mock.studentCourses.map((c) => c.code);
 
 function Page() {
   const { data: user } = useSessionUser();
@@ -41,6 +46,19 @@ function Page() {
     limit: 200,
     enabled: Boolean(schoolId),
   });
+
+  // Demo roster when DB empty
+  const [demoTeachers, setDemoTeachers] = useState(() =>
+    mock.teachers.map((t) => ({
+      id: t.id,
+      name: t.name,
+      staffId: t.staffId,
+      department: t.department,
+      status: t.status,
+      assigned: [...t.assigned],
+    })),
+  );
+  const [assignFor, setAssignFor] = useState<string | null>(null);
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -82,11 +100,34 @@ function Page() {
     }
   }
 
+  function toggleCourse(teacherId: string, code: string) {
+    setDemoTeachers((prev) =>
+      prev.map((t) => {
+        if (t.id !== teacherId) return t;
+        const has = t.assigned.includes(code);
+        return {
+          ...t,
+          assigned: has ? t.assigned.filter((c) => c !== code) : [...t.assigned, code],
+        };
+      }),
+    );
+  }
+
+  function saveAssignments(teacherId: string) {
+    const t = demoTeachers.find((x) => x.id === teacherId);
+    toast.success(
+      `Courses saved for ${t?.name ?? "teacher"}: ${(t?.assigned ?? []).join(", ") || "none"}. Teacher can only build exams for these.`,
+    );
+    setAssignFor(null);
+  }
+
+  const dbTeachers = list.data ?? [];
+
   return (
     <>
       <PageHeader
         title="Teachers"
-        description="Add teachers. Password is always their Staff ID — no password list to copy."
+        description="Add teachers and assign courses. Teachers can only create questions and exams for assigned courses."
       />
 
       <SectionCard title="How teachers log in">
@@ -129,12 +170,12 @@ function Page() {
           </form>
         </SectionCard>
 
-        <SectionCard title="Teacher list">
-          {(list.data ?? []).length === 0 ? (
-            <EmptyState title="No teachers yet" description="Create a teacher to see them here." />
+        <SectionCard title="Teacher list (live database)">
+          {dbTeachers.length === 0 ? (
+            <EmptyState title="No teachers in database yet" description="Create a teacher or use the assignment panel below for demo teachers." />
           ) : (
             <ul className="divide-y divide-slate-100">
-              {(list.data ?? []).map((t) => (
+              {dbTeachers.map((t) => (
                 <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
                   <div>
                     <p className="font-semibold text-slate-900">{t.profiles?.full_name ?? "—"}</p>
@@ -150,6 +191,71 @@ function Page() {
           )}
         </SectionCard>
       </div>
+
+      <SectionCard
+        className="mt-6"
+        title="Assign courses to teachers"
+        description="Teachers only see these courses in Question Bank and Exam Builder."
+      >
+        <ul className="space-y-4">
+          {demoTeachers.map((t) => (
+            <li key={t.id} className="rounded-xl border border-slate-200 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-bold text-slate-900">{t.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {t.staffId} · {t.department}
+                  </p>
+                  <p className="mt-1 text-xs font-semibold text-primary">
+                    Assigned: {t.assigned.length ? t.assigned.join(", ") : "None"}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <StatusBadge status={t.status} />
+                  <Button
+                    size="sm"
+                    variant={assignFor === t.id ? "default" : "outline"}
+                    className="font-semibold"
+                    onClick={() => setAssignFor(assignFor === t.id ? null : t.id)}
+                  >
+                    {assignFor === t.id ? "Close" : "Assign courses"}
+                  </Button>
+                </div>
+              </div>
+
+              {assignFor === t.id && (
+                <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {ALL_COURSES.map((code) => {
+                      const title =
+                        mock.studentCourses.find((c) => c.code === code)?.title ?? code;
+                      const checked = t.assigned.includes(code);
+                      return (
+                        <label
+                          key={code}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-100 px-3 py-2"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => toggleCourse(t.id, code)}
+                          />
+                          <span className="text-sm">
+                            <span className="font-bold">{code}</span>
+                            <span className="text-slate-500"> — {title}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <Button className="font-semibold" onClick={() => saveAssignments(t.id)}>
+                    Save course assignments
+                  </Button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </SectionCard>
     </>
   );
 }
