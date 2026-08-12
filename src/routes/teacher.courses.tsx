@@ -109,13 +109,13 @@ function Page() {
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" className="font-semibold" asChild>
-                    <Link to="/teacher/question-bank">
+                    <Link to="/teacher/question-bank" search={{ course: c.id }}>
                       <Layers className="mr-1.5 h-3.5 w-3.5" />
                       Questions
                     </Link>
                   </Button>
                   <Button size="sm" className="font-semibold" asChild>
-                    <Link to="/teacher/examinations">
+                    <Link to="/teacher/examinations" search={{ course: c.id }}>
                       <FileText className="mr-1.5 h-3.5 w-3.5" />
                       Exams
                     </Link>
@@ -129,9 +129,9 @@ function Page() {
 
       <SectionCard className="mt-6" title="Assignment rule">
         <p className="text-sm text-slate-600">
-          Only School Admin can assign courses. You may create questions and examinations solely for
-          the courses listed above. Submitting an exam sends it to the Examination Officer for
-          approval before students can see it.
+          Open <strong>Questions</strong> on a course card to see and upload questions for that
+          course only (e.g. MTH 101 questions only under MTH 101). Other courses’ questions stay
+          separate.
         </p>
       </SectionCard>
     </>
