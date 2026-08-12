@@ -62,6 +62,19 @@ type ExamRow = {
   courses: { code: string; name: string } | null;
 };
 
+function toLocalInput(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function endFromStartLocal(startLocal: string, durationMin: number) {
+  if (!startLocal) return "";
+  const d = new Date(startLocal);
+  if (Number.isNaN(d.getTime())) return "";
+  d.setMinutes(d.getMinutes() + Math.max(1, durationMin));
+  return toLocalInput(d);
+}
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
@@ -167,14 +180,24 @@ function Page() {
     setSelected(item);
     setAction(a);
     setComment("");
-    setScheduleStart(
-      item.scheduled_start
-        ? new Date(item.scheduled_start).toISOString().slice(0, 16)
-        : "",
-    );
-    setScheduleEnd(
-      item.scheduled_end ? new Date(item.scheduled_end).toISOString().slice(0, 16) : "",
-    );
+    const start = item.scheduled_start
+      ? toLocalInput(new Date(item.scheduled_start))
+      : "";
+    setScheduleStart(start);
+    const end =
+      item.scheduled_end
+        ? toLocalInput(new Date(item.scheduled_end))
+        : start
+          ? endFromStartLocal(start, item.duration_minutes)
+          : "";
+    setScheduleEnd(end);
+  }
+
+  function onOfficerStartChange(v: string) {
+    setScheduleStart(v);
+    if (v && selected) {
+      setScheduleEnd(endFromStartLocal(v, selected.duration_minutes));
+    }
   }
 
   function closeDialog() {
@@ -194,8 +217,11 @@ function Page() {
       toast.error("Describe the changes the teacher must make.");
       return;
     }
-    if (action === "approve" && scheduleStart && scheduleEnd) {
-      if (new Date(scheduleEnd) <= new Date(scheduleStart)) {
+
+    let endLocal = scheduleEnd;
+    if (action === "approve" && scheduleStart) {
+      if (!endLocal) endLocal = endFromStartLocal(scheduleStart, selected.duration_minutes);
+      if (new Date(endLocal) <= new Date(scheduleStart)) {
         toast.error("End time must be after start time.");
         return;
       }
@@ -211,7 +237,7 @@ function Page() {
       const update: Record<string, unknown> = { status: nextStatus };
       if (action === "approve") {
         if (scheduleStart) update.scheduled_start = new Date(scheduleStart).toISOString();
-        if (scheduleEnd) update.scheduled_end = new Date(scheduleEnd).toISOString();
+        if (endLocal) update.scheduled_end = new Date(endLocal).toISOString();
       }
       if (comment.trim()) {
         const prefix =
@@ -250,18 +276,24 @@ function Page() {
           reject: "Examination rejected",
           changes: "Changes requested on your examination",
         } as const;
+        const when =
+          action === "approve" && scheduleStart
+            ? ` Starts ${new Date(scheduleStart).toLocaleString()}.`
+            : "";
         await supabase.from("notifications").insert({
           recipient_user_id: selected.created_by,
           school_id: schoolId,
           title: titles[action],
-          message: `${selected.title}: ${comment.trim() || nextStatus}`,
+          message: `${selected.title}: ${comment.trim() || nextStatus}.${when}`,
           type: action === "approve" ? "success" : action === "reject" ? "error" : "warning",
         } as never);
       }
 
       toast.success(
         action === "approve"
-          ? "Examination approved"
+          ? scheduleStart
+            ? `Approved — starts ${new Date(scheduleStart).toLocaleString()}`
+            : "Examination approved"
           : action === "reject"
             ? "Examination rejected"
             : "Changes requested from teacher",
@@ -269,7 +301,6 @@ function Page() {
       closeDialog();
       await qc.invalidateQueries({ queryKey: ["officer-approvals"] });
       await qc.invalidateQueries({ queryKey: ["officer-exam-settings"] });
-      await qc.invalidateQueries({ queryKey: ["count"] });
       await listQ.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not update examination");
@@ -309,7 +340,7 @@ function Page() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <SectionCard
           title="Awaiting your decision"
-          description={listQ.isFetching ? "Refreshing…" : "Teachers submit → you approve"}
+          description={listQ.isFetching ? "Refreshing…" : "Teachers submit → you approve → students see it"}
         >
           {listQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading examinations…</p>
@@ -360,16 +391,7 @@ function Page() {
                           <ShieldCheck className="h-3.5 w-3.5" />
                           {settingsRow ? "Security saved" : "No security row yet"}
                         </span>
-                        <span className="text-slate-400">
-                          Submitted {new Date(item.created_at).toLocaleString()}
-                        </span>
                       </div>
-
-                      {item.description && (
-                        <p className="mt-2 line-clamp-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 whitespace-pre-wrap">
-                          {item.description}
-                        </p>
-                      )}
 
                       <button
                         type="button"
@@ -393,13 +415,6 @@ function Page() {
                             <p className="font-bold text-slate-900">Examination details</p>
                             <ul className="mt-1.5 space-y-1">
                               <li>
-                                <strong>Title:</strong> {item.title}
-                              </li>
-                              <li>
-                                <strong>Course:</strong> {item.courses?.code ?? "—"} —{" "}
-                                {item.courses?.name ?? ""}
-                              </li>
-                              <li>
                                 <strong>Duration:</strong> {item.duration_minutes} minutes
                               </li>
                               <li>
@@ -415,13 +430,8 @@ function Page() {
                                   : "Not set"}
                               </li>
                               <li>
-                                <strong>Questions in bank (this course):</strong> {qn}
+                                <strong>Questions in bank:</strong> {qn}
                               </li>
-                              {settingsRow?.total_marks ? (
-                                <li>
-                                  <strong>Total marks (settings):</strong> {settingsRow.total_marks}
-                                </li>
-                              ) : null}
                             </ul>
                           </div>
                           <div>
@@ -436,10 +446,7 @@ function Page() {
                                 ))}
                               </ul>
                             ) : (
-                              <p className="mt-1.5 text-amber-800">
-                                Teacher has not saved security for this exam yet. Ask them to open
-                                Exam Security, save defaults, then submit the exam again.
-                              </p>
+                              <p className="mt-1.5 text-amber-800">No security row saved yet.</p>
                             )}
                           </div>
                         </div>
@@ -472,7 +479,7 @@ function Page() {
           )}
         </SectionCard>
 
-        <SectionCard title="Recent decisions" description="Approved, scheduled, or rejected">
+        <SectionCard title="Recent decisions" description="Approved / scheduled exams show start time">
           {history.length === 0 ? (
             <EmptyState title="No decisions yet" description="Processed examinations will show here." />
           ) : (
@@ -485,7 +492,10 @@ function Page() {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-900">{item.title}</p>
                     <p className="text-xs text-slate-500">
-                      {item.courses?.code ?? "—"} · {item.courses?.name ?? ""}
+                      {item.courses?.code ?? "—"}
+                      {item.scheduled_start
+                        ? ` · Starts ${new Date(item.scheduled_start).toLocaleString()}`
+                        : ""}
                     </p>
                   </div>
                   <StatusBadge status={String(item.status).replaceAll("_", " ")} />
@@ -505,11 +515,7 @@ function Page() {
               {action === "changes" && "Request changes"}
             </DialogTitle>
             <DialogDescription>
-              {selected?.title} · {selected?.courses?.code}
-              {selected?.course_id && qCounts[selected.course_id]
-                ? ` · ${qCounts[selected.course_id]} questions`
-                : ""}
-              {selected && settingsMap[selected.id] ? " · Security on file" : ""}
+              {selected?.title} · {selected?.courses?.code} · {selected?.duration_minutes} min
             </DialogDescription>
           </DialogHeader>
 
@@ -517,14 +523,15 @@ function Page() {
             {action === "approve" && (
               <>
                 <p className="text-sm text-slate-600">
-                  Optionally set the delivery schedule. Leave blank to approve without scheduling.
+                  Set start time. End is filled automatically as start + {selected?.duration_minutes}{" "}
+                  minutes (you can still edit it).
                 </p>
                 <div className="space-y-2">
                   <Label className="font-semibold">Start</Label>
                   <Input
                     type="datetime-local"
                     value={scheduleStart}
-                    onChange={(e) => setScheduleStart(e.target.value)}
+                    onChange={(e) => onOfficerStartChange(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
