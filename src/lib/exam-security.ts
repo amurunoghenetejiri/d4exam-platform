@@ -12,6 +12,8 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   thresholdAction: "flag",
 };
 
+const SECURITY_MARKER = "[[D4_SECURITY_JSON]]";
+
 const storageKey = (teacherId: string) => `d4exam.teacher.security.${teacherId}`;
 
 export function loadTeacherSecurityDefaults(teacherId: string): ExamSecuritySettings {
@@ -77,6 +79,41 @@ export function fromExamSettingsRow(row: ExamSettingsRow | null | undefined): Ex
     requireMicrophone: row.require_microphone,
     thresholdAction: (row.threshold_action as ExamSecuritySettings["thresholdAction"]) || "flag",
   };
+}
+
+/** Embed security JSON into description so officer can still read it if exam_settings table is missing. */
+export function embedSecurityInDescription(
+  description: string | null | undefined,
+  settings: ExamSecuritySettings,
+): string {
+  const clean = (description || "").replace(
+    new RegExp(`\n?${SECURITY_MARKER.replace(/[[\]]/g, "\\$&")}[\s\S]*$`),
+    "",
+  ).trim();
+  const blob = `${SECURITY_MARKER}${JSON.stringify(settings)}`;
+  return clean ? `${clean}\n${blob}` : blob;
+}
+
+export function parseSecurityFromDescription(
+  description: string | null | undefined,
+): ExamSecuritySettings | null {
+  if (!description) return null;
+  const idx = description.indexOf(SECURITY_MARKER);
+  if (idx < 0) return null;
+  try {
+    const raw = description.slice(idx + SECURITY_MARKER.length).trim();
+    const parsed = JSON.parse(raw) as Partial<ExamSecuritySettings>;
+    return { ...DEFAULT_EXAM_SECURITY, ...parsed };
+  } catch {
+    return null;
+  }
+}
+
+export function stripSecurityMarker(description: string | null | undefined): string {
+  if (!description) return "";
+  return description
+    .replace(new RegExp(`\n?${SECURITY_MARKER.replace(/[[\]]/g, "\\$&")}[\s\S]*$`), "")
+    .trim();
 }
 
 export function securitySummaryLines(s: ExamSecuritySettings): string[] {
