@@ -8,18 +8,18 @@ const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
-function appOrigin() {
-  return (
-    process.env["SITE_URL"] ||
-    process.env["VITE_SITE_URL"] ||
-    process.env["APP_URL"] ||
-    ""
-  ).replace(/\/$/, "");
+function generateTempPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let out = "D4-";
+  for (let i = 0; i < 10; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  out += "!";
+  return out;
 }
 
 /**
  * Resolves the account from (school code + identifier) server side, then signs in.
- * The e-mail address is never returned to an unauthenticated caller.
  */
 export const signInWithSchoolCode = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => loginSchema.parse(data))
@@ -127,7 +127,7 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
     };
   });
 
-/** Super admin: approve / reject / request more information on a school application. */
+/** Super admin reviews school applications. Approve creates school + admin with instant password. */
 export const reviewSchoolApplication = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) =>
@@ -163,8 +163,14 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
       .eq("id", data.applicationId);
 
     let schoolCode: string | null = null;
+    let adminEmail: string | null = null;
+    let adminPassword: string | null = null;
 
     if (data.decision === "approved") {
+      if (app.status === "approved") {
+        throw new Error("This application was already approved.");
+      }
+
       const { data: code } = await supabaseAdmin.rpc("generate_school_code", {
         _name: app.school_name,
       });
@@ -190,41 +196,45 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
         .single();
       if (schoolError || !school) throw new Error(schoolError?.message ?? "Could not create school");
 
-      const origin = appOrigin();
-      const redirectTo = origin
-        ? `${origin}/reset-password`
-        : undefined;
+      adminPassword = generateTempPassword();
+      adminEmail = app.applicant_email;
 
-      const { data: invited, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
-        app.applicant_email,
-        redirectTo ? { redirectTo } : undefined,
-      );
-      if (inviteError || !invited.user) {
-        throw new Error(inviteError?.message ?? "Could not invite the school administrator");
+      const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
+        email: app.applicant_email,
+        password: adminPassword,
+        email_confirm: true,
+        user_metadata: {
+          full_name: app.applicant_name,
+          role: "school_admin",
+          school_code: schoolCode,
+        },
+      });
+      if (createError || !created.user) {
+        throw new Error(createError?.message ?? "Could not create school administrator account");
       }
 
       const { data: profile } = await supabaseAdmin
         .from("profiles")
         .insert({
-          auth_user_id: invited.user.id,
+          auth_user_id: created.user.id,
           school_id: school.id,
           full_name: app.applicant_name,
           email: app.applicant_email,
           phone: app.applicant_phone,
-          status: "invited",
+          status: "active",
         })
         .select("id")
         .single();
 
       await supabaseAdmin
         .from("user_roles")
-        .insert({ user_id: invited.user.id, school_id: school.id, role: "school_admin" });
+        .insert({ user_id: created.user.id, school_id: school.id, role: "school_admin" });
 
       await supabaseAdmin.from("notifications").insert({
-        recipient_user_id: invited.user.id,
+        recipient_user_id: created.user.id,
         school_id: school.id,
         title: "Welcome to D4EXAM",
-        message: `Your school has been approved. School code: ${schoolCode}. Open the invite email and set your password at /reset-password, then sign in with this school code and your email.`,
+        message: `Congratulations! Your school space is ready. School code: ${schoolCode}. Sign in at /login with your email and the password shared by the D4EXAM super admin.`,
         type: "success",
       });
 
@@ -235,7 +245,7 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
         action: "school_approved",
         entity_type: "school",
         entity_id: school.id,
-        description: `Approved ${app.school_name} (${schoolCode})`,
+        description: `Approved ${app.school_name} (${schoolCode}) with instant school admin credentials`,
         metadata: { profile_id: profile?.id ?? null },
       });
     } else {
@@ -249,7 +259,13 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
       });
     }
 
-    return { ok: true, schoolCode };
+    return {
+      ok: true,
+      schoolCode,
+      adminEmail,
+      adminPassword,
+      schoolName: app.school_name as string,
+    };
   });
 
 const personSchema = z.object({
@@ -264,7 +280,6 @@ const personSchema = z.object({
   levelId: z.string().uuid().optional().nullable(),
 });
 
-/** School admin: create a student / teacher / examination officer account and invite them. */
 export const createSchoolUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => personSchema.parse(data))
@@ -299,7 +314,6 @@ export const createSchoolUser = createServerFn({ method: "POST" })
     return result;
   });
 
-/** School admin: bulk student import (validated rows already previewed on the client). */
 export const importStudents = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) =>

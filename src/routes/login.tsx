@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export const Route = createFileRoute("/login")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Login — D4EXAM" },
@@ -24,6 +25,12 @@ export const Route = createFileRoute("/login")({
       },
     ],
   }),
+  beforeLoad: async () => {
+    const user = await fetchSessionUser();
+    if (user?.role) {
+      throw redirect({ to: roleHome[user.role] as never });
+    }
+  },
   component: LoginPage,
 });
 
@@ -40,8 +47,6 @@ function LoginPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    // School code optional for platform super admins (email login).
-    // Students/staff still use school code + identifier.
     if (!identifier.trim() || !password.trim()) {
       setError("Enter your username/email and password to continue.");
       return;

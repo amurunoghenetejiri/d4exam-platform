@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import {
   ShieldCheck,
   Gauge,
@@ -17,8 +17,10 @@ import {
 } from "lucide-react";
 import { PublicLayout } from "@/components/layout/PublicLayout";
 import { Button } from "@/components/ui/button";
+import { fetchSessionUser, roleHome } from "@/lib/session";
 
 export const Route = createFileRoute("/")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "D4EXAM — Smart, Secure Online Examination Platform for Schools" },
@@ -29,6 +31,12 @@ export const Route = createFileRoute("/")({
       },
     ],
   }),
+  beforeLoad: async () => {
+    const user = await fetchSessionUser();
+    if (user?.role) {
+      throw redirect({ to: roleHome[user.role] as never });
+    }
+  },
   component: HomePage,
 });
 
@@ -61,10 +69,10 @@ const roles = [
 ];
 
 const stats = [
-  { value: "182+", label: "Institutions" },
-  { value: "84K+", label: "Students" },
-  { value: "12K+", label: "Examinations" },
-  { value: "98.5%", label: "Success Rate" },
+  { value: "Live", label: "Institutions" },
+  { value: "Secure", label: "CBT delivery" },
+  { value: "Fast", label: "Results" },
+  { value: "Global", label: "Access" },
 ];
 
 const plans = [
@@ -112,7 +120,6 @@ const plans = [
 function HomePage() {
   return (
     <PublicLayout>
-      {/* Full-width hero image with overlay content */}
       <section className="relative min-h-[min(88vh,720px)] w-full overflow-hidden">
         <img
           src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1920&q=85"
@@ -188,7 +195,6 @@ function HomePage() {
         </div>
       </section>
 
-      {/* Pricing preview */}
       <section id="pricing" className="border-b border-slate-100 bg-white">
         <div className="mx-auto w-full max-w-[1180px] px-4 py-14 sm:px-6">
           <div className="mx-auto max-w-2xl text-center">
@@ -222,9 +228,7 @@ function HomePage() {
                   ))}
                 </ul>
                 <Button
-                  className={`mt-6 w-full rounded-full font-semibold ${
-                    p.highlight ? "" : ""
-                  }`}
+                  className="mt-6 w-full rounded-full font-semibold"
                   variant={p.highlight ? "default" : "outline"}
                   asChild
                 >
@@ -263,9 +267,7 @@ function HomePage() {
             <h2 className="text-2xl font-extrabold text-slate-900 sm:text-3xl">
               Examination integrity by design
             </h2>
-            <p className="mt-3 text-slate-600">
-              Every attempt is monitored, recorded and reviewable.
-            </p>
+            <p className="mt-3 text-slate-600">Every attempt is monitored, recorded and reviewable.</p>
             <Button className="mt-6 rounded-full font-semibold" variant="outline" asChild>
               <Link to="/features">Explore all features</Link>
             </Button>
