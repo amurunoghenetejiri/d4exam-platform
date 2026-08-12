@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
-import { Input } from "@/components/ui/input";
-import * as mock from "@/data/mock";
+import { useTeacherContext } from "@/lib/teacher";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/teacher/results")({
   head: () => ({
@@ -10,80 +10,81 @@ export const Route = createFileRoute("/teacher/results")({
       { title: "Results — D4EXAM" },
       {
         name: "description",
-        content: "Results for examinations on your assigned courses (release controlled by officer).",
+        content: "Completed examinations on your assigned courses.",
       },
     ],
   }),
   component: Page,
 });
 
-function Page() {
-  const assigned = mock.currentTeacher.assignedCourses;
-  const [q, setQ] = useState("");
+type ExamRow = {
+  id: string;
+  title: string;
+  status: string;
+  scheduled_end: string | null;
+  courses: { code: string; name: string } | null;
+};
 
-  const rows = useMemo(() => {
-    let list = mock.studentResults.filter((r) => assigned.includes(r.course));
-    if (q.trim()) {
-      const s = q.toLowerCase();
-      list = list.filter(
-        (r) =>
-          r.course.toLowerCase().includes(s) ||
-          r.title.toLowerCase().includes(s) ||
-          r.grade.toLowerCase().includes(s),
-      );
-    }
-    return list;
-  }, [assigned, q]);
+function Page() {
+  const { data: teacher, isLoading } = useTeacherContext();
+
+  const examsQ = useQuery({
+    queryKey: ["teacher-completed-exams", teacher?.schoolId, teacher?.courseIds],
+    enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
+    queryFn: async () => {
+      if (!teacher) return [] as ExamRow[];
+      const { data, error } = await supabase
+        .from("examinations")
+        .select("id, title, status, scheduled_end, courses(code, name)")
+        .eq("school_id", teacher.schoolId)
+        .in("course_id", teacher.courseIds)
+        .in("status", ["completed", "closed"])
+        .order("updated_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return (data ?? []) as ExamRow[];
+    },
+  });
+
+  if (isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (!teacher) {
+    return <EmptyState title="Teacher profile not found" description="Contact School Admin." />;
+  }
+
+  const rows = examsQ.data ?? [];
 
   return (
     <>
       <PageHeader
         title="Results"
-        description="Scores for your courses. Final student visibility is controlled by the Examination Officer."
+        description={`Completed exams on your courses · ${teacher.fullName}. Student score release is controlled by the Examination Officer.`}
       />
 
-      <div className="mb-4">
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search course or title…"
-          className="max-w-md rounded-full"
-        />
-      </div>
-
-      <SectionCard title="Course results">
-        {rows.length === 0 ? (
+      <SectionCard title="Completed examinations">
+        {examsQ.isLoading ? (
+          <p className="text-sm text-slate-500">Loading…</p>
+        ) : rows.length === 0 ? (
           <EmptyState
-            title="No results yet"
-            description="Results appear after exams complete and marking is done."
+            title="No completed examinations"
+            description="When exams on your courses finish, they appear here. Detailed student scores depend on attempt tables once candidates sit exams."
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="px-3 py-2">Course</th>
-                  <th className="px-3 py-2">Title</th>
-                  <th className="px-3 py-2">Sample score</th>
-                  <th className="px-3 py-2">Grade</th>
-                  <th className="px-3 py-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-slate-100 last:border-0">
-                    <td className="px-3 py-3 font-semibold">{r.course}</td>
-                    <td className="px-3 py-3">{r.title}</td>
-                    <td className="px-3 py-3">{r.score}</td>
-                    <td className="px-3 py-3">{r.grade}</td>
-                    <td className="px-3 py-3">
-                      <StatusBadge status={r.status.replaceAll("_", " ")} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul className="space-y-3">
+            {rows.map((r) => (
+              <li
+                key={r.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
+              >
+                <div>
+                  <p className="text-sm font-bold text-slate-900">{r.title}</p>
+                  <p className="text-xs text-slate-500">
+                    {r.courses?.code} — {r.courses?.name}
+                  </p>
+                </div>
+                <StatusBadge status={String(r.status).replaceAll("_", " ")} />
+              </li>
+            ))}
+          </ul>
         )}
       </SectionCard>
     </>
