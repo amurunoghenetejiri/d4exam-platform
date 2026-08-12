@@ -27,6 +27,27 @@ export const Route = createFileRoute("/school-application")({
 
 const steps = ["Institution", "Contact Person", "Details", "Review"];
 
+async function notifySuperAdmins(schoolName: string, applicationId: string) {
+  try {
+    const { data: roles } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "super_admin");
+    const ids = [...new Set((roles ?? []).map((r) => r.user_id).filter(Boolean))];
+    if (ids.length === 0) return;
+    await supabase.from("notifications").insert(
+      ids.map((uid) => ({
+        recipient_user_id: uid,
+        title: "New school application",
+        message: `${schoolName} submitted an application (ref ${applicationId}). Review it under Applications.`,
+        type: "info",
+      })),
+    );
+  } catch {
+    // Application is already saved; notification is best-effort
+  }
+}
+
 function Page() {
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -76,6 +97,7 @@ function Page() {
         return;
       }
       setRefId(data.id);
+      void notifySuperAdmins(schoolName.trim(), data.id);
     } catch {
       setError("Could not submit application. Please try again.");
     } finally {
@@ -105,11 +127,11 @@ function Page() {
                 <strong className="break-all">{refId}</strong>
               </p>
               <p>
-                Use your official applicant email on the{" "}
+                Super admins can review it under Applications. Track status with your applicant email on{" "}
                 <Link to="/application-status" className="font-semibold text-primary underline">
                   Application Status
-                </Link>{" "}
-                page. A super admin will review it from the platform dashboard.
+                </Link>
+                .
               </p>
             </AlertDescription>
           </Alert>

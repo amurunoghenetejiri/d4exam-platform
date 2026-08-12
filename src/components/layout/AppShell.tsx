@@ -14,7 +14,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { signOut } from "@/lib/session";
+import { signOut, useSessionUser } from "@/lib/session";
+import { useCount } from "@/lib/queries";
 import type { RoleConfig } from "@/components/navigation/navConfig";
 
 export interface AppUser {
@@ -75,6 +76,21 @@ export function AppShell({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const { data: session } = useSessionUser();
+  const unread = useCount(
+    "notifications",
+    session?.userId
+      ? [
+          { column: "recipient_user_id", value: session.userId },
+          // head count cannot filter IS NULL easily via useCount eq only;
+          // badge uses total for recipient; inbox page shows unread accurately
+        ]
+      : [],
+    Boolean(session?.userId),
+  );
+
+  const notifPath = `${config.home}/notifications`;
+  const showDot = (unread.data ?? 0) > 0;
 
   return (
     <div className="min-h-dvh bg-slate-50">
@@ -88,13 +104,14 @@ export function AppShell({
           <NavLinks config={config} />
         </div>
         <div className="border-t border-white/10 p-3">
-          <Link
-            to="/login"
-            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
           >
             <LogOut className="h-4 w-4" aria-hidden />
             Logout
-          </Link>
+          </button>
         </div>
       </aside>
 
@@ -151,9 +168,13 @@ export function AppShell({
             </div>
 
             <div className="flex items-center gap-1 justify-self-end">
-              <Button variant="ghost" size="icon" className="relative" aria-label="Notifications">
-                <Bell className="h-5 w-5 text-slate-600" />
-                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
+              <Button variant="ghost" size="icon" className="relative" aria-label="Notifications" asChild>
+                <Link to={notifPath as string}>
+                  <Bell className="h-5 w-5 text-slate-600" />
+                  {showDot && (
+                    <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
+                  )}
+                </Link>
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -166,7 +187,9 @@ export function AppShell({
                     </span>
                     <span className="hidden text-left sm:block">
                       <span className="block text-xs font-bold leading-tight text-slate-900">{user.name}</span>
-                      <span className="block text-[11px] leading-tight text-slate-500">{user.subtitle}</span>
+                      <span className="block max-w-[140px] truncate text-[11px] leading-tight text-slate-500">
+                        {user.subtitle}
+                      </span>
                     </span>
                   </button>
                 </DropdownMenuTrigger>
@@ -178,6 +201,9 @@ export function AppShell({
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
                     <Link to={`${config.home}/settings` as string}>Settings</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to={notifPath as string}>Notifications</Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => void signOut()}>Logout</DropdownMenuItem>

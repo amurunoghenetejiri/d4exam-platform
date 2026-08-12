@@ -1,76 +1,137 @@
-import { useState } from "react";
 import { Bell, CheckCheck, Info, AlertTriangle, CircleCheck, CircleX } from "lucide-react";
-import { notifications as seed } from "@/data/mock";
 import { EmptyState, PageHeader, SectionCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useSessionUser } from "@/lib/session";
+import { useRows } from "@/lib/queries";
+import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
-const icons = {
+type Notif = {
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  created_at: string;
+  read_at: string | null;
+};
+
+const icons: Record<string, typeof Info> = {
   info: Info,
   success: CircleCheck,
   warning: AlertTriangle,
   error: CircleX,
 };
 
-const tones = {
-  info: "bg-info/12 text-info",
-  success: "bg-primary/12 text-primary",
-  warning: "bg-warning/12 text-warning",
-  error: "bg-destructive/12 text-destructive",
+const tones: Record<string, string> = {
+  info: "bg-sky-50 text-sky-700",
+  success: "bg-emerald-50 text-emerald-700",
+  warning: "bg-amber-50 text-amber-700",
+  error: "bg-red-50 text-red-700",
 };
 
 export function NotificationsPage({ scope }: { scope: string }) {
-  const [items, setItems] = useState(seed);
+  const { data: user } = useSessionUser();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  const { data, isLoading, refetch } = useRows<Notif>({
+    table: "notifications",
+    select: "id, title, message, type, created_at, read_at",
+    filters: user?.userId ? [{ column: "recipient_user_id", value: user.userId }] : [],
+    order: { column: "created_at", ascending: false },
+    limit: 100,
+    enabled: Boolean(user?.userId),
+  });
+
+  const items = data ?? [];
+  const unread = items.filter((i) => !i.read_at).length;
+
+  async function markAllRead() {
+    if (!user?.userId) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("recipient_user_id", user.userId)
+        .is("read_at", null);
+      if (error) throw error;
+      await qc.invalidateQueries({ queryKey: ["rows", "notifications"] });
+      await qc.invalidateQueries({ queryKey: ["count", "notifications"] });
+      await refetch();
+      toast.success("All notifications marked as read");
+    } catch (e) {
+      toast.error((e as Error).message || "Could not update");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markOne(id: string) {
+    const { error } = await supabase
+      .from("notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("id", id);
+    if (!error) {
+      await qc.invalidateQueries({ queryKey: ["rows", "notifications"] });
+      await refetch();
+    }
+  }
 
   return (
     <>
       <PageHeader
         title="Notifications"
-        description={`Alerts and updates for your ${scope} account.`}
+        description={`Alerts for your ${scope} account from the database.`}
         actions={
-          <Button
-            variant="outline"
-            className="gap-2"
-            onClick={() => {
-              setItems((prev) => prev.map((i) => ({ ...i, read: true })));
-              toast.success("All notifications marked as read");
-            }}
-          >
+          <Button variant="outline" className="gap-2" disabled={busy || unread === 0} onClick={() => void markAllRead()}>
             <CheckCheck className="h-4 w-4" aria-hidden />
             Mark all read
           </Button>
         }
       />
 
-      <SectionCard title="Inbox" description={`${items.filter((i) => !i.read).length} unread`}>
-        {items.length === 0 ? (
+      <SectionCard title="Inbox" description={isLoading ? "Loading…" : `${unread} unread`}>
+        {isLoading ? (
+          <p className="text-sm text-slate-500">Loading notifications…</p>
+        ) : items.length === 0 ? (
           <EmptyState
             icon={Bell}
             title="No notifications"
-            description="You're all caught up. New alerts will appear here."
+            description="You are all caught up. New alerts from the platform will appear here."
           />
         ) : (
           <ul className="divide-y divide-border">
             {items.map((n) => {
-              const Icon = icons[n.type];
+              const t = (n.type || "info").toLowerCase();
+              const Icon = icons[t] ?? Info;
+              const unreadItem = !n.read_at;
               return (
-                <li key={n.id} className="flex gap-3 py-4 first:pt-0 last:pb-0">
-                  <span
-                    className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", tones[n.type])}
-                  >
+                <li
+                  key={n.id}
+                  className="flex cursor-pointer gap-3 py-4 first:pt-0 last:pb-0"
+                  onClick={() => {
+                    if (unreadItem) void markOne(n.id);
+                  }}
+                >
+                  <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", tones[t] ?? tones.info)}>
                     <Icon className="h-4 w-4" aria-hidden />
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                      <p className={cn("text-sm", n.read ? "font-medium" : "font-semibold")}>
+                      <p className={cn("text-sm", unreadItem ? "font-semibold" : "font-medium")}>
                         {n.title}
                       </p>
-                      <span className="shrink-0 text-xs text-muted-foreground">{n.time}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {new Date(n.created_at).toLocaleString()}
+                      </span>
                     </div>
-                    <p className="mt-1 text-sm text-muted-foreground">{n.body}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{n.message}</p>
                   </div>
-                  {!n.read && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
+                  {unreadItem && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
                 </li>
               );
             })}
