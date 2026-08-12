@@ -120,14 +120,13 @@ function LoginPage() {
     <div className="grid min-h-dvh lg:grid-cols-2">
       {/* ── Left brand panel (desktop) ─────────────────────────────── */}
       <aside className="relative hidden flex-col justify-between overflow-hidden bg-[#070d1b] px-10 py-10 text-white lg:flex xl:px-14">
-        {/* Soft decorative glow */}
         <div
           aria-hidden
-          className="pointer-events-none absolute -right-24 top-1/4 h-80 w-80 rounded-full bg-emerald-500/10 blur-3xl"
+          className="pointer-events-none absolute -right-24 top-1/4 h-80 w-80 rounded-full bg-primary/15 blur-3xl"
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute -left-16 bottom-0 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl"
+          className="pointer-events-none absolute -left-16 bottom-0 h-64 w-64 rounded-full bg-blue-400/10 blur-3xl"
         />
 
         <div className="relative z-10">
@@ -141,7 +140,7 @@ function LoginPage() {
             <h1 className="text-3xl font-extrabold leading-tight tracking-tight xl:text-4xl">
               Secure. Reliable.
               <br />
-              <span className="text-emerald-400">Built for Examinations.</span>
+              <span className="text-primary">Built for Examinations.</span>
             </h1>
             <p className="mt-4 text-sm leading-relaxed text-slate-300 xl:text-base">
               D4EXAM is a professional online examination and assessment platform trusted by
@@ -152,7 +151,7 @@ function LoginPage() {
           <ul className="space-y-5">
             {features.map((f) => (
               <li key={f.title} className="flex gap-3">
-                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/25">
+                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/20 text-primary ring-1 ring-primary/30">
                   <f.icon className="h-4.5 w-4.5" strokeWidth={2.25} aria-hidden />
                 </span>
                 <div>
@@ -171,8 +170,8 @@ function LoginPage() {
 
       {/* ── Right / main form panel ────────────────────────────────── */}
       <div className="relative flex flex-col bg-slate-50">
-        {/* Subtle watermark */}
-        <Watermark opacity={0.05} size="lg" />
+        {/* Visible but soft watermark behind the form */}
+        <Watermark opacity={0.11} size="lg" />
 
         {/* Mobile-only dark header */}
         <div className="relative z-10 bg-[#070d1b] px-5 pb-8 pt-6 text-center text-white lg:hidden">
@@ -185,7 +184,7 @@ function LoginPage() {
         </div>
 
         <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-8 sm:px-8">
-          <div className="w-full max-w-[420px] rounded-2xl border border-slate-200/80 bg-white p-6 shadow-lg shadow-slate-200/50 sm:p-8">
+          <div className="w-full max-w-[420px] rounded-2xl border border-slate-200/80 bg-white/95 p-6 shadow-lg shadow-slate-200/50 backdrop-blur-[1px] sm:p-8">
             <div className="mb-6 flex flex-col items-center text-center">
               <div className="hidden lg:block">
                 <Logo size="md" />
@@ -267,7 +266,7 @@ function LoginPage() {
                 </label>
                 <Link
                   to="/forgot-password"
-                  className="text-sm font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
+                  className="text-sm font-semibold text-primary hover:underline"
                 >
                   Forgot password?
                 </Link>
@@ -276,7 +275,7 @@ function LoginPage() {
               <Button
                 type="submit"
                 disabled={loading}
-                className="mt-1 h-11 w-full rounded-lg bg-emerald-500 text-base font-semibold text-white shadow-md shadow-emerald-500/25 hover:bg-emerald-600 focus-visible:ring-emerald-500"
+                className="mt-1 h-11 w-full rounded-lg text-base font-semibold"
               >
                 {loading ? (
                   <>
@@ -301,7 +300,7 @@ function LoginPage() {
 
             <p className="mt-4 text-center text-sm text-slate-600">
               Need help?{" "}
-              <Link to="/support" className="font-semibold text-emerald-600 hover:underline">
+              <Link to="/support" className="font-semibold text-primary hover:underline">
                 Contact Support
               </Link>
             </p>
