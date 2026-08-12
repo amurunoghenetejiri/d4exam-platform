@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { signOut } from "@/lib/session";
 import type { RoleConfig } from "@/components/navigation/navConfig";
 
 export interface AppUser {
@@ -173,15 +174,13 @@ export function AppShell({
                   <DropdownMenuLabel className="text-slate-900">{user.name}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
-                    <Link to={`${config.home}/profile`}>Profile</Link>
+                    <Link to={`${config.home}/profile` as string}>Profile</Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link to={`${config.home}/settings`}>Settings</Link>
+                    <Link to={`${config.home}/settings` as string}>Settings</Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link to="/login">Logout</Link>
-                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void signOut()}>Logout</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
