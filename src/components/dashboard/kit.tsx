@@ -16,14 +16,18 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="mb-6 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 sm:flex sm:flex-wrap sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <h1 className="truncate text-xl font-bold sm:text-2xl">{title}</h1>
+    <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+      <div className="min-w-0 flex-1">
+        <h1 className="text-xl font-bold leading-tight text-slate-900 sm:text-2xl">{title}</h1>
         {description && (
-          <p className="mt-1 text-sm text-muted-foreground sm:max-w-2xl">{description}</p>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
         )}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions && (
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
+          {actions}
+        </div>
+      )}
     </header>
   );
 }
@@ -85,14 +89,14 @@ export function SectionCard({
   return (
     <section className={cn("surface-panel overflow-hidden", className)}>
       {(title || action) && (
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3.5 sm:px-5">
+        <div className="flex flex-col gap-2 border-b border-border px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-5">
           <div className="min-w-0">
-            {title && <h2 className="truncate text-sm font-semibold sm:text-base">{title}</h2>}
+            {title && <h2 className="text-sm font-semibold sm:text-base">{title}</h2>}
             {description && (
-              <p className="truncate text-xs text-muted-foreground">{description}</p>
+              <p className="text-xs text-muted-foreground">{description}</p>
             )}
           </div>
-          {action}
+          {action && <div className="shrink-0">{action}</div>}
         </div>
       )}
       <div className="p-4 sm:p-5">{children}</div>
