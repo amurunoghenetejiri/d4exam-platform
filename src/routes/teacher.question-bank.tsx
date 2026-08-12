@@ -8,8 +8,10 @@ import {
   Search,
   Loader2,
   Trash2,
+  Pencil,
   FileQuestion,
   X,
+  Save,
 } from "lucide-react";
 import {
   PageHeader,
@@ -51,7 +53,7 @@ export const Route = createFileRoute("/teacher/question-bank")({
       { title: "Question Bank — D4EXAM" },
       {
         name: "description",
-        content: "Create, import and manage questions for your assigned courses.",
+        content: "Create, import, edit and manage questions for your assigned courses.",
       },
     ],
   }),
@@ -63,7 +65,6 @@ type QuestionRow = {
   question_text: string;
   question_type: string;
   marks: number;
-  difficulty: string;
   status: string;
   course_id: string | null;
   correct_answer: string | null;
@@ -72,7 +73,7 @@ type QuestionRow = {
   courses: { code: string; name: string } | null;
 };
 
-type Mode = "list" | "create" | "import";
+type Mode = "list" | "form" | "import";
 
 function encodeOptions(a: string, b: string, c: string, d: string) {
   const parts = [
@@ -92,20 +93,21 @@ function decodeOptions(explanation: string | null): {
   note: string;
 } {
   if (!explanation) return { a: "", b: "", c: "", d: "", note: "" };
-  if (explanation.startsWith("OPTIONS::")) {
-    const body = explanation.slice("OPTIONS::".length);
-    const map: Record<string, string> = { A: "", B: "", C: "", D: "" };
-    for (const part of body.split("|")) {
-      const eq = part.indexOf("=");
-      if (eq > 0) {
-        const k = part.slice(0, eq).trim().toUpperCase();
-        const v = part.slice(eq + 1);
-        if (k in map) map[k] = v;
-      }
+  const lines = explanation.split("\n");
+  const optLine = lines.find((l) => l.startsWith("OPTIONS::"));
+  const note = lines.filter((l) => !l.startsWith("OPTIONS::")).join("\n").trim();
+  if (!optLine) return { a: "", b: "", c: "", d: "", note: explanation };
+  const body = optLine.slice("OPTIONS::".length);
+  const map: Record<string, string> = { A: "", B: "", C: "", D: "" };
+  for (const part of body.split("|")) {
+    const eq = part.indexOf("=");
+    if (eq > 0) {
+      const k = part.slice(0, eq).trim().toUpperCase();
+      const v = part.slice(eq + 1);
+      if (k in map) map[k] = v;
     }
-    return { a: map.A, b: map.B, c: map.C, d: map.D, note: "" };
   }
-  return { a: "", b: "", c: "", d: "", note: explanation };
+  return { a: map.A, b: map.B, c: map.C, d: map.D, note };
 }
 
 function QuestionBankPage() {
@@ -119,17 +121,17 @@ function QuestionBankPage() {
   const lockedCourse = teacher?.courses.find((c) => c.id === lockedCourseId) ?? null;
 
   const [mode, setMode] = useState<Mode>("list");
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterCourse, setFilterCourse] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
   const [busy, setBusy] = useState(false);
 
-  // Create form
+  // Form fields (create + edit)
   const [courseId, setCourseId] = useState("");
   const [qText, setQText] = useState("");
   const [qType, setQType] = useState("mcq");
   const [marks, setMarks] = useState(1);
-  const [difficulty, setDifficulty] = useState("easy");
   const [optionA, setOptionA] = useState("");
   const [optionB, setOptionB] = useState("");
   const [optionC, setOptionC] = useState("");
@@ -152,7 +154,7 @@ function QuestionBankPage() {
       const { data, error } = await supabase
         .from("questions")
         .select(
-          "id, question_text, question_type, marks, difficulty, status, course_id, correct_answer, explanation, created_at, courses(code, name)",
+          "id, question_text, question_type, marks, status, course_id, correct_answer, explanation, created_at, courses(code, name)",
         )
         .eq("school_id", teacher.schoolId)
         .in("course_id", ids)
@@ -185,23 +187,44 @@ function QuestionBankPage() {
     return { total, mcq, active };
   }, [questions]);
 
-  function openCreate() {
-    if (!teacher?.courses.length) {
-      toast.error("No courses assigned");
-      return;
-    }
-    setCourseId(lockedCourseId ?? teacher.courses[0].id);
+  function resetForm() {
+    setEditingId(null);
+    setCourseId(lockedCourseId ?? teacher?.courses[0]?.id ?? "");
     setQText("");
     setQType("mcq");
     setMarks(1);
-    setDifficulty("easy");
     setOptionA("");
     setOptionB("");
     setOptionC("");
     setOptionD("");
     setCorrect("A");
     setExplanation("");
-    setMode("create");
+  }
+
+  function openCreate() {
+    if (!teacher?.courses.length) {
+      toast.error("No courses assigned");
+      return;
+    }
+    resetForm();
+    setCourseId(lockedCourseId ?? teacher.courses[0].id);
+    setMode("form");
+  }
+
+  function openEdit(q: QuestionRow) {
+    const opts = decodeOptions(q.explanation);
+    setEditingId(q.id);
+    setCourseId(q.course_id ?? lockedCourseId ?? teacher?.courses[0]?.id ?? "");
+    setQText(q.question_text);
+    setQType(q.question_type || "mcq");
+    setMarks(q.marks || 1);
+    setOptionA(opts.a);
+    setOptionB(opts.b);
+    setOptionC(opts.c);
+    setOptionD(opts.d);
+    setCorrect(q.correct_answer || "A");
+    setExplanation(opts.note);
+    setMode("form");
   }
 
   function openImport() {
@@ -248,24 +271,38 @@ function QuestionBankPage() {
         qType === "true_false"
           ? encodeOptions(optionA || "True", optionB || "False", "", "")
           : encodeOptions(optionA, optionB, optionC, optionD);
-      const expl =
-        [optsBlob, explanation.trim()].filter(Boolean).join("\n") || null;
+      const expl = [optsBlob, explanation.trim()].filter(Boolean).join("\n") || null;
 
-      const { error } = await supabase.from("questions").insert({
-        school_id: teacher.schoolId,
+      const payload = {
         course_id: courseId,
-        created_by: session.userId,
         question_text: qText.trim(),
         question_type: qType,
         marks,
-        difficulty,
         status: "active",
         correct_answer: correct.trim() || null,
         explanation: expl,
-      } as never);
-      if (error) throw error;
-      toast.success("Question saved");
+      };
+
+      if (editingId) {
+        const { error } = await supabase
+          .from("questions")
+          .update(payload as never)
+          .eq("id", editingId)
+          .eq("school_id", teacher.schoolId);
+        if (error) throw error;
+        toast.success("Question updated");
+      } else {
+        const { error } = await supabase.from("questions").insert({
+          ...payload,
+          school_id: teacher.schoolId,
+          created_by: session.userId,
+        } as never);
+        if (error) throw error;
+        toast.success("Question saved");
+      }
+
       setMode("list");
+      resetForm();
       await qc.invalidateQueries({ queryKey: ["teacher-questions"] });
       await listQ.refetch();
     } catch (err) {
@@ -331,7 +368,6 @@ function QuestionBankPage() {
           question_text: d.question_text.trim(),
           question_type: d.question_type,
           marks: d.marks,
-          difficulty: "medium",
           status: "active",
           correct_answer: d.correct_answer.trim() || null,
           explanation: expl,
@@ -360,19 +396,27 @@ function QuestionBankPage() {
     );
   }
 
-  // ── CREATE ──────────────────────────────────────────────
-  if (mode === "create") {
+  // ── CREATE / EDIT FORM ──────────────────────────────────
+  if (mode === "form") {
     return (
       <>
         <PageHeader
-          title="Add question"
+          title={editingId ? "Edit question" : "Add question"}
           description={
             lockedCourse
               ? `For ${lockedCourse.code} — ${lockedCourse.name}`
-              : "Add a single question to your bank"
+              : editingId
+                ? "Update this question and save your changes"
+                : "Add a single question to your bank"
           }
           actions={
-            <Button variant="outline" onClick={() => setMode("list")}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                resetForm();
+                setMode("list");
+              }}
+            >
               <X className="mr-1.5 h-4 w-4" />
               Cancel
             </Button>
@@ -402,7 +446,7 @@ function QuestionBankPage() {
               )}
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label className="font-semibold">Type</Label>
                 <Select value={qType} onValueChange={setQType}>
@@ -426,19 +470,6 @@ function QuestionBankPage() {
                   value={marks}
                   onChange={(e) => setMarks(Number(e.target.value) || 1)}
                 />
-              </div>
-              <div className="space-y-2">
-                <Label className="font-semibold">Difficulty</Label>
-                <Select value={difficulty} onValueChange={setDifficulty}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="easy">Easy</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="hard">Hard</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </div>
 
@@ -518,12 +549,24 @@ function QuestionBankPage() {
             </div>
 
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <Button variant="outline" onClick={() => setMode("list")}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  resetForm();
+                  setMode("list");
+                }}
+              >
                 Cancel
               </Button>
               <Button className="font-semibold" disabled={busy} onClick={() => void saveQuestion()}>
-                {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Plus className="mr-1.5 h-4 w-4" />}
-                Save question
+                {busy ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : editingId ? (
+                  <Save className="mr-1.5 h-4 w-4" />
+                ) : (
+                  <Plus className="mr-1.5 h-4 w-4" />
+                )}
+                {editingId ? "Save changes" : "Save question"}
               </Button>
             </div>
           </div>
@@ -815,7 +858,6 @@ function QuestionBankPage() {
                               {q.courses?.code ?? "—"}
                             </span>
                             <StatusBadge status={q.question_type.replaceAll("_", " ")} />
-                            <StatusBadge status={q.difficulty} />
                             <span className="text-xs text-slate-500">{q.marks} mark(s)</span>
                           </div>
                           <p className="mt-2 text-sm font-semibold text-slate-900">{q.question_text}</p>
@@ -833,15 +875,25 @@ function QuestionBankPage() {
                             </p>
                           )}
                         </div>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="text-destructive"
-                          onClick={() => void deleteQuestion(q.id)}
-                          aria-label="Delete question"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => openEdit(q)}
+                            aria-label="Edit question"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="text-destructive"
+                            onClick={() => void deleteQuestion(q.id)}
+                            aria-label="Delete question"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     </li>
                   );
