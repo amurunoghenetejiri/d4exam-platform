@@ -12,7 +12,8 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   thresholdAction: "flag",
 };
 
-const SECURITY_MARKER = "[[D4_SECURITY_JSON]]";
+export const SECURITY_MARKER = "[[D4_SECURITY_JSON]]";
+export const META_MARKER = "[[D4_EXAM_META]]";
 
 const storageKey = (teacherId: string) => `d4exam.teacher.security.${teacherId}`;
 
@@ -81,15 +82,39 @@ export function fromExamSettingsRow(row: ExamSettingsRow | null | undefined): Ex
   };
 }
 
+/** Remove all internal markers so teachers only see human instructions. */
+export function stripInternalMarkers(description: string | null | undefined): string {
+  if (!description) return "";
+  let s = description;
+  const secIdx = s.indexOf(SECURITY_MARKER);
+  if (secIdx >= 0) s = s.slice(0, secIdx);
+  const metaIdx = s.indexOf(META_MARKER);
+  if (metaIdx >= 0) {
+    // meta may appear mid-text; drop from marker to end of that line / blob
+    const before = s.slice(0, metaIdx);
+    const after = s.slice(metaIdx + META_MARKER.length);
+    // drop JSON on same segment until newline or next marker
+    const rest = after.replace(/^\s*\{[^\n]*\}/, "");
+    s = before + rest;
+  }
+  s = s
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      return !t.startsWith(SECURITY_MARKER) && !t.startsWith(META_MARKER);
+    })
+    .join("\n")
+    .trim();
+  return s;
+}
+
 /** Embed security JSON into description so officer can still read it if exam_settings table is missing. */
 export function embedSecurityInDescription(
   description: string | null | undefined,
   settings: ExamSecuritySettings,
 ): string {
-  const clean = (description || "").replace(
-    new RegExp(`\n?${SECURITY_MARKER.replace(/[[\]]/g, "\\$&")}[\s\S]*$`),
-    "",
-  ).trim();
+  const clean = stripInternalMarkers(description);
+  // re-attach meta if caller already put it back — only security here
   const blob = `${SECURITY_MARKER}${JSON.stringify(settings)}`;
   return clean ? `${clean}\n${blob}` : blob;
 }
@@ -101,19 +126,33 @@ export function parseSecurityFromDescription(
   const idx = description.indexOf(SECURITY_MARKER);
   if (idx < 0) return null;
   try {
-    const raw = description.slice(idx + SECURITY_MARKER.length).trim();
-    const parsed = JSON.parse(raw) as Partial<ExamSecuritySettings>;
+    let raw = description.slice(idx + SECURITY_MARKER.length).trim();
+    // only parse the first JSON object
+    const start = raw.indexOf("{");
+    if (start < 0) return null;
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < raw.length; i++) {
+      if (raw[i] === "{") depth++;
+      if (raw[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end < 0) return null;
+    const parsed = JSON.parse(raw.slice(start, end + 1)) as Partial<ExamSecuritySettings>;
     return { ...DEFAULT_EXAM_SECURITY, ...parsed };
   } catch {
     return null;
   }
 }
 
+/** @deprecated use stripInternalMarkers */
 export function stripSecurityMarker(description: string | null | undefined): string {
-  if (!description) return "";
-  return description
-    .replace(new RegExp(`\n?${SECURITY_MARKER.replace(/[[\]]/g, "\\$&")}[\s\S]*$`), "")
-    .trim();
+  return stripInternalMarkers(description);
 }
 
 export function securitySummaryLines(s: ExamSecuritySettings): string[] {
