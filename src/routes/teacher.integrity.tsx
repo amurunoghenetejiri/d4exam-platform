@@ -1,8 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
-import { Input } from "@/components/ui/input";
-import * as mock from "@/data/mock";
+import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
+import { useTeacherContext } from "@/lib/teacher";
 
 export const Route = createFileRoute("/teacher/integrity")({
   head: () => ({
@@ -10,7 +8,7 @@ export const Route = createFileRoute("/teacher/integrity")({
       { title: "Integrity — D4EXAM" },
       {
         name: "description",
-        content: "Security and integrity events from examinations on your assigned courses.",
+        content: "Integrity events for examinations on your assigned courses.",
       },
     ],
   }),
@@ -18,64 +16,25 @@ export const Route = createFileRoute("/teacher/integrity")({
 });
 
 function Page() {
-  const assigned = mock.currentTeacher.assignedCourses;
-  const [q, setQ] = useState("");
+  const { data: teacher, isLoading } = useTeacherContext();
 
-  const events = useMemo(() => {
-    let list = mock.integrityEvents.filter((e) => assigned.includes(e.exam));
-    if (q.trim()) {
-      const s = q.toLowerCase();
-      list = list.filter(
-        (e) =>
-          e.student.toLowerCase().includes(s) ||
-          e.matric.toLowerCase().includes(s) ||
-          e.event.toLowerCase().includes(s) ||
-          e.exam.toLowerCase().includes(s),
-      );
-    }
-    return list;
-  }, [assigned, q]);
+  if (isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (!teacher) {
+    return <EmptyState title="Teacher profile not found" description="Contact School Admin." />;
+  }
 
   return (
     <>
       <PageHeader
         title="Integrity"
-        description="Tab switches, fullscreen exits, and blocked actions during exams on your courses."
+        description={`Events for exams on your ${teacher.courses.length} assigned course(s) · ${teacher.fullName}`}
       />
 
-      <div className="mb-4">
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search student, event, exam…"
-          className="max-w-md rounded-full"
+      <SectionCard title="Integrity events">
+        <EmptyState
+          title="No integrity events yet"
+          description="When students sit locked-down exams on your courses, tab switches, fullscreen exits, and similar events will appear here once logged by the platform."
         />
-      </div>
-
-      <SectionCard title="Recent events">
-        {events.length === 0 ? (
-          <EmptyState
-            title="No integrity events"
-            description="Events appear while students sit locked-down examinations."
-          />
-        ) : (
-          <ul className="space-y-3">
-            {events.map((e) => (
-              <li
-                key={e.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-900">{e.event}</p>
-                  <p className="text-xs text-slate-500">
-                    {e.student} · {e.matric} · {e.exam} · {e.time}
-                  </p>
-                </div>
-                <StatusBadge status={e.severity} />
-              </li>
-            ))}
-          </ul>
-        )}
       </SectionCard>
     </>
   );
