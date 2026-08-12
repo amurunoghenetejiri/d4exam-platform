@@ -1,7 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Send, Save, Loader2, ChevronLeft, ChevronRight, ShieldCheck } from "lucide-react";
+import {
+  Plus,
+  Send,
+  Save,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  ShieldCheck,
+  Undo2,
+} from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +62,22 @@ type ExamRow = {
   courses: { code: string; name: string } | null;
 };
 
+function toLocalInput(iso: string | null | undefined) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function endFromStart(startLocal: string, durationMin: number) {
+  if (!startLocal) return "";
+  const d = new Date(startLocal);
+  if (Number.isNaN(d.getTime())) return "";
+  d.setMinutes(d.getMinutes() + Math.max(1, durationMin));
+  return toLocalInput(d.toISOString());
+}
+
 async function upsertExamSettings(examId: string, teacherId: string, totalMarks = 0) {
   const security = loadTeacherSecurityDefaults(teacherId);
   const row = toExamSettingsRow(examId, security, totalMarks);
@@ -90,6 +115,7 @@ function Page() {
   const listQ = useQuery({
     queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds, lockedCourseId],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
+    refetchInterval: 20_000,
     queryFn: async () => {
       if (!teacher) return [] as ExamRow[];
       const { data, error } = await supabase
@@ -106,9 +132,7 @@ function Page() {
     },
   });
 
-  const securityPreview = teacher
-    ? loadTeacherSecurityDefaults(teacher.teacherId)
-    : null;
+  const securityPreview = teacher ? loadTeacherSecurityDefaults(teacher.teacherId) : null;
 
   function openBuilder() {
     if (!teacher?.courses.length) {
@@ -123,6 +147,16 @@ function Page() {
     setEndAt("");
     setStep(1);
     setBuilder(true);
+  }
+
+  function onStartChange(v: string) {
+    setStartAt(v);
+    if (v) setEndAt(endFromStart(v, duration));
+  }
+
+  function onDurationChange(n: number) {
+    setDuration(n);
+    if (startAt) setEndAt(endFromStart(startAt, n));
   }
 
   function validateStep(s: number) {
@@ -155,6 +189,8 @@ function Page() {
     if (!teacher || !session || !validateStep(1)) return;
     setBusy(true);
     try {
+      const computedEnd =
+        endAt || (startAt ? endFromStart(startAt, duration) : "");
       const { data: created, error } = await supabase
         .from("examinations")
         .insert({
@@ -165,7 +201,7 @@ function Page() {
           description: description.trim() || null,
           duration_minutes: duration,
           scheduled_start: startAt ? new Date(startAt).toISOString() : null,
-          scheduled_end: endAt ? new Date(endAt).toISOString() : null,
+          scheduled_end: computedEnd ? new Date(computedEnd).toISOString() : null,
           status,
         } as never)
         .select("id")
@@ -199,12 +235,30 @@ function Page() {
         .eq("id", id)
         .eq("school_id", teacher.schoolId);
       if (error) throw error;
-      // Ensure security row exists / is refreshed from current defaults
       await upsertExamSettings(id, teacher.teacherId);
       toast.success("Submitted for officer approval (security saved)");
       await listQ.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not submit");
+    }
+  }
+
+  /** Withdraw from officer queue back to draft so teacher can edit. */
+  async function cancelSubmit(id: string) {
+    if (!teacher) return;
+    if (!confirm("Withdraw this examination from officer review? It will return to draft.")) return;
+    try {
+      const { error } = await supabase
+        .from("examinations")
+        .update({ status: "draft" } as never)
+        .eq("id", id)
+        .eq("school_id", teacher.schoolId)
+        .in("status", ["pending_approval", "changes_requested"]);
+      if (error) throw error;
+      toast.success("Submission cancelled — exam is draft again");
+      await listQ.refetch();
+    } catch (err) {
+      toast.error((err as Error).message || "Could not cancel submission");
     }
   }
 
@@ -303,7 +357,7 @@ function Page() {
                   type="number"
                   min={5}
                   value={duration}
-                  onChange={(e) => setDuration(Number(e.target.value) || 60)}
+                  onChange={(e) => onDurationChange(Number(e.target.value) || 60)}
                 />
               </div>
             </div>
@@ -312,18 +366,19 @@ function Page() {
           {step === 2 && (
             <div className="mx-auto max-w-xl space-y-4">
               <p className="text-sm text-slate-600">
-                Proposed schedule. Examination Officer may adjust on approval.
+                Proposed schedule. End time auto-fills from start + duration. Officer may reschedule on
+                approval.
               </p>
               <div className="space-y-2">
                 <Label className="font-semibold">Start</Label>
                 <Input
                   type="datetime-local"
                   value={startAt}
-                  onChange={(e) => setStartAt(e.target.value)}
+                  onChange={(e) => onStartChange(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
-                <Label className="font-semibold">End</Label>
+                <Label className="font-semibold">End (auto from duration)</Label>
                 <Input
                   type="datetime-local"
                   value={endAt}
@@ -374,16 +429,12 @@ function Page() {
                       <li key={line}>• {line}</li>
                     ))}
                   </ul>
-                  <p className="mt-2 text-[11px] text-slate-500">
-                    Change these under <strong>Exam Security</strong>, then create/submit again to
-                    refresh.
-                  </p>
                 </div>
               )}
 
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                Submitting sends this exam and its security settings to the Examination Officer.
-                Students only see it after approval.
+                Students only see this exam after the Examination Officer approves it. While it is
+                pending, you can cancel the submission and return it to draft.
               </p>
             </div>
           )}
@@ -394,11 +445,7 @@ function Page() {
               Back
             </Button>
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() => void persist("draft")}
-              >
+              <Button variant="outline" disabled={busy} onClick={() => void persist("draft")}>
                 {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}
                 Save draft
               </Button>
@@ -483,34 +530,61 @@ function Page() {
             />
           ) : (
             <ul className="space-y-3">
-              {exams.map((e) => (
-                <li
-                  key={e.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
-                    <p className="text-xs text-slate-500">
-                      {e.courses?.code ?? "—"} · {e.duration_minutes} min ·{" "}
-                      {e.scheduled_start
-                        ? new Date(e.scheduled_start).toLocaleString()
-                        : "Not scheduled"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <StatusBadge status={String(e.status).replaceAll("_", " ")} />
-                    {e.status === "draft" && (
-                      <Button
-                        size="sm"
-                        className="font-semibold"
-                        onClick={() => void submitExisting(e.id)}
-                      >
-                        Submit
-                      </Button>
-                    )}
-                  </div>
-                </li>
-              ))}
+              {exams.map((e) => {
+                const approvedLike = ["approved", "scheduled", "published", "ongoing"].includes(
+                  e.status,
+                );
+                return (
+                  <li
+                    key={e.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {e.courses?.code ?? "—"} · {e.duration_minutes} min
+                        {e.scheduled_start
+                          ? ` · Starts ${new Date(e.scheduled_start).toLocaleString()}`
+                          : " · Not scheduled"}
+                      </p>
+                      {approvedLike && (
+                        <p className="mt-1 text-xs font-semibold text-primary">
+                          Approved
+                          {e.scheduled_start
+                            ? ` — exam starting ${new Date(e.scheduled_start).toLocaleString()}`
+                            : " — schedule may still be set by officer"}
+                        </p>
+                      )}
+                      {e.status === "pending_approval" && (
+                        <p className="mt-1 text-xs text-amber-700">Waiting for officer approval</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge status={String(e.status).replaceAll("_", " ")} />
+                      {e.status === "draft" && (
+                        <Button
+                          size="sm"
+                          className="font-semibold"
+                          onClick={() => void submitExisting(e.id)}
+                        >
+                          Submit
+                        </Button>
+                      )}
+                      {(e.status === "pending_approval" || e.status === "changes_requested") && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="font-semibold"
+                          onClick={() => void cancelSubmit(e.id)}
+                        >
+                          <Undo2 className="mr-1 h-3.5 w-3.5" />
+                          Cancel submit
+                        </Button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </SectionCard>
