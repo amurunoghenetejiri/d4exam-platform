@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Send, Save, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Send, Save, Loader2, ChevronLeft, ChevronRight, ShieldCheck } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,11 @@ import {
 import { useTeacherContext } from "@/lib/teacher";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  loadTeacherSecurityDefaults,
+  securitySummaryLines,
+  toExamSettingsRow,
+} from "@/lib/exam-security";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -48,6 +53,16 @@ type ExamRow = {
   courses: { code: string; name: string } | null;
 };
 
+async function upsertExamSettings(examId: string, teacherId: string, totalMarks = 0) {
+  const security = loadTeacherSecurityDefaults(teacherId);
+  const row = toExamSettingsRow(examId, security, totalMarks);
+  const { error } = await supabase.from("exam_settings").upsert(row as never, {
+    onConflict: "exam_id",
+  });
+  if (error) throw error;
+  return security;
+}
+
 function Page() {
   const { course: courseFromUrl } = Route.useSearch();
   const { data: teacher, isLoading: tLoading } = useTeacherContext();
@@ -77,7 +92,7 @@ function Page() {
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
     queryFn: async () => {
       if (!teacher) return [] as ExamRow[];
-      let q = supabase
+      const { data, error } = await supabase
         .from("examinations")
         .select(
           "id, title, status, duration_minutes, scheduled_start, scheduled_end, course_id, description, courses(code, name)",
@@ -86,11 +101,14 @@ function Page() {
         .in("course_id", lockedCourseId ? [lockedCourseId] : teacher.courseIds)
         .order("created_at", { ascending: false })
         .limit(100);
-      const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as ExamRow[];
     },
   });
+
+  const securityPreview = teacher
+    ? loadTeacherSecurityDefaults(teacher.teacherId)
+    : null;
 
   function openBuilder() {
     if (!teacher?.courses.length) {
@@ -137,22 +155,30 @@ function Page() {
     if (!teacher || !session || !validateStep(1)) return;
     setBusy(true);
     try {
-      const { error } = await supabase.from("examinations").insert({
-        school_id: teacher.schoolId,
-        course_id: courseId,
-        created_by: session.userId,
-        title: title.trim(),
-        description: description.trim() || null,
-        duration_minutes: duration,
-        scheduled_start: startAt ? new Date(startAt).toISOString() : null,
-        scheduled_end: endAt ? new Date(endAt).toISOString() : null,
-        status,
-      } as never);
+      const { data: created, error } = await supabase
+        .from("examinations")
+        .insert({
+          school_id: teacher.schoolId,
+          course_id: courseId,
+          created_by: session.userId,
+          title: title.trim(),
+          description: description.trim() || null,
+          duration_minutes: duration,
+          scheduled_start: startAt ? new Date(startAt).toISOString() : null,
+          scheduled_end: endAt ? new Date(endAt).toISOString() : null,
+          status,
+        } as never)
+        .select("id")
+        .single();
       if (error) throw error;
+      if (!created?.id) throw new Error("Examination was not created");
+
+      await upsertExamSettings(created.id, teacher.teacherId);
+
       toast.success(
         status === "draft"
-          ? "Draft saved"
-          : "Submitted for Examination Officer approval",
+          ? "Draft saved with security settings"
+          : "Submitted for Examination Officer approval (security attached)",
       );
       setBuilder(false);
       await qc.invalidateQueries({ queryKey: ["teacher-exams"] });
@@ -173,7 +199,9 @@ function Page() {
         .eq("id", id)
         .eq("school_id", teacher.schoolId);
       if (error) throw error;
-      toast.success("Submitted for officer approval");
+      // Ensure security row exists / is refreshed from current defaults
+      await upsertExamSettings(id, teacher.teacherId);
+      toast.success("Submitted for officer approval (security saved)");
       await listQ.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not submit");
@@ -334,9 +362,28 @@ function Page() {
                   </div>
                 </dl>
               </div>
+
+              {securityPreview && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                  <p className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-900">
+                    <ShieldCheck className="h-4 w-4 text-primary" />
+                    Exam security (from your defaults)
+                  </p>
+                  <ul className="space-y-1 text-xs text-slate-700">
+                    {securitySummaryLines(securityPreview).map((line) => (
+                      <li key={line}>• {line}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    Change these under <strong>Exam Security</strong>, then create/submit again to
+                    refresh.
+                  </p>
+                </div>
+              )}
+
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                Submitting sends this exam to the Examination Officer. Students only see it after
-                approval.
+                Submitting sends this exam and its security settings to the Examination Officer.
+                Students only see it after approval.
               </p>
             </div>
           )}
