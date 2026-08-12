@@ -57,7 +57,6 @@ function Page() {
         .order("scheduled_start", { ascending: true, nullsFirst: false })
         .limit(30);
 
-      // Prefer enrolled courses; if none linked yet, still show school approved exams
       if (student?.courseIds?.length) {
         q = q.in("course_id", student.courseIds);
       }
@@ -111,24 +110,28 @@ function Page() {
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <MiniStat
+          to="/student/examinations"
           label="Ready to start"
           value={startable.length}
           icon={Play}
           color="bg-emerald-50 text-emerald-600"
         />
         <MiniStat
+          to="/student/examinations"
           label="Upcoming"
           value={upcoming.length}
           icon={CalendarClock}
           color="bg-blue-50 text-blue-600"
         />
         <MiniStat
+          to="/student/results"
           label="Completed"
           value={completed.length}
           icon={CheckCircle2}
           color="bg-violet-50 text-violet-600"
         />
         <MiniStat
+          to="/student/courses"
           label="My courses"
           value={student?.courses.length ?? 0}
           icon={BookOpen}
@@ -223,45 +226,32 @@ function Page() {
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <QuickTile
-          to="/student/courses"
-          label="Courses"
-          value={student?.courses.length ?? 0}
-          icon={BookOpen}
-          sub="Enrolled"
-        />
-        <QuickTile
-          to="/student/notifications"
-          label="Unread"
-          value={unread}
-          icon={Bell}
-          sub="Notifications"
-        />
-        <QuickTile
-          to="/student/examinations"
-          label="Exams"
-          value={exams.length}
-          icon={CalendarClock}
-          sub="Officer-approved"
-        />
+        <QuickTile to="/student/courses" label="Courses" value={student?.courses.length ?? 0} icon={BookOpen} sub="My programme" />
+        <QuickTile to="/student/notifications" label="Unread" value={unread} icon={Bell} sub="Notifications" />
+        <QuickTile to="/student/examinations" label="Exams" value={exams.length} icon={CalendarClock} sub="Officer-approved" />
       </div>
     </>
   );
 }
 
 function MiniStat({
+  to,
   label,
   value,
   icon: Icon,
   color,
 }: {
+  to: string;
   label: string;
   value: string | number;
   icon: typeof Play;
   color: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <Link
+      to={to}
+      className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-primary/40 hover:shadow-md"
+    >
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-xs font-semibold text-slate-500">{label}</p>
@@ -271,7 +261,7 @@ function MiniStat({
           <Icon className="h-4 w-4" />
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
 
