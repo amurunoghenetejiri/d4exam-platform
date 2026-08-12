@@ -2,8 +2,8 @@ import logo from "@/assets/d4exam-logo.png.asset.json";
 import { cn } from "@/lib/utils";
 
 /**
- * Brand watermark using the official D4EXAM logo.
- * Soft grayscale, positioned behind content so it is visible but never competes.
+ * Brand watermark — FIXED to the viewport so page content scrolls over it.
+ * Soft grayscale; never blocks interaction.
  */
 export function Watermark({
   className,
@@ -26,7 +26,8 @@ export function Watermark({
     <div
       aria-hidden
       className={cn(
-        "pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden",
+        // fixed = stays in place while the document scrolls
+        "pointer-events-none fixed inset-0 z-0 flex items-center justify-center overflow-hidden",
         className,
       )}
     >
