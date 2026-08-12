@@ -13,6 +13,17 @@ export const Route = createFileRoute("/officer/results")({
   component: Page,
 });
 
+type ExamRow = {
+  id: string;
+  title: string;
+  status: string;
+  course_id: string | null;
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  duration_minutes: number | null;
+  courses: { code: string; name: string } | null;
+};
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
@@ -22,21 +33,91 @@ function Page() {
     queryKey: ["officer-results-exams", schoolId],
     enabled: Boolean(schoolId),
     queryFn: async () => {
-      if (!schoolId) return [];
+      if (!schoolId) return [] as ExamRow[];
       const { data, error } = await supabase
         .from("examinations")
-        .select("id, title, status, courses(code, name)")
+        .select(
+          "id, title, status, course_id, scheduled_start, scheduled_end, duration_minutes, courses(code, name)",
+        )
         .eq("school_id", schoolId)
-        .in("status", ["completed", "closed", "ongoing", "scheduled", "approved"])
+        .in("status", ["completed", "closed", "ongoing", "scheduled", "approved", "published"])
         .order("updated_at", { ascending: false })
         .limit(50);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as ExamRow[];
+    },
+  });
+
+  /** Attempts per exam — used to gate completion */
+  const attemptsQ = useQuery({
+    queryKey: ["officer-exam-attempts", schoolId, examsQ.data?.map((e) => e.id).join(",")],
+    enabled: Boolean(schoolId && (examsQ.data?.length ?? 0) > 0),
+    queryFn: async () => {
+      const ids = (examsQ.data ?? []).map((e) => e.id);
+      if (!ids.length) return {} as Record<string, { total: number; finished: number }>;
+      try {
+        const { data, error } = await supabase
+          .from("exam_attempts")
+          .select("examination_id, status")
+          .in("examination_id", ids);
+        if (error) throw error;
+        const map: Record<string, { total: number; finished: number }> = {};
+        for (const a of data ?? []) {
+          const eid = (a as { examination_id: string }).examination_id;
+          if (!map[eid]) map[eid] = { total: 0, finished: 0 };
+          map[eid].total += 1;
+          const st = String((a as { status: string }).status || "").toLowerCase();
+          if (["submitted", "completed", "finished", "graded", "marked"].includes(st)) {
+            map[eid].finished += 1;
+          }
+        }
+        return map;
+      } catch {
+        return {} as Record<string, { total: number; finished: number }>;
+      }
+    },
+  });
+
+  const qCountQ = useQuery({
+    queryKey: ["officer-exam-qcounts", schoolId, examsQ.data?.map((e) => e.course_id).join(",")],
+    enabled: Boolean(schoolId && (examsQ.data?.length ?? 0) > 0),
+    queryFn: async () => {
+      const courseIds = [...new Set((examsQ.data ?? []).map((e) => e.course_id).filter(Boolean))] as string[];
+      if (!courseIds.length || !schoolId) return {} as Record<string, number>;
+      const { data } = await supabase
+        .from("questions")
+        .select("course_id")
+        .eq("school_id", schoolId)
+        .in("course_id", courseIds);
+      const map: Record<string, number> = {};
+      for (const q of data ?? []) {
+        const c = (q as { course_id: string }).course_id;
+        map[c] = (map[c] ?? 0) + 1;
+      }
+      return map;
     },
   });
 
   async function markCompleted(id: string) {
     if (!schoolId || !user) return;
+    const stats = attemptsQ.data?.[id];
+    if (stats && stats.total > 0 && stats.finished < stats.total) {
+      toast.error(
+        `Cannot complete yet — ${stats.finished} of ${stats.total} student attempts finished. All students must finish first.`,
+      );
+      return;
+    }
+    if (!stats || stats.total === 0) {
+      // No attempt rows yet — allow with confirmation
+      if (
+        !confirm(
+          "No student attempts recorded yet. Mark completed only if you are sure all candidates have finished.",
+        )
+      ) {
+        return;
+      }
+    }
+
     const { error } = await supabase
       .from("examinations")
       .update({ status: "completed" } as never)
@@ -53,7 +134,7 @@ function Page() {
       action: "exam_completed",
       entity_type: "examination",
       entity_id: id,
-      description: "Marked examination completed",
+      description: "Marked examination completed after student attempts finished",
     } as never);
     toast.success("Marked completed");
     await qc.invalidateQueries({ queryKey: ["officer-results-exams"] });
@@ -61,12 +142,14 @@ function Page() {
   }
 
   const rows = examsQ.data ?? [];
+  const attempts = attemptsQ.data ?? {};
+  const qCounts = qCountQ.data ?? {};
 
   return (
     <>
       <PageHeader
         title="Results Release"
-        description="Manage completed examinations for your school. Detailed student scores appear when attempts exist."
+        description="An exam can be marked completed only when all recorded student attempts are finished."
       />
 
       <SectionCard title="Examinations">
@@ -79,28 +162,57 @@ function Page() {
           />
         ) : (
           <ul className="space-y-3">
-            {rows.map((e) => (
-              <li
-                key={e.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
-              >
-                <div>
-                  <p className="text-sm font-bold">{e.title}</p>
-                  <p className="text-xs text-slate-500">
-                    {(e.courses as { code?: string } | null)?.code} —{" "}
-                    {(e.courses as { name?: string } | null)?.name}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={String(e.status).replaceAll("_", " ")} />
-                  {e.status !== "completed" && e.status !== "closed" && (
-                    <Button size="sm" variant="outline" onClick={() => void markCompleted(e.id)}>
-                      Mark completed
-                    </Button>
-                  )}
-                </div>
-              </li>
-            ))}
+            {rows.map((e) => {
+              const st = attempts[e.id];
+              const canComplete =
+                e.status !== "completed" &&
+                e.status !== "closed" &&
+                (!st || st.total === 0 || st.finished >= st.total);
+              const blocked =
+                st && st.total > 0 && st.finished < st.total && e.status !== "completed";
+              const qn = e.course_id ? qCounts[e.course_id] ?? 0 : 0;
+              return (
+                <li
+                  key={e.id}
+                  className="flex flex-col gap-2 rounded-xl border border-slate-100 p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold">{e.title}</p>
+                    <p className="text-xs text-slate-500">
+                      {e.courses?.code} — {e.courses?.name}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {e.scheduled_start
+                        ? `Start ${new Date(e.scheduled_start).toLocaleString()}`
+                        : "Not scheduled"}
+                      {e.duration_minutes ? ` · ${e.duration_minutes} min` : ""}
+                      {qn ? ` · ${qn} bank questions` : ""}
+                      {st
+                        ? ` · Attempts ${st.finished}/${st.total} finished`
+                        : " · No attempts yet"}
+                    </p>
+                    {blocked && (
+                      <p className="mt-1 text-xs font-semibold text-amber-700">
+                        Waiting for remaining students to finish before completion.
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={String(e.status).replaceAll("_", " ")} />
+                    {e.status !== "completed" && e.status !== "closed" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={Boolean(blocked)}
+                        onClick={() => void markCompleted(e.id)}
+                      >
+                        Mark completed
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </SectionCard>
