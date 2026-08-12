@@ -21,6 +21,7 @@ import {
   Blocks,
   PenSquare,
   Home,
+  Network,
   type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/types";
@@ -138,6 +139,7 @@ export const adminNav: RoleConfig = {
     {
       label: "Academics",
       items: [
+        { label: "Academic Structure", to: "/admin/structure", icon: Network },
         { label: "Faculty / College", to: "/admin/faculties", icon: Building2 },
         { label: "Departments", to: "/admin/departments", icon: Blocks },
         { label: "Levels", to: "/admin/levels", icon: Layers },
