@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { ShieldCheck, Save } from "lucide-react";
-import { PageHeader, SectionCard } from "@/components/dashboard/kit";
+import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useTeacherContext } from "@/lib/teacher";
 import { toast } from "sonner";
 import type { ExamSecuritySettings } from "@/types";
 
@@ -22,7 +23,7 @@ export const Route = createFileRoute("/teacher/exam-security")({
       { title: "Exam Security — D4EXAM" },
       {
         name: "description",
-        content: "Default CBT security settings applied when you create examinations.",
+        content: "Default CBT security settings for examinations you create.",
       },
     ],
   }),
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/teacher/exam-security")({
 });
 
 function Page() {
+  const { data: teacher, isLoading } = useTeacherContext();
   const [settings, setSettings] = useState<ExamSecuritySettings>({
     fullscreen: true,
     tabMonitoring: true,
@@ -43,18 +45,23 @@ function Page() {
   });
 
   function save() {
-    toast.success("Security defaults saved. New exams will use these settings.");
+    toast.success("Security defaults saved for your next examinations.");
   }
 
   function toggle<K extends keyof ExamSecuritySettings>(key: K, value: ExamSecuritySettings[K]) {
     setSettings((s) => ({ ...s, [key]: value }));
   }
 
+  if (isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (!teacher) {
+    return <EmptyState title="Teacher profile not found" description="Contact School Admin." />;
+  }
+
   return (
     <>
       <PageHeader
         title="Exam Security"
-        description="Default lockdown settings for CBT delivery. Applied when you build a new examination (you can override per exam)."
+        description={`Defaults for ${teacher.fullName}. Applied when you build new examinations.`}
         actions={
           <Button className="font-semibold" onClick={save}>
             <Save className="mr-1.5 h-4 w-4" />
@@ -102,7 +109,7 @@ function Page() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="warn">Warn candidate</SelectItem>
-                  <SelectItem value="flag">Flag for officer review</SelectItem>
+                  <SelectItem value="flag">Flag for review</SelectItem>
                   <SelectItem value="terminate">Terminate attempt</SelectItem>
                 </SelectContent>
               </Select>
@@ -132,7 +139,7 @@ function Page() {
             />
             <Toggle
               label="Require camera"
-              hint="Optional proctoring camera (if school enables)"
+              hint="Optional proctoring camera"
               checked={settings.requireCamera}
               onChange={(v) => toggle("requireCamera", v)}
             />
@@ -147,8 +154,8 @@ function Page() {
           <div className="mt-6 flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4">
             <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
             <p className="text-sm text-slate-700">
-              Integrity events (tab switches, fullscreen exit, copy attempts) are logged for the
-              Examination Officer and appear on the Integrity page during live exams.
+              These defaults apply when you create examinations for your assigned courses. Officer
+              approval is still required before students can sit the exam.
             </p>
           </div>
         </SectionCard>
