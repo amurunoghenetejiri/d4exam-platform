@@ -29,7 +29,9 @@ import {
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  DEFAULT_EXAM_SECURITY,
   fromExamSettingsRow,
+  parseSecurityFromDescription,
   securitySummaryLines,
   type ExamSettingsRow,
 } from "@/lib/exam-security";
@@ -136,18 +138,25 @@ function Page() {
     queryKey: ["officer-exam-settings", schoolId, examIds.join(",")],
     enabled: Boolean(schoolId && examIds.length),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("exam_settings")
-        .select(
-          "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility",
-        )
-        .in("exam_id", examIds);
-      if (error) throw error;
-      const map: Record<string, ExamSettingsRow> = {};
-      for (const row of (data ?? []) as ExamSettingsRow[]) {
-        map[row.exam_id] = row;
+      try {
+        const { data, error } = await supabase
+          .from("exam_settings")
+          .select(
+            "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility",
+          )
+          .in("exam_id", examIds);
+        if (error) {
+          console.warn("exam_settings not available:", error.message);
+          return {} as Record<string, ExamSettingsRow>;
+        }
+        const map: Record<string, ExamSettingsRow> = {};
+        for (const row of (data ?? []) as ExamSettingsRow[]) {
+          map[row.exam_id] = row;
+        }
+        return map;
+      } catch {
+        return {} as Record<string, ExamSettingsRow>;
       }
-      return map;
     },
   });
   const settingsMap = settingsQ.data ?? {};
@@ -175,6 +184,14 @@ function Page() {
     }),
     [exams, activeQueue.length],
   );
+
+  function resolveSecurity(item: ExamRow) {
+    const row = settingsMap[item.id];
+    if (row) return { security: fromExamSettingsRow(row), source: "table" as const };
+    const fromDesc = parseSecurityFromDescription(item.description);
+    if (fromDesc) return { security: fromDesc, source: "snapshot" as const };
+    return { security: DEFAULT_EXAM_SECURITY, source: "default" as const };
+  }
 
   function openAction(item: ExamRow, a: "approve" | "reject" | "changes") {
     setSelected(item);
@@ -300,7 +317,6 @@ function Page() {
       );
       closeDialog();
       await qc.invalidateQueries({ queryKey: ["officer-approvals"] });
-      await qc.invalidateQueries({ queryKey: ["officer-exam-settings"] });
       await listQ.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not update examination");
@@ -331,12 +347,6 @@ function Page() {
         <Stat label="In queue" value={stats.total} icon={FileText} tone="primary" />
       </div>
 
-      {listQ.isError && (
-        <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {(listQ.error as Error).message}
-        </p>
-      )}
-
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <SectionCard
           title="Awaiting your decision"
@@ -347,14 +357,13 @@ function Page() {
           ) : activeQueue.length === 0 ? (
             <EmptyState
               title="No examinations awaiting approval"
-              description="When a teacher submits an exam, it appears here with security and schedule details."
+              description="When a teacher submits an exam, it appears here."
             />
           ) : (
             <ul className="space-y-4">
               {activeQueue.map((item) => {
                 const qn = item.course_id ? qCounts[item.course_id] ?? 0 : 0;
-                const settingsRow = settingsMap[item.id];
-                const security = fromExamSettingsRow(settingsRow);
+                const { security, source } = resolveSecurity(item);
                 const open = expandedId === item.id;
                 return (
                   <li
@@ -385,11 +394,15 @@ function Page() {
                         </span>
                         <span className="inline-flex items-center gap-1">
                           <FileText className="h-3.5 w-3.5" />
-                          {qn} question(s) in course bank
+                          {qn} question(s)
                         </span>
                         <span className="inline-flex items-center gap-1 text-primary">
                           <ShieldCheck className="h-3.5 w-3.5" />
-                          {settingsRow ? "Security saved" : "No security row yet"}
+                          {source === "table"
+                            ? "Security saved"
+                            : source === "snapshot"
+                              ? "Security on exam"
+                              : "Default security"}
                         </span>
                       </div>
 
@@ -439,15 +452,11 @@ function Page() {
                               <ShieldCheck className="h-3.5 w-3.5 text-primary" />
                               Exam security
                             </p>
-                            {settingsRow ? (
-                              <ul className="mt-1.5 space-y-1">
-                                {securitySummaryLines(security).map((line) => (
-                                  <li key={line}>• {line}</li>
-                                ))}
-                              </ul>
-                            ) : (
-                              <p className="mt-1.5 text-amber-800">No security row saved yet.</p>
-                            )}
+                            <ul className="mt-1.5 space-y-1">
+                              {securitySummaryLines(security).map((line) => (
+                                <li key={line}>• {line}</li>
+                              ))}
+                            </ul>
                           </div>
                         </div>
                       )}
