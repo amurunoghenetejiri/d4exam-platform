@@ -8,6 +8,15 @@ const loginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+function appOrigin() {
+  return (
+    process.env["SITE_URL"] ||
+    process.env["VITE_SITE_URL"] ||
+    process.env["APP_URL"] ||
+    ""
+  ).replace(/\/$/, "");
+}
+
 /**
  * Resolves the account from (school code + identifier) server side, then signs in.
  * The e-mail address is never returned to an unauthenticated caller.
@@ -36,7 +45,6 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
       }
     }
 
-    // Candidate look-ups: e-mail, student id / matric, staff id, officer id
     const profileQuery = supabaseAdmin
       .from("profiles")
       .select("id, email, status, school_id")
@@ -182,8 +190,15 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
         .single();
       if (schoolError || !school) throw new Error(schoolError?.message ?? "Could not create school");
 
-      const { data: invited, error: inviteError } =
-        await supabaseAdmin.auth.admin.inviteUserByEmail(app.applicant_email);
+      const origin = appOrigin();
+      const redirectTo = origin
+        ? `${origin}/reset-password`
+        : undefined;
+
+      const { data: invited, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+        app.applicant_email,
+        redirectTo ? { redirectTo } : undefined,
+      );
       if (inviteError || !invited.user) {
         throw new Error(inviteError?.message ?? "Could not invite the school administrator");
       }
@@ -209,7 +224,7 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
         recipient_user_id: invited.user.id,
         school_id: school.id,
         title: "Welcome to D4EXAM",
-        message: `Your school has been approved. School code: ${schoolCode}. Activate your account to continue.`,
+        message: `Your school has been approved. School code: ${schoolCode}. Open the invite email and set your password at /reset-password, then sign in with this school code and your email.`,
         type: "success",
       });
 
