@@ -17,6 +17,8 @@ export const currentStudent = {
   session: "2025/2026",
   semester: "First Semester",
   avatar: "DA",
+  /** Course codes this student is enrolled in (eligibility) */
+  enrolledCourses: ["CSC101", "MTH301", "PHY301", "EEE301", "GST301", "CSC305"],
 };
 
 export const currentTeacher = {
@@ -25,6 +27,8 @@ export const currentTeacher = {
   department: "Computer Engineering",
   school: "Example State University",
   avatar: "JD",
+  /** Only these courses may be managed by this teacher */
+  assignedCourses: ["CSC101", "CSC305"],
 };
 
 export const currentAdmin = {
@@ -51,46 +55,126 @@ export const currentSuperAdmin = {
   avatar: "D4",
 };
 
+/** Exams visible to the current student (eligible only). */
 export const studentExams: Exam[] = [
   {
     id: "e1",
     code: "CSC101",
     title: "First Semester Examination",
     course: "Introduction to Computer Science",
+    courseCode: "CSC101",
     date: "Tomorrow · 10:00 AM",
     duration: 60,
     questions: 50,
     status: "scheduled",
+    totalMarks: 100,
+    resultVisibility: "after_officer_release",
   },
   {
     id: "e2",
     code: "MTH301",
     title: "Continuous Assessment",
     course: "Numerical Analysis",
+    courseCode: "MTH301",
     date: "Today · 2:00 PM",
     duration: 45,
     questions: 40,
     status: "ongoing",
+    totalMarks: 40,
   },
   {
     id: "e3",
     code: "PHY301",
     title: "Mid Semester Test",
     course: "Electromagnetic Fields",
+    courseCode: "PHY301",
     date: "Aug 28, 2026 · 9:00 AM",
     duration: 90,
     questions: 60,
     status: "scheduled",
+    totalMarks: 60,
   },
   {
     id: "e4",
     code: "EEE301",
     title: "First Semester Examination",
     course: "Digital Electronics",
+    courseCode: "EEE301",
     date: "Aug 12, 2026 · 11:00 AM",
     duration: 60,
     questions: 50,
     status: "completed",
+    totalMarks: 100,
+  },
+];
+
+/** Teacher-created exams including those awaiting officer approval. */
+export const teacherExams: Exam[] = [
+  {
+    id: "te1",
+    code: "CSC101",
+    title: "CSC101 First Semester Examination",
+    course: "Introduction to Computer Science",
+    courseCode: "CSC101",
+    date: "Aug 20, 2026 · 10:00 AM",
+    duration: 60,
+    questions: 50,
+    status: "pending_approval",
+    totalMarks: 100,
+  },
+  {
+    id: "te2",
+    code: "CSC305",
+    title: "CSC305 Continuous Assessment",
+    course: "Operating Systems",
+    courseCode: "CSC305",
+    date: "Aug 25, 2026 · 2:00 PM",
+    duration: 45,
+    questions: 30,
+    status: "draft",
+    totalMarks: 30,
+  },
+  {
+    id: "te3",
+    code: "CSC101",
+    title: "CSC101 Mid-Semester Test",
+    course: "Introduction to Computer Science",
+    courseCode: "CSC101",
+    date: "Jul 15, 2026 · 9:00 AM",
+    duration: 40,
+    questions: 25,
+    status: "completed",
+    totalMarks: 40,
+  },
+];
+
+/** Officer queue — pending / changes requested. */
+export const officerApprovalQueue: Exam[] = [
+  {
+    id: "te1",
+    code: "CSC101",
+    title: "CSC101 First Semester Examination",
+    course: "Introduction to Computer Science",
+    courseCode: "CSC101",
+    date: "Aug 20, 2026 · 10:00 AM",
+    duration: 60,
+    questions: 50,
+    status: "pending_approval",
+    totalMarks: 100,
+    createdBy: "Dr. John Doe",
+  },
+  {
+    id: "oa2",
+    code: "MTH301",
+    title: "MTH301 Continuous Assessment",
+    course: "Numerical Analysis",
+    courseCode: "MTH301",
+    date: "Aug 18, 2026 · 11:00 AM",
+    duration: 45,
+    questions: 40,
+    status: "changes_requested",
+    totalMarks: 40,
+    createdBy: "Dr. Amina Bello",
   },
 ];
 
@@ -128,7 +212,7 @@ export const studentResults: ResultRecord[] = [
     title: "Digital Electronics",
     score: 68,
     grade: "C",
-    status: "pending",
+    status: "awaiting_release",
     session: "2025/2026",
   },
 ];
@@ -192,6 +276,7 @@ export const examQuestions: Question[] = [
     marks: 2,
     topic: "Fundamentals",
     difficulty: "Easy",
+    courseCode: "CSC101",
   },
   {
     id: "q2",
@@ -202,6 +287,7 @@ export const examQuestions: Question[] = [
     marks: 2,
     topic: "Data Structures",
     difficulty: "Easy",
+    courseCode: "CSC101",
   },
   {
     id: "q3",
@@ -212,6 +298,7 @@ export const examQuestions: Question[] = [
     marks: 3,
     topic: "Algorithms",
     difficulty: "Medium",
+    courseCode: "CSC101",
   },
   {
     id: "q4",
@@ -222,6 +309,7 @@ export const examQuestions: Question[] = [
     marks: 2,
     topic: "Fundamentals",
     difficulty: "Easy",
+    courseCode: "CSC101",
   },
   {
     id: "q5",
@@ -232,6 +320,7 @@ export const examQuestions: Question[] = [
     marks: 1,
     topic: "Compilers",
     difficulty: "Easy",
+    courseCode: "CSC101",
   },
   {
     id: "q6",
@@ -242,6 +331,7 @@ export const examQuestions: Question[] = [
     marks: 3,
     topic: "Operating Systems",
     difficulty: "Medium",
+    courseCode: "CSC305",
   },
   {
     id: "q7",
@@ -257,6 +347,7 @@ export const examQuestions: Question[] = [
     marks: 1,
     topic: "Databases",
     difficulty: "Easy",
+    courseCode: "CSC101",
   },
   {
     id: "q8",
@@ -267,6 +358,7 @@ export const examQuestions: Question[] = [
     marks: 3,
     topic: "Databases",
     difficulty: "Medium",
+    courseCode: "CSC101",
   },
   {
     id: "q9",
@@ -277,6 +369,7 @@ export const examQuestions: Question[] = [
     marks: 2,
     topic: "Networking",
     difficulty: "Easy",
+    courseCode: "CSC101",
   },
   {
     id: "q10",
@@ -287,6 +380,7 @@ export const examQuestions: Question[] = [
     marks: 1,
     topic: "Algorithms",
     difficulty: "Medium",
+    courseCode: "CSC101",
   },
 ];
 
@@ -298,6 +392,7 @@ export const students: Student[] = [
     name: "Destiny Amurun",
     matric: "CSC/2021/0184",
     email: "destiny.amurun@examplestate.edu.ng",
+    faculty: "Faculty of Engineering",
     department: "Computer Engineering",
     level: "300",
     status: "active",
@@ -307,6 +402,7 @@ export const students: Student[] = [
     name: "Aisha Mohammed",
     matric: "CSC/2021/0102",
     email: "aisha.mohammed@examplestate.edu.ng",
+    faculty: "Faculty of Science",
     department: "Computer Science",
     level: "300",
     status: "active",
@@ -316,6 +412,7 @@ export const students: Student[] = [
     name: "Emeka Obi",
     matric: "EEE/2020/0455",
     email: "emeka.obi@examplestate.edu.ng",
+    faculty: "Faculty of Engineering",
     department: "Electrical Engineering",
     level: "400",
     status: "active",
@@ -325,6 +422,7 @@ export const students: Student[] = [
     name: "Fatima Yusuf",
     matric: "MTH/2022/0231",
     email: "fatima.yusuf@examplestate.edu.ng",
+    faculty: "Faculty of Science",
     department: "Mathematics",
     level: "200",
     status: "pending",
@@ -334,6 +432,7 @@ export const students: Student[] = [
     name: "Tunde Bakare",
     matric: "PHY/2019/0078",
     email: "tunde.bakare@examplestate.edu.ng",
+    faculty: "Faculty of Science",
     department: "Physics",
     level: "500",
     status: "inactive",
@@ -343,6 +442,7 @@ export const students: Student[] = [
     name: "Chiamaka Nwankwo",
     matric: "CSC/2022/0311",
     email: "chiamaka.nwankwo@examplestate.edu.ng",
+    faculty: "Faculty of Science",
     department: "Computer Science",
     level: "200",
     status: "active",
@@ -352,6 +452,7 @@ export const students: Student[] = [
     name: "Ibrahim Sule",
     matric: "EEE/2021/0190",
     email: "ibrahim.sule@examplestate.edu.ng",
+    faculty: "Faculty of Engineering",
     department: "Electrical Engineering",
     level: "300",
     status: "active",
@@ -361,6 +462,7 @@ export const students: Student[] = [
     name: "Ngozi Eze",
     matric: "BIO/2023/0044",
     email: "ngozi.eze@examplestate.edu.ng",
+    faculty: "Faculty of Science",
     department: "Biology",
     level: "100",
     status: "active",
@@ -368,11 +470,11 @@ export const students: Student[] = [
 ];
 
 export const teachers = [
-  { id: "t1", name: "Dr. John Doe", staffId: "STF/ENG/0342", department: "Computer Engineering", courses: 4, status: "active" },
-  { id: "t2", name: "Dr. Amina Bello", staffId: "STF/SCI/0121", department: "Mathematics", courses: 3, status: "active" },
-  { id: "t3", name: "Prof. K. Nwosu", staffId: "STF/SCI/0033", department: "Physics", courses: 2, status: "active" },
-  { id: "t4", name: "Engr. Peter Musa", staffId: "STF/ENG/0410", department: "Electrical Engineering", courses: 5, status: "active" },
-  { id: "t5", name: "Mrs. F. Adebayo", staffId: "STF/GST/0009", department: "General Studies", courses: 2, status: "inactive" },
+  { id: "t1", name: "Dr. John Doe", staffId: "STF/ENG/0342", department: "Computer Engineering", courses: 2, assigned: ["CSC101", "CSC305"], status: "active" },
+  { id: "t2", name: "Dr. Amina Bello", staffId: "STF/SCI/0121", department: "Mathematics", courses: 3, assigned: ["MTH301"], status: "active" },
+  { id: "t3", name: "Prof. K. Nwosu", staffId: "STF/SCI/0033", department: "Physics", courses: 2, assigned: ["PHY301"], status: "active" },
+  { id: "t4", name: "Engr. Peter Musa", staffId: "STF/ENG/0410", department: "Electrical Engineering", courses: 5, assigned: ["EEE301"], status: "active" },
+  { id: "t5", name: "Mrs. F. Adebayo", staffId: "STF/GST/0009", department: "General Studies", courses: 2, assigned: ["GST301"], status: "inactive" },
 ];
 
 export const faculties = [
@@ -414,7 +516,7 @@ export const integrityEvents = [
 
 export const auditLogs = [
   { id: "l1", actor: "Grace Okonkwo", action: "Published CSC101 results", target: "CSC101", time: "Aug 11, 2026 · 14:22", ip: "102.89.34.11" },
-  { id: "l2", actor: "Dr. John Doe", action: "Created examination", target: "CSC101 First Semester", time: "Aug 11, 2026 · 09:04", ip: "102.89.34.87" },
+  { id: "l2", actor: "Dr. John Doe", action: "Submitted examination for approval", target: "CSC101 First Semester", time: "Aug 11, 2026 · 09:04", ip: "102.89.34.87" },
   { id: "l3", actor: "Prof. Samuel Adeyemi", action: "Approved examination", target: "MTH301 CA", time: "Aug 10, 2026 · 16:41", ip: "197.210.77.4" },
   { id: "l4", actor: "Platform Operations", action: "Suspended school account", target: "Nairobi Institute of Technology", time: "Aug 9, 2026 · 11:07", ip: "41.75.88.20" },
   { id: "l5", actor: "Grace Okonkwo", action: "Imported 420 student records", target: "students-2026.csv", time: "Aug 8, 2026 · 08:15", ip: "102.89.34.11" },
