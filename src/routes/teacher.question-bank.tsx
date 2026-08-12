@@ -52,6 +52,13 @@ export const Route = createFileRoute("/teacher/question-bank")({
   component: Page,
 });
 
+type QOption = {
+  id?: string;
+  option_text: string;
+  is_correct: boolean;
+  option_order: number;
+};
+
 type QRow = {
   id: string;
   question_text: string;
@@ -63,7 +70,7 @@ type QRow = {
   explanation: string | null;
   correct_answer: string | null;
   courses: { code: string; name: string } | null;
-  question_options?: { id: string; option_text: string; is_correct: boolean; option_order: number }[];
+  question_options?: QOption[];
 };
 
 type EditorState = {
@@ -82,7 +89,83 @@ type EditorState = {
   option_d: string;
 };
 
-const STATUSES = ["draft", "ready_for_review", "approved", "rejected", "archived"] as const;
+const STATUSES = ["draft", "ready_for_review", "approved", "rejected", "archived", "active"] as const;
+
+/** Load questions even if optional columns / options table are missing. */
+async function fetchTeacherQuestions(
+  schoolId: string,
+  courseIds: string[],
+): Promise<QRow[]> {
+  if (!courseIds.length) return [];
+
+  // Prefer full shape; fall back so list still works without migrations
+  const attempts = [
+    "id, question_text, question_type, marks, difficulty, course_id, status, explanation, correct_answer, created_at, courses(code, name)",
+    "id, question_text, question_type, marks, difficulty, course_id, status, created_at, courses(code, name)",
+    "id, question_text, question_type, marks, difficulty, course_id, status, created_at",
+  ];
+
+  let rows: QRow[] | null = null;
+  let lastError: Error | null = null;
+
+  for (const select of attempts) {
+    const { data, error } = await supabase
+      .from("questions")
+      .select(select)
+      .eq("school_id", schoolId)
+      .in("course_id", courseIds)
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (!error) {
+      rows = (data ?? []).map((r) => ({
+        ...(r as QRow),
+        explanation: (r as QRow).explanation ?? null,
+        correct_answer: (r as QRow).correct_answer ?? null,
+        courses: (r as QRow).courses ?? null,
+        question_options: [],
+      }));
+      break;
+    }
+    lastError = error;
+  }
+
+  if (!rows) throw lastError ?? new Error("Could not load questions");
+
+  // Attach options in a second query (won’t break list if table missing)
+  try {
+    const ids = rows.map((r) => r.id);
+    if (ids.length) {
+      const { data: opts } = await supabase
+        .from("question_options")
+        .select("id, question_id, option_text, is_correct, option_order")
+        .in("question_id", ids);
+      if (opts?.length) {
+        const byQ = new Map<string, QOption[]>();
+        for (const o of opts) {
+          const qid = (o as { question_id: string }).question_id;
+          const list = byQ.get(qid) ?? [];
+          list.push({
+            id: (o as { id: string }).id,
+            option_text: (o as { option_text: string }).option_text,
+            is_correct: Boolean((o as { is_correct: boolean }).is_correct),
+            option_order: Number((o as { option_order: number }).option_order) || 1,
+          });
+          byQ.set(qid, list);
+        }
+        rows = rows.map((r) => ({
+          ...r,
+          question_options: (byQ.get(r.id) ?? []).sort(
+            (a, b) => a.option_order - b.option_order,
+          ),
+        }));
+      }
+    }
+  } catch {
+    /* options optional */
+  }
+
+  return rows;
+}
 
 function Page() {
   const { data: teacher, isLoading: tLoading } = useTeacherContext();
@@ -98,29 +181,17 @@ function Page() {
   const [editing, setEditing] = useState<EditorState | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Import wizard
   const [importOpen, setImportOpen] = useState(false);
   const [importCourseId, setImportCourseId] = useState("");
   const [importDrafts, setImportDrafts] = useState<DraftQuestion[]>([]);
   const [importBusy, setImportBusy] = useState(false);
-  const [importStep, setImportStep] = useState<"upload" | "preview">("upload");
 
   const listQ = useQuery({
-    queryKey: ["teacher-questions", teacher?.schoolId, teacher?.courseIds],
+    queryKey: ["teacher-questions", teacher?.schoolId, teacher?.courseIds?.join(",")],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
     queryFn: async () => {
       if (!teacher) return [] as QRow[];
-      const { data, error } = await supabase
-        .from("questions")
-        .select(
-          "id, question_text, question_type, marks, difficulty, course_id, status, explanation, correct_answer, courses(code, name), question_options(id, option_text, is_correct, option_order)",
-        )
-        .eq("school_id", teacher.schoolId)
-        .in("course_id", teacher.courseIds)
-        .order("created_at", { ascending: false })
-        .limit(500);
-      if (error) throw error;
-      return (data ?? []) as unknown as QRow[];
+      return fetchTeacherQuestions(teacher.schoolId, teacher.courseIds);
     },
   });
 
@@ -141,6 +212,11 @@ function Page() {
     }
     return list;
   }, [items, courseFilter, statusFilter, typeFilter, search]);
+
+  async function refreshList() {
+    await qc.invalidateQueries({ queryKey: ["teacher-questions"] });
+    await listQ.refetch();
+  }
 
   function emptyEditor(courseId: string): EditorState {
     return {
@@ -194,25 +270,48 @@ function Page() {
   }
 
   async function saveOptions(questionId: string, ed: EditorState) {
-    await supabase.from("question_options").delete().eq("question_id", questionId);
-    const needs =
-      ed.question_type === "mcq" ||
-      ed.question_type === "true_false";
+    try {
+      await supabase.from("question_options").delete().eq("question_id", questionId);
+    } catch {
+      /* table may not exist */
+    }
+    const needs = ed.question_type === "mcq" || ed.question_type === "true_false";
     if (!needs) return;
     const texts = [ed.option_a, ed.option_b, ed.option_c, ed.option_d];
     const correct = ed.correct_answer.trim().toUpperCase();
     const rows = texts
       .map((text, i) => ({
         question_id: questionId,
-        option_text: text.trim() || (ed.question_type === "true_false" && i < 2 ? (i === 0 ? "True" : "False") : ""),
+        option_text:
+          text.trim() ||
+          (ed.question_type === "true_false" && i < 2
+            ? i === 0
+              ? "True"
+              : "False"
+            : ""),
         is_correct: correct === String.fromCharCode(65 + i),
         option_order: i + 1,
       }))
       .filter((r) => r.option_text);
     if (rows.length) {
       const { error } = await supabase.from("question_options").insert(rows as never);
-      if (error) throw error;
+      if (error) {
+        // Non-fatal for bank list; warn teacher
+        console.warn(error.message);
+      }
     }
+  }
+
+  async function insertQuestionRow(payload: Record<string, unknown>) {
+    // Try with optional columns, then without
+    let res = await supabase.from("questions").insert(payload as never).select("id").single();
+    if (res.error && /explanation|correct_answer/i.test(res.error.message)) {
+      const slim = { ...payload };
+      delete slim.explanation;
+      delete slim.correct_answer;
+      res = await supabase.from("questions").insert(slim as never).select("id").single();
+    }
+    return res;
   }
 
   async function saveQuestion() {
@@ -234,13 +333,13 @@ function Page() {
     }
     setBusy(true);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         course_id: editing.course_id,
         question_text: editing.question_text.trim(),
         question_type: editing.question_type,
         marks: editing.marks,
         difficulty: editing.difficulty,
-        status: editing.status,
+        status: editing.status || "draft",
         explanation: editing.explanation.trim() || null,
         correct_answer:
           editing.question_type === "mcq" || editing.question_type === "true_false"
@@ -250,30 +349,35 @@ function Page() {
 
       let qid = editing.id;
       if (editing.id) {
-        const { error } = await supabase
+        let { error } = await supabase
           .from("questions")
           .update(payload as never)
           .eq("id", editing.id)
           .eq("school_id", teacher.schoolId);
+        if (error && /explanation|correct_answer/i.test(error.message)) {
+          const slim = { ...payload };
+          delete slim.explanation;
+          delete slim.correct_answer;
+          ({ error } = await supabase
+            .from("questions")
+            .update(slim as never)
+            .eq("id", editing.id)
+            .eq("school_id", teacher.schoolId));
+        }
         if (error) throw error;
       } else {
-        const { data, error } = await supabase
-          .from("questions")
-          .insert({
-            school_id: teacher.schoolId,
-            created_by: session.userId,
-            ...payload,
-          } as never)
-          .select("id")
-          .single();
+        const { data, error } = await insertQuestionRow({
+          school_id: teacher.schoolId,
+          created_by: session.userId,
+          ...payload,
+        });
         if (error) throw error;
         qid = (data as { id: string }).id;
       }
       if (qid) await saveOptions(qid, editing);
-      toast.success(editing.id ? "Question updated" : "Question saved to bank");
+      toast.success(editing.id ? "Question updated" : "Question saved — it now appears in your bank");
       setEditing(null);
-      await qc.invalidateQueries({ queryKey: ["teacher-questions"] });
-      await listQ.refetch();
+      await refreshList();
     } catch (err) {
       toast.error((err as Error).message || "Could not save");
     } finally {
@@ -299,27 +403,23 @@ function Page() {
       n.delete(id);
       return n;
     });
-    await listQ.refetch();
+    await refreshList();
   }
 
   async function duplicateQuestion(item: QRow) {
     if (!teacher || !session) return;
-    const { data, error } = await supabase
-      .from("questions")
-      .insert({
-        school_id: teacher.schoolId,
-        course_id: item.course_id,
-        created_by: session.userId,
-        question_text: item.question_text + " (copy)",
-        question_type: item.question_type,
-        marks: item.marks,
-        difficulty: item.difficulty,
-        status: "draft",
-        explanation: item.explanation,
-        correct_answer: item.correct_answer,
-      } as never)
-      .select("id")
-      .single();
+    const { data, error } = await insertQuestionRow({
+      school_id: teacher.schoolId,
+      course_id: item.course_id,
+      created_by: session.userId,
+      question_text: item.question_text + " (copy)",
+      question_type: item.question_type,
+      marks: item.marks,
+      difficulty: item.difficulty,
+      status: "draft",
+      explanation: item.explanation,
+      correct_answer: item.correct_answer,
+    });
     if (error) {
       toast.error(error.message);
       return;
@@ -337,7 +437,7 @@ function Page() {
       );
     }
     toast.success("Duplicated as draft");
-    await listQ.refetch();
+    await refreshList();
   }
 
   async function bulkStatus(status: string) {
@@ -349,9 +449,9 @@ function Page() {
       .eq("school_id", teacher.schoolId);
     if (error) toast.error(error.message);
     else {
-      toast.success(`Updated ${selectedIds.size} question(s) to ${status.replaceAll("_", " ")}`);
+      toast.success(`Updated ${selectedIds.size} question(s)`);
       setSelectedIds(new Set());
-      await listQ.refetch();
+      await refreshList();
     }
   }
 
@@ -367,7 +467,7 @@ function Page() {
     else {
       toast.success("Deleted");
       setSelectedIds(new Set());
-      await listQ.refetch();
+      await refreshList();
     }
   }
 
@@ -382,9 +482,8 @@ function Page() {
       }
       setImportDrafts(validateAll(drafts));
       setImportCourseId(teacher.courses[0]?.id ?? "");
-      setImportStep("preview");
       setImportOpen(true);
-      toast.message(`Extracted ${drafts.length} question(s) — review before import`);
+      toast.message(`Extracted ${drafts.length} question(s) — review, then Confirm import`);
     } catch (err) {
       toast.error((err as Error).message || "Import failed");
     } finally {
@@ -413,24 +512,24 @@ function Page() {
     setImportBusy(true);
     try {
       let saved = 0;
+      const errors: string[] = [];
       for (const d of selected) {
-        const { data, error } = await supabase
-          .from("questions")
-          .insert({
-            school_id: teacher.schoolId,
-            course_id: importCourseId,
-            created_by: session.userId,
-            question_text: d.question_text.trim(),
-            question_type: d.question_type,
-            marks: d.marks,
-            difficulty: "medium",
-            status: "draft",
-            explanation: d.explanation.trim() || null,
-            correct_answer: d.correct_answer.trim() || null,
-          } as never)
-          .select("id")
-          .single();
-        if (error) throw error;
+        const { data, error } = await insertQuestionRow({
+          school_id: teacher.schoolId,
+          course_id: importCourseId,
+          created_by: session.userId,
+          question_text: d.question_text.trim(),
+          question_type: d.question_type,
+          marks: d.marks,
+          difficulty: "medium",
+          status: "draft",
+          explanation: d.explanation.trim() || null,
+          correct_answer: d.correct_answer.trim() || null,
+        });
+        if (error) {
+          errors.push(error.message);
+          continue;
+        }
         const qid = (data as { id: string }).id;
         if (d.question_type === "mcq" || d.question_type === "true_false") {
           const texts = [d.option_a, d.option_b, d.option_c, d.option_d];
@@ -449,11 +548,30 @@ function Page() {
         }
         saved++;
       }
-      toast.success(`Imported ${saved} question(s) as draft. They are NOT auto-approved for exams.`);
+
+      // Reset filters so drafts are visible
+      setCourseFilter("all");
+      setStatusFilter("all");
+      setTypeFilter("all");
+      setSearch("");
       setImportOpen(false);
       setImportDrafts([]);
-      setImportStep("upload");
-      await listQ.refetch();
+
+      await refreshList();
+
+      if (saved === 0) {
+        toast.error(
+          errors[0] ||
+            "Nothing was saved. Check that your teacher account can write questions for this school.",
+        );
+      } else {
+        toast.success(
+          `Imported ${saved} question(s). They are listed below — edit anytime. (Not exam-approved.)`,
+        );
+        if (errors.length) {
+          toast.message(`${errors.length} row(s) failed: ${errors[0]}`);
+        }
+      }
     } catch (err) {
       toast.error((err as Error).message || "Import save failed");
     } finally {
@@ -474,7 +592,7 @@ function Page() {
     <>
       <PageHeader
         title="Question Bank"
-        description={`${teacher.fullName} · Assigned courses only · Manual create or import (no AI)`}
+        description={`${teacher.fullName} · ${items.length} question(s) in bank · Assigned courses only`}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" className="font-semibold" onClick={downloadCsvTemplate}>
@@ -516,6 +634,26 @@ function Page() {
         />
       ) : (
         <>
+          <div className="mb-4 rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-sm shadow-sm">
+            <span className="font-extrabold text-slate-900">{items.length}</span>
+            <span className="text-slate-600"> total in bank</span>
+            {filtered.length !== items.length && (
+              <span className="text-slate-600">
+                {" · "}
+                <span className="font-bold text-primary">{filtered.length}</span> matching filters
+              </span>
+            )}
+            {listQ.isFetching && (
+              <span className="ml-2 text-xs text-slate-400">Refreshing…</span>
+            )}
+          </div>
+
+          {listQ.isError && (
+            <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              Could not load questions: {(listQ.error as Error)?.message}
+            </p>
+          )}
+
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Input
               value={search}
@@ -562,6 +700,9 @@ function Page() {
                 <SelectItem value="numerical">Numerical</SelectItem>
               </SelectContent>
             </Select>
+            <Button variant="ghost" size="sm" className="font-semibold" onClick={() => void refreshList()}>
+              Refresh list
+            </Button>
           </div>
 
           {selectedIds.size > 0 && (
@@ -586,9 +727,13 @@ function Page() {
 
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
             <div className="space-y-3">
-              {listQ.isLoading && <p className="text-sm text-slate-500">Loading…</p>}
+              <h2 className="text-sm font-extrabold text-slate-800">
+                Your questions ({filtered.length})
+              </h2>
+              {listQ.isLoading && <p className="text-sm text-slate-500">Loading questions…</p>}
               {filtered.map((item) => {
                 const checked = selectedIds.has(item.id);
+                const opts = item.question_options ?? [];
                 return (
                   <div
                     key={item.id}
@@ -612,9 +757,24 @@ function Page() {
                       />
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-bold uppercase tracking-wide text-primary">
-                          {item.courses?.code ?? "—"}
+                          {item.courses?.code ?? "Course"}
                         </p>
                         <p className="mt-1 text-sm font-bold text-slate-900">{item.question_text}</p>
+                        {opts.length > 0 && (
+                          <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
+                            {opts.map((o, i) => (
+                              <li key={o.id ?? i}>
+                                <span className="font-semibold">
+                                  {String.fromCharCode(65 + i)}.
+                                </span>{" "}
+                                {o.option_text}
+                                {o.is_correct ? (
+                                  <span className="ml-1 font-bold text-emerald-600">✓</span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                         <div className="mt-2 flex flex-wrap gap-2">
                           <StatusBadge status={item.question_type} />
                           <StatusBadge status={String(item.status).replaceAll("_", " ")} />
@@ -622,7 +782,12 @@ function Page() {
                         </div>
                       </div>
                       <div className="flex shrink-0 gap-0.5">
-                        <Button size="icon" variant="ghost" onClick={() => loadIntoEditor(item)} aria-label="Edit">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => loadIntoEditor(item)}
+                          aria-label="Edit"
+                        >
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button
@@ -649,7 +814,9 @@ function Page() {
               })}
               {!listQ.isLoading && filtered.length === 0 && (
                 <p className="rounded-2xl border border-dashed border-slate-200 py-12 text-center text-sm text-slate-500">
-                  No questions match. Create one or import a file.
+                  {items.length === 0
+                    ? "No questions in your bank yet. Import a file or create one — they will show up here."
+                    : "No questions match your filters. Set status/type filters to “All”."}
                 </p>
               )}
             </div>
@@ -657,10 +824,13 @@ function Page() {
             <div className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm lg:sticky lg:top-24 lg:self-start">
               {!editing ? (
                 <div className="space-y-4 py-8 text-center text-sm text-slate-500">
-                  <p>Select <strong>Edit</strong> or create a new question.</p>
+                  <p>
+                    Your imported and created questions appear on the left. Click the pencil to
+                    edit any of them.
+                  </p>
                   <p className="text-xs">
-                    Supported import: .xlsx .xls .csv .docx .pdf · Always review answers before
-                    confirm. Import does not approve exams.
+                    Supported import: .xlsx .xls .csv .docx .pdf · Review answers before Confirm
+                    import.
                   </p>
                 </div>
               ) : (
@@ -802,10 +972,7 @@ function Page() {
 
                   {!needsOpts && (
                     <div className="space-y-2">
-                      <Label className="font-semibold">
-                        Correct answer{" "}
-                        {editing.question_type === "essay" ? "(optional key)" : ""}
-                      </Label>
+                      <Label className="font-semibold">Correct answer</Label>
                       <Input
                         value={editing.correct_answer}
                         onChange={(e) =>
@@ -826,7 +993,11 @@ function Page() {
                   </div>
 
                   <div className="flex flex-wrap gap-2 pt-1">
-                    <Button className="font-semibold" disabled={busy} onClick={() => void saveQuestion()}>
+                    <Button
+                      className="font-semibold"
+                      disabled={busy}
+                      onClick={() => void saveQuestion()}
+                    >
                       {busy ? (
                         <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                       ) : (
@@ -843,7 +1014,6 @@ function Page() {
             </div>
           </div>
 
-          {/* Import preview modal-like panel */}
           {importOpen && (
             <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4">
               <div className="flex max-h-[92dvh] w-full max-w-3xl flex-col rounded-t-2xl border border-slate-200 bg-white shadow-xl sm:rounded-2xl">
@@ -851,7 +1021,8 @@ function Page() {
                   <div>
                     <h2 className="text-base font-extrabold">Import preview</h2>
                     <p className="text-xs text-slate-500">
-                      Edit every question. Invalid rows will not save. No AI — you control answers.
+                      {importDrafts.length} question(s) extracted. Edit, then Confirm — they will
+                      appear in your bank list.
                     </p>
                   </div>
                   <Button
@@ -859,7 +1030,7 @@ function Page() {
                     variant="ghost"
                     onClick={() => {
                       setImportOpen(false);
-                      setImportStep("upload");
+                      setImportDrafts([]);
                     }}
                   >
                     <X className="h-4 w-4" />
@@ -964,7 +1135,10 @@ function Page() {
                               validateAll(
                                 rows.map((r, i) =>
                                   i === idx
-                                    ? { ...r, question_type: v as DraftQuestion["question_type"] }
+                                    ? {
+                                        ...r,
+                                        question_type: v as DraftQuestion["question_type"],
+                                      }
                                     : r,
                                 ),
                               ),
@@ -1013,7 +1187,11 @@ function Page() {
                   >
                     Cancel
                   </Button>
-                  <Button className="font-semibold" disabled={importBusy} onClick={() => void confirmImport()}>
+                  <Button
+                    className="font-semibold"
+                    disabled={importBusy}
+                    onClick={() => void confirmImport()}
+                  >
                     {importBusy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
                     Confirm import
                   </Button>
@@ -1024,9 +1202,9 @@ function Page() {
 
           <SectionCard className="mt-6" title="How this fits exam creation">
             <p className="text-sm text-slate-600">
-              Question Bank → select questions when creating an examination → submit for officer
-              approval → officer approves → exam is scheduled → eligible students sit the exam.
-              Importing or creating questions never auto-approves an examination.
+              After import, questions show in this bank. Edit them here, then attach them when
+              creating an examination and submit for officer approval. Import never auto-approves
+              an exam.
             </p>
           </SectionCard>
         </>
