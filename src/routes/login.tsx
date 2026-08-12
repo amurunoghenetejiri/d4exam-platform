@@ -40,14 +40,20 @@ function LoginPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (!code.trim() || !identifier.trim() || !password.trim()) {
-      setError("Enter your school code, username and password to continue.");
+    // School code optional for platform super admins (email login).
+    // Students/staff still use school code + identifier.
+    if (!identifier.trim() || !password.trim()) {
+      setError("Enter your username/email and password to continue.");
       return;
     }
     setLoading(true);
     try {
       const result = await signIn({
-        data: { schoolCode: code.trim(), identifier: identifier.trim(), password },
+        data: {
+          schoolCode: code.trim(),
+          identifier: identifier.trim(),
+          password,
+        },
       });
       if ("error" in result && result.error) {
         setError(result.error);
@@ -71,7 +77,6 @@ function LoginPage() {
     }
   }
 
-
   return (
     <div className="grid min-h-dvh bg-white lg:grid-cols-2">
       <div className="flex flex-col px-4 py-8 sm:px-8">
@@ -81,7 +86,6 @@ function LoginPage() {
 
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-10">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-            {/* Institution mark */}
             <div className="mb-6 flex flex-col items-center text-center">
               <div className="grid h-16 w-16 place-items-center rounded-2xl border border-slate-200 bg-slate-50 text-primary shadow-sm">
                 <Building2 className="h-8 w-8" aria-hidden />
@@ -105,7 +109,8 @@ function LoginPage() {
             <form className="mt-6 space-y-4" onSubmit={submit} noValidate>
               <div className="space-y-2">
                 <Label htmlFor="school-code" className="font-semibold text-slate-700">
-                  School Code
+                  School Code{" "}
+                  <span className="font-normal text-slate-400">(optional for platform admin)</span>
                 </Label>
                 <Input
                   id="school-code"
