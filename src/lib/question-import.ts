@@ -213,28 +213,49 @@ function makeDraft(partial: Partial<DraftQuestion> & { question_text: string }):
   };
 }
 
-/** Normalize PDF/Word text that often loses line breaks. */
+/** Aggressive normalization so PDF single-line dumps still split. */
 function normalizeExtractedText(raw: string): string {
   let t = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  // Collapse excessive spaces but keep intentional newlines
-  t = t.replace(/[ \t]+/g, " ");
-  // Markers → new lines
+  t = t.replace(/[ \t\u00a0]+/g, " ");
+
+  // Explicit headers
   t = t.replace(/\s*(QUESTION\s*\d+\s*[:.)]?)/gi, "\n$1\n");
   t = t.replace(/\s*(Q\s*\d+\s*[:.)])/gi, "\n$1\n");
-  // Numbered stems: "1." "2)" "3:" at start-ish
+
+  // Numbered stems anywhere in flow: " 1. " " 12) "
+  t = t.replace(/(?:^|[\n.?!;])\s*(\d{1,3})[.)]\s+/g, "\n$1. ");
   t = t.replace(/(?:^|\n)\s*(\d{1,3})[.)]\s+/g, "\n$1. ");
-  t = t.replace(/\s+([A-Da-d])[)\].:\-]\s+/g, "\n$1. ");
+
+  // Options: A. A) (A) a. a)
+  t = t.replace(/\s*[(\[]?\s*([A-Da-d])\s*[)\].:\-]\s+/g, "\n$1. ");
+
+  // Answers
   t = t.replace(/\s*(ANSWER\s*[:：])/gi, "\n$1 ");
   t = t.replace(/\s*(Ans(?:wer)?\s*[:：])/gi, "\n$1 ");
+
   return t;
 }
 
-const OPTION_LINE = /^([A-Da-d])[)\].:\-\s]+\s*(.+)$/;
+// A. / A) / (A) / a.
+const OPTION_LINE = /^[(\[]?\s*([A-Da-d])\s*[)\].:\-]\s*(.+)$/;
 const ANSWER_LINE = /^(?:ANSWER|ANS(?:WER)?)\s*[:：]\s*(.+)$/i;
 const QUESTION_HDR = /^(?:QUESTION|Q)\s*(\d+)\s*[:.)]?\s*(.*)$/i;
 const NUMBERED_STEM = /^(\d{1,3})[.)]\s+(.+)$/;
 
-/** Strategy A: QUESTION N / Q N blocks */
+function isOptionLine(line: string) {
+  return OPTION_LINE.test(line);
+}
+function isAnswerLine(line: string) {
+  return ANSWER_LINE.test(line);
+}
+function isQuestionHdr(line: string) {
+  return QUESTION_HDR.test(line);
+}
+function isNumberedStem(line: string) {
+  // Don't treat "A. something" as numbered — digits only
+  return NUMBERED_STEM.test(line);
+}
+
 function parseQuestionHeaderBlocks(lines: string[]): DraftQuestion[] {
   const out: DraftQuestion[] = [];
   let i = 0;
@@ -249,22 +270,22 @@ function parseQuestionHeaderBlocks(lines: string[]): DraftQuestion[] {
     if (hdr[2]?.trim()) questionLines.push(hdr[2].trim());
     while (
       i < lines.length &&
-      !OPTION_LINE.test(lines[i]) &&
-      !ANSWER_LINE.test(lines[i]) &&
-      !QUESTION_HDR.test(lines[i]) &&
-      !NUMBERED_STEM.test(lines[i])
+      !isOptionLine(lines[i]) &&
+      !isAnswerLine(lines[i]) &&
+      !isQuestionHdr(lines[i]) &&
+      !isNumberedStem(lines[i])
     ) {
       questionLines.push(lines[i]);
       i++;
     }
     const opts: Record<string, string> = { A: "", B: "", C: "", D: "" };
-    while (i < lines.length && OPTION_LINE.test(lines[i])) {
+    while (i < lines.length && isOptionLine(lines[i])) {
       const m = lines[i].match(OPTION_LINE)!;
       opts[m[1].toUpperCase()] = m[2].trim();
       i++;
     }
     let answer = "";
-    if (i < lines.length && ANSWER_LINE.test(lines[i])) {
+    if (i < lines.length && isAnswerLine(lines[i])) {
       answer = normalizeCorrect(lines[i].replace(ANSWER_LINE, "$1"));
       i++;
     }
@@ -287,7 +308,6 @@ function parseQuestionHeaderBlocks(lines: string[]): DraftQuestion[] {
   return out;
 }
 
-/** Strategy B: numbered items 1. 2. 3. with A/B/C/D options */
 function parseNumberedMcqBlocks(lines: string[]): DraftQuestion[] {
   const out: DraftQuestion[] = [];
   let i = 0;
@@ -297,36 +317,33 @@ function parseNumberedMcqBlocks(lines: string[]): DraftQuestion[] {
       i++;
       continue;
     }
-    // Avoid treating option-like "A. text" — NUMBERED is digits only
     i++;
     const questionLines: string[] = [stem[2].trim()];
     while (
       i < lines.length &&
-      !OPTION_LINE.test(lines[i]) &&
-      !ANSWER_LINE.test(lines[i]) &&
-      !NUMBERED_STEM.test(lines[i]) &&
-      !QUESTION_HDR.test(lines[i])
+      !isOptionLine(lines[i]) &&
+      !isAnswerLine(lines[i]) &&
+      !isNumberedStem(lines[i]) &&
+      !isQuestionHdr(lines[i])
     ) {
       questionLines.push(lines[i]);
       i++;
     }
     const opts: Record<string, string> = { A: "", B: "", C: "", D: "" };
     let optionCount = 0;
-    while (i < lines.length && OPTION_LINE.test(lines[i])) {
+    while (i < lines.length && isOptionLine(lines[i])) {
       const m = lines[i].match(OPTION_LINE)!;
       opts[m[1].toUpperCase()] = m[2].trim();
       optionCount++;
       i++;
     }
     let answer = "";
-    if (i < lines.length && ANSWER_LINE.test(lines[i])) {
+    if (i < lines.length && isAnswerLine(lines[i])) {
       answer = normalizeCorrect(lines[i].replace(ANSWER_LINE, "$1"));
       i++;
     }
-    // Only keep if it looks like a real MCQ (has options) or a solid stem
     const text = questionLines.join(" ").trim();
-    if (!text || text.length < 3) continue;
-    if (optionCount === 0 && text.length < 12) continue;
+    if (!text || text.length < 2) continue;
     out.push(
       makeDraft({
         question_text: text,
@@ -342,7 +359,6 @@ function parseNumberedMcqBlocks(lines: string[]): DraftQuestion[] {
   return out;
 }
 
-/** Strategy C: stream walk — stem then options until next stem */
 function parseStreamMcq(lines: string[]): DraftQuestion[] {
   const out: DraftQuestion[] = [];
   let curQ = "";
@@ -369,21 +385,25 @@ function parseStreamMcq(lines: string[]): DraftQuestion[] {
   };
 
   for (const line of lines) {
-    if (ANSWER_LINE.test(line)) {
+    if (isAnswerLine(line)) {
       answer = normalizeCorrect(line.replace(ANSWER_LINE, "$1"));
       flush();
       continue;
     }
     const om = line.match(OPTION_LINE);
     if (om) {
+      // New option group after previous complete MCQ
+      if (opts.A && opts.B && om[1].toUpperCase() === "A" && curQ) {
+        flush();
+      }
       opts[om[1].toUpperCase()] = om[2].trim();
       continue;
     }
-    if (QUESTION_HDR.test(line) || NUMBERED_STEM.test(line)) {
+    if (isQuestionHdr(line) || isNumberedStem(line)) {
       if (curQ || Object.values(opts).some((v) => v)) flush();
       const qh = line.match(QUESTION_HDR);
       const ns = line.match(NUMBERED_STEM);
-      curQ = (qh?.[2] || ns?.[2] || line).trim();
+      curQ = (qh?.[2] || ns?.[2] || "").trim();
       continue;
     }
     if (Object.values(opts).some((v) => v) && curQ) {
@@ -395,7 +415,7 @@ function parseStreamMcq(lines: string[]): DraftQuestion[] {
   return out;
 }
 
-/** Prefer the strategy that yields the most valid-looking questions. */
+/** Pick the strategy with the most extracted questions (prefer MCQ-rich). */
 export function parseStructuredText(text: string): DraftQuestion[] {
   const normalized = normalizeExtractedText(text);
   const lines = normalized
@@ -411,32 +431,20 @@ export function parseStructuredText(text: string): DraftQuestion[] {
     parseStreamMcq(lines),
   ];
 
-  // Score: prefer more items with options and non-empty stems
   let best: DraftQuestion[] = [];
   let bestScore = -1;
+
   for (const list of candidates) {
-    const score = list.reduce((s, q) => {
-      let n = q.question_text.trim().length > 5 ? 2 : 0;
-      if (q.option_a && q.option_b) n += 3;
-      if (q.option_c) n += 1;
-      if (q.correct_answer) n += 1;
-      return s + n;
-    }, 0);
+    const mcq = list.filter((q) => q.option_a && q.option_b).length;
+    // Count first, then quality — never discard a longer extraction
+    const score = list.length * 10 + mcq * 5;
     if (list.length > best.length || (list.length === best.length && score > bestScore)) {
-      if (list.length >= best.length) {
-        best = list;
-        bestScore = score;
-      }
+      best = list;
+      bestScore = score;
     }
   }
 
-  // Merge if header strategy found few but numbered found many
-  const byLen = [...candidates].sort((a, b) => b.length - a.length);
-  if (byLen[0] && byLen[0].length > best.length) best = byLen[0];
-
-  // Drop empty / garbage
-  best = best.filter((q) => q.question_text.trim().length >= 3);
-
+  best = best.filter((q) => q.question_text.trim().length >= 2);
   return validateAll(best);
 }
 
@@ -481,12 +489,11 @@ export async function parseDocxFile(file: File): Promise<DraftQuestion[]> {
     const drafts = parseStructuredText(result.value || "");
     if (!drafts.length) {
       throw new Error(
-        "No questions found in Word file. Use numbered items or:\nQUESTION 1\n...\nA. ...\nANSWER: B",
+        "No questions found in Word file. Use numbered items (1. … A. B.) or QUESTION 1 / ANSWER: B",
       );
     }
     return drafts;
   } catch (e) {
-    if (e instanceof Error && e.message.includes("QUESTION 1")) throw e;
     if (e instanceof Error && e.message.includes("No questions found")) throw e;
     throw new Error(
       "Could not read Word (.docx) file. Save as .docx (not .doc) or use CSV/Excel.",
@@ -521,27 +528,26 @@ export async function parsePdfFile(file: File): Promise<DraftQuestion[]> {
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p);
       const content = await page.getTextContent();
-      type Item = { str?: string; transform?: number[]; hasEOL?: boolean };
+      type Item = { str?: string; transform?: number[]; hasEOL?: boolean; width?: number };
       const items = content.items as Item[];
-      let lastY: number | null = null;
-      let line = "";
+
+      // Group by approximate Y (line), then sort by X
+      type LineBucket = { y: number; parts: { x: number; str: string }[] };
+      const buckets: LineBucket[] = [];
       for (const it of items) {
         const str = it.str ?? "";
-        const y = it.transform?.[5];
-        if (lastY !== null && y !== undefined && Math.abs(y - lastY) > 5) {
-          text += line.trim() + "\n";
-          line = "";
-        }
-        line += (line && !line.endsWith(" ") ? " " : "") + str;
-        if (it.hasEOL) {
-          text += line.trim() + "\n";
-          line = "";
-          lastY = null;
-          continue;
-        }
-        if (y !== undefined) lastY = y;
+        if (!str) continue;
+        const x = it.transform?.[4] ?? 0;
+        const y = it.transform?.[5] ?? 0;
+        const bucket = buckets.find((b) => Math.abs(b.y - y) < 4);
+        if (bucket) bucket.parts.push({ x, str });
+        else buckets.push({ y, parts: [{ x, str }] });
       }
-      if (line.trim()) text += line.trim() + "\n";
+      buckets.sort((a, b) => b.y - a.y); // top to bottom in PDF coords
+      for (const b of buckets) {
+        b.parts.sort((a, c) => a.x - c.x);
+        text += b.parts.map((p) => p.str).join(" ").replace(/\s+/g, " ").trim() + "\n";
+      }
       text += "\n";
     }
 
@@ -554,7 +560,7 @@ export async function parsePdfFile(file: File): Promise<DraftQuestion[]> {
     const drafts = parseStructuredText(text);
     if (!drafts.length) {
       throw new Error(
-        "PDF text was read but no questions matched. Prefer numbered questions (1. … A. B. C. D.) or QUESTION 1 / ANSWER: B format.",
+        "PDF text was read but no questions matched. Use numbered questions:\n1. …\nA. …\nB. …\nor QUESTION 1 / ANSWER: B",
       );
     }
     return drafts;
@@ -565,7 +571,8 @@ export async function parsePdfFile(file: File): Promise<DraftQuestion[]> {
       (e.message.includes("QUESTION") ||
         e.message.includes("no selectable text") ||
         e.message.includes("scanned") ||
-        e.message.includes("no questions matched"))
+        e.message.includes("no questions matched") ||
+        e.message.includes("numbered"))
     ) {
       throw e;
     }
