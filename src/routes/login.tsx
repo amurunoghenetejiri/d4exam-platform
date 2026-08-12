@@ -7,6 +7,7 @@ import { fetchSessionUser, roleHome } from "@/lib/session";
 
 import { Eye, EyeOff, ShieldCheck, Loader2, Building2 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
+import logoAsset from "@/assets/d4exam-logo.png.asset.json";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -84,117 +85,133 @@ function LoginPage() {
 
   return (
     <div className="grid min-h-dvh bg-white lg:grid-cols-2">
-      <div className="flex flex-col px-4 py-8 sm:px-8">
-        <Link to="/" aria-label="D4EXAM home" className="self-start">
-          <Logo size="lg" />
-        </Link>
+      {/* Left: form panel with logo watermark backdrop */}
+      <div className="relative flex flex-col overflow-hidden px-4 py-8 sm:px-8">
+        {/* Exact D4EXAM logo as subtle monochrome backdrop (watermark style) */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 flex items-center justify-center"
+        >
+          <img
+            src={logoAsset.url}
+            alt=""
+            className="h-[min(70vh,520px)] w-auto max-w-[90%] select-none object-contain opacity-[0.04] grayscale"
+            style={{ filter: "grayscale(1) brightness(0.35)" }}
+          />
+        </div>
 
-        <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-10">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-            <div className="mb-6 flex flex-col items-center text-center">
-              <div className="grid h-16 w-16 place-items-center rounded-2xl border border-slate-200 bg-slate-50 text-primary shadow-sm">
-                <Building2 className="h-8 w-8" aria-hidden />
+        <div className="relative z-10 flex flex-col">
+          <Link to="/" aria-label="D4EXAM home" className="self-start">
+            <Logo size="lg" />
+          </Link>
+
+          <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-10">
+            <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-6 shadow-sm backdrop-blur-[2px] sm:p-8">
+              <div className="mb-6 flex flex-col items-center text-center">
+                <div className="grid h-16 w-16 place-items-center rounded-2xl border border-slate-200 bg-slate-50 text-primary shadow-sm">
+                  <Building2 className="h-8 w-8" aria-hidden />
+                </div>
+                <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Institutional sign-in
+                </p>
               </div>
-              <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Institutional sign-in
+
+              <h1 className="text-center text-2xl font-extrabold text-slate-900 sm:text-3xl">
+                Welcome Back!
+              </h1>
+              <p className="mt-2 text-center text-sm text-slate-600">Sign in to continue</p>
+
+              {error && (
+                <Alert variant="destructive" className="mt-5">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              <form className="mt-6 space-y-4" onSubmit={submit} noValidate>
+                <div className="space-y-2">
+                  <Label htmlFor="school-code" className="font-semibold text-slate-700">
+                    School Code{" "}
+                    <span className="font-normal text-slate-400">(optional for platform admin)</span>
+                  </Label>
+                  <Input
+                    id="school-code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder="e.g. your school code"
+                    className="h-11 rounded-lg border-slate-200 bg-white"
+                    autoComplete="organization"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="identifier" className="font-semibold text-slate-700">
+                    Username / Matric / Staff ID / Email
+                  </Label>
+                  <Input
+                    id="identifier"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder="Enter username, matric number, staff ID or email"
+                    className="h-11 rounded-lg border-slate-200 bg-white"
+                    autoComplete="username"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="password" className="font-semibold text-slate-700">
+                    Password
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      autoComplete="current-password"
+                      className="h-11 rounded-lg border-slate-200 bg-white pr-11"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((s) => !s)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-slate-500 hover:text-slate-800"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-sm text-slate-600">
+                    <Checkbox id="remember" />
+                    <span>Remember me</span>
+                  </label>
+                  <Link
+                    to="/forgot-password"
+                    className="text-sm font-semibold text-primary hover:underline"
+                  >
+                    Forgot Password?
+                  </Link>
+                </div>
+
+                <Button
+                  type="submit"
+                  className="h-11 w-full rounded-lg text-base font-semibold"
+                  disabled={loading}
+                >
+                  {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
+                  {loading ? "Signing in…" : "Login"}
+                </Button>
+              </form>
+
+              <p className="mt-6 text-center text-sm text-slate-600">
+                Need Help?{" "}
+                <Link to="/support" className="font-semibold text-primary hover:underline">
+                  Contact Support
+                </Link>
               </p>
             </div>
-
-            <h1 className="text-center text-2xl font-extrabold text-slate-900 sm:text-3xl">
-              Welcome Back!
-            </h1>
-            <p className="mt-2 text-center text-sm text-slate-600">Sign in to continue</p>
-
-            {error && (
-              <Alert variant="destructive" className="mt-5">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            <form className="mt-6 space-y-4" onSubmit={submit} noValidate>
-              <div className="space-y-2">
-                <Label htmlFor="school-code" className="font-semibold text-slate-700">
-                  School Code{" "}
-                  <span className="font-normal text-slate-400">(optional for platform admin)</span>
-                </Label>
-                <Input
-                  id="school-code"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="e.g. your school code"
-                  className="h-11 rounded-lg border-slate-200 bg-white"
-                  autoComplete="organization"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="identifier" className="font-semibold text-slate-700">
-                  Username / Matric / Staff ID / Email
-                </Label>
-                <Input
-                  id="identifier"
-                  value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="Enter username, matric number, staff ID or email"
-                  className="h-11 rounded-lg border-slate-200 bg-white"
-                  autoComplete="username"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password" className="font-semibold text-slate-700">
-                  Password
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter your password"
-                    autoComplete="current-password"
-                    className="h-11 rounded-lg border-slate-200 bg-white pr-11"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((s) => !s)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md text-slate-500 hover:text-slate-800"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between gap-3">
-                <label className="flex items-center gap-2 text-sm text-slate-600">
-                  <Checkbox id="remember" />
-                  <span>Remember me</span>
-                </label>
-                <Link
-                  to="/forgot-password"
-                  className="text-sm font-semibold text-primary hover:underline"
-                >
-                  Forgot Password?
-                </Link>
-              </div>
-
-              <Button
-                type="submit"
-                className="h-11 w-full rounded-lg text-base font-semibold"
-                disabled={loading}
-              >
-                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />}
-                {loading ? "Signing in…" : "Login"}
-              </Button>
-            </form>
-
-            <p className="mt-6 text-center text-sm text-slate-600">
-              Need Help?{" "}
-              <Link to="/support" className="font-semibold text-primary hover:underline">
-                Contact Support
-              </Link>
-            </p>
           </div>
         </div>
       </div>
