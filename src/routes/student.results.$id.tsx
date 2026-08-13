@@ -14,6 +14,8 @@ import {
   CalendarDays,
   Clock,
   ShieldCheck,
+  User,
+  Hash,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStudentContext } from "@/lib/student";
@@ -65,31 +67,31 @@ function gradeLabel(g: string | null) {
 }
 
 function ScoreRing({ pct, score, total }: { pct: number; score: string; total: string }) {
-  const r = 54;
+  const r = 58;
   const c = 2 * Math.PI * r;
   const clamped = Math.max(0, Math.min(100, pct));
   const offset = c - (clamped / 100) * c;
   return (
-    <div className="relative mx-auto grid h-44 w-44 place-items-center sm:h-48 sm:w-48">
-      <svg className="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 120 120" aria-hidden>
-        <circle cx="60" cy="60" r={r} fill="none" stroke="#e2e8f0" strokeWidth="10" />
+    <div className="relative mx-auto grid h-48 w-48 place-items-center sm:h-52 sm:w-52">
+      <svg className="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 140 140" aria-hidden>
+        <circle cx="70" cy="70" r={r} fill="none" stroke="#e2e8f0" strokeWidth="11" />
         <circle
-          cx="60"
-          cy="60"
+          cx="70"
+          cy="70"
           r={r}
           fill="none"
           stroke="#2563eb"
-          strokeWidth="10"
+          strokeWidth="11"
           strokeLinecap="round"
           strokeDasharray={c}
           strokeDashoffset={offset}
-          className="transition-all duration-700"
+          className="transition-all duration-700 ease-out"
         />
       </svg>
-      <div className="relative z-10 text-center">
+      <div className="relative z-10 px-2 text-center">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Your Score</p>
-        <p className="text-4xl font-black text-primary sm:text-5xl">{clamped}%</p>
-        <p className="mt-0.5 text-sm font-semibold text-slate-600">
+        <p className="text-5xl font-black leading-none text-primary sm:text-[3.25rem]">{Math.round(clamped)}%</p>
+        <p className="mt-1 text-sm font-semibold text-slate-600">
           {score} / {total}
         </p>
       </div>
@@ -150,29 +152,30 @@ function ResultDetailPage() {
 
   const isPub = (r.status || "").toLowerCase() === "published";
   const pass = (r.pass_fail || "").toLowerCase() === "pass";
-  const pct = r.percentage ?? 0;
+  const pct = Number(r.percentage ?? 0);
   const correct = r.correct_count ?? 0;
   const wrong = r.wrong_count ?? 0;
   const unanswered = r.unanswered_count ?? 0;
   const totalQ = correct + wrong + unanswered || 0;
-  const scoreText =
-    r.total_score != null ? String(r.total_score) : String(correct);
+  const scoreText = r.total_score != null ? String(r.total_score) : String(correct);
   const totalText = totalQ > 0 ? String(totalQ) : "—";
+  const securityRaw = (r.security_review_status || "pending").toLowerCase();
   const security =
-    (r.security_review_status || "pending").toLowerCase() === "clear" ||
-    (r.security_review_status || "").toLowerCase() === "pending"
+    securityRaw === "clear" || securityRaw === "pending"
       ? "CLEAR"
       : (r.security_review_status || "—").replaceAll("_", " ").toUpperCase();
 
   const courseCode = r.examinations?.courses?.code ?? "—";
   const courseName = r.examinations?.courses?.name ?? r.examinations?.title ?? "Examination";
+  const examTitle = r.examinations?.title || `${courseCode} – ${courseName}`;
   const dateTaken = r.released_at || r.created_at;
   const durationMin = r.examinations?.duration_minutes;
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl space-y-5 pb-8">
+      {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold text-slate-400">
             <Link to="/student" className="hover:text-primary">
               Dashboard
@@ -183,16 +186,18 @@ function ResultDetailPage() {
             </Link>{" "}
             › <span className="text-primary">Result</span>
           </p>
-          <h1 className="mt-1 flex items-center gap-2 text-2xl font-extrabold text-slate-900">
-            <FileText className="h-6 w-6 text-primary" />
+          <h1 className="mt-1 flex items-center gap-2 text-xl font-extrabold text-slate-900 sm:text-2xl">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+              <FileText className="h-5 w-5" />
+            </span>
             Exam Result
           </h1>
-          <p className="text-sm text-slate-500">Your performance in this examination</p>
+          <p className="mt-0.5 text-sm text-slate-500">Your performance in this examination</p>
         </div>
         {isPub && (
           <Button
             variant="outline"
-            className="font-semibold text-primary"
+            className="w-full font-semibold text-primary sm:w-auto"
             onClick={() => window.print()}
           >
             <Download className="mr-2 h-4 w-4" />
@@ -201,23 +206,24 @@ function ResultDetailPage() {
         )}
       </div>
 
-      {/* Student identity strip */}
-      <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
-        <Info label="Student name" value={student.fullName || "—"} bold />
-        <Info label="Matric number" value={student.matric || "—"} />
-        <Info label="Department" value={student.departmentName || "—"} />
-        <Info label="Faculty / College" value={student.facultyName || "—"} />
-        <Info label="Level" value={student.levelName || "—"} />
-        <Info label="Session" value={student.sessionName || "—"} />
-        <Info label="Semester" value={student.semesterName || "—"} />
-        <Info label="School" value={student.schoolName || "—"} />
+      {/* Student identity */}
+      <div className="grid grid-cols-2 gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-4">
+        <Info icon={User} label="Student name" value={student.fullName || "—"} bold />
+        <Info icon={Hash} label="Matric number" value={student.matric || "—"} />
+        <Info icon={Building2} label="Department" value={student.departmentName || "—"} />
+        <Info icon={Building2} label="Faculty / College" value={student.facultyName || "—"} />
+        <Info icon={GraduationCap} label="Level" value={student.levelName || "—"} />
+        <Info icon={CalendarDays} label="Session" value={student.sessionName || "—"} />
+        <Info icon={CalendarDays} label="Semester" value={student.semesterName || "—"} />
+        <Info icon={Building2} label="School" value={student.schoolName || "—"} />
       </div>
 
       {!isPub ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center">
           <p className="text-lg font-bold text-amber-900">Result under review</p>
           <p className="mt-2 text-sm text-amber-800">
-            Your score will appear here after the Examination Officer releases results.
+            Your score will appear here after the Examination Officer releases results for this
+            subject.
           </p>
           <Button className="mt-6" variant="outline" asChild>
             <Link to="/student/results">
@@ -227,15 +233,11 @@ function ResultDetailPage() {
         </div>
       ) : (
         <>
-          <div className="grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-[1fr_1.1fr]">
+          {/* Score ring + exam meta */}
+          <div className="grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
             <div className="flex flex-col items-center justify-center gap-3 py-2">
               <ScoreRing pct={pct} score={scoreText} total={totalText} />
-              <p
-                className={cn(
-                  "text-sm font-bold",
-                  pass ? "text-emerald-600" : "text-red-600",
-                )}
-              >
+              <p className={cn("text-sm font-bold", pass ? "text-emerald-600" : "text-red-600")}>
                 {pass ? "Excellent Performance!" : "Keep practising — you can improve."}
               </p>
               <span
@@ -250,31 +252,20 @@ function ResultDetailPage() {
             </div>
 
             <div className="space-y-0 divide-y divide-slate-100 text-sm">
+              <MetaRow icon={FileText} label="Exam Title" value={examTitle} />
               <MetaRow
                 icon={FileText}
-                label="Exam Title"
+                label="Course"
                 value={`${courseCode} – ${courseName}`}
               />
-              <MetaRow
-                icon={Building2}
-                label="Department"
-                value={student.departmentName || "—"}
-              />
+              <MetaRow icon={Building2} label="Department" value={student.departmentName || "—"} />
               <MetaRow icon={GraduationCap} label="Level" value={student.levelName || "—"} />
-              <MetaRow
-                icon={CalendarDays}
-                label="Semester"
-                value={student.semesterName || "—"}
-              />
-              <MetaRow
-                icon={CalendarDays}
-                label="Session"
-                value={student.sessionName || "—"}
-              />
+              <MetaRow icon={CalendarDays} label="Session" value={student.sessionName || "—"} />
+              <MetaRow icon={CalendarDays} label="Semester" value={student.semesterName || "—"} />
               <MetaRow
                 icon={CalendarDays}
                 label="Date Taken"
-                value={dateTaken ? new Date(dateTaken).toLocaleDateString() : "—"}
+                value={dateTaken ? new Date(dateTaken).toLocaleDateString(undefined, { dateStyle: "medium" }) : "—"}
               />
               <MetaRow
                 icon={Clock}
@@ -284,21 +275,12 @@ function ResultDetailPage() {
             </div>
           </div>
 
+          {/* Stat chips */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <StatCard
-              icon={CheckCircle2}
-              label="Correct Answers"
-              value={String(correct)}
-              tone="green"
-            />
+            <StatCard icon={CheckCircle2} label="Correct Answers" value={String(correct)} tone="green" />
             <StatCard icon={XCircle} label="Wrong Answers" value={String(wrong)} tone="red" />
-            <StatCard
-              icon={MinusCircle}
-              label="Unanswered"
-              value={String(unanswered)}
-              tone="amber"
-            />
-            <StatCard icon={Percent} label="Percentage" value={`${pct}%`} tone="blue" />
+            <StatCard icon={MinusCircle} label="Unanswered" value={String(unanswered)} tone="amber" />
+            <StatCard icon={Percent} label="Percentage" value={`${Math.round(pct)}%`} tone="blue" />
             <StatCard
               icon={Star}
               label="Grade"
@@ -308,16 +290,14 @@ function ResultDetailPage() {
             />
           </div>
 
+          {/* Info + summary */}
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-sm font-extrabold text-slate-900">Exam Information</h2>
               <ul className="mt-4 space-y-2.5 text-sm">
                 <InfoRow label="Total Questions" value={String(totalQ || "—")} />
                 <InfoRow label="Question Type" value="Multiple Choice" />
-                <InfoRow
-                  label="Passing Score"
-                  value="40%"
-                />
+                <InfoRow label="Passing Score" value="40%" />
                 <InfoRow label="Your Score" value={`${scoreText}/${totalText}`} />
                 <InfoRow label="Grade" value={gradeLabel(r.grade)} />
                 <InfoRow
@@ -333,9 +313,9 @@ function ResultDetailPage() {
               </ul>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-sm font-extrabold text-slate-900">Result Summary</h2>
-              <p className="mt-6 text-center text-sm leading-relaxed text-slate-500">
+              <p className="mt-6 flex-1 text-center text-sm leading-relaxed text-slate-500">
                 {pass
                   ? "Great job! You have successfully completed the examination. Keep up the good work and continue striving for excellence."
                   : "You did not meet the pass mark this time. Review the course materials and prepare for the next opportunity."}
@@ -349,7 +329,7 @@ function ResultDetailPage() {
         </>
       )}
 
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         <Button variant="outline" className="font-semibold" asChild>
           <Link to="/student/examinations">
             <ArrowLeft className="mr-2 h-4 w-4" /> Back to My Examinations
@@ -364,18 +344,23 @@ function ResultDetailPage() {
 }
 
 function Info({
+  icon: Icon,
   label,
   value,
   bold,
 }: {
+  icon?: typeof User;
   label: string;
   value: string;
   bold?: boolean;
 }) {
   return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className={cn("text-sm text-slate-900", bold && "font-bold")} >{value}</p>
+    <div className="min-w-0">
+      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+        {Icon ? <Icon className="h-3 w-3" /> : null}
+        {label}
+      </p>
+      <p className={cn("truncate text-sm text-slate-900", bold && "font-bold")}>{value}</p>
     </div>
   );
 }
