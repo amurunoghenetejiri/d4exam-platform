@@ -32,15 +32,19 @@ import { Route as AdminExaminationsRouteImport } from './routes/admin.examinatio
 import { Route as AdminFacultiesRouteImport } from './routes/admin.faculties'
 import { Route as AdminLevelsRouteImport } from './routes/admin.levels'
 import { Route as AdminNotificationsRouteImport } from './routes/admin.notifications'
+import { Route as AdminOfficersRouteImport } from './routes/admin.officers'
 import { Route as AdminProfileRouteImport } from './routes/admin.profile'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminResultsRouteImport } from './routes/admin.results'
 import { Route as AdminSemestersRouteImport } from './routes/admin.semesters'
 import { Route as AdminSessionsRouteImport } from './routes/admin.sessions'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
+import { Route as AdminStructureRouteImport } from './routes/admin.structure'
+import { Route as AdminStudentImportRouteImport } from './routes/admin.student-import'
 import { Route as AdminStudentsRouteImport } from './routes/admin.students'
 import { Route as AdminTeachersRouteImport } from './routes/admin.teachers'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as OfficerIndexRouteImport } from './routes/officer.index'
 import { Route as OfficerApprovalsRouteImport } from './routes/officer.approvals'
 import { Route as OfficerAuditLogsRouteImport } from './routes/officer.audit-logs'
@@ -82,6 +86,7 @@ import { Route as TeacherResultsRouteImport } from './routes/teacher.results'
 import { Route as TeacherSettingsRouteImport } from './routes/teacher.settings'
 import { Route as TeacherSubmissionsRouteImport } from './routes/teacher.submissions'
 import { Route as StudentExamIdRouteImport } from './routes/student.exam.$id'
+import { Route as TeacherExamPaperIdRouteImport } from './routes/teacher.exam-paper.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -198,6 +203,11 @@ const AdminNotificationsRoute = AdminNotificationsRouteImport.update({
   path: '/notifications',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminOfficersRoute = AdminOfficersRouteImport.update({
+  id: '/officers',
+  path: '/officers',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminProfileRoute = AdminProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -228,6 +238,16 @@ const AdminSettingsRoute = AdminSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminStructureRoute = AdminStructureRouteImport.update({
+  id: '/structure',
+  path: '/structure',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminStudentImportRoute = AdminStudentImportRouteImport.update({
+  id: '/student-import',
+  path: '/student-import',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminStudentsRoute = AdminStudentsRouteImport.update({
   id: '/students',
   path: '/students',
@@ -242,6 +262,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   id: '/users',
   path: '/users',
   getParentRoute: () => AdminRoute,
+} as any)
+const AuthCallbackRoute = AuthCallbackRouteImport.update({
+  id: '/auth/callback',
+  path: '/auth/callback',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const OfficerIndexRoute = OfficerIndexRouteImport.update({
   id: '/',
@@ -448,6 +473,11 @@ const StudentExamIdRoute = StudentExamIdRouteImport.update({
   path: '/exam/$id',
   getParentRoute: () => StudentRoute,
 } as any)
+const TeacherExamPaperIdRoute = TeacherExamPaperIdRouteImport.update({
+  id: '/exam-paper/$id',
+  path: '/exam-paper/$id',
+  getParentRoute: () => TeacherRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -472,15 +502,19 @@ export interface FileRoutesByFullPath {
   '/admin/faculties': typeof AdminFacultiesRoute
   '/admin/levels': typeof AdminLevelsRoute
   '/admin/notifications': typeof AdminNotificationsRoute
+  '/admin/officers': typeof AdminOfficersRoute
   '/admin/profile': typeof AdminProfileRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/semesters': typeof AdminSemestersRoute
   '/admin/sessions': typeof AdminSessionsRoute
   '/admin/settings': typeof AdminSettingsRoute
+  '/admin/structure': typeof AdminStructureRoute
+  '/admin/student-import': typeof AdminStudentImportRoute
   '/admin/students': typeof AdminStudentsRoute
   '/admin/teachers': typeof AdminTeachersRoute
   '/admin/users': typeof AdminUsersRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/officer/approvals': typeof OfficerApprovalsRoute
   '/officer/audit-logs': typeof OfficerAuditLogsRoute
   '/officer/integrity': typeof OfficerIntegrityRoute
@@ -523,6 +557,7 @@ export interface FileRoutesByFullPath {
   '/super-admin/': typeof SuperAdminIndexRoute
   '/teacher/': typeof TeacherIndexRoute
   '/student/exam/$id': typeof StudentExamIdRoute
+  '/teacher/exam-paper/$id': typeof TeacherExamPaperIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -542,15 +577,19 @@ export interface FileRoutesByTo {
   '/admin/faculties': typeof AdminFacultiesRoute
   '/admin/levels': typeof AdminLevelsRoute
   '/admin/notifications': typeof AdminNotificationsRoute
+  '/admin/officers': typeof AdminOfficersRoute
   '/admin/profile': typeof AdminProfileRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/semesters': typeof AdminSemestersRoute
   '/admin/sessions': typeof AdminSessionsRoute
   '/admin/settings': typeof AdminSettingsRoute
+  '/admin/structure': typeof AdminStructureRoute
+  '/admin/student-import': typeof AdminStudentImportRoute
   '/admin/students': typeof AdminStudentsRoute
   '/admin/teachers': typeof AdminTeachersRoute
   '/admin/users': typeof AdminUsersRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/officer/approvals': typeof OfficerApprovalsRoute
   '/officer/audit-logs': typeof OfficerAuditLogsRoute
   '/officer/integrity': typeof OfficerIntegrityRoute
@@ -593,6 +632,7 @@ export interface FileRoutesByTo {
   '/super-admin': typeof SuperAdminIndexRoute
   '/teacher': typeof TeacherIndexRoute
   '/student/exam/$id': typeof StudentExamIdRoute
+  '/teacher/exam-paper/$id': typeof TeacherExamPaperIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -618,15 +658,19 @@ export interface FileRoutesById {
   '/admin/faculties': typeof AdminFacultiesRoute
   '/admin/levels': typeof AdminLevelsRoute
   '/admin/notifications': typeof AdminNotificationsRoute
+  '/admin/officers': typeof AdminOfficersRoute
   '/admin/profile': typeof AdminProfileRoute
   '/admin/reports': typeof AdminReportsRoute
   '/admin/results': typeof AdminResultsRoute
   '/admin/semesters': typeof AdminSemestersRoute
   '/admin/sessions': typeof AdminSessionsRoute
   '/admin/settings': typeof AdminSettingsRoute
+  '/admin/structure': typeof AdminStructureRoute
+  '/admin/student-import': typeof AdminStudentImportRoute
   '/admin/students': typeof AdminStudentsRoute
   '/admin/teachers': typeof AdminTeachersRoute
   '/admin/users': typeof AdminUsersRoute
+  '/auth/callback': typeof AuthCallbackRoute
   '/officer/approvals': typeof OfficerApprovalsRoute
   '/officer/audit-logs': typeof OfficerAuditLogsRoute
   '/officer/integrity': typeof OfficerIntegrityRoute
@@ -669,6 +713,7 @@ export interface FileRoutesById {
   '/super-admin/': typeof SuperAdminIndexRoute
   '/teacher/': typeof TeacherIndexRoute
   '/student/exam/$id': typeof StudentExamIdRoute
+  '/teacher/exam-paper/$id': typeof TeacherExamPaperIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -695,15 +740,19 @@ export interface FileRouteTypes {
     | '/admin/faculties'
     | '/admin/levels'
     | '/admin/notifications'
+    | '/admin/officers'
     | '/admin/profile'
     | '/admin/reports'
     | '/admin/results'
     | '/admin/semesters'
     | '/admin/sessions'
     | '/admin/settings'
+    | '/admin/structure'
+    | '/admin/student-import'
     | '/admin/students'
     | '/admin/teachers'
     | '/admin/users'
+    | '/auth/callback'
     | '/officer/approvals'
     | '/officer/audit-logs'
     | '/officer/integrity'
@@ -746,6 +795,7 @@ export interface FileRouteTypes {
     | '/super-admin/'
     | '/teacher/'
     | '/student/exam/$id'
+    | '/teacher/exam-paper/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -765,15 +815,19 @@ export interface FileRouteTypes {
     | '/admin/faculties'
     | '/admin/levels'
     | '/admin/notifications'
+    | '/admin/officers'
     | '/admin/profile'
     | '/admin/reports'
     | '/admin/results'
     | '/admin/semesters'
     | '/admin/sessions'
     | '/admin/settings'
+    | '/admin/structure'
+    | '/admin/student-import'
     | '/admin/students'
     | '/admin/teachers'
     | '/admin/users'
+    | '/auth/callback'
     | '/officer/approvals'
     | '/officer/audit-logs'
     | '/officer/integrity'
@@ -816,6 +870,7 @@ export interface FileRouteTypes {
     | '/super-admin'
     | '/teacher'
     | '/student/exam/$id'
+    | '/teacher/exam-paper/$id'
   id:
     | '__root__'
     | '/'
@@ -840,15 +895,19 @@ export interface FileRouteTypes {
     | '/admin/faculties'
     | '/admin/levels'
     | '/admin/notifications'
+    | '/admin/officers'
     | '/admin/profile'
     | '/admin/reports'
     | '/admin/results'
     | '/admin/semesters'
     | '/admin/sessions'
     | '/admin/settings'
+    | '/admin/structure'
+    | '/admin/student-import'
     | '/admin/students'
     | '/admin/teachers'
     | '/admin/users'
+    | '/auth/callback'
     | '/officer/approvals'
     | '/officer/audit-logs'
     | '/officer/integrity'
@@ -891,6 +950,7 @@ export interface FileRouteTypes {
     | '/super-admin/'
     | '/teacher/'
     | '/student/exam/$id'
+    | '/teacher/exam-paper/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -910,6 +970,7 @@ export interface RootRouteChildren {
   SuperAdminRoute: typeof SuperAdminRouteWithChildren
   SupportRoute: typeof SupportRoute
   TeacherRoute: typeof TeacherRouteWithChildren
+  AuthCallbackRoute: typeof AuthCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1075,6 +1136,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminNotificationsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/officers': {
+      id: '/admin/officers'
+      path: '/officers'
+      fullPath: '/admin/officers'
+      preLoaderRoute: typeof AdminOfficersRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/profile': {
       id: '/admin/profile'
       path: '/profile'
@@ -1117,6 +1185,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminSettingsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/structure': {
+      id: '/admin/structure'
+      path: '/structure'
+      fullPath: '/admin/structure'
+      preLoaderRoute: typeof AdminStructureRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/student-import': {
+      id: '/admin/student-import'
+      path: '/student-import'
+      fullPath: '/admin/student-import'
+      preLoaderRoute: typeof AdminStudentImportRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/students': {
       id: '/admin/students'
       path: '/students'
@@ -1137,6 +1219,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/users'
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/auth/callback': {
+      id: '/auth/callback'
+      path: '/auth/callback'
+      fullPath: '/auth/callback'
+      preLoaderRoute: typeof AuthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/officer/': {
       id: '/officer/'
@@ -1425,6 +1514,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StudentExamIdRouteImport
       parentRoute: typeof StudentRoute
     }
+    '/teacher/exam-paper/$id': {
+      id: '/teacher/exam-paper/$id'
+      path: '/exam-paper/$id'
+      fullPath: '/teacher/exam-paper/$id'
+      preLoaderRoute: typeof TeacherExamPaperIdRouteImport
+      parentRoute: typeof TeacherRoute
+    }
   }
 }
 
@@ -1435,12 +1531,15 @@ interface AdminRouteChildren {
   AdminFacultiesRoute: typeof AdminFacultiesRoute
   AdminLevelsRoute: typeof AdminLevelsRoute
   AdminNotificationsRoute: typeof AdminNotificationsRoute
+  AdminOfficersRoute: typeof AdminOfficersRoute
   AdminProfileRoute: typeof AdminProfileRoute
   AdminReportsRoute: typeof AdminReportsRoute
   AdminResultsRoute: typeof AdminResultsRoute
   AdminSemestersRoute: typeof AdminSemestersRoute
   AdminSessionsRoute: typeof AdminSessionsRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
+  AdminStructureRoute: typeof AdminStructureRoute
+  AdminStudentImportRoute: typeof AdminStudentImportRoute
   AdminStudentsRoute: typeof AdminStudentsRoute
   AdminTeachersRoute: typeof AdminTeachersRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -1454,12 +1553,15 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminFacultiesRoute: AdminFacultiesRoute,
   AdminLevelsRoute: AdminLevelsRoute,
   AdminNotificationsRoute: AdminNotificationsRoute,
+  AdminOfficersRoute: AdminOfficersRoute,
   AdminProfileRoute: AdminProfileRoute,
   AdminReportsRoute: AdminReportsRoute,
   AdminResultsRoute: AdminResultsRoute,
   AdminSemestersRoute: AdminSemestersRoute,
   AdminSessionsRoute: AdminSessionsRoute,
   AdminSettingsRoute: AdminSettingsRoute,
+  AdminStructureRoute: AdminStructureRoute,
+  AdminStudentImportRoute: AdminStudentImportRoute,
   AdminStudentsRoute: AdminStudentsRoute,
   AdminTeachersRoute: AdminTeachersRoute,
   AdminUsersRoute: AdminUsersRoute,
@@ -1566,6 +1668,7 @@ interface TeacherRouteChildren {
   TeacherSettingsRoute: typeof TeacherSettingsRoute
   TeacherSubmissionsRoute: typeof TeacherSubmissionsRoute
   TeacherIndexRoute: typeof TeacherIndexRoute
+  TeacherExamPaperIdRoute: typeof TeacherExamPaperIdRoute
 }
 
 const TeacherRouteChildren: TeacherRouteChildren = {
@@ -1582,6 +1685,7 @@ const TeacherRouteChildren: TeacherRouteChildren = {
   TeacherSettingsRoute: TeacherSettingsRoute,
   TeacherSubmissionsRoute: TeacherSubmissionsRoute,
   TeacherIndexRoute: TeacherIndexRoute,
+  TeacherExamPaperIdRoute: TeacherExamPaperIdRoute,
 }
 
 const TeacherRouteWithChildren =
@@ -1604,7 +1708,18 @@ const rootRouteChildren: RootRouteChildren = {
   SuperAdminRoute: SuperAdminRouteWithChildren,
   SupportRoute: SupportRoute,
   TeacherRoute: TeacherRouteWithChildren,
+  AuthCallbackRoute: AuthCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
