@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Flag, ChevronLeft, ChevronRight, Loader2, Camera, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import {
   parseSecurityFromDescription,
   type ExamSettingsRow,
 } from "@/lib/exam-security";
-import { scoreObjectiveAnswers } from "@/lib/cbt-security";
+import { scoreObjectiveAnswers, logSecurityEvent } from "@/lib/cbt-security";
 import { parseExamMeta, pickExamQuestions, seededShuffle } from "@/lib/exam-meta";
 import { toast } from "sonner";
 
@@ -61,10 +61,31 @@ function decodeOptions(explanation: string | null): string[] {
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
+/** Resolve stored correct_answer (letter or text) to the actual option text using original order. */
+function resolveCorrectOptionText(
+  correctAnswer: string | null,
+  originalOptions: string[],
+): string | null {
+  const raw = (correctAnswer || "").trim();
+  if (!raw) return null;
+  if (/^[A-Da-d]$/.test(raw) && originalOptions.length > 0) {
+    const letterIdx = raw.toUpperCase().charCodeAt(0) - 65;
+    return originalOptions[letterIdx] ?? null;
+  }
+  // Already full text, or True/False
+  const byText = originalOptions.find(
+    (o) => o.trim().toLowerCase() === raw.toLowerCase(),
+  );
+  if (byText) return byText;
+  return raw;
+}
+
 function CbtExamPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
   const { data: student } = useStudentContext();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const examQ = useQuery({
     queryKey: ["cbt-exam", id],
@@ -141,13 +162,18 @@ function CbtExamPage() {
 
   const questions = useMemo(() => {
     const bank = (questionsQ.data ?? []).map((q) => {
-      const opts = decodeOptions(q.explanation);
+      let opts = decodeOptions(q.explanation);
       if (opts.length === 0 && (q.question_type === "true_false" || q.question_type === "True/False")) {
-        return { ...q, options: ["True", "False"] };
+        opts = ["True", "False"];
       }
+      if (opts.length === 0) {
+        opts = ["Option A", "Option B", "Option C", "Option D"];
+      }
+      const correctOptionText = resolveCorrectOptionText(q.correct_answer, opts);
       return {
         ...q,
-        options: opts.length ? opts : ["Option A", "Option B", "Option C", "Option D"],
+        options: opts,
+        correctOptionText,
       };
     });
     const limited = pickExamQuestions(bank, {
@@ -159,11 +185,19 @@ function CbtExamPage() {
     if (security.randomizeOptions) {
       return limited.map((q) => ({
         ...q,
+        // Shuffle display order only — correctOptionText stays the real answer text
         options: seededShuffle(q.options, `${id}:${student?.studentId ?? "anon"}:${q.id}:opts`),
       }));
     }
     return limited;
-  }, [questionsQ.data, security.randomizeQuestions, security.randomizeOptions, questionsToAnswer, student?.studentId, id]);
+  }, [
+    questionsQ.data,
+    security.randomizeQuestions,
+    security.randomizeOptions,
+    questionsToAnswer,
+    student?.studentId,
+    id,
+  ]);
 
   const TOTAL = questions.length;
   const [index, setIndex] = useState(0);
@@ -176,6 +210,7 @@ function CbtExamPage() {
   const [doneTerminated, setDoneTerminated] = useState(false);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [camReady, setCamReady] = useState(false);
+  const [faceStatus, setFaceStatus] = useState<"ok" | "none" | "multi" | "unknown">("unknown");
 
   useEffect(() => {
     if (examQ.data && seconds === null) {
@@ -234,6 +269,91 @@ function CbtExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, security.fullscreen, security.tabMonitoring, security.blockCopyPaste]);
 
+  // Attach live stream to PIP video + optional FaceDetector
+  useEffect(() => {
+    if (!started || !camReady || !streamRef.current) return;
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = streamRef.current;
+      void video.play().catch(() => {});
+    }
+
+    let cancelled = false;
+    let detector: { detect: (v: HTMLVideoElement) => Promise<{ boundingBox?: unknown }[]> } | null =
+      null;
+    try {
+      // Chrome Face Detection API (optional — deters cheating when available)
+      const FD = (window as unknown as { FaceDetector?: new (o?: object) => typeof detector }).FaceDetector;
+      if (FD) detector = new FD({ fastMode: true, maxDetectedFaces: 5 }) as typeof detector;
+    } catch {
+      detector = null;
+    }
+
+    const tick = async () => {
+      if (cancelled || !video || video.readyState < 2) return;
+      if (!detector) {
+        setFaceStatus("unknown");
+        return;
+      }
+      try {
+        const faces = await detector.detect(video);
+        const n = faces?.length ?? 0;
+        if (n === 0) {
+          setFaceStatus("none");
+          if (examQ.data && student) {
+            void logSecurityEvent({
+              schoolId: examQ.data.school_id,
+              examId: examQ.data.id,
+              attemptId: null,
+              studentId: student.studentId,
+              eventType: "NO_FACE",
+              severity: "medium",
+              description: "No face detected in camera feed",
+            });
+          }
+        } else if (n >= 2) {
+          setFaceStatus("multi");
+          toast.warning("More than one face detected — stay alone in frame");
+          if (examQ.data && student) {
+            void logSecurityEvent({
+              schoolId: examQ.data.school_id,
+              examId: examQ.data.id,
+              attemptId: null,
+              studentId: student.studentId,
+              eventType: "MULTIPLE_FACES",
+              severity: "high",
+              description: `${n} faces detected`,
+              extra: { count: n },
+            });
+          }
+        } else {
+          setFaceStatus("ok");
+        }
+      } catch {
+        setFaceStatus("unknown");
+      }
+    };
+
+    const interval = window.setInterval(() => void tick(), 4000);
+    void tick();
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [started, camReady, examQ.data, student]);
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      const w = window as unknown as { __d4examStream?: MediaStream };
+      if (w.__d4examStream) {
+        w.__d4examStream.getTracks().forEach((t) => t.stop());
+        delete w.__d4examStream;
+      }
+    };
+  }, []);
+
   async function finishAttempt(auto = false) {
     if (!examQ.data || !student) {
       navigate({ to: "/student/examinations" });
@@ -280,6 +400,8 @@ function CbtExamPage() {
     } catch (e) {
       console.warn("finishAttempt", e);
     }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
     if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
     toast.success(auto ? "Examination closed" : "Examination submitted successfully");
     setDoneTerminated(status === "terminated");
@@ -303,16 +425,25 @@ function CbtExamPage() {
           return;
         }
       }
-      if (security.requireCamera || security.requireMicrophone) {
+      // Always try camera when required OR when teacher enabled camera — show live PIP
+      const needCam = security.requireCamera;
+      const needMic = security.requireMicrophone;
+      if (needCam || needMic) {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: security.requireCamera,
-            audio: security.requireMicrophone,
+            video: needCam
+              ? { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }
+              : false,
+            audio: needMic,
           });
-          setCamReady(true);
-          // keep tracks alive during exam (browser may stop if we stop tracks)
+          streamRef.current = stream;
           (window as unknown as { __d4examStream?: MediaStream }).__d4examStream = stream;
-          toast.success("Camera/microphone access granted");
+          setCamReady(Boolean(needCam && stream.getVideoTracks().length > 0));
+          toast.success(
+            needCam
+              ? "Camera on — your face stays visible during the exam"
+              : "Microphone access granted",
+          );
         } catch {
           toast.error("Allow camera/microphone in your browser, then try again.");
           setMediaBusy(false);
@@ -374,7 +505,7 @@ function CbtExamPage() {
     return (
       <div className="grid min-h-dvh place-items-center bg-slate-50 p-4 sm:p-6">
         <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-          <Logo size="sm" className="mx-auto" />
+          <Logo size="md" className="mx-auto justify-center" />
           <h1 className="mt-4 text-2xl font-extrabold text-slate-900">Examination completed</h1>
           <p className="mt-2 text-sm text-slate-600">
             {doneTerminated
@@ -398,9 +529,9 @@ function CbtExamPage() {
     return (
       <div className="grid min-h-dvh place-items-center bg-slate-50 p-6">
         <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <Logo size="sm" />
-          <h1 className="mt-4 text-xl font-extrabold text-slate-900">{exam.title}</h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <Logo size="lg" />
+          <h1 className="mt-4 text-xl font-extrabold text-primary">{exam.title}</h1>
+          <p className="mt-1 text-sm font-semibold text-primary/80">
             {exam.courses?.code} · {exam.courses?.name}
           </p>
           <ul className="mt-4 space-y-1 text-sm text-slate-600">
@@ -414,7 +545,9 @@ function CbtExamPage() {
             <li>Fullscreen: {security.fullscreen ? "Required" : "Optional"}</li>
             <li className="flex items-center gap-2">
               <Camera className="h-3.5 w-3.5" /> Camera:{" "}
-              {security.requireCamera ? "Required — browser will ask permission" : "Not required"}
+              {security.requireCamera
+                ? "Required — live preview stays on screen during the exam"
+                : "Not required"}
             </li>
             <li className="flex items-center gap-2">
               <Mic className="h-3.5 w-3.5" /> Microphone:{" "}
@@ -473,10 +606,10 @@ function CbtExamPage() {
   return (
     <div className="flex min-h-dvh flex-col bg-slate-50">
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-[#0b1b3a] text-white">
-        <div className="mx-auto flex h-14 max-w-[1200px] items-center justify-between gap-3 px-3 sm:px-6">
+        <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-3 px-3 sm:h-[4.5rem] sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <Logo size="sm" />
-            <p className="hidden truncate text-sm font-bold sm:block">
+            <Logo size="md" wordmark={false} />
+            <p className="hidden truncate text-sm font-bold text-primary sm:block sm:text-base">
               {exam.courses?.code ?? "EXAM"} — {exam.title}
             </p>
           </div>
@@ -538,8 +671,8 @@ function CbtExamPage() {
 
         <section className="order-1 flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:order-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-slate-500">
-              Question <span className="text-slate-900">{index + 1}</span> of {TOTAL}
+            <p className="text-sm font-semibold text-primary">
+              Question <span className="text-primary">{index + 1}</span> of {TOTAL}
             </p>
             <button
               type="button"
@@ -600,15 +733,54 @@ function CbtExamPage() {
           </ul>
 
           <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
-            <Button variant="outline" className="rounded-lg font-semibold" disabled={index === 0} onClick={() => setIndex((i) => Math.max(0, i - 1))}>
+            <Button
+              variant="outline"
+              className="rounded-lg font-semibold"
+              disabled={index === 0}
+              onClick={() => setIndex((i) => Math.max(0, i - 1))}
+            >
               <ChevronLeft className="mr-1 h-4 w-4" /> Previous
             </Button>
-            <Button className="rounded-lg font-semibold" disabled={index >= TOTAL - 1} onClick={() => setIndex((i) => Math.min(TOTAL - 1, i + 1))}>
+            <Button
+              className="rounded-lg font-semibold"
+              disabled={index >= TOTAL - 1}
+              onClick={() => setIndex((i) => Math.min(TOTAL - 1, i + 1))}
+            >
               Next <ChevronRight className="ml-1 h-4 w-4" />
             </Button>
           </div>
         </section>
       </div>
+
+      {/* Live camera PIP — fixed bottom-right so student always sees themselves while scrolling the paper */}
+      {camReady && (
+        <div className="pointer-events-none fixed bottom-4 right-4 z-50 w-[140px] overflow-hidden rounded-xl border-2 border-primary bg-black shadow-2xl sm:bottom-6 sm:right-6 sm:w-[180px]">
+          <video
+            ref={videoRef}
+            className="aspect-[4/3] w-full object-cover"
+            autoPlay
+            playsInline
+            muted
+          />
+          <div
+            className={cn(
+              "px-2 py-1 text-center text-[10px] font-bold text-white",
+              faceStatus === "multi" && "bg-red-600",
+              faceStatus === "none" && "bg-amber-600",
+              faceStatus === "ok" && "bg-emerald-600",
+              faceStatus === "unknown" && "bg-primary",
+            )}
+          >
+            {faceStatus === "multi"
+              ? "Multiple faces"
+              : faceStatus === "none"
+                ? "No face detected"
+                : faceStatus === "ok"
+                  ? "Monitoring · 1 face"
+                  : "Live camera"}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
