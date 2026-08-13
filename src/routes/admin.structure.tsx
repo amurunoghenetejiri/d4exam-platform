@@ -35,7 +35,7 @@ export const Route = createFileRoute("/admin/structure")({
     department: typeof s.department === "string" ? s.department : undefined,
     level: typeof s.level === "string" ? s.level : undefined,
     tab: s.tab === "courses" || s.tab === "students" ? s.tab : undefined,
-  }),
+  } as { faculty?: string; department?: string; level?: string; tab?: string }),
   head: () => ({ meta: [{ title: "Academic Structure — D4EXAM" }] }),
   component: Page,
 });
@@ -219,7 +219,7 @@ function Page() {
   }
 
   async function saveFaculty() {
-    if (!schoolId || !name.trim()) return toast.error("Name required");
+    if (!schoolId || !name.trim()) { toast.error("Name required"); return; }
     setBusy(true);
     try {
       if (editId) {
@@ -234,7 +234,7 @@ function Page() {
   }
 
   async function saveDepartment() {
-    if (!schoolId || !facultyId || !name.trim()) return toast.error("Name required");
+    if (!schoolId || !facultyId || !name.trim()) { toast.error("Name required"); return; }
     setBusy(true);
     try {
       if (editId) {
@@ -249,7 +249,7 @@ function Page() {
   }
 
   async function saveLevel() {
-    if (!schoolId || !name.trim()) return toast.error("Name required");
+    if (!schoolId || !name.trim()) { toast.error("Name required"); return; }
     setBusy(true);
     try {
       const { error } = await supabase.from("levels").insert({ school_id: schoolId, name: name.trim(), code: code.trim() || null, status: "active" } as never);
@@ -270,7 +270,7 @@ function Page() {
 
   async function addStudent() {
     if (!schoolId || !facultyId || !departmentId || !levelId) return;
-    if (!sFull.trim() || !sMatric.trim()) return toast.error("Full name and matric required");
+    if (!sFull.trim() || !sMatric.trim()) { toast.error("Full name and matric required"); return; }
     setBusy(true);
     try {
       const matric = sMatric.trim();
@@ -320,7 +320,7 @@ function Page() {
   async function importStudentsFile(file: File) {
     if (!schoolId || !facultyId || !departmentId || !levelId) return;
     const rows = parseStudentCsv(await file.text());
-    if (!rows.length) return toast.error("No valid rows. Use: SN, Full Name, Matric");
+    if (!rows.length) { toast.error("No valid rows. Use: SN, Full Name, Matric"); return; }
     setBusy(true);
     let created = 0, skipped = 0;
     try {
@@ -339,7 +339,7 @@ function Page() {
 
   async function offerSelectedCourses() {
     if (!schoolId || !departmentId || !levelId) return;
-    if (selectedCourseIds.size === 0) return toast.error("Select at least one course");
+    if (selectedCourseIds.size === 0) { toast.error("Select at least one course"); return; }
     setBusy(true);
     try {
       let added = 0;
@@ -360,7 +360,7 @@ function Page() {
   }
 
   async function createAndOfferCourse() {
-    if (!schoolId || !departmentId || !levelId || !cCode.trim() || !cName.trim()) return toast.error("Code and title required");
+    if (!schoolId || !departmentId || !levelId || !cCode.trim() || !cName.trim()) { toast.error("Code and title required"); return; }
     setBusy(true);
     try {
       const codeVal = cCode.trim().toUpperCase();

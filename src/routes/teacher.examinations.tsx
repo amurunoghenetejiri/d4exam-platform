@@ -46,7 +46,7 @@ import type { ExamSecuritySettings } from "@/types";
 export const Route = createFileRoute("/teacher/examinations")({
   validateSearch: (search: Record<string, unknown>) => ({
     course: typeof search.course === "string" ? search.course : undefined,
-  }),
+  } as { course?: string }),
   head: () => ({
     meta: [
       { title: "Examinations — D4EXAM" },

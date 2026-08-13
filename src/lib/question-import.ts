@@ -519,9 +519,8 @@ export async function parsePdfFile(file: File): Promise<DraftQuestion[]> {
     const loadingTask = pdfjs.getDocument({
       data: buf,
       useSystemFonts: true,
-      isEvalSupported: false,
       useWorkerFetch: false,
-    });
+    } as Parameters<typeof pdfjs.getDocument>[0]);
     const pdf = await loadingTask.promise;
 
     let text = "";

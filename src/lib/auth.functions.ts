@@ -31,259 +31,113 @@ function studentSyntheticEmail(schoolCode: string, matric: string) {
 export const signInWithSchoolCode = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => loginSchema.parse(data))
   .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { createClient } = await import("@supabase/supabase-js");
+    const { hasAdminKey, provisionStudentLogin, writeLoginAudit } = await import("@/lib/login.server");
 
-    const code = data.schoolCode.toUpperCase();
+    const url = process.env["SUPABASE_URL"] ?? process.env["VITE_SUPABASE_URL"];
+    const publishableKey =
+      process.env["SUPABASE_PUBLISHABLE_KEY"] ??
+      process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ??
+      process.env["SUPABASE_ANON_KEY"] ??
+      process.env["VITE_SUPABASE_ANON_KEY"];
+
+    if (!url || !publishableKey) {
+      console.error("[login] Missing SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY on the server");
+      return {
+        error:
+          "Server is not configured for sign-in (missing backend URL or public key). Add SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY to your hosting environment variables.",
+      };
+    }
+
+    const publicClient = createClient(url, publishableKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: {
+        fetch: (input, init) => {
+          const headers = new Headers(init?.headers);
+          if (publishableKey.startsWith("sb_") && headers.get("Authorization") === `Bearer ${publishableKey}`) {
+            headers.delete("Authorization");
+          }
+          headers.set("apikey", publishableKey);
+          return fetch(input, { ...init, headers });
+        },
+      },
+    });
+
+    const code = data.schoolCode.trim().toUpperCase();
     const ident = data.identifier.trim();
     const password = data.password;
 
-    let schoolId: string | null = null;
-    let schoolCodeResolved = code;
-    if (code) {
-      const { data: school } = await supabaseAdmin
-        .from("schools")
-        .select("id, status, school_code")
-        .eq("school_code", code)
-        .maybeSingle();
-      if (school) {
-        if (school.status !== "active") {
+    const genericError = "Invalid school code, identifier or password.";
+
+    // 1) Resolve the sign-in email through a database function (no admin key needed).
+    let email: string | null = null;
+    let accountStatus: string | null = null;
+
+    const { data: resolved, error: rpcError } = await publicClient.rpc("resolve_login_identity", {
+      _school_code: code,
+      _identifier: ident,
+    });
+
+    if (rpcError) {
+      console.error("[login] resolve_login_identity failed:", rpcError.message);
+    } else {
+      const row = Array.isArray(resolved) ? resolved[0] : resolved;
+      if (row) {
+        if ((row as { kind?: string }).kind === "school_inactive") {
           return { error: "This school account is not active. Contact D4EXAM support." };
         }
-        schoolId = school.id as string;
-        schoolCodeResolved = (school.school_code as string) || code;
+        email = ((row as { email?: string | null }).email ?? null) as string | null;
+        accountStatus = ((row as { account_status?: string | null }).account_status ?? null) as string | null;
       }
     }
 
-    // ─── Student path: Username = full name (or matric), Password = matric ───
-    if (schoolId) {
-      const { data: studentRows } = await supabaseAdmin
-        .from("students")
-        .select("id, student_id, matric_number, full_name, status, profile_id")
-        .eq("school_id", schoolId)
-        .limit(2000);
-
-      const wantName = normalizeName(ident);
-      const student = (studentRows ?? []).find((s) => {
-        const matric = (s.matric_number || s.student_id || "").trim();
-        const name = normalizeName(s.full_name || "");
-        return (
-          normalizeName(matric) === wantName ||
-          name === wantName ||
-          (name.length > 0 && name.includes(wantName) && wantName.length >= 3)
-        );
-      });
-
-      if (student) {
-        if (student.status === "suspended" || student.status === "deactivated" || student.status === "locked") {
-          return { error: "This student account is suspended. Contact your school administrator." };
-        }
-
-        const matric = (student.matric_number || student.student_id || "").trim();
-        if (!matric || password !== matric) {
-          return { error: "Invalid school code, name or matric password." };
-        }
-
-        // Ensure auth user + profile + role exist
-        let profileEmail: string | null = null;
-        let authUserId: string | null = null;
-
-        if (student.profile_id) {
-          const { data: profile } = await supabaseAdmin
-            .from("profiles")
-            .select("id, email, auth_user_id, status")
-            .eq("id", student.profile_id)
-            .maybeSingle();
-          if (profile) {
-            profileEmail = profile.email as string;
-            authUserId = profile.auth_user_id as string;
-          }
-        }
-
-        if (!profileEmail || !authUserId) {
-          const email = studentSyntheticEmail(schoolCodeResolved, matric);
-          const fullName = (student.full_name || matric).trim();
-
-          // Try create; if email exists, look up user
-          const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
-            email,
-            password: matric,
-            email_confirm: true,
-            user_metadata: { full_name: fullName, role: "student" },
-          });
-
-          if (createError || !created.user) {
-            // User may already exist — try list by email
-            const { data: listed } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-            const existing = listed?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-            if (!existing) {
-              return { error: createError?.message ?? "Could not prepare student login." };
-            }
-            authUserId = existing.id;
-            // Reset password to matric so login always works
-            await supabaseAdmin.auth.admin.updateUserById(existing.id, { password: matric });
-          } else {
-            authUserId = created.user.id;
-          }
-
-          profileEmail = email;
-
-          // Upsert profile
-          const { data: existingProfile } = await supabaseAdmin
-            .from("profiles")
-            .select("id")
-            .eq("auth_user_id", authUserId)
-            .maybeSingle();
-
-          let profileId = existingProfile?.id as string | undefined;
-          if (!profileId) {
-            const { data: newProfile, error: pErr } = await supabaseAdmin
-              .from("profiles")
-              .insert({
-                auth_user_id: authUserId,
-                school_id: schoolId,
-                full_name: fullName,
-                email,
-                status: "active",
-              })
-              .select("id")
-              .single();
-            if (pErr || !newProfile) {
-              return { error: pErr?.message ?? "Could not create student profile." };
-            }
-            profileId = newProfile.id as string;
-          }
-
-          await supabaseAdmin
-            .from("students")
-            .update({ profile_id: profileId, status: "active" } as never)
-            .eq("id", student.id);
-
-          // Ensure student role
-          const { data: roleRow } = await supabaseAdmin
-            .from("user_roles")
-            .select("id")
-            .eq("user_id", authUserId)
-            .eq("role", "student")
-            .eq("school_id", schoolId)
-            .maybeSingle();
-          if (!roleRow) {
-            await supabaseAdmin.from("user_roles").insert({
-              user_id: authUserId,
-              school_id: schoolId,
-              role: "student",
-            });
-          }
-        } else {
-          // Keep password in sync with matric for structure-imported students
-          await supabaseAdmin.auth.admin.updateUserById(authUserId, { password: matric });
-        }
-
-        const anon = createClient(
-          process.env["SUPABASE_URL"]!,
-          process.env["SUPABASE_PUBLISHABLE_KEY"]!,
-          { auth: { persistSession: false, autoRefreshToken: false } },
-        );
-
-        const { data: signIn, error } = await anon.auth.signInWithPassword({
-          email: profileEmail!,
-          password: matric,
-        });
-
-        if (error || !signIn.session) {
-          return { error: "Invalid school code, name or matric password." };
-        }
-
-        await supabaseAdmin.from("audit_logs").insert({
-          school_id: schoolId,
-          actor_user_id: signIn.user?.id ?? null,
-          action: "login",
-          entity_type: "student",
-          entity_id: student.id,
-          description: "Student signed in (name + matric)",
-        });
-
-        return {
-          session: {
-            access_token: signIn.session.access_token,
-            refresh_token: signIn.session.refresh_token,
-          },
-        };
-      }
-    }
-
-    // ─── Staff / email path (existing behaviour) ───
-    const profileQuery = supabaseAdmin
-      .from("profiles")
-      .select("id, email, status, school_id")
-      .ilike("email", ident);
-    if (schoolId) profileQuery.eq("school_id", schoolId);
-    const { data: byEmail } = await profileQuery.maybeSingle();
-
-    let profileId: string | null = byEmail?.id ?? null;
-
-    if (!profileId && schoolId) {
-      const lookups: Array<{ table: "students" | "teachers" | "examination_officers"; cols: string[] }> = [
-        { table: "students", cols: ["student_id", "matric_number", "admission_number"] },
-        { table: "teachers", cols: ["staff_id"] },
-        { table: "examination_officers", cols: ["officer_id"] },
-      ];
-      for (const l of lookups) {
-        const or = l.cols.map((c) => `${c}.eq.${ident}`).join(",");
-        const { data: row } = await supabaseAdmin
-          .from(l.table)
-          .select("profile_id")
-          .eq("school_id", schoolId)
-          .or(or)
-          .maybeSingle();
-        if (row?.profile_id) {
-          profileId = row.profile_id as string;
-          break;
-        }
-      }
-    }
-
-    if (!profileId) return { error: "Invalid school code, identifier or password." };
-
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("id, email, status, school_id")
-      .eq("id", profileId)
-      .maybeSingle();
-
-    if (!profile) return { error: "Invalid school code, identifier or password." };
-    if (schoolId && profile.school_id !== schoolId) {
-      return { error: "Invalid school code, identifier or password." };
-    }
-    if (profile.status === "suspended" || profile.status === "deactivated" || profile.status === "locked") {
+    if (accountStatus === "suspended" || accountStatus === "deactivated" || accountStatus === "locked") {
       return { error: "This account is not permitted to sign in. Contact your school administrator." };
     }
 
-    const anon = createClient(
-      process.env["SUPABASE_URL"]!,
-      process.env["SUPABASE_PUBLISHABLE_KEY"]!,
-      { auth: { persistSession: false, autoRefreshToken: false } },
-    );
+    let signInPassword = password;
 
-    const { data: signIn, error } = await anon.auth.signInWithPassword({
-      email: profile.email,
-      password: data.password,
+    // 2) Fallback: a student row exists but has no auth account yet. This needs
+    //    admin access, which only exists where the service role key is present.
+    if (!email && code) {
+      if (hasAdminKey()) {
+        const { data: school } = await publicClient
+          .from("schools")
+          .select("id, status, school_code")
+          .eq("school_code", code)
+          .maybeSingle();
+        if (school && (school as { status?: string }).status === "active") {
+          const provisioned = await provisionStudentLogin({
+            schoolId: (school as { id: string }).id,
+            schoolCode: ((school as { school_code?: string }).school_code || code) as string,
+            identifier: ident,
+            password,
+          });
+          if (provisioned && "error" in provisioned) return { error: provisioned.error };
+          if (provisioned && "email" in provisioned) {
+            email = provisioned.email;
+            signInPassword = provisioned.password;
+          }
+        }
+      } else {
+        console.warn("[login] No service role key available; skipping student auto-provisioning.");
+      }
+    }
+
+    if (!email) return { error: genericError };
+
+    const { data: signIn, error } = await publicClient.auth.signInWithPassword({
+      email,
+      password: signInPassword,
     });
 
     if (error || !signIn.session) {
-      return { error: "Invalid school code, identifier or password." };
+      return { error: genericError };
     }
 
-    if (profile.status !== "active") {
-      await supabaseAdmin.from("profiles").update({ status: "active" }).eq("id", profile.id);
-    }
-
-    await supabaseAdmin.from("audit_logs").insert({
-      school_id: profile.school_id,
-      actor_user_id: signIn.user?.id ?? null,
-      action: "login",
-      entity_type: "profile",
-      entity_id: profile.id,
+    await writeLoginAudit({
+      schoolId: null,
+      userId: signIn.user?.id ?? null,
       description: "User signed in",
     });
 
@@ -294,6 +148,7 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
       },
     };
   });
+
 
 export const reviewSchoolApplication = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
