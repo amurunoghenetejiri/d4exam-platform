@@ -6,24 +6,26 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
-  Camera,
-  Mic,
   GripVertical,
-  Monitor,
-  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/brand/Logo";
+import { ExamSecurityGate } from "@/components/cbt/ExamSecurityGate";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useStudentContext, canStartExam } from "@/lib/student";
 import {
   fromExamSettingsRow,
-  parseSecurityFromDescription,
+  resolveScreenShareMode,
   type ExamSettingsRow,
 } from "@/lib/exam-security";
 import { scoreObjectiveAnswers, logSecurityEvent } from "@/lib/cbt-security";
 import { parseExamMeta, pickExamQuestions, seededShuffle } from "@/lib/exam-meta";
+import {
+  capabilitiesSnapshot,
+  detectDeviceCapabilities,
+  type DeviceCapabilities,
+} from "@/lib/device-capabilities";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/student/exam/$id")({
@@ -73,19 +75,13 @@ function decodeOptions(explanation: string | null): string[] {
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
-function resolveCorrectOptionText(
-  correctAnswer: string | null,
-  originalOptions: string[],
-): string | null {
+function resolveCorrectOptionText(correctAnswer: string | null, originalOptions: string[]): string | null {
   const raw = (correctAnswer || "").trim();
   if (!raw) return null;
   if (/^[A-Da-d]$/.test(raw) && originalOptions.length > 0) {
-    const letterIdx = raw.toUpperCase().charCodeAt(0) - 65;
-    return originalOptions[letterIdx] ?? null;
+    return originalOptions[raw.toUpperCase().charCodeAt(0) - 65] ?? null;
   }
-  const byText = originalOptions.find((o) => o.trim().toLowerCase() === raw.toLowerCase());
-  if (byText) return byText;
-  return raw;
+  return originalOptions.find((o) => o.trim().toLowerCase() === raw.toLowerCase()) ?? raw;
 }
 
 const TOAST_COOLDOWN_MS = 10_000;
@@ -103,6 +99,7 @@ function CbtExamPage() {
   const faceWarnCountRef = useRef(0);
   const lastToastKeyRef = useRef<{ key: string; at: number }>({ key: "", at: 0 });
   const prevFaceRef = useRef<FaceState>("unknown");
+  const capsRef = useRef<DeviceCapabilities | null>(null);
   const dragState = useRef<{ ox: number; oy: number; px: number; py: number } | null>(null);
 
   const [pip, setPip] = useState({ x: 16, y: 16 });
@@ -185,27 +182,27 @@ function CbtExamPage() {
     },
   });
 
-  const security = useMemo(() => {
-    return fromExamSettingsRow(settingsQ.data, examQ.data?.description);
-  }, [settingsQ.data, examQ.data?.description]);
+  const security = useMemo(
+    () => fromExamSettingsRow(settingsQ.data, examQ.data?.description),
+    [settingsQ.data, examQ.data?.description],
+  );
+  const shareMode = resolveScreenShareMode(security);
+  const screenRequired = shareMode === "required";
 
   const questionsToAnswer = useMemo(() => {
     const fromSettings = (settingsQ.data as ExamSettingsRow | null)?.questions_to_answer;
     if (typeof fromSettings === "number" && fromSettings > 0) return Math.floor(fromSettings);
     const meta = parseExamMeta(examQ.data?.description);
-    if (meta.questionsToAnswer && meta.questionsToAnswer > 0) return meta.questionsToAnswer;
-    return null;
+    return meta.questionsToAnswer && meta.questionsToAnswer > 0 ? meta.questionsToAnswer : null;
   }, [settingsQ.data, examQ.data?.description]);
 
   const questions = useMemo(() => {
     const bank = (questionsQ.data ?? []).map((q) => {
       let opts = decodeOptions(q.explanation);
-      if (opts.length === 0 && (q.question_type === "true_false" || q.question_type === "True/False")) {
+      if (opts.length === 0 && (q.question_type === "true_false" || q.question_type === "True/False"))
         opts = ["True", "False"];
-      }
       if (opts.length === 0) opts = ["Option A", "Option B", "Option C", "Option D"];
-      const correctOptionText = resolveCorrectOptionText(q.correct_answer, opts);
-      return { ...q, options: opts, correctOptionText };
+      return { ...q, options: opts, correctOptionText: resolveCorrectOptionText(q.correct_answer, opts) };
     });
     const limited = pickExamQuestions(bank, {
       questionsToAnswer,
@@ -220,14 +217,7 @@ function CbtExamPage() {
       }));
     }
     return limited;
-  }, [
-    questionsQ.data,
-    security.randomizeQuestions,
-    security.randomizeOptions,
-    questionsToAnswer,
-    student?.studentId,
-    id,
-  ]);
+  }, [questionsQ.data, security.randomizeQuestions, security.randomizeOptions, questionsToAnswer, student?.studentId, id]);
 
   const TOTAL = questions.length;
   const [answers, setAnswers] = useState<Record<string, number>>({});
@@ -242,15 +232,9 @@ function CbtExamPage() {
   const [camReady, setCamReady] = useState(false);
   const [screenReady, setScreenReady] = useState(false);
   const [faceStatus, setFaceStatus] = useState<FaceState>("unknown");
-  const [precheckStep, setPrecheckStep] = useState<"idle" | "camera" | "screen" | "ready">("idle");
 
   const logEvent = useCallback(
-    (
-      eventType: string,
-      severity: "low" | "medium" | "high",
-      description: string,
-      extra?: Record<string, unknown>,
-    ) => {
+    (eventType: string, severity: "low" | "medium" | "high", description: string, extra?: Record<string, unknown>) => {
       if (!examQ.data || !student) return;
       void logSecurityEvent({
         schoolId: examQ.data.school_id,
@@ -262,26 +246,29 @@ function CbtExamPage() {
         description,
         questionId: questions[indexRef.current]?.id ?? null,
         questionIndex: indexRef.current + 1,
-        extra,
+        extra: {
+          ...capabilitiesSnapshot(capsRef.current ?? detectDeviceCapabilities(), {
+            cameraActive: camReady,
+            screenShareActive: screenReady,
+            faceStatus,
+          }),
+          ...(extra ?? {}),
+        },
       });
     },
-    [examQ.data, student, questions],
+    [examQ.data, student, questions, camReady, screenReady, faceStatus],
   );
 
   const toastCooldowned = useCallback((key: string, message: string, kind: "warn" | "ok" = "warn") => {
     const now = Date.now();
-    if (lastToastKeyRef.current.key === key && now - lastToastKeyRef.current.at < TOAST_COOLDOWN_MS) {
-      return;
-    }
+    if (lastToastKeyRef.current.key === key && now - lastToastKeyRef.current.at < TOAST_COOLDOWN_MS) return;
     lastToastKeyRef.current = { key, at: now };
     if (kind === "ok") toast.success(message, { duration: 2500 });
     else toast.warning(message, { duration: 5500 });
   }, []);
 
   useEffect(() => {
-    if (examQ.data && seconds === null) {
-      setSeconds(Math.max(1, Number(examQ.data.duration_minutes) || 1) * 60);
-    }
+    if (examQ.data && seconds === null) setSeconds(Math.max(1, Number(examQ.data.duration_minutes) || 1) * 60);
   }, [examQ.data, seconds]);
 
   useEffect(() => {
@@ -302,9 +289,7 @@ function CbtExamPage() {
       if (document.hidden && security.tabMonitoring) {
         setTabSwitches((n) => {
           const next = n + 1;
-          logEvent("TAB_SWITCH", "medium", `Tab switch ${next}/${security.maxTabSwitches}`, {
-            count: next,
-          });
+          logEvent("TAB_SWITCH", "medium", `Tab switch ${next}/${security.maxTabSwitches}`, { count: next });
           if (next >= security.maxTabSwitches) {
             if (security.thresholdAction === "terminate") {
               toast.error("Too many tab switches — exam terminated");
@@ -334,7 +319,6 @@ function CbtExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, security.tabMonitoring, security.blockCopyPaste, security.maxTabSwitches]);
 
-  // Face detection loop
   useEffect(() => {
     if (!started || !camReady || !security.requireCamera || !security.faceDetection) return;
     const video = videoRef.current;
@@ -342,7 +326,6 @@ function CbtExamPage() {
       video.srcObject = camStreamRef.current;
       void video.play().catch(() => {});
     }
-
     let cancelled = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let detector: { detect: (v: HTMLVideoElement) => Promise<any[]> } | null = null;
@@ -352,36 +335,6 @@ function CbtExamPage() {
     } catch {
       detector = null;
     }
-
-    const applyFaceState = (next: FaceState, faceCount: number) => {
-      const prev = prevFaceRef.current;
-      setFaceStatus(next);
-      prevFaceRef.current = next;
-
-      if (next === "none") {
-        toastCooldowned(
-          "face-none",
-          "⚠️ Face not detected. Please position your face within the camera view.",
-        );
-        logEvent("FACE_NOT_DETECTED", "medium", "No face detected", { faces: 0 });
-        faceWarnCountRef.current += 1;
-        maybeFaceThreshold();
-      } else if (next === "multi") {
-        const msg =
-          faceCount === 2
-            ? "⚠️ 2 faces detected. Only the registered student should be visible."
-            : "⚠️ Multiple faces detected. Please ensure only you are visible.";
-        toastCooldowned(`face-multi-${faceCount}`, msg);
-        logEvent("MULTIPLE_FACES_DETECTED", "high", `${faceCount} faces detected`, {
-          faces: faceCount,
-        });
-        faceWarnCountRef.current += 1;
-        maybeFaceThreshold();
-      } else if (next === "ok" && (prev === "none" || prev === "multi")) {
-        toastCooldowned("face-ok", "✓ Face detected. Monitoring restored.", "ok");
-        logEvent("ONE_FACE_DETECTED", "low", "Face monitoring restored", { faces: 1 });
-      }
-    };
 
     const maybeFaceThreshold = () => {
       const max = security.maxFaceWarnings || 5;
@@ -396,6 +349,31 @@ function CbtExamPage() {
       } else if (action === "flag") {
         toast.warning("Multiple face warnings recorded for security review");
         logEvent("WARNING_SHOWN", "high", "Face warning threshold reached — flagged");
+      }
+    };
+
+    const applyFaceState = (next: FaceState, faceCount: number) => {
+      const prev = prevFaceRef.current;
+      setFaceStatus(next);
+      prevFaceRef.current = next;
+      if (next === "none") {
+        toastCooldowned("face-none", "⚠️ Face not detected. Please position your face within the camera view.");
+        logEvent("FACE_NOT_DETECTED", "medium", "No face detected", { faces: 0 });
+        faceWarnCountRef.current += 1;
+        maybeFaceThreshold();
+      } else if (next === "multi") {
+        toastCooldowned(
+          `face-multi-${faceCount}`,
+          faceCount === 2
+            ? "⚠️ 2 faces detected. Only the registered student should be visible."
+            : "⚠️ Multiple faces detected. Please ensure only you are visible.",
+        );
+        logEvent("MULTIPLE_FACES_DETECTED", "high", `${faceCount} faces detected`, { faces: faceCount });
+        faceWarnCountRef.current += 1;
+        maybeFaceThreshold();
+      } else if (next === "ok" && (prev === "none" || prev === "multi")) {
+        toastCooldowned("face-ok", "✓ Face detected. Monitoring restored.", "ok");
+        logEvent("ONE_FACE_DETECTED", "low", "Face monitoring restored", { faces: 1 });
       }
     };
 
@@ -415,7 +393,6 @@ function CbtExamPage() {
         setFaceStatus("unknown");
       }
     };
-
     const interval = window.setInterval(() => void tick(), 3000);
     void tick();
     return () => {
@@ -425,7 +402,6 @@ function CbtExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, camReady, security.requireCamera, security.faceDetection, security.maxFaceWarnings]);
 
-  // Camera track ended / revoked
   useEffect(() => {
     if (!started || !camStreamRef.current) return;
     const tracks = camStreamRef.current.getVideoTracks();
@@ -440,9 +416,8 @@ function CbtExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, camReady]);
 
-  // Screen share ended monitoring
   useEffect(() => {
-    if (!started || !screenStreamRef.current || !security.requireScreenShare) return;
+    if (!started || !screenStreamRef.current || !screenRequired) return;
     const tracks = screenStreamRef.current.getVideoTracks();
     const onEnded = () => {
       setScreenReady(false);
@@ -451,14 +426,12 @@ function CbtExamPage() {
         "⚠️ Screen sharing stopped. Please resume screen sharing to continue your examination.",
       );
       logEvent("SCREEN_SHARE_STOPPED", "high", "Screen sharing stopped by user or system");
-      if ((security.faceViolationAction || security.thresholdAction) === "pause") {
-        setPaused(true);
-      }
+      if ((security.faceViolationAction || security.thresholdAction) === "pause") setPaused(true);
     };
     tracks.forEach((t) => t.addEventListener("ended", onEnded));
     return () => tracks.forEach((t) => t.removeEventListener("ended", onEnded));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, screenReady, security.requireScreenShare]);
+  }, [started, screenReady, screenRequired]);
 
   useEffect(() => {
     return () => {
@@ -498,6 +471,7 @@ function CbtExamPage() {
           student_id: student.studentId,
           status: "in_progress",
           started_at: new Date().toISOString(),
+          metadata: capabilitiesSnapshot(capsRef.current ?? detectDeviceCapabilities()) as never,
         } as never,
         { onConflict: "exam_id,student_id" },
       )
@@ -507,9 +481,8 @@ function CbtExamPage() {
       console.warn("ensureAttemptRow", error);
       return null;
     }
-    const aid = (data as { id?: string } | null)?.id ?? null;
-    attemptIdRef.current = aid;
-    return aid;
+    attemptIdRef.current = (data as { id?: string } | null)?.id ?? null;
+    return attemptIdRef.current;
   }
 
   async function finishAttempt(auto = false) {
@@ -539,6 +512,11 @@ function CbtExamPage() {
             total: TOTAL,
             score: scored,
             face_warnings: faceWarnCountRef.current,
+            ...capabilitiesSnapshot(capsRef.current ?? detectDeviceCapabilities(), {
+              cameraActive: camReady,
+              screenShareActive: screenReady,
+              faceStatus,
+            }),
           } as never,
         } as never,
         { onConflict: "exam_id,student_id" },
@@ -604,25 +582,24 @@ function CbtExamPage() {
   }
 
   async function requestScreenShare() {
+    const caps = capsRef.current ?? detectDeviceCapabilities();
+    if (!caps.screenShare) return false;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const display = (navigator.mediaDevices as any).getDisplayMedia?.({
+      const stream: MediaStream = await (navigator.mediaDevices as any).getDisplayMedia({
         video: true,
         audio: false,
       });
-      if (!display) {
-        toast.error("Screen sharing is not supported in this browser");
-        return false;
-      }
-      const stream: MediaStream = await display;
       screenStreamRef.current = stream;
       setScreenReady(true);
       toast.success("✓ Screen sharing active");
       logEvent("SCREEN_SHARE_STARTED", "low", "Screen sharing started");
       return true;
     } catch {
-      toast.warning("⚠️ Screen sharing is required for this examination.");
-      logEvent("SCREEN_SHARE_STOPPED", "high", "Screen share permission denied or cancelled");
+      if (screenRequired) {
+        toast.warning("⚠️ Screen sharing is required for this examination.");
+        logEvent("SCREEN_SHARE_STOPPED", "high", "Screen share permission denied or cancelled");
+      }
       return false;
     }
   }
@@ -632,12 +609,13 @@ function CbtExamPage() {
     if (ok) {
       logEvent("SCREEN_SHARE_RESTORED", "low", "Screen sharing restored");
       toast.success("✓ Screen sharing restored.");
-      if (paused && security.requireScreenShare) setPaused(false);
+      if (paused && screenRequired) setPaused(false);
     }
   }
 
-  async function beginWithMedia() {
+  async function beginWithMedia(opts: { skipScreenShare: boolean; caps: DeviceCapabilities }) {
     setMediaBusy(true);
+    capsRef.current = opts.caps;
     try {
       if (student) {
         const { data: existing } = await supabase
@@ -655,8 +633,12 @@ function CbtExamPage() {
         if (existing?.id) attemptIdRef.current = existing.id as string;
       }
 
+      logEvent("SECURITY_CHECK_PASSED", "low", "Device capability snapshot", {
+        ...capabilitiesSnapshot(opts.caps),
+        screen_share_mode: shareMode,
+      });
+
       if (security.requireCamera) {
-        setPrecheckStep("camera");
         const camOk = await requestCamera();
         if (!camOk) {
           setMediaBusy(false);
@@ -664,17 +646,21 @@ function CbtExamPage() {
         }
       }
 
-      if (security.requireScreenShare) {
-        setPrecheckStep("screen");
-        const scrOk = await requestScreenShare();
-        if (!scrOk) {
+      if (!opts.skipScreenShare && (shareMode === "required" || shareMode === "optional")) {
+        if (opts.caps.screenShare) {
+          const scrOk = await requestScreenShare();
+          if (!scrOk && shareMode === "required") {
+            setMediaBusy(false);
+            return;
+          }
+        } else if (shareMode === "required") {
+          toast.warning("This examination requires a desktop browser with screen-sharing support.");
           setMediaBusy(false);
           return;
         }
       }
 
       await ensureAttemptRow();
-      logEvent("SECURITY_CHECK_PASSED", "low", "Pre-exam security checks passed");
 
       if (security.fullscreen) {
         try {
@@ -684,7 +670,6 @@ function CbtExamPage() {
         }
       }
 
-      setPrecheckStep("ready");
       setStarted(true);
       setIndex(0);
     } finally {
@@ -754,111 +739,16 @@ function CbtExamPage() {
   }
 
   if (!started) {
-    const needCam = security.requireCamera;
-    const needScreen = security.requireScreenShare;
-    const needMic = security.requireMicrophone;
     return (
-      <div className="grid min-h-dvh place-items-center bg-slate-50 p-6">
-        <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <Logo size="lg" />
-          <h1 className="mt-4 text-xl font-extrabold text-primary">{exam.title}</h1>
-          <p className="mt-1 text-sm font-semibold text-primary/80">
-            {exam.courses?.code} · {exam.courses?.name}
-          </p>
-
-          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              SECURITY CHECK
-            </p>
-            <ul className="mt-3 space-y-2 text-sm text-slate-700">
-              <li className="flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <Camera className="h-3.5 w-3.5" /> Camera monitoring
-                </span>
-                <span className={needCam ? "font-semibold text-primary" : "text-slate-400"}>
-                  {needCam ? "Required" : "Off"}
-                </span>
-              </li>
-              <li className="flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <Camera className="h-3.5 w-3.5" /> Face detection
-                </span>
-                <span
-                  className={
-                    needCam && security.faceDetection
-                      ? "font-semibold text-primary"
-                      : "text-slate-400"
-                  }
-                >
-                  {needCam && security.faceDetection ? "On" : "Off"}
-                </span>
-              </li>
-              <li className="flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <Monitor className="h-3.5 w-3.5" /> Screen sharing
-                </span>
-                <span className={needScreen ? "font-semibold text-primary" : "text-slate-400"}>
-                  {needScreen ? "Required" : "Off"}
-                </span>
-              </li>
-              <li className="flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <Mic className="h-3.5 w-3.5" /> Microphone
-                </span>
-                <span className={needMic ? "font-semibold text-primary" : "text-slate-400"}>
-                  {needMic ? "Required" : "Off"}
-                </span>
-              </li>
-            </ul>
-            <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-              Monitoring helps maintain exam integrity. It does not guarantee absolute prevention of
-              misconduct. Events are logged for review by authorised staff.
-            </p>
-          </div>
-
-          <ul className="mt-4 space-y-1 text-sm text-slate-600">
-            <li>
-              Duration: <strong>{exam.duration_minutes} minutes</strong>
-            </li>
-            <li>
-              Questions to answer: <strong>{TOTAL}</strong>
-            </li>
-          </ul>
-
-          {TOTAL === 0 ? (
-            <p className="mt-4 text-sm text-amber-700">No questions on this exam paper yet.</p>
-          ) : (
-            <Button
-              className="mt-6 w-full font-semibold"
-              disabled={mediaBusy}
-              onClick={() => void beginWithMedia()}
-            >
-              {mediaBusy ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {precheckStep === "screen"
-                    ? "Waiting for screen share…"
-                    : precheckStep === "camera"
-                      ? "Requesting camera…"
-                      : "Preparing…"}
-                </>
-              ) : needCam || needScreen || needMic ? (
-                needScreen ? (
-                  "Share screen & continue"
-                ) : (
-                  "Allow camera & start exam"
-                )
-              ) : (
-                "Begin examination"
-              )}
-            </Button>
-          )}
-          <Button variant="ghost" className="mt-2 w-full" asChild>
-            <Link to="/student/examinations">Cancel</Link>
-          </Button>
-        </div>
-      </div>
+      <ExamSecurityGate
+        examTitle={exam.title}
+        courseLine={`${exam.courses?.code ?? ""} · ${exam.courses?.name ?? ""}`}
+        durationMinutes={exam.duration_minutes}
+        totalQuestions={TOTAL}
+        security={security}
+        busy={mediaBusy}
+        onStart={(opts) => void beginWithMedia(opts)}
+      />
     );
   }
 
@@ -884,12 +774,7 @@ function CbtExamPage() {
     return "blank";
   };
 
-  const camDot =
-    !security.requireCamera
-      ? null
-      : camReady
-        ? "bg-emerald-400"
-        : "bg-red-400";
+  const camDot = !security.requireCamera ? null : camReady ? "bg-emerald-400" : "bg-red-400";
   const faceDot =
     !security.requireCamera || !security.faceDetection
       ? null
@@ -899,11 +784,7 @@ function CbtExamPage() {
           ? "bg-amber-400"
           : "bg-slate-400";
   const screenDot =
-    !security.requireScreenShare
-      ? null
-      : screenReady
-        ? "bg-emerald-400"
-        : "bg-red-400";
+    shareMode === "disabled" ? null : screenReady ? "bg-emerald-400" : shareMode === "required" ? "bg-red-400" : "bg-slate-400";
 
   return (
     <div className="flex min-h-dvh flex-col bg-slate-50">
@@ -916,7 +797,6 @@ function CbtExamPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Subtle status indicators */}
             <div className="hidden items-center gap-2 text-[10px] font-bold sm:flex">
               {camDot && (
                 <span className="inline-flex items-center gap-1 rounded bg-white/10 px-2 py-1">
@@ -955,10 +835,9 @@ function CbtExamPage() {
         </div>
       </header>
 
-      {/* Pause / screen-share resume banner */}
-      {(paused || (security.requireScreenShare && !screenReady)) && (
+      {(paused || (screenRequired && !screenReady)) && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-amber-900">
-          {security.requireScreenShare && !screenReady ? (
+          {screenRequired && !screenReady ? (
             <div className="flex flex-wrap items-center justify-center gap-3">
               <span>⚠️ Screen sharing stopped. Resume to continue.</span>
               <Button size="sm" className="font-semibold" onClick={() => void resumeScreenShare()}>
@@ -992,8 +871,7 @@ function CbtExamPage() {
                     st === "current" && "bg-primary text-white ring-2 ring-primary/30",
                     st === "answered" && "bg-emerald-500 text-white",
                     st === "flagged" && "bg-amber-400 text-slate-900",
-                    st === "blank" &&
-                      "border border-slate-200 bg-white text-slate-700 hover:border-primary",
+                    st === "blank" && "border border-slate-200 bg-white text-slate-700 hover:border-primary",
                   )}
                 >
                   {i + 1}
@@ -1034,9 +912,7 @@ function CbtExamPage() {
             </button>
           </div>
 
-          <h1 className="mt-4 text-lg font-bold leading-snug text-slate-900 sm:text-xl">
-            {q?.question_text}
-          </h1>
+          <h1 className="mt-4 text-lg font-bold leading-snug text-slate-900 sm:text-xl">{q?.question_text}</h1>
 
           <ul className="mt-6 space-y-3">
             {(q?.options ?? []).map((opt, oi) => {
@@ -1059,9 +935,7 @@ function CbtExamPage() {
                     <span
                       className={cn(
                         "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[10px] font-bold",
-                        selected
-                          ? "border-primary bg-primary text-white"
-                          : "border-slate-300 text-slate-500",
+                        selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500",
                       )}
                     >
                       {String.fromCharCode(65 + oi)}
@@ -1074,19 +948,10 @@ function CbtExamPage() {
           </ul>
 
           <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
-            <Button
-              variant="outline"
-              className="rounded-lg font-semibold"
-              disabled={index === 0}
-              onClick={() => setIndex((i) => Math.max(0, i - 1))}
-            >
+            <Button variant="outline" className="rounded-lg font-semibold" disabled={index === 0} onClick={() => setIndex((i) => Math.max(0, i - 1))}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Previous
             </Button>
-            <Button
-              className="rounded-lg font-semibold"
-              disabled={index >= TOTAL - 1}
-              onClick={() => setIndex((i) => Math.min(TOTAL - 1, i + 1))}
-            >
+            <Button className="rounded-lg font-semibold" disabled={index >= TOTAL - 1} onClick={() => setIndex((i) => Math.min(TOTAL - 1, i + 1))}>
               Next <ChevronRight className="ml-1 h-4 w-4" />
             </Button>
           </div>
@@ -1106,13 +971,7 @@ function CbtExamPage() {
             <GripVertical className="h-3 w-3 text-white" />
             <span className="text-[9px] font-bold uppercase tracking-wide text-white">Drag me</span>
           </div>
-          <video
-            ref={videoRef}
-            className="aspect-[4/3] w-full object-cover"
-            autoPlay
-            playsInline
-            muted
-          />
+          <video ref={videoRef} className="aspect-[4/3] w-full object-cover" autoPlay playsInline muted />
           <div
             className={cn(
               "px-2 py-1 text-center text-[10px] font-bold text-white",
