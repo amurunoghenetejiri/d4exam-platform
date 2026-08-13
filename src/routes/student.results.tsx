@@ -1,17 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
+import { PageHeader, EmptyState } from "@/components/dashboard/kit";
+import { Logo } from "@/components/brand/Logo";
 import { useStudentContext } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/student/results")({
   head: () => ({
     meta: [
       { title: "My Results — D4EXAM" },
-      {
-        name: "description",
-        content: "Published scores and results still under review.",
-      },
+      { name: "description", content: "Your examination results." },
     ],
   }),
   component: Page,
@@ -31,15 +30,11 @@ type ResultRow = {
   security_review_status: string | null;
   released_at: string | null;
   created_at: string | null;
-  examinations: { title: string; courses: { code: string } | null } | null;
-};
-
-type AttemptRow = {
-  exam_id: string;
-  status: string;
-  submitted_at: string | null;
-  percentage: number | null;
-  score: number | null;
+  examinations: {
+    title: string;
+    duration_minutes?: number;
+    courses: { code: string; name: string } | null;
+  } | null;
 };
 
 function Page() {
@@ -54,7 +49,7 @@ function Page() {
       const { data, error } = await supabase
         .from("results")
         .select(
-          "id, exam_id, total_score, percentage, grade, pass_fail, correct_count, wrong_count, unanswered_count, status, security_review_status, released_at, created_at, examinations(title, courses(code))",
+          "id, exam_id, total_score, percentage, grade, pass_fail, correct_count, wrong_count, unanswered_count, status, security_review_status, released_at, created_at, examinations(title, duration_minutes, courses(code, name))",
         )
         .eq("student_id", student.studentId)
         .eq("school_id", student.schoolId)
@@ -64,146 +59,190 @@ function Page() {
     },
   });
 
-  const attemptsQ = useQuery({
-    queryKey: ["student-result-attempts", student?.studentId],
-    enabled: Boolean(student?.studentId),
-    queryFn: async () => {
-      if (!student) return [] as AttemptRow[];
-      const { data, error } = await supabase
-        .from("exam_attempts")
-        .select("exam_id, status, submitted_at, percentage, score")
-        .eq("student_id", student.studentId)
-        .in("status", ["submitted", "terminated", "flagged"]);
-      if (error) throw error;
-      return (data ?? []) as AttemptRow[];
-    },
-  });
-
   if (isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
   if (!student) {
     return <EmptyState title="Student profile not found" description="Contact School Admin." />;
   }
 
   const rows = resultsQ.data ?? [];
-  const published = rows.filter((r) => r.status === "published");
-  const pending = rows.filter((r) => r.status !== "published");
-  const resultExamIds = new Set(rows.map((r) => r.exam_id));
-  const submittedWithoutResult = (attemptsQ.data ?? []).filter(
-    (a) => !resultExamIds.has(a.exam_id),
-  );
-  const attemptExamIds = new Set((attemptsQ.data ?? []).map((a) => a.exam_id));
+  const published = rows.filter((r) => (r.status || "").toLowerCase() === "published");
+  const pending = rows.filter((r) => (r.status || "").toLowerCase() !== "published");
 
   return (
     <>
       <PageHeader
         title="My Results"
-        description={`${student.matric ?? ""} · Instant scores show when the teacher set “immediate” release; otherwise they appear after officer review`}
+        description={`${student.fullName || student.matric || ""} · Official examination results`}
       />
 
-      <SectionCard title={`Published results (${published.length})`}>
-        {resultsQ.isLoading ? (
-          <p className="text-sm text-slate-500">Loading…</p>
-        ) : published.length === 0 ? (
-          <EmptyState
-            title="No published results yet"
-            description="When your scores are released, they appear here with grade and percentage."
-          />
-        ) : (
-          <ul className="space-y-3">
-            {published.map((r) => (
-              <ResultCard key={r.id} r={r} />
-            ))}
-          </ul>
-        )}
-      </SectionCard>
-
-      <div className="mt-6">
-        <SectionCard title={`Under review (${pending.length + submittedWithoutResult.length})`}>
-          {pending.length === 0 && submittedWithoutResult.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              Nothing waiting for review. Submitted exams show here until results are released.
-            </p>
-          ) : (
-            <ul className="space-y-3">
-              {pending.map((r) => (
-                <ResultCard key={r.id} r={r} pending />
-              ))}
-              {submittedWithoutResult.map((a) => (
-                <li
-                  key={a.exam_id}
-                  className="rounded-xl border border-amber-100 bg-amber-50/50 p-3.5"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-bold text-slate-900">Submitted examination</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {a.submitted_at
-                          ? `Submitted ${new Date(a.submitted_at).toLocaleString()}`
-                          : "Submitted"}
-                        {a.percentage != null ? ` · Provisional ${a.percentage}%` : ""}
-                      </p>
-                    </div>
-                    <StatusBadge status="pending review" />
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </SectionCard>
-      </div>
-
-      {attemptExamIds.size > 0 && (
-        <p className="mt-4 text-center text-xs text-slate-400">
-          You have completed {attemptExamIds.size} examination
-          {attemptExamIds.size === 1 ? "" : "s"}. Completed exams no longer appear under “Available
-          now”.
-        </p>
+      {resultsQ.isLoading ? (
+        <p className="text-sm text-slate-500">Loading results…</p>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title="No results yet"
+          description="After you submit an exam, your result slip appears here when released."
+        />
+      ) : (
+        <div className="space-y-6">
+          {published.map((r) => (
+            <ResultSlip key={r.id} r={r} student={student} />
+          ))}
+          {pending.map((r) => (
+            <ResultSlip key={r.id} r={r} student={student} pending />
+          ))}
+        </div>
       )}
     </>
   );
 }
 
-function ResultCard({ r, pending }: { r: ResultRow; pending?: boolean }) {
+function ResultSlip({
+  r,
+  student,
+  pending,
+}: {
+  r: ResultRow;
+  student: {
+    fullName: string;
+    matric: string | null;
+    departmentName: string | null;
+    levelName: string | null;
+    facultyName: string | null;
+    schoolName: string | null;
+  };
+  pending?: boolean;
+}) {
+  const isPub = !pending && (r.status || "").toLowerCase() === "published";
+  const pass = (r.pass_fail || "").toLowerCase() === "pass";
+  const attempted =
+    (r.correct_count ?? 0) + (r.wrong_count ?? 0) + (r.unanswered_count ?? 0);
+
   return (
-    <li
-      className={`rounded-xl border p-3.5 ${
-        pending ? "border-amber-100 bg-amber-50/40" : "border-slate-100"
-      }`}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-bold text-slate-900">
-            {r.examinations?.courses?.code ?? "—"} · {r.examinations?.title ?? "Examination"}
-          </p>
-          {r.status === "published" ? (
+    <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-[#0b1b3a] px-5 py-4 text-white">
+        <div className="flex items-center gap-3">
+          <Logo size="sm" />
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/70">
+              D4EXAM · Result slip
+            </p>
+            <p className="text-sm font-bold">
+              {r.examinations?.courses?.code ?? "—"} · {r.examinations?.title ?? "Examination"}
+            </p>
+          </div>
+        </div>
+        <span
+          className={
+            isPub
+              ? "rounded-full bg-emerald-500 px-3 py-1 text-[10px] font-bold uppercase text-white"
+              : "rounded-full bg-amber-400 px-3 py-1 text-[10px] font-bold uppercase text-slate-900"
+          }
+        >
+          {isPub ? "Published" : "Under review"}
+        </span>
+      </div>
+
+      <div className="grid gap-6 p-5 sm:grid-cols-[1fr_auto]">
+        <div className="space-y-2 text-sm">
+          <Row label="Candidate name" value={student.fullName || "—"} bold />
+          <Row label="Matric number" value={student.matric || "—"} />
+          <Row label="Faculty" value={student.facultyName || "—"} />
+          <Row label="Department" value={student.departmentName || "—"} />
+          <Row label="Level / class" value={student.levelName || "—"} />
+          <Row
+            label="Course"
+            value={r.examinations?.courses?.name || r.examinations?.courses?.code || "—"}
+          />
+          <Row label="Exam title" value={r.examinations?.title || "—"} />
+        </div>
+
+        <div
+          className={
+            isPub
+              ? pass
+                ? "flex min-w-[160px] flex-col items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-5 text-center"
+                : "flex min-w-[160px] flex-col items-center justify-center rounded-2xl border border-red-200 bg-red-50 px-6 py-5 text-center"
+              : "flex min-w-[160px] flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 px-6 py-5 text-center"
+          }
+        >
+          {isPub ? (
             <>
-              <p className="mt-1 text-xs text-slate-500">
-                Score {r.total_score ?? "—"}
-                {r.percentage != null ? ` · ${r.percentage}%` : ""}
-                {r.grade ? ` · Grade ${r.grade}` : ""}
-                {r.pass_fail ? ` · ${r.pass_fail}` : ""}
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Score</p>
+              <p className="mt-1 text-4xl font-black text-slate-900">
+                {r.percentage != null ? `${r.percentage}%` : "—"}
               </p>
-              <p className="mt-0.5 text-xs text-slate-400">
-                Correct {r.correct_count ?? 0} · Wrong {r.wrong_count ?? 0} · Unanswered{" "}
-                {r.unanswered_count ?? 0}
+              <p className="mt-1 text-sm font-bold text-slate-700">
+                {r.total_score != null ? `${r.total_score} marks` : ""}
+                {r.grade ? ` · Grade ${r.grade}` : ""}
+              </p>
+              <p
+                className={
+                  pass
+                    ? "mt-3 rounded-full bg-emerald-600 px-4 py-1 text-sm font-extrabold uppercase text-white"
+                    : "mt-3 rounded-full bg-red-600 px-4 py-1 text-sm font-extrabold uppercase text-white"
+                }
+              >
+                {r.pass_fail || "—"}
               </p>
             </>
           ) : (
-            <p className="mt-1 text-xs text-amber-800">
-              Your script was submitted. Score is hidden until the teacher or examination officer
-              releases results.
-            </p>
-          )}
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <StatusBadge status={r.status === "published" ? "published" : "under review"} />
-          {r.security_review_status && (
-            <span className="text-[10px] font-semibold uppercase text-slate-500">
-              Security: {r.security_review_status.replaceAll("_", " ")}
-            </span>
+            <>
+              <p className="text-xs font-semibold uppercase text-amber-800">Pending</p>
+              <p className="mt-2 max-w-[140px] text-xs text-amber-900">
+                Score will show here after the Examination Officer releases results.
+              </p>
+            </>
           )}
         </div>
       </div>
-    </li>
+
+      {isPub && (
+        <div className="grid grid-cols-2 gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:grid-cols-4">
+          <Stat label="Questions" value={String(attempted || "—")} />
+          <Stat label="Correct" value={String(r.correct_count ?? 0)} />
+          <Stat label="Wrong" value={String(r.wrong_count ?? 0)} />
+          <Stat label="Unanswered" value={String(r.unanswered_count ?? 0)} />
+        </div>
+      )}
+
+      <div className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">
+        {r.released_at
+          ? `Released ${new Date(r.released_at).toLocaleString()}`
+          : r.created_at
+            ? `Submitted ${new Date(r.created_at).toLocaleString()}`
+            : ""}
+        {r.security_review_status
+          ? ` · Security: ${r.security_review_status.replaceAll("_", " ")}`
+          : ""}
+      </div>
+    </article>
+  );
+}
+
+function Row({
+  label,
+  value,
+  bold,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap gap-x-2">
+      <span className="w-28 shrink-0 text-xs font-semibold text-slate-500">{label}</span>
+      <span className={bold ? "text-sm font-bold text-slate-900" : "text-sm text-slate-900"}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-center">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-0.5 text-lg font-extrabold text-slate-900">{value}</p>
+    </div>
   );
 }
