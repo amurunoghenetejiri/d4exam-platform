@@ -44,7 +44,6 @@ type AttemptRow = {
 
 const DONE_ATTEMPT_STATUSES = ["submitted", "terminated", "flagged"];
 
-/** Format remaining ms as DDd HH:MM:SS or HH:MM:SS or MM:SS */
 function formatCountdown(ms: number): string {
   if (ms <= 0) return "00:00:00";
   const totalSec = Math.floor(ms / 1000);
@@ -82,7 +81,6 @@ function StartOrCountdownButton({
 }) {
   const { remainingMs, ready } = useCountdown(scheduledStart);
 
-  // Live / available now
   if (canStartNow || ready) {
     return (
       <Button size="sm" className="font-semibold" asChild>
@@ -93,7 +91,6 @@ function StartOrCountdownButton({
     );
   }
 
-  // No schedule yet
   if (remainingMs == null) {
     return (
       <Button size="sm" variant="outline" className="font-semibold" disabled>
@@ -102,7 +99,6 @@ function StartOrCountdownButton({
     );
   }
 
-  // Countdown until start
   return (
     <Button
       size="sm"
@@ -196,7 +192,6 @@ function Page() {
 
   const exams = examsQ.data ?? [];
 
-  // Recompute lists every second so upcoming → live when countdown hits 0
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 1000);
@@ -204,7 +199,7 @@ function Page() {
   }, []);
 
   const { live, upcoming, done } = useMemo(() => {
-    void tick; // depend on clock tick
+    void tick;
     const liveList: ExamRow[] = [];
     const upList: ExamRow[] = [];
     const doneList: ExamRow[] = [];
@@ -379,13 +374,9 @@ function ExamList({
               )}
               {completed && studentFinished && (
                 <Button size="sm" variant="outline" className="font-semibold" asChild>
-                  {resultId ? (
-                    <Link to="/student/results/$id" params={{ id: resultId }}>
-                      View Result
-                    </Link>
-                  ) : (
-                    <Link to="/student/results">View Result</Link>
-                  )}
+                  <Link to="/student/results/$id" params={{ id: resultId || e.id }}>
+                    View Result
+                  </Link>
                 </Button>
               )}
             </div>
