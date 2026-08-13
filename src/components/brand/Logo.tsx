@@ -1,3 +1,4 @@
+import { LOGO_SRC } from "@/components/brand/brand-assets";
 import { cn } from "@/lib/utils";
 
 export function Logo({
@@ -17,7 +18,7 @@ export function Logo({
   return (
     <span className={cn("inline-flex items-center gap-2.5", className)}>
       <img
-        src="/logo.png"
+        src={LOGO_SRC}
         alt="D4EXAM"
         className={cn(dims, "w-auto shrink-0 object-contain drop-shadow-sm")}
         width={64}

@@ -1,3 +1,4 @@
+import { LOGO_SRC } from "@/components/brand/brand-assets";
 import { cn } from "@/lib/utils";
 
 /**
@@ -25,13 +26,12 @@ export function Watermark({
     <div
       aria-hidden
       className={cn(
-        // fixed = stays in place while the document scrolls
         "pointer-events-none fixed inset-0 z-0 flex items-center justify-center overflow-hidden",
         className,
       )}
     >
       <img
-        src="/logo.png"
+        src={LOGO_SRC}
         alt=""
         className={cn("w-auto select-none object-contain", sizeClass)}
         style={{
