@@ -9,6 +9,10 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   randomizeOptions: true,
   requireCamera: false,
   requireMicrophone: false,
+  requireScreenShare: false,
+  faceDetection: true,
+  maxFaceWarnings: 5,
+  faceViolationAction: "flag",
   thresholdAction: "flag",
   resultVisibility: "after_officer_release",
   questionsToAnswer: null,
@@ -36,7 +40,7 @@ export function saveTeacherSecurityDefaults(teacherId: string, settings: ExamSec
   localStorage.setItem(storageKey(teacherId), JSON.stringify(settings));
 }
 
-/** Row shape for public.exam_settings */
+/** Row shape for public.exam_settings (core columns only — extras live in description JSON) */
 export function toExamSettingsRow(
   examId: string,
   s: ExamSecuritySettings,
@@ -77,9 +81,16 @@ export type ExamSettingsRow = {
   questions_to_answer?: number | null;
 };
 
-export function fromExamSettingsRow(row: ExamSettingsRow | null | undefined): ExamSecuritySettings {
-  if (!row) return { ...DEFAULT_EXAM_SECURITY };
+export function fromExamSettingsRow(
+  row: ExamSettingsRow | null | undefined,
+  descriptionFallback?: string | null,
+): ExamSecuritySettings {
+  const fromDesc = descriptionFallback ? parseSecurityFromDescription(descriptionFallback) : null;
+  if (!row && !fromDesc) return { ...DEFAULT_EXAM_SECURITY };
+  const base = fromDesc ?? { ...DEFAULT_EXAM_SECURITY };
+  if (!row) return base;
   return {
+    ...base,
     fullscreen: row.fullscreen,
     tabMonitoring: row.tab_monitoring,
     maxTabSwitches: row.max_tab_switches,
@@ -88,14 +99,15 @@ export function fromExamSettingsRow(row: ExamSettingsRow | null | undefined): Ex
     randomizeOptions: row.randomize_options,
     requireCamera: row.require_camera,
     requireMicrophone: row.require_microphone,
-    thresholdAction: (row.threshold_action as ExamSecuritySettings["thresholdAction"]) || "flag",
+    thresholdAction: (row.threshold_action as ExamSecuritySettings["thresholdAction"]) || base.thresholdAction,
     resultVisibility:
       (row.result_visibility as ExamSecuritySettings["resultVisibility"]) ||
+      base.resultVisibility ||
       "after_officer_release",
     questionsToAnswer:
       typeof row.questions_to_answer === "number" && row.questions_to_answer > 0
         ? row.questions_to_answer
-        : null,
+        : base.questionsToAnswer ?? null,
   };
 }
 
@@ -175,7 +187,9 @@ export function securitySummaryLines(s: ExamSecuritySettings): string[] {
     `Block copy/paste: ${s.blockCopyPaste ? "On" : "Off"}`,
     `Randomise questions: ${s.randomizeQuestions ? "On" : "Off"}`,
     `Randomise options: ${s.randomizeOptions ? "On" : "Off"}`,
-    `Camera: ${s.requireCamera ? "Required" : "Not required"}`,
+    `Camera monitoring: ${s.requireCamera ? "Required" : "Off"}`,
+    `Face detection: ${s.faceDetection && s.requireCamera ? `On (max ${s.maxFaceWarnings} warnings → ${s.faceViolationAction})` : "Off"}`,
+    `Screen sharing: ${s.requireScreenShare ? "Required" : "Off"}`,
     `Microphone: ${s.requireMicrophone ? "Required" : "Not required"}`,
     `Result release: ${s.resultVisibility}`,
   ];
