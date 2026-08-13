@@ -254,11 +254,14 @@ function ResultDetailPage() {
   const correct = r.correct_count ?? metaScore?.correct ?? 0;
   const wrong = r.wrong_count ?? metaScore?.wrong ?? 0;
   const unanswered = r.unanswered_count ?? metaScore?.unanswered ?? 0;
-  // Parentheses required: cannot mix ?? with || without them (breaks Vite/TanStack parse)
-  const totalQ =
-    correct + wrong + unanswered || Number(attemptQ.data?.metadata?.total ?? 0);
+
+  // Keep ?? and || on separate lines — Babel forbids mixing them without parens
+  const answeredSum = correct + wrong + unanswered;
+  const metaTotal = attemptQ.data?.metadata?.total ?? 0;
+  const totalQ = answeredSum > 0 ? answeredSum : Number(metaTotal);
   const totalScore = r.total_score ?? metaScore?.totalScore ?? correct;
-  const maxMarks = (metaScore?.maxMarks ?? totalQ) || totalScore;
+  const marksFromMeta = metaScore?.maxMarks ?? totalQ;
+  const maxMarks = marksFromMeta > 0 ? marksFromMeta : totalScore;
   const scoreText = String(totalScore);
   const maxText = String(maxMarks);
   const grade = r.grade || metaScore?.grade || null;
@@ -301,12 +304,7 @@ function ResultDetailPage() {
                 })
               : "—"}
             {" · "}
-            <span
-              className={cn(
-                "font-bold",
-                isPub ? "text-emerald-600" : "text-amber-700",
-              )}
-            >
+            <span className={cn("font-bold", isPub ? "text-emerald-600" : "text-amber-700")}>
               {isPub ? "Published" : "Pending release"}
             </span>
           </p>
