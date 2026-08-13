@@ -374,7 +374,10 @@ function ExamList({
               )}
               {completed && studentFinished && (
                 <Button size="sm" variant="outline" className="font-semibold" asChild>
-                  <Link to="/student/results/$id" params={{ id: resultId || e.id }}>
+                  <Link
+                    to="/student/results"
+                    search={{ id: resultId || e.id }}
+                  >
                     View Result
                   </Link>
                 </Button>
