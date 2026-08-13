@@ -11,6 +11,7 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   requireMicrophone: false,
   thresholdAction: "flag",
   resultVisibility: "after_officer_release",
+  questionsToAnswer: null,
 };
 
 export const SECURITY_MARKER = "[[D4_SECURITY_JSON]]";
@@ -36,7 +37,12 @@ export function saveTeacherSecurityDefaults(teacherId: string, settings: ExamSec
 }
 
 /** Row shape for public.exam_settings */
-export function toExamSettingsRow(examId: string, s: ExamSecuritySettings, totalMarks = 0) {
+export function toExamSettingsRow(
+  examId: string,
+  s: ExamSecuritySettings,
+  totalMarks = 0,
+  questionsToAnswer: number | null = null,
+) {
   return {
     exam_id: examId,
     fullscreen: s.fullscreen,
@@ -50,6 +56,7 @@ export function toExamSettingsRow(examId: string, s: ExamSecuritySettings, total
     threshold_action: s.thresholdAction,
     result_visibility: s.resultVisibility,
     total_marks: totalMarks,
+    questions_to_answer: questionsToAnswer,
   };
 }
 
@@ -67,6 +74,7 @@ export type ExamSettingsRow = {
   total_marks: number;
   instructions: string | null;
   result_visibility: string;
+  questions_to_answer?: number | null;
 };
 
 export function fromExamSettingsRow(row: ExamSettingsRow | null | undefined): ExamSecuritySettings {
@@ -84,6 +92,10 @@ export function fromExamSettingsRow(row: ExamSettingsRow | null | undefined): Ex
     resultVisibility:
       (row.result_visibility as ExamSecuritySettings["resultVisibility"]) ||
       "after_officer_release",
+    questionsToAnswer:
+      typeof row.questions_to_answer === "number" && row.questions_to_answer > 0
+        ? row.questions_to_answer
+        : null,
   };
 }
 
