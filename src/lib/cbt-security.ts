@@ -65,8 +65,30 @@ export function gradeFromPercentage(pct: number): string {
   return "F";
 }
 
+function normalizeAnswer(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"');
+}
+
+/**
+ * Score objective answers.
+ * Prefer `correctOptionText` (resolved before option shuffle) so letter answers
+ * still match after randomize_options. Falls back to letter index only when
+ * options were not shuffled / text is unavailable.
+ */
 export function scoreObjectiveAnswers(
-  questions: { id: string; correct_answer: string | null; marks: number; options: string[] }[],
+  questions: {
+    id: string;
+    correct_answer: string | null;
+    /** Canonical correct option text (preferred when options may be shuffled) */
+    correctOptionText?: string | null;
+    marks: number;
+    options: string[];
+  }[],
   answers: Record<string, number>,
 ) {
   let correct = 0;
@@ -79,22 +101,37 @@ export function scoreObjectiveAnswers(
     const marks = Number(q.marks) || 1;
     maxMarks += marks;
     const idx = answers[q.id];
-    if (idx == null) {
+    if (idx == null || Number.isNaN(Number(idx))) {
       unanswered += 1;
       continue;
     }
-    const chosen = q.options[idx] ?? "";
-    const correctRaw = (q.correct_answer || "").trim();
-    // correct_answer may be letter A-D or full option text
-    let ok = false;
-    if (/^[A-Da-d]$/.test(correctRaw)) {
-      const letterIdx = correctRaw.toUpperCase().charCodeAt(0) - 65;
-      ok = idx === letterIdx;
-    } else if (correctRaw) {
-      ok =
-        chosen.trim().toLowerCase() === correctRaw.toLowerCase() ||
-        String(idx) === correctRaw;
+    const chosen = normalizeAnswer(String(q.options[idx] ?? ""));
+    if (!chosen) {
+      unanswered += 1;
+      continue;
     }
+
+    const textKey = (q.correctOptionText || "").trim();
+    const raw = (q.correct_answer || "").trim();
+    let ok = false;
+
+    if (textKey) {
+      // Primary path: match by option content (works after shuffle)
+      ok = chosen === normalizeAnswer(textKey);
+    } else if (/^[A-Da-d]$/.test(raw)) {
+      // Letter stored in DB — only valid if options kept original order
+      const letterIdx = raw.toUpperCase().charCodeAt(0) - 65;
+      ok = idx === letterIdx;
+      // Also accept if the chosen text equals that letter (rare)
+      if (!ok) ok = chosen === raw.toLowerCase();
+    } else if (raw) {
+      ok =
+        chosen === normalizeAnswer(raw) ||
+        String(idx) === raw ||
+        // allow "A. answer" style storage
+        chosen === normalizeAnswer(raw.replace(/^[A-Da-d][).:\-\s]+/, ""));
+    }
+
     if (ok) {
       correct += 1;
       totalScore += marks;
