@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const loginSchema = z.object({
-  schoolCode: z.string().trim().max(32),
+  schoolCode: z.string().trim().max(32).optional().default(""),
   identifier: z.string().trim().min(1).max(255),
   password: z.string().min(1).max(200),
 });
@@ -18,14 +18,8 @@ function generateTempPassword() {
   return out;
 }
 
-function normalizeName(s: string) {
-  return s.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function studentSyntheticEmail(schoolCode: string, matric: string) {
-  const safeMatric = matric.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  const safeCode = schoolCode.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
-  return `${safeMatric}@${safeCode || "school"}.student.d4exam.local`;
+function looksLikeEmail(s: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 }
 
 export const signInWithSchoolCode = createServerFn({ method: "POST" })
@@ -63,31 +57,62 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
       },
     });
 
-    const code = data.schoolCode.trim().toUpperCase();
+    const code = (data.schoolCode || "").trim().toUpperCase();
     const ident = data.identifier.trim();
     const password = data.password;
-
     const genericError = "Invalid school code, identifier or password.";
 
-    // 1) Resolve the sign-in email through a database function (no admin key needed).
+    // ——— Super admin / platform staff: email + password, no school code ———
+    // Accept empty code, SYSTEM, D4, D4EXAM, PLATFORM
+    const platformCodes = new Set(["", "SYSTEM", "D4", "D4EXAM", "PLATFORM", "SUPER"]);
+    if (platformCodes.has(code) && looksLikeEmail(ident)) {
+      const { data: signIn, error } = await publicClient.auth.signInWithPassword({
+        email: ident.toLowerCase(),
+        password,
+      });
+      if (!error && signIn.session) {
+        // Prefer super_admin role; still allow if any role resolves later
+        await writeLoginAudit({
+          schoolId: null,
+          userId: signIn.user?.id ?? null,
+          description: "Platform / super-admin sign-in",
+        });
+        return {
+          session: {
+            access_token: signIn.session.access_token,
+            refresh_token: signIn.session.refresh_token,
+          },
+        };
+      }
+      // If platform path failed and code was empty, stop (don't force school lookup)
+      if (!code) {
+        return { error: "Invalid email or password. Super admin does not need a school code." };
+      }
+    }
+
+    // 1) Resolve the sign-in email through a database function
     let email: string | null = null;
     let accountStatus: string | null = null;
 
-    const { data: resolved, error: rpcError } = await publicClient.rpc("resolve_login_identity", {
-      _school_code: code,
-      _identifier: ident,
-    });
+    if (code) {
+      const { data: resolved, error: rpcError } = await publicClient.rpc("resolve_login_identity", {
+        _school_code: code,
+        _identifier: ident,
+      });
 
-    if (rpcError) {
-      console.error("[login] resolve_login_identity failed:", rpcError.message);
-    } else {
-      const row = Array.isArray(resolved) ? resolved[0] : resolved;
-      if (row) {
-        if ((row as { kind?: string }).kind === "school_inactive") {
-          return { error: "This school account is not active. Contact D4EXAM support." };
+      if (rpcError) {
+        console.error("[login] resolve_login_identity failed:", rpcError.message);
+      } else {
+        const row = Array.isArray(resolved) ? resolved[0] : resolved;
+        if (row) {
+          if ((row as { kind?: string }).kind === "school_inactive") {
+            return { error: "This school account is not active. Contact D4EXAM support." };
+          }
+          email = ((row as { email?: string | null }).email ?? null) as string | null;
+          accountStatus = ((row as { account_status?: string | null }).account_status ?? null) as
+            | string
+            | null;
         }
-        email = ((row as { email?: string | null }).email ?? null) as string | null;
-        accountStatus = ((row as { account_status?: string | null }).account_status ?? null) as string | null;
       }
     }
 
@@ -97,8 +122,7 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
 
     let signInPassword = password;
 
-    // 2) Fallback: a student row exists but has no auth account yet. This needs
-    //    admin access, which only exists where the service role key is present.
+    // 2) Student auto-provision fallback
     if (!email && code) {
       if (hasAdminKey()) {
         const { data: school } = await publicClient
@@ -124,7 +148,20 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
       }
     }
 
-    if (!email) return { error: genericError };
+    // 3) Direct email login for staff when identifier is an email (with school code)
+    if (!email && looksLikeEmail(ident)) {
+      email = ident.toLowerCase();
+    }
+
+    if (!email) {
+      if (!code) {
+        return {
+          error:
+            "Enter your school code (students / school staff) or leave it blank and use your email for super admin.",
+        };
+      }
+      return { error: genericError };
+    }
 
     const { data: signIn, error } = await publicClient.auth.signInWithPassword({
       email,
@@ -148,7 +185,6 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
       },
     };
   });
-
 
 export const reviewSchoolApplication = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
