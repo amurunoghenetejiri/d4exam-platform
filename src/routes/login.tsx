@@ -1,6 +1,6 @@
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { signInWithSchoolCode } from "@/lib/auth.functions";
 import { fetchSessionUser, roleHome } from "@/lib/session";
@@ -77,18 +77,17 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
   const signIn = useServerFn(signInWithSchoolCode);
+  const inFlight = useRef(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (inFlight.current || loading) return;
     setError("");
-    if (!code.trim()) {
-      setError("Enter your school / institution code.");
-      return;
-    }
     if (!identifier.trim() || !password.trim()) {
-      setError("Enter your full name (or matric) and password to continue.");
+      setError("Enter your email / name / matric and password to continue.");
       return;
     }
+    inFlight.current = true;
     setLoading(true);
     try {
       const result = await signIn({
@@ -113,16 +112,16 @@ function LoginPage() {
         return;
       }
       navigate({ to: roleHome[user.role] as never });
-    } catch (e) {
-      const detail = e instanceof Error ? e.message : "";
-      console.error("[login] sign-in failed:", e);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "";
+      console.error("[login] sign-in failed:", err);
       setError(
         detail
           ? `Unable to sign in right now: ${detail}`
           : "Unable to sign in right now. Please try again.",
       );
-
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }
@@ -200,7 +199,7 @@ function LoginPage() {
                 Welcome Back
               </h1>
               <p className="mt-1.5 text-sm text-slate-500">
-                Students: full name + matric · Staff: email / ID + password
+                Students & school staff: school code + credentials. Super admin: email + password only.
               </p>
             </div>
 
@@ -213,34 +212,31 @@ function LoginPage() {
             <form className="space-y-4" onSubmit={submit} noValidate>
               <div className="space-y-1.5">
                 <Label htmlFor="school-code" className="text-sm font-semibold text-slate-700">
-                  School / Institution Code
+                  School / Institution Code{" "}
+                  <span className="font-normal text-slate-400">(optional for super admin)</span>
                 </Label>
                 <Input
                   id="school-code"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  placeholder="Enter school code"
+                  placeholder="Leave blank for super admin"
                   className="h-11 rounded-lg border-slate-200 bg-slate-50/80 focus-visible:bg-white"
                   autoComplete="organization"
-                  required
                 />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="identifier" className="text-sm font-semibold text-slate-700">
-                  Full name (students) / Staff ID / Email
+                  Email / Full name / Staff ID / Matric
                 </Label>
                 <Input
                   id="identifier"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="e.g. Ada Obi or staff email"
+                  placeholder="Super admin: your email"
                   className="h-11 rounded-lg border-slate-200 bg-slate-50/80 focus-visible:bg-white"
                   autoComplete="username"
                 />
-                <p className="text-[11px] text-slate-500">
-                  Students: use the same full name as in the student list (or your matric number).
-                </p>
               </div>
 
               <div className="space-y-1.5">
@@ -253,7 +249,7 @@ function LoginPage() {
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Students: matric number"
+                    placeholder="Your password"
                     autoComplete="current-password"
                     className="h-11 rounded-lg border-slate-200 bg-slate-50/80 pr-11 focus-visible:bg-white"
                   />
@@ -266,7 +262,6 @@ function LoginPage() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-                <p className="text-[11px] text-slate-500">Students: password is your matric number.</p>
               </div>
 
               <div className="flex items-center justify-between gap-3 pt-0.5">
@@ -319,16 +314,6 @@ function LoginPage() {
               </Link>
             </p>
           </div>
-
-          <p className="mt-6 hidden text-center text-xs text-slate-400 lg:block">
-            <Link to="/privacy" className="hover:text-slate-600 hover:underline">
-              Privacy Policy
-            </Link>
-            <span className="mx-2">·</span>
-            <Link to="/support" className="hover:text-slate-600 hover:underline">
-              Support
-            </Link>
-          </p>
         </div>
       </div>
     </div>
