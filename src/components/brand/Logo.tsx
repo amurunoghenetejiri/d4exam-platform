@@ -11,27 +11,33 @@ export function Logo({
   showTagline?: boolean;
   wordmark?: boolean;
 }) {
-  const dims = { sm: "h-9", md: "h-11", lg: "h-14", xl: "h-16" }[size];
-  const text = { sm: "text-lg", md: "text-xl", lg: "text-2xl", xl: "text-3xl" }[size];
+  // Larger mark so the logo is always readable and stands out in headers/sidebars
+  const dims = { sm: "h-12", md: "h-14", lg: "h-16", xl: "h-20" }[size];
+  const text = { sm: "text-xl", md: "text-2xl", lg: "text-3xl", xl: "text-4xl" }[size];
 
   return (
-    <span className={cn("inline-flex items-center gap-2.5", className)}>
+    <span className={cn("inline-flex items-center gap-3", className)}>
       <img
         src="/logo.png"
         alt="D4EXAM"
         className={cn(dims, "w-auto shrink-0 object-contain drop-shadow-sm")}
-        width={64}
-        height={64}
+        width={80}
+        height={80}
         loading="eager"
         decoding="async"
       />
       {wordmark && (
         <span className="min-w-0 leading-none">
-          <span className={cn("block font-display font-extrabold tracking-tight text-primary", text)}>
+          <span
+            className={cn(
+              "block font-display font-extrabold tracking-tight text-primary",
+              text,
+            )}
+          >
             D4EXAM
           </span>
           {showTagline && (
-            <span className="mt-1 block text-[11px] font-medium text-muted-foreground">
+            <span className="mt-1 block text-xs font-medium text-muted-foreground">
               Smart. Secure. Seamless.
             </span>
           )}
