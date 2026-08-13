@@ -94,7 +94,7 @@ function Page() {
 
   async function addStudent(e: React.FormEvent) {
     e.preventDefault();
-    if (!schoolId) return toast.error("Not linked to a school");
+    if (!schoolId) { toast.error("Not linked to a school"); return; }
     setBusy(true);
     try {
       await createOne({

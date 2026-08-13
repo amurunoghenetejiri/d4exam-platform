@@ -47,7 +47,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/teacher/question-bank")({
   validateSearch: (search: Record<string, unknown>) => ({
     course: typeof search.course === "string" ? search.course : undefined,
-  }),
+  } as { course?: string }),
   head: () => ({
     meta: [
       { title: "Question Bank — D4EXAM" },
