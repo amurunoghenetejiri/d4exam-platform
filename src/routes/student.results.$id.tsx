@@ -7,7 +7,6 @@ import {
   XCircle,
   MinusCircle,
   Percent,
-  Star,
   FileText,
   Building2,
   GraduationCap,
@@ -131,16 +130,11 @@ function ScoreRing({
   );
 }
 
-/**
- * Load a result that belongs ONLY to the logged-in student.
- * Route param may be a results.id OR an examinations.id (exam_id).
- */
 async function fetchOwnedResult(
   paramId: string,
   studentId: string,
   schoolId: string,
 ): Promise<ResultRow | null> {
-  // 1) Try as result primary key
   const byId = await supabase
     .from("results")
     .select(
@@ -156,7 +150,6 @@ async function fetchOwnedResult(
 
   if (byId.data) return byId.data as ResultRow;
 
-  // 2) Try as exam_id for this student
   const byExam = await supabase
     .from("results")
     .select(
@@ -242,7 +235,6 @@ function ResultDetailPage() {
     );
   }
 
-  // Ownership already enforced in query — double-check
   if (r.student_id && r.student_id !== student.studentId) {
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
@@ -262,9 +254,11 @@ function ResultDetailPage() {
   const correct = r.correct_count ?? metaScore?.correct ?? 0;
   const wrong = r.wrong_count ?? metaScore?.wrong ?? 0;
   const unanswered = r.unanswered_count ?? metaScore?.unanswered ?? 0;
-  const totalQ = correct + wrong + unanswered || Number(attemptQ.data?.metadata?.total ?? 0);
+  // Parentheses required: cannot mix ?? with || without them (breaks Vite/TanStack parse)
+  const totalQ =
+    correct + wrong + unanswered || Number(attemptQ.data?.metadata?.total ?? 0);
   const totalScore = r.total_score ?? metaScore?.totalScore ?? correct;
-  const maxMarks = metaScore?.maxMarks ?? totalQ || totalScore;
+  const maxMarks = (metaScore?.maxMarks ?? totalQ) || totalScore;
   const scoreText = String(totalScore);
   const maxText = String(maxMarks);
   const grade = r.grade || metaScore?.grade || null;
@@ -282,7 +276,6 @@ function ResultDetailPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 pb-10">
-      {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="min-w-0 flex-1">
           <Logo size="md" />
@@ -330,7 +323,6 @@ function ResultDetailPage() {
         )}
       </div>
 
-      {/* Student identity */}
       <div className="grid grid-cols-2 gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-3 lg:grid-cols-4">
         <Info icon={User} label="Student name" value={student.fullName || "—"} bold />
         <Info icon={Hash} label="Matric number" value={student.matric || "—"} />
@@ -366,7 +358,6 @@ function ResultDetailPage() {
         </div>
       ) : (
         <>
-          {/* Main score card */}
           <div className="grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
             <div className="flex flex-col items-center justify-center gap-3 py-2">
               <ScoreRing pct={pct} score={scoreText} maxMarks={maxText} />
@@ -409,7 +400,6 @@ function ResultDetailPage() {
             </div>
           </div>
 
-          {/* Performance summary */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <StatCard icon={FileText} label="Total Questions" value={String(totalQ || "—")} tone="blue" />
             <StatCard icon={CheckCircle2} label="Correct Answers" value={String(correct)} tone="green" />
