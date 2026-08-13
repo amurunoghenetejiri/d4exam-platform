@@ -90,6 +90,27 @@ function Page() {
     },
   });
 
+  const resultsQ = useQuery({
+    queryKey: ["student-result-ids", student?.studentId],
+    enabled: Boolean(student?.studentId),
+    staleTime: 20_000,
+    queryFn: async () => {
+      if (!student?.studentId) return {} as Record<string, string>;
+      const { data, error } = await supabase
+        .from("results")
+        .select("id, exam_id")
+        .eq("student_id", student.studentId)
+        .eq("school_id", student.schoolId);
+      if (error) throw error;
+      const map: Record<string, string> = {};
+      for (const r of data ?? []) {
+        map[(r as { exam_id: string }).exam_id] = (r as { id: string }).id;
+      }
+      return map;
+    },
+  });
+  const resultIdByExam = resultsQ.data ?? {};
+
   const attemptByExam = useMemo(() => {
     const map = new Map<string, AttemptRow>();
     for (const a of attemptsQ.data ?? []) map.set(a.exam_id, a);
@@ -142,7 +163,7 @@ function Page() {
         title="My Examinations"
         description={
           termLine
-            ? `${termLine} · Only officer-approved exams appear here. After you submit, open View Result for that subject.`
+            ? `${termLine} · Only officer-approved exams appear here.`
             : "You only see exams after the Examination Officer has approved them."
         }
       />
@@ -162,6 +183,7 @@ function Page() {
                 items={live}
                 canStart
                 attemptByExam={attemptByExam}
+                resultIdByExam={resultIdByExam}
                 sessionName={student.sessionName}
                 semesterName={student.semesterName}
               />
@@ -174,6 +196,7 @@ function Page() {
               <ExamList
                 items={upcoming}
                 attemptByExam={attemptByExam}
+                resultIdByExam={resultIdByExam}
                 sessionName={student.sessionName}
                 semesterName={student.semesterName}
               />
@@ -186,6 +209,7 @@ function Page() {
               <ExamList
                 items={done}
                 attemptByExam={attemptByExam}
+                resultIdByExam={resultIdByExam}
                 completed
                 sessionName={student.sessionName}
                 semesterName={student.semesterName}
@@ -203,6 +227,7 @@ function ExamList({
   canStart,
   completed,
   attemptByExam,
+  resultIdByExam,
   sessionName,
   semesterName,
 }: {
@@ -210,6 +235,7 @@ function ExamList({
   canStart?: boolean;
   completed?: boolean;
   attemptByExam: Map<string, AttemptRow>;
+  resultIdByExam: Record<string, string>;
   sessionName?: string | null;
   semesterName?: string | null;
 }) {
@@ -224,6 +250,7 @@ function ExamList({
             ? "terminated"
             : "completed"
           : String(e.status).replaceAll("_", " ");
+        const resultId = resultIdByExam[e.id];
 
         return (
           <li
@@ -257,7 +284,13 @@ function ExamList({
               )}
               {completed && studentFinished && (
                 <Button size="sm" variant="outline" className="font-semibold" asChild>
-                  <Link to="/student/results">View Result</Link>
+                  {resultId ? (
+                    <Link to="/student/results/$id" params={{ id: resultId }}>
+                      View Result
+                    </Link>
+                  ) : (
+                    <Link to="/student/results">View Result</Link>
+                  )}
                 </Button>
               )}
             </div>
