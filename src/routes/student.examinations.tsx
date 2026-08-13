@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Clock } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +10,7 @@ import {
   canStartExam,
 } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/student/examinations")({
   head: () => ({
@@ -16,8 +18,7 @@ export const Route = createFileRoute("/student/examinations")({
       { title: "My Examinations — D4EXAM" },
       {
         name: "description",
-        content:
-          "Only examinations approved by the Examination Officer appear here.",
+        content: "Only examinations approved by the Examination Officer appear here.",
       },
     ],
   }),
@@ -42,6 +43,82 @@ type AttemptRow = {
 };
 
 const DONE_ATTEMPT_STATUSES = ["submitted", "terminated", "flagged"];
+
+/** Format remaining ms as DDd HH:MM:SS or HH:MM:SS or MM:SS */
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "00:00:00";
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (days > 0) return `${days}d ${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+  return `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+}
+
+function useCountdown(targetIso: string | null | undefined) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!targetIso) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [targetIso]);
+  if (!targetIso) return { remainingMs: null as number | null, ready: false };
+  const target = new Date(targetIso).getTime();
+  if (Number.isNaN(target)) return { remainingMs: null, ready: false };
+  const remainingMs = Math.max(0, target - now);
+  return { remainingMs, ready: remainingMs <= 0 };
+}
+
+function StartOrCountdownButton({
+  examId,
+  scheduledStart,
+  canStartNow,
+}: {
+  examId: string;
+  scheduledStart: string | null;
+  canStartNow: boolean;
+}) {
+  const { remainingMs, ready } = useCountdown(scheduledStart);
+
+  // Live / available now
+  if (canStartNow || ready) {
+    return (
+      <Button size="sm" className="font-semibold" asChild>
+        <Link to="/student/exam/$id" params={{ id: examId }}>
+          Start Exam
+        </Link>
+      </Button>
+    );
+  }
+
+  // No schedule yet
+  if (remainingMs == null) {
+    return (
+      <Button size="sm" variant="outline" className="font-semibold" disabled>
+        Schedule TBC
+      </Button>
+    );
+  }
+
+  // Countdown until start
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled
+      className={cn(
+        "min-w-[9.5rem] font-mono text-xs font-bold tabular-nums",
+        remainingMs < 5 * 60_000 && "border-amber-300 text-amber-800",
+        remainingMs < 60_000 && "border-red-300 text-red-700",
+      )}
+    >
+      <Clock className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+      Starts in {formatCountdown(remainingMs)}
+    </Button>
+  );
+}
 
 function Page() {
   const { data: student, isLoading: sLoading } = useStudentContext();
@@ -119,7 +196,15 @@ function Page() {
 
   const exams = examsQ.data ?? [];
 
+  // Recompute lists every second so upcoming → live when countdown hits 0
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   const { live, upcoming, done } = useMemo(() => {
+    void tick; // depend on clock tick
     const liveList: ExamRow[] = [];
     const upList: ExamRow[] = [];
     const doneList: ExamRow[] = [];
@@ -142,7 +227,7 @@ function Page() {
     }
 
     return { live: liveList, upcoming: upList, done: doneList };
-  }, [exams, attemptByExam]);
+  }, [exams, attemptByExam, tick]);
 
   if (sLoading) return <p className="text-sm text-slate-500">Loading…</p>;
 
@@ -199,6 +284,7 @@ function Page() {
                 resultIdByExam={resultIdByExam}
                 sessionName={student.sessionName}
                 semesterName={student.semesterName}
+                showCountdown
               />
             )}
           </SectionCard>
@@ -226,6 +312,7 @@ function ExamList({
   items,
   canStart,
   completed,
+  showCountdown,
   attemptByExam,
   resultIdByExam,
   sessionName,
@@ -234,6 +321,7 @@ function ExamList({
   items: ExamRow[];
   canStart?: boolean;
   completed?: boolean;
+  showCountdown?: boolean;
   attemptByExam: Map<string, AttemptRow>;
   resultIdByExam: Record<string, string>;
   sessionName?: string | null;
@@ -273,14 +361,21 @@ function ExamList({
                   : ""}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={badge} />
               {canStart && !studentFinished && (
-                <Button size="sm" className="font-semibold" asChild>
-                  <Link to="/student/exam/$id" params={{ id: e.id }}>
-                    Start Exam
-                  </Link>
-                </Button>
+                <StartOrCountdownButton
+                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow
+                />
+              )}
+              {showCountdown && !studentFinished && (
+                <StartOrCountdownButton
+                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow={false}
+                />
               )}
               {completed && studentFinished && (
                 <Button size="sm" variant="outline" className="font-semibold" asChild>
