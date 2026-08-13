@@ -1535,6 +1535,15 @@ export type Database = {
       in_school: { Args: { _school: string }; Returns: boolean }
       is_school_teacher: { Args: { _school: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
+      resolve_login_identity: {
+        Args: { _identifier: string; _school_code: string }
+        Returns: {
+          account_status: string
+          email: string
+          kind: string
+          school_active: boolean
+        }[]
+      }
     }
     Enums: {
       account_status:
