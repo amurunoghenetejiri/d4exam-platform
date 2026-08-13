@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, ChevronRight, Search, Users, Blocks, GraduationCap } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -29,6 +29,7 @@ type SchoolRow = {
 
 function Page() {
   const [q, setQ] = useState("");
+  const navigate = useNavigate();
 
   const schoolsQ = useQuery({
     queryKey: ["sa-schools-list"],
@@ -141,10 +142,18 @@ function Page() {
                         </span>
                       </div>
                     </div>
-                    <Button size="sm" className="font-semibold" asChild>
-                      <Link to="/super-admin/schools/$id" params={{ id: s.id }}>
-                        Open overview <ChevronRight className="ml-1 h-4 w-4" />
-                      </Link>
+                    <Button
+                      size="sm"
+                      className="font-semibold"
+                      type="button"
+                      onClick={() =>
+                        void navigate({
+                          to: "/super-admin/schools/$id",
+                          params: { id: s.id },
+                        })
+                      }
+                    >
+                      Open overview <ChevronRight className="ml-1 h-4 w-4" />
                     </Button>
                   </div>
                 </li>
