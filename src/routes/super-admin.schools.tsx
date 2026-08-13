@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Building2, ChevronRight, Search, Users, Blocks, GraduationCap } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -114,6 +114,7 @@ function Page() {
               const fac = counts?.faculties[s.id] ?? 0;
               const dept = counts?.departments[s.id] ?? 0;
               const stu = counts?.students[s.id] ?? 0;
+              const overviewHref = `/super-admin/schools/${s.id}`;
               return (
                 <li
                   key={s.id}
@@ -146,9 +147,9 @@ function Page() {
                       </div>
                     </div>
                     <Button size="sm" className="font-semibold" asChild>
-                      <Link to="/super-admin/schools/$id" params={{ id: s.id }}>
+                      <a href={overviewHref}>
                         Open overview <ChevronRight className="ml-1 h-4 w-4" />
-                      </Link>
+                      </a>
                     </Button>
                   </div>
                 </li>
