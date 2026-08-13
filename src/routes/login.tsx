@@ -113,8 +113,15 @@ function LoginPage() {
         return;
       }
       navigate({ to: roleHome[user.role] as never });
-    } catch {
-      setError("Unable to sign in right now. Please try again.");
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : "";
+      console.error("[login] sign-in failed:", e);
+      setError(
+        detail
+          ? `Unable to sign in right now: ${detail}`
+          : "Unable to sign in right now. Please try again.",
+      );
+
     } finally {
       setLoading(false);
     }
