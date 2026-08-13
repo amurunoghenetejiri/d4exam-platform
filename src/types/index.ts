@@ -45,6 +45,8 @@ export type AccountStatus =
   | "deactivated"
   | "locked";
 
+export type FaceViolationAction = "warn" | "flag" | "pause" | "terminate";
+
 export interface Student {
   id: string;
   name: string;
@@ -89,6 +91,10 @@ export interface ExamSecuritySettings {
   randomizeOptions: boolean;
   requireCamera: boolean;
   requireMicrophone: boolean;
+  requireScreenShare: boolean;
+  faceDetection: boolean;
+  maxFaceWarnings: number;
+  faceViolationAction: FaceViolationAction;
   thresholdAction: "flag" | "terminate" | "warn";
   resultVisibility: ResultVisibility;
   questionsToAnswer?: number | null;
