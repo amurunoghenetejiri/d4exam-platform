@@ -35,6 +35,14 @@ type ExamRow = {
   courses: { code: string; name: string } | null;
 };
 
+type AttemptRow = {
+  exam_id: string;
+  status: string;
+  submitted_at: string | null;
+};
+
+const DONE_ATTEMPT_STATUSES = ["submitted", "terminated", "flagged"];
+
 function Page() {
   const { data: student, isLoading: sLoading } = useStudentContext();
   const schoolId = student?.schoolId ?? null;
@@ -65,16 +73,53 @@ function Page() {
     },
   });
 
+  const attemptsQ = useQuery({
+    queryKey: ["student-attempts", student?.studentId],
+    enabled: Boolean(student?.studentId),
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      if (!student?.studentId) return [] as AttemptRow[];
+      const { data, error } = await supabase
+        .from("exam_attempts")
+        .select("exam_id, status, submitted_at")
+        .eq("student_id", student.studentId);
+      if (error) throw error;
+      return (data ?? []) as AttemptRow[];
+    },
+  });
+
+  const attemptByExam = useMemo(() => {
+    const map = new Map<string, AttemptRow>();
+    for (const a of attemptsQ.data ?? []) map.set(a.exam_id, a);
+    return map;
+  }, [attemptsQ.data]);
+
   const exams = examsQ.data ?? [];
 
   const { live, upcoming, done } = useMemo(() => {
-    const liveList = exams.filter((e) => canStartExam(e.status, e.scheduled_start));
-    const doneList = exams.filter((e) => ["completed", "closed"].includes(e.status));
-    const up = exams.filter(
-      (e) => !liveList.some((x) => x.id === e.id) && !doneList.some((x) => x.id === e.id),
-    );
-    return { live: liveList, upcoming: up, done: doneList };
-  }, [exams]);
+    const liveList: ExamRow[] = [];
+    const upList: ExamRow[] = [];
+    const doneList: ExamRow[] = [];
+
+    for (const e of exams) {
+      const attempt = attemptByExam.get(e.id);
+      const studentFinished =
+        attempt && DONE_ATTEMPT_STATUSES.includes((attempt.status || "").toLowerCase());
+
+      if (studentFinished || ["completed", "closed"].includes(e.status)) {
+        doneList.push(e);
+        continue;
+      }
+
+      if (canStartExam(e.status, e.scheduled_start)) {
+        liveList.push(e);
+      } else {
+        upList.push(e);
+      }
+    }
+
+    return { live: liveList, upcoming: upList, done: doneList };
+  }, [exams, attemptByExam]);
 
   if (sLoading) return <p className="text-sm text-slate-500">Loading…</p>;
 
@@ -91,7 +136,7 @@ function Page() {
     <>
       <PageHeader
         title="My Examinations"
-        description="You only see exams after the Examination Officer has approved them. Drafts and pending submissions are hidden."
+        description="You only see exams after the Examination Officer has approved them. Once you submit, the exam is marked Completed and cannot be rewritten."
       />
 
       {examsQ.isLoading ? (
@@ -105,21 +150,21 @@ function Page() {
         <div className="space-y-6">
           {live.length > 0 && (
             <SectionCard title="Available now">
-              <ExamList items={live} canStart />
+              <ExamList items={live} canStart attemptByExam={attemptByExam} />
             </SectionCard>
           )}
           <SectionCard title="Upcoming">
             {upcoming.length === 0 ? (
               <p className="text-sm text-slate-500">No upcoming examinations.</p>
             ) : (
-              <ExamList items={upcoming} />
+              <ExamList items={upcoming} attemptByExam={attemptByExam} />
             )}
           </SectionCard>
           <SectionCard title="Completed">
             {done.length === 0 ? (
               <p className="text-sm text-slate-500">No completed examinations yet.</p>
             ) : (
-              <ExamList items={done} />
+              <ExamList items={done} attemptByExam={attemptByExam} completed />
             )}
           </SectionCard>
         </div>
@@ -128,38 +173,67 @@ function Page() {
   );
 }
 
-function ExamList({ items, canStart }: { items: ExamRow[]; canStart?: boolean }) {
+function ExamList({
+  items,
+  canStart,
+  completed,
+  attemptByExam,
+}: {
+  items: ExamRow[];
+  canStart?: boolean;
+  completed?: boolean;
+  attemptByExam: Map<string, AttemptRow>;
+}) {
   return (
     <ul className="space-y-3">
-      {items.map((e) => (
-        <li
-          key={e.id}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
-        >
-          <div className="min-w-0">
-            <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
-            <p className="text-xs text-slate-500">
-              {e.courses?.code ?? "—"} · {e.courses?.name ?? ""} · {e.duration_minutes} min
-            </p>
-            <p className="text-xs text-slate-400">
-              {e.scheduled_start
-                ? `Starts ${new Date(e.scheduled_start).toLocaleString()}`
-                : "Schedule TBC"}
-              {e.scheduled_end ? ` · Ends ${new Date(e.scheduled_end).toLocaleString()}` : ""}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <StatusBadge status={String(e.status).replaceAll("_", " ")} />
-            {canStart && (
-              <Button size="sm" className="font-semibold" asChild>
-                <Link to="/student/exam/$id" params={{ id: e.id }}>
-                  Start Exam
-                </Link>
-              </Button>
-            )}
-          </div>
-        </li>
-      ))}
+      {items.map((e) => {
+        const attempt = attemptByExam.get(e.id);
+        const studentFinished =
+          attempt && DONE_ATTEMPT_STATUSES.includes((attempt.status || "").toLowerCase());
+        const badge = studentFinished
+          ? attempt!.status === "terminated"
+            ? "terminated"
+            : "completed"
+          : String(e.status).replaceAll("_", " ");
+
+        return (
+          <li
+            key={e.id}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
+              <p className="text-xs text-slate-500">
+                {e.courses?.code ?? "—"} · {e.courses?.name ?? ""} · {e.duration_minutes} min
+              </p>
+              <p className="text-xs text-slate-400">
+                {e.scheduled_start
+                  ? `Starts ${new Date(e.scheduled_start).toLocaleString()}`
+                  : "Schedule TBC"}
+                {e.scheduled_end ? ` · Ends ${new Date(e.scheduled_end).toLocaleString()}` : ""}
+                {attempt?.submitted_at
+                  ? ` · Submitted ${new Date(attempt.submitted_at).toLocaleString()}`
+                  : ""}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <StatusBadge status={badge} />
+              {canStart && !studentFinished && (
+                <Button size="sm" className="font-semibold" asChild>
+                  <Link to="/student/exam/$id" params={{ id: e.id }}>
+                    Start Exam
+                  </Link>
+                </Button>
+              )}
+              {completed && studentFinished && (
+                <Button size="sm" variant="outline" className="font-semibold" asChild>
+                  <Link to="/student/results">View results</Link>
+                </Button>
+              )}
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }
