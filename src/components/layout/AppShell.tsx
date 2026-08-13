@@ -97,9 +97,9 @@ export function AppShell({
       <Watermark opacity={0.1} size="xl" className="lg:left-64" />
 
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-[#0b1b3a] lg:flex">
-        <div className="flex h-16 items-center border-b border-white/10 px-4">
+        <div className="flex h-[4.5rem] items-center border-b border-white/10 px-4">
           <Link to="/" aria-label="D4EXAM home">
-            <Logo size="md" />
+            <Logo size="lg" />
           </Link>
         </div>
         <div className="flex-1 overflow-y-auto hide-scrollbar">
@@ -119,7 +119,7 @@ export function AppShell({
 
       <div className="relative z-10 lg:pl-64">
         <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
-          <div className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
+          <div className="grid h-[4.5rem] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 sm:px-6">
             <div className="flex min-w-0 items-center gap-2">
               <Sheet open={open} onOpenChange={setOpen}>
                 <SheetTrigger asChild>
@@ -129,8 +129,8 @@ export function AppShell({
                 </SheetTrigger>
                 <SheetContent side="left" className="w-72 border-r-0 bg-[#0b1b3a] p-0">
                   <SheetTitle className="sr-only">{config.label} navigation</SheetTitle>
-                  <div className="flex h-16 items-center justify-between border-b border-white/10 px-4">
-                    <Logo size="md" />
+                  <div className="flex h-[4.5rem] items-center justify-between border-b border-white/10 px-4">
+                    <Logo size="lg" />
                     <Button
                       variant="ghost"
                       size="icon"
@@ -141,16 +141,16 @@ export function AppShell({
                       <X className="h-5 w-5" />
                     </Button>
                   </div>
-                  <div className="h-[calc(100dvh-4rem)] overflow-y-auto">
+                  <div className="h-[calc(100dvh-4.5rem)] overflow-y-auto">
                     <NavLinks config={config} onNavigate={() => setOpen(false)} />
                   </div>
                 </SheetContent>
               </Sheet>
-              <span className="hidden text-sm font-semibold text-slate-500 lg:inline">
+              <span className="hidden text-sm font-bold text-primary lg:inline">
                 {config.label} Portal
               </span>
               <Link to="/" className="lg:hidden" aria-label="D4EXAM home">
-                <Logo size="sm" />
+                <Logo size="md" />
               </Link>
             </div>
 
