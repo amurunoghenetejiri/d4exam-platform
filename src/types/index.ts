@@ -68,7 +68,6 @@ export interface Exam {
   questions: number;
   status: ExamStatus | string;
   candidates?: number;
-  /** Academic scope used for eligibility checks */
   schoolId?: string;
   facultyId?: string;
   departmentId?: string;
@@ -115,7 +114,6 @@ export interface NotificationItem {
   read: boolean;
 }
 
-/** Academic hierarchy node helpers */
 export interface AcademicScope {
   schoolId: string;
   facultyId?: string | null;
@@ -148,4 +146,6 @@ export interface ExamSecuritySettings {
   requireMicrophone: boolean;
   /** Action when threshold reached: warn | flag | terminate */
   thresholdAction: "warn" | "flag" | "terminate";
+  /** When students can see official scores */
+  resultVisibility: ResultVisibility;
 }
