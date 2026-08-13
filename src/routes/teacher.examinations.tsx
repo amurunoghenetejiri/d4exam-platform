@@ -12,6 +12,7 @@ import {
   Undo2,
   Pencil,
   Trash2,
+  ListChecks,
 } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -44,9 +45,10 @@ import { cn } from "@/lib/utils";
 import type { ExamSecuritySettings } from "@/types";
 
 export const Route = createFileRoute("/teacher/examinations")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    course: typeof search.course === "string" ? search.course : undefined,
-  } as { course?: string }),
+  validateSearch: (search: Record<string, unknown>) =>
+    ({ course: typeof search.course === "string" ? search.course : undefined }) as {
+      course?: string;
+    },
   head: () => ({
     meta: [
       { title: "Examinations — D4EXAM" },
@@ -88,9 +90,13 @@ function endFromStart(startLocal: string, durationMin: number) {
   return toLocalInput(d.toISOString());
 }
 
-async function tryUpsertExamSettings(examId: string, security: ExamSecuritySettings) {
+async function tryUpsertExamSettings(
+  examId: string,
+  security: ExamSecuritySettings,
+  questionsToAnswer: number | null = null,
+) {
   try {
-    const row = toExamSettingsRow(examId, security, 0);
+    const row = toExamSettingsRow(examId, security, 0, questionsToAnswer);
     const { error } = await supabase.from("exam_settings").upsert(row as never, {
       onConflict: "exam_id",
     });
@@ -155,7 +161,7 @@ function Page() {
   const listQ = useQuery({
     queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds, lockedCourseId, session?.userId],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
-    refetchInterval: 20_000,
+    refetchInterval: 30_000,
     queryFn: async () => {
       if (!teacher || !session) return [] as ExamRow[];
       const { data, error } = await supabase
@@ -266,13 +272,9 @@ function Page() {
         toast.error("Questions to answer must be at least 1");
         return false;
       }
-      // Only hard-block on submit if bank is smaller than requested
       if (forSubmit && bankCount > 0 && questionsToAnswer > bankCount) {
         toast.error(`Bank has only ${bankCount} active questions. Lower “questions to answer”.`);
         return false;
-      }
-      if (!forSubmit && bankCount > 0 && questionsToAnswer > bankCount) {
-        toast.message(`Note: bank has ${bankCount} questions; you set ${questionsToAnswer}.`);
       }
     }
     if (s === 2 && startAt && endAt && new Date(endAt) <= new Date(startAt)) {
@@ -287,14 +289,12 @@ function Page() {
     if (!validateStep(1, status === "pending_approval")) return;
     setBusy(true);
     try {
-      // Human instructions only → then attach meta + security (never shown in the form again)
       const plain = stripInternalMarkers(description.trim() || "");
       let desc: string | null = plain || null;
       desc = embedExamMeta(desc, { questionsToAnswer });
       desc = embedSecurityInDescription(desc, security);
 
-      const computedEnd =
-        endAt || (startAt ? endFromStart(startAt, durationMinutes) : "");
+      const computedEnd = endAt || (startAt ? endFromStart(startAt, durationMinutes) : "");
 
       const payload = {
         school_id: teacher.schoolId,
@@ -311,7 +311,6 @@ function Page() {
       let examId = editingId;
 
       if (editingId) {
-        // Do not require created_by match (older rows may be null)
         const { error } = await supabase
           .from("examinations")
           .update(payload as never)
@@ -329,13 +328,13 @@ function Page() {
         examId = created.id as string;
       }
 
-      if (examId) await tryUpsertExamSettings(examId, security);
+      if (examId) await tryUpsertExamSettings(examId, security, questionsToAnswer);
 
       toast.success(
         status === "draft"
           ? editingId
-            ? "Draft updated"
-            : "Draft saved"
+            ? "Draft updated — next: Select questions for this paper"
+            : "Draft saved — open Select questions to pick the paper"
           : "Submitted for Examination Officer approval",
       );
       setBuilder(false);
@@ -360,8 +359,7 @@ function Page() {
       let desc = (existing as { description?: string } | null)?.description ?? null;
       const meta = parseExamMeta(desc);
       const sec =
-        parseSecurityFromDescription(desc) ??
-        loadTeacherSecurityDefaults(teacher.teacherId);
+        parseSecurityFromDescription(desc) ?? loadTeacherSecurityDefaults(teacher.teacherId);
       const plain = stripInternalMarkers(desc);
       desc = embedExamMeta(plain, meta);
       desc = embedSecurityInDescription(desc, sec);
@@ -371,7 +369,7 @@ function Page() {
         .eq("id", id)
         .eq("school_id", teacher.schoolId);
       if (error) throw error;
-      await tryUpsertExamSettings(id, sec);
+      await tryUpsertExamSettings(id, sec, meta.questionsToAnswer);
       toast.success("Submitted for officer approval");
       await listQ.refetch();
     } catch (err) {
@@ -417,9 +415,7 @@ function Page() {
 
   if (tLoading) return <p className="text-sm text-slate-500">Loading…</p>;
   if (!teacher) {
-    return (
-      <EmptyState title="Teacher profile not found" description="Contact School Admin." />
-    );
+    return <EmptyState title="Teacher profile not found" description="Contact School Admin." />;
   }
 
   if (builder) {
@@ -434,11 +430,7 @@ function Page() {
       <>
         <PageHeader
           title={editingId ? "Edit examination" : "Create examination"}
-          description={
-            lockedCourse
-              ? `For ${lockedCourse.code} only. Save draft or submit for officer approval.`
-              : "Only for courses assigned to you. Save draft or submit for officer approval."
-          }
+          description="Set how many questions students answer, then use Select questions to pick which bank items are on the paper."
           actions={
             <Button
               variant="outline"
@@ -512,9 +504,6 @@ function Page() {
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Instructions for candidates…"
                 />
-                <p className="text-[11px] text-slate-500">
-                  Only candidate-facing text. Security settings are configured on the Security step.
-                </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -528,158 +517,60 @@ function Page() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label className="font-semibold">Questions to answer</Label>
+                  <Label className="font-semibold">Students must answer</Label>
                   <Input
                     type="text"
                     inputMode="numeric"
                     value={questionsText}
                     onChange={(e) => onQuestionsTextChange(e.target.value)}
-                    placeholder="e.g. 20"
+                    placeholder="e.g. 10"
                   />
                 </div>
               </div>
-              <p className="text-xs text-slate-500">
-                Course bank has <strong>{bankCount}</strong> active question(s). Students answer{" "}
-                <strong>{questionsText || "?"}</strong>
-                {security.randomizeQuestions
-                  ? " — each student gets a random mix (shown as 1, 2, 3…)."
-                  : " — fixed order unless you turn on randomise on the Security step."}
+              <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-700">
+                Course bank has <strong>{bankCount}</strong> question(s). After you save the exam,
+                open <strong>Select questions</strong> and tick the ones for this paper (e.g. 20).
+                Students then answer <strong>{questionsText || "?"}</strong> of those (random per
+                student if randomise is on).
               </p>
             </div>
           )}
 
           {step === 2 && (
             <div className="mx-auto max-w-xl space-y-4">
-              <p className="text-sm text-slate-600">
-                Set date and time (hour and minutes). End auto-fills from start + duration.
-              </p>
               <div className="space-y-2">
                 <Label className="font-semibold">Start (date & time)</Label>
-                <Input
-                  type="datetime-local"
-                  value={startAt}
-                  onChange={(e) => onStartChange(e.target.value)}
-                />
+                <Input type="datetime-local" value={startAt} onChange={(e) => onStartChange(e.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">End (date & time)</Label>
-                <Input
-                  type="datetime-local"
-                  value={endAt}
-                  onChange={(e) => setEndAt(e.target.value)}
-                />
+                <Input type="datetime-local" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
               </div>
             </div>
           )}
 
           {step === 3 && (
             <div className="mx-auto max-w-xl space-y-3">
-              <p className="text-sm text-slate-600">
-                Set CBT security for <strong>this examination</strong>. These are saved with the exam
-                (officer can review them before approval).
-              </p>
-              <SecToggle
-                label="Fullscreen lockdown"
-                hint="Candidate must stay in fullscreen"
-                checked={security.fullscreen}
-                onChange={(v) => toggleSec("fullscreen", v)}
-              />
-              <SecToggle
-                label="Tab & focus monitoring"
-                hint="Detect leaving the exam window"
-                checked={security.tabMonitoring}
-                onChange={(v) => toggleSec("tabMonitoring", v)}
-              />
+              <SecToggle label="Fullscreen lockdown" hint="Candidate must stay in fullscreen" checked={security.fullscreen} onChange={(v) => toggleSec("fullscreen", v)} />
+              <SecToggle label="Tab & focus monitoring" hint="Detect leaving the exam window" checked={security.tabMonitoring} onChange={(v) => toggleSec("tabMonitoring", v)} />
               <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
                 <Label className="font-semibold">Max tab switches</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={security.maxTabSwitches}
-                  disabled={!security.tabMonitoring}
-                  onChange={(e) => toggleSec("maxTabSwitches", Number(e.target.value) || 5)}
-                />
+                <Input type="number" min={1} max={20} value={security.maxTabSwitches} disabled={!security.tabMonitoring} onChange={(e) => toggleSec("maxTabSwitches", Number(e.target.value) || 5)} />
               </div>
-              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
-                <Label className="font-semibold">When threshold is reached</Label>
-                <Select
-                  value={security.thresholdAction}
-                  onValueChange={(v) =>
-                    toggleSec("thresholdAction", v as ExamSecuritySettings["thresholdAction"])
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="warn">Warn candidate</SelectItem>
-                    <SelectItem value="flag">Flag for review</SelectItem>
-                    <SelectItem value="terminate">Terminate attempt</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <SecToggle
-                label="Block copy / paste"
-                hint="Disable clipboard during the attempt"
-                checked={security.blockCopyPaste}
-                onChange={(v) => toggleSec("blockCopyPaste", v)}
-              />
-              <SecToggle
-                label="Randomise questions"
-                hint="Each student gets a random set (still numbered 1…N)"
-                checked={security.randomizeQuestions}
-                onChange={(v) => toggleSec("randomizeQuestions", v)}
-              />
-              <SecToggle
-                label="Randomise options"
-                hint="MCQ choices shuffled per student"
-                checked={security.randomizeOptions}
-                onChange={(v) => toggleSec("randomizeOptions", v)}
-              />
-              <SecToggle
-                label="Require camera"
-                hint="Optional proctoring camera"
-                checked={security.requireCamera}
-                onChange={(v) => toggleSec("requireCamera", v)}
-              />
-              <SecToggle
-                label="Require microphone"
-                hint="Optional audio monitoring"
-                checked={security.requireMicrophone}
-                onChange={(v) => toggleSec("requireMicrophone", v)}
-              />
+              <SecToggle label="Block copy / paste" hint="Disable clipboard" checked={security.blockCopyPaste} onChange={(v) => toggleSec("blockCopyPaste", v)} />
+              <SecToggle label="Randomise questions" hint="Each student gets a random subset of the paper" checked={security.randomizeQuestions} onChange={(v) => toggleSec("randomizeQuestions", v)} />
+              <SecToggle label="Randomise options" hint="MCQ choices shuffled" checked={security.randomizeOptions} onChange={(v) => toggleSec("randomizeOptions", v)} />
+              <SecToggle label="Require camera" hint="Live face preview during CBT" checked={security.requireCamera} onChange={(v) => toggleSec("requireCamera", v)} />
+              <SecToggle label="Require microphone" hint="Optional audio" checked={security.requireMicrophone} onChange={(v) => toggleSec("requireMicrophone", v)} />
               <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
                 <Label className="font-semibold">When can students see results?</Label>
-                <p className="text-xs text-slate-500">
-                  Flagged or terminated attempts always stay under review until the Examination
-                  Officer releases them.
-                </p>
-                <Select
-                  value={security.resultVisibility}
-                  onValueChange={(v) =>
-                    toggleSec(
-                      "resultVisibility",
-                      v as ExamSecuritySettings["resultVisibility"],
-                    )
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                <Select value={security.resultVisibility} onValueChange={(v) => toggleSec("resultVisibility", v as ExamSecuritySettings["resultVisibility"])}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="immediate">
-                      Immediately after the student submits
-                    </SelectItem>
-                    <SelectItem value="after_marking">
-                      After marking is finished
-                    </SelectItem>
-                    <SelectItem value="after_exam_closes">
-                      After the examination window closes
-                    </SelectItem>
-                    <SelectItem value="after_officer_release">
-                      Only after Examination Officer releases results
-                    </SelectItem>
+                    <SelectItem value="immediate">Immediately after submit</SelectItem>
+                    <SelectItem value="after_officer_release">After Examination Officer releases</SelectItem>
+                    <SelectItem value="after_marking">After marking</SelectItem>
+                    <SelectItem value="after_exam_closes">After exam window closes</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -690,64 +581,25 @@ function Page() {
             <div className="mx-auto max-w-xl space-y-3 text-sm">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="font-extrabold text-slate-900">{title || "Untitled"}</p>
-                {description.trim() ? (
-                  <p className="mt-2 text-xs text-slate-600">{description.trim()}</p>
-                ) : null}
                 <dl className="mt-3 space-y-2 text-slate-600">
-                  <div className="flex justify-between gap-4">
-                    <dt>Course</dt>
-                    <dd className="font-semibold text-slate-900">
-                      {teacher.courses.find((c) => c.id === courseId)?.code ?? "—"}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt>Duration</dt>
-                    <dd className="font-semibold text-slate-900">{durationMinutes} min</dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt>Questions to answer</dt>
-                    <dd className="font-semibold text-slate-900">
-                      {questionsToAnswer} of {bankCount} in bank
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt>Start</dt>
-                    <dd className="font-semibold text-slate-900">
-                      {startAt ? new Date(startAt).toLocaleString() : "Not set"}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt>End</dt>
-                    <dd className="font-semibold text-slate-900">
-                      {endAt ? new Date(endAt).toLocaleString() : "Not set"}
-                    </dd>
-                  </div>
+                  <div className="flex justify-between gap-4"><dt>Course</dt><dd className="font-semibold text-slate-900">{teacher.courses.find((c) => c.id === courseId)?.code ?? "—"}</dd></div>
+                  <div className="flex justify-between gap-4"><dt>Duration</dt><dd className="font-semibold text-slate-900">{durationMinutes} min</dd></div>
+                  <div className="flex justify-between gap-4"><dt>Students answer</dt><dd className="font-semibold text-primary">{questionsToAnswer} questions</dd></div>
                 </dl>
               </div>
-
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                <p className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-900">
-                  <ShieldCheck className="h-4 w-4 text-primary" />
-                  Exam security
-                </p>
-                <ul className="space-y-1 text-xs text-slate-700">
-                  {securitySummaryLines(security).map((line) => (
-                    <li key={line}>• {line}</li>
-                  ))}
-                </ul>
+                <p className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-900"><ShieldCheck className="h-4 w-4 text-primary" />Exam security</p>
+                <ul className="space-y-1 text-xs text-slate-700">{securitySummaryLines(security).map((line) => (<li key={line}>• {line}</li>))}</ul>
               </div>
-
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                Drafts stay private to you. Students only see the exam after the Examination Officer
-                approves it.
+                After save: use <strong>Select questions</strong> on the exam row to choose which bank items are on the paper. Officer will see paper size and students-must-answer count.
               </p>
             </div>
           )}
 
           <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <Button variant="outline" onClick={() => setStep((s) => Math.max(1, s - 1))} disabled={step === 1}>
-              <ChevronLeft className="mr-1 h-4 w-4" />
-              Back
+              <ChevronLeft className="mr-1 h-4 w-4" /> Back
             </Button>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" disabled={busy} onClick={() => void persist("draft")}>
@@ -755,26 +607,12 @@ function Page() {
                 Save draft
               </Button>
               {step < 4 ? (
-                <Button
-                  className="font-semibold"
-                  onClick={() => {
-                    if (validateStep(step)) setStep((s) => s + 1);
-                  }}
-                >
-                  Continue
-                  <ChevronRight className="ml-1 h-4 w-4" />
+                <Button className="font-semibold" onClick={() => { if (validateStep(step)) setStep((s) => s + 1); }}>
+                  Continue <ChevronRight className="ml-1 h-4 w-4" />
                 </Button>
               ) : (
-                <Button
-                  className="font-semibold"
-                  disabled={busy}
-                  onClick={() => void persist("pending_approval")}
-                >
-                  {busy ? (
-                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="mr-1.5 h-4 w-4" />
-                  )}
+                <Button className="font-semibold" disabled={busy} onClick={() => void persist("pending_approval")}>
+                  {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
                   Submit for approval
                 </Button>
               )}
@@ -791,11 +629,7 @@ function Page() {
     <>
       <PageHeader
         title={lockedCourse ? `Exams · ${lockedCourse.code}` : "Examinations"}
-        description={
-          lockedCourse
-            ? `Only exams for ${lockedCourse.code} — ${lockedCourse.name}`
-            : `Create exams for your assigned courses · ${teacher.fullName}`
-        }
+        description="Create exam → Select questions for the paper → set how many students answer → submit for officer"
         actions={
           <div className="flex flex-wrap gap-2">
             {lockedCourse && (
@@ -803,77 +637,47 @@ function Page() {
                 <Link to="/teacher/courses">All courses</Link>
               </Button>
             )}
-            <Button
-              className="font-semibold"
-              onClick={openBuilder}
-              disabled={!teacher.courses.length}
-            >
-              <Plus className="mr-1.5 h-4 w-4" />
-              Create examination
+            <Button className="font-semibold" onClick={openBuilder} disabled={!teacher.courses.length}>
+              <Plus className="mr-1.5 h-4 w-4" /> Create examination
             </Button>
           </div>
         }
       />
 
       {!teacher.courses.length ? (
-        <EmptyState
-          title="No courses assigned"
-          description="School Admin must assign courses before you can create examinations."
-        />
+        <EmptyState title="No courses assigned" description="School Admin must assign courses first." />
       ) : (
-        <SectionCard
-          title={lockedCourse ? `${lockedCourse.code} examinations` : "Your examinations (live)"}
-        >
+        <SectionCard title="Your examinations">
           {listQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading…</p>
           ) : exams.length === 0 ? (
-            <EmptyState
-              title={lockedCourse ? `No exams for ${lockedCourse.code}` : "No examinations yet"}
-              description="Create one for this course."
-              actionLabel="Create examination"
-              onAction={openBuilder}
-            />
+            <EmptyState title="No examinations yet" description="Create one for this course." actionLabel="Create examination" onAction={openBuilder} />
           ) : (
             <ul className="space-y-3">
               {exams.map((e) => {
-                const approvedLike = ["approved", "scheduled", "published", "ongoing"].includes(
-                  e.status,
-                );
                 const meta = parseExamMeta(e.description);
                 const canEdit = e.status === "draft" || e.status === "changes_requested";
                 const canDelete = ["draft", "changes_requested", "rejected"].includes(e.status);
                 return (
-                  <li
-                    key={e.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
-                  >
+                  <li key={e.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
                       <p className="text-xs text-slate-500">
                         {e.courses?.code ?? "—"} · {e.duration_minutes} min
-                        {meta.questionsToAnswer ? ` · ${meta.questionsToAnswer} questions` : ""}
-                        {e.scheduled_start
-                          ? ` · Starts ${new Date(e.scheduled_start).toLocaleString()}`
-                          : " · Not scheduled"}
+                        {meta.questionsToAnswer ? ` · students answer ${meta.questionsToAnswer}` : ""}
                       </p>
-                      {approvedLike && (
-                        <p className="mt-1 text-xs font-semibold text-primary">
-                          Approved
-                          {e.scheduled_start
-                            ? ` — exam starting ${new Date(e.scheduled_start).toLocaleString()}`
-                            : " — schedule may still be set by officer"}
-                        </p>
-                      )}
-                      {e.status === "pending_approval" && (
-                        <p className="mt-1 text-xs text-amber-700">Waiting for officer approval</p>
-                      )}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge status={String(e.status).replaceAll("_", " ")} />
+                      <Button size="sm" variant="outline" className="font-semibold" asChild>
+                        <Link to="/teacher/exam-paper/$id" params={{ id: e.id }}>
+                          <ListChecks className="mr-1 h-3.5 w-3.5" />
+                          Select questions
+                        </Link>
+                      </Button>
                       {canEdit && (
                         <Button size="sm" variant="outline" className="font-semibold" onClick={() => openEdit(e)}>
-                          <Pencil className="mr-1 h-3.5 w-3.5" />
-                          Edit
+                          <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
                         </Button>
                       )}
                       {e.status === "draft" && (
@@ -882,25 +686,13 @@ function Page() {
                         </Button>
                       )}
                       {(e.status === "pending_approval" || e.status === "changes_requested") && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="font-semibold"
-                          onClick={() => void cancelSubmit(e.id)}
-                        >
-                          <Undo2 className="mr-1 h-3.5 w-3.5" />
-                          Cancel submit
+                        <Button size="sm" variant="outline" className="font-semibold" onClick={() => void cancelSubmit(e.id)}>
+                          <Undo2 className="mr-1 h-3.5 w-3.5" /> Cancel submit
                         </Button>
                       )}
                       {canDelete && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="font-semibold text-red-600 hover:bg-red-50"
-                          onClick={() => void deleteExam(e.id)}
-                        >
-                          <Trash2 className="mr-1 h-3.5 w-3.5" />
-                          Delete
+                        <Button size="sm" variant="outline" className="font-semibold text-red-600" onClick={() => void deleteExam(e.id)}>
+                          <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
                         </Button>
                       )}
                     </div>
