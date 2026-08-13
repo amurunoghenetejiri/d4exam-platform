@@ -1,4 +1,4 @@
-import { Bell, CheckCheck, Info, AlertTriangle, CircleCheck, CircleX } from "lucide-react";
+import { Bell, CheckCheck, Info, AlertTriangle, CircleCheck, CircleX, ExternalLink } from "lucide-react";
 import { EmptyState, PageHeader, SectionCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ import { useRows } from "@/lib/queries";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useRealtimeInvalidate } from "@/lib/realtime";
 
 type Notif = {
   id: string;
@@ -16,6 +17,8 @@ type Notif = {
   type: string;
   created_at: string;
   read_at: string | null;
+  link?: string | null;
+  action_url?: string | null;
 };
 
 const icons: Record<string, typeof Info> = {
@@ -37,17 +40,26 @@ export function NotificationsPage({ scope }: { scope: string }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
 
+  useRealtimeInvalidate(
+    `notifs-${user?.userId ?? "anon"}`,
+    [{ table: "notifications", filter: user?.userId ? `recipient_user_id=eq.${user.userId}` : undefined }],
+    [["rows", "notifications"], ["count", "notifications"], ["student-dashboard-notifs"]],
+    Boolean(user?.userId),
+  );
+
   const { data, isLoading, refetch } = useRows<Notif>({
     table: "notifications",
     select: "id, title, message, type, created_at, read_at",
     filters: user?.userId ? [{ column: "recipient_user_id", value: user.userId }] : [],
     order: { column: "created_at", ascending: false },
-    limit: 100,
+    limit: 150,
     enabled: Boolean(user?.userId),
   });
 
   const items = data ?? [];
-  const unread = items.filter((i) => !i.read_at).length;
+  const unreadItems = items.filter((i) => !i.read_at);
+  const historyItems = items.filter((i) => i.read_at);
+  const unread = unreadItems.length;
 
   async function markAllRead() {
     if (!user?.userId) return;
@@ -81,63 +93,89 @@ export function NotificationsPage({ scope }: { scope: string }) {
     }
   }
 
+  function renderList(list: Notif[]) {
+    return (
+      <ul className="divide-y divide-border">
+        {list.map((n) => {
+          const t = (n.type || "info").toLowerCase();
+          const Icon = icons[t] ?? Info;
+          const unreadItem = !n.read_at;
+          const href = n.link || n.action_url || null;
+          return (
+            <li
+              key={n.id}
+              className="flex cursor-pointer gap-3 py-4 first:pt-0 last:pb-0"
+              onClick={() => {
+                if (unreadItem) void markOne(n.id);
+                if (href) window.location.href = href;
+              }}
+            >
+              <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", tones[t] ?? tones.info)}>
+                <Icon className="h-4 w-4" aria-hidden />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                  <p className={cn("text-sm", unreadItem ? "font-semibold" : "font-medium")}>{n.title}</p>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {new Date(n.created_at).toLocaleString()}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">{n.message}</p>
+                {href && (
+                  <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-primary">
+                    Open <ExternalLink className="h-3 w-3" />
+                  </p>
+                )}
+              </div>
+              {unreadItem && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
   return (
     <>
       <PageHeader
         title="Notifications"
-        description={`Alerts for your ${scope} account from the database.`}
+        description={`Realtime alerts for your ${scope} account.`}
         actions={
-          <Button variant="outline" className="gap-2" disabled={busy || unread === 0} onClick={() => void markAllRead()}>
+          <Button
+            variant="outline"
+            className="gap-2"
+            disabled={busy || unread === 0}
+            onClick={() => void markAllRead()}
+          >
             <CheckCheck className="h-4 w-4" aria-hidden />
             Mark all read
           </Button>
         }
       />
 
-      <SectionCard title="Inbox" description={isLoading ? "Loading…" : `${unread} unread`}>
+      <SectionCard title="Unread" description={isLoading ? "Loading…" : `${unread} unread`}>
         {isLoading ? (
           <p className="text-sm text-slate-500">Loading notifications…</p>
-        ) : items.length === 0 ? (
+        ) : unreadItems.length === 0 ? (
           <EmptyState
             icon={Bell}
-            title="No notifications"
-            description="You are all caught up. New alerts from the platform will appear here."
+            title="No unread notifications"
+            description="You are all caught up. New alerts appear here in realtime."
           />
         ) : (
-          <ul className="divide-y divide-border">
-            {items.map((n) => {
-              const t = (n.type || "info").toLowerCase();
-              const Icon = icons[t] ?? Info;
-              const unreadItem = !n.read_at;
-              return (
-                <li
-                  key={n.id}
-                  className="flex cursor-pointer gap-3 py-4 first:pt-0 last:pb-0"
-                  onClick={() => {
-                    if (unreadItem) void markOne(n.id);
-                  }}
-                >
-                  <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", tones[t] ?? tones.info)}>
-                    <Icon className="h-4 w-4" aria-hidden />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                      <p className={cn("text-sm", unreadItem ? "font-semibold" : "font-medium")}>
-                        {n.title}
-                      </p>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {new Date(n.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm text-muted-foreground">{n.message}</p>
-                  </div>
-                  {unreadItem && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
-                </li>
-              );
-            })}
-          </ul>
+          renderList(unreadItems)
         )}
       </SectionCard>
+
+      <div className="mt-6">
+        <SectionCard title="History" description={`${historyItems.length} older notifications`}>
+          {historyItems.length === 0 ? (
+            <EmptyState title="No history yet" description="Read notifications are kept here." />
+          ) : (
+            renderList(historyItems)
+          )}
+        </SectionCard>
+      </div>
     </>
   );
 }
