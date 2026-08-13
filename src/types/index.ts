@@ -47,6 +47,9 @@ export type AccountStatus =
 
 export type FaceViolationAction = "warn" | "flag" | "pause" | "terminate";
 
+/** Screen sharing policy for an examination */
+export type ScreenShareMode = "optional" | "required" | "disabled";
+
 export interface Student {
   id: string;
   name: string;
@@ -91,7 +94,10 @@ export interface ExamSecuritySettings {
   randomizeOptions: boolean;
   requireCamera: boolean;
   requireMicrophone: boolean;
+  /** @deprecated prefer screenShareMode; kept for older saved JSON */
   requireScreenShare: boolean;
+  /** optional | required | disabled */
+  screenShareMode: ScreenShareMode;
   faceDetection: boolean;
   maxFaceWarnings: number;
   faceViolationAction: FaceViolationAction;
