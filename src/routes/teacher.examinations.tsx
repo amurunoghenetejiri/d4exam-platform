@@ -34,7 +34,9 @@ import {
   DEFAULT_EXAM_SECURITY,
   embedSecurityInDescription,
   loadTeacherSecurityDefaults,
+  normalizeSecuritySettings,
   parseSecurityFromDescription,
+  resolveScreenShareMode,
   securitySummaryLines,
   stripInternalMarkers,
   toExamSettingsRow,
@@ -42,20 +44,15 @@ import {
 import { embedExamMeta, parseExamMeta } from "@/lib/exam-meta";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import type { ExamSecuritySettings, FaceViolationAction } from "@/types";
+import type { ExamSecuritySettings, FaceViolationAction, ScreenShareMode } from "@/types";
 
 export const Route = createFileRoute("/teacher/examinations")({
   validateSearch: (search: Record<string, unknown>) =>
-    ({ course: typeof search.course === "string" ? search.course : undefined }) as {
-      course?: string;
-    },
+    ({ course: typeof search.course === "string" ? search.course : undefined }) as { course?: string },
   head: () => ({
     meta: [
       { title: "Examinations — D4EXAM" },
-      {
-        name: "description",
-        content: "Create and schedule examinations for your assigned courses.",
-      },
+      { name: "description", content: "Create and schedule examinations for your assigned courses." },
     ],
   }),
   component: Page,
@@ -97,16 +94,13 @@ async function tryUpsertExamSettings(
 ) {
   try {
     const row = toExamSettingsRow(examId, security, 0, questionsToAnswer);
-    const { error } = await supabase.from("exam_settings").upsert(row as never, {
-      onConflict: "exam_id",
-    });
+    const { error } = await supabase.from("exam_settings").upsert(row as never, { onConflict: "exam_id" });
     if (error) {
       console.warn("exam_settings upsert skipped:", error.message);
       return { savedToTable: false as const, error: error.message };
     }
     return { savedToTable: true as const, error: null };
   } catch (e) {
-    console.warn("exam_settings upsert failed", e);
     return { savedToTable: false as const, error: (e as Error).message };
   }
 }
@@ -189,9 +183,7 @@ function Page() {
     setQuestionsText("20");
     setStartAt("");
     setEndAt("");
-    setSecurity(
-      teacher ? loadTeacherSecurityDefaults(teacher.teacherId) : { ...DEFAULT_EXAM_SECURITY },
-    );
+    setSecurity(teacher ? loadTeacherSecurityDefaults(teacher.teacherId) : { ...DEFAULT_EXAM_SECURITY });
     setStep(1);
     setEditingId(null);
   }
@@ -224,7 +216,7 @@ function Page() {
     setQuestionsText(String(meta.questionsToAnswer ?? 20));
     setStartAt(toLocalInput(e.scheduled_start));
     setEndAt(toLocalInput(e.scheduled_end));
-    setSecurity(sec);
+    setSecurity(normalizeSecuritySettings(sec));
     setStep(1);
     setBuilder(true);
   }
@@ -247,17 +239,23 @@ function Page() {
   }
 
   function toggleSec<K extends keyof ExamSecuritySettings>(key: K, value: ExamSecuritySettings[K]) {
-    setSecurity((s) => ({ ...s, [key]: value }));
+    setSecurity((s) => normalizeSecuritySettings({ ...s, [key]: value }));
+  }
+
+  function setScreenMode(mode: ScreenShareMode) {
+    setSecurity((s) =>
+      normalizeSecuritySettings({
+        ...s,
+        screenShareMode: mode,
+        requireScreenShare: mode === "required",
+      }),
+    );
   }
 
   function validateStep(s: number, forSubmit = false) {
     if (s === 1) {
       if (!courseId || !teacher?.courseIds.includes(courseId)) {
         toast.error("Select an assigned course");
-        return false;
-      }
-      if (lockedCourseId && courseId !== lockedCourseId) {
-        toast.error("This view is locked to one course.");
         return false;
       }
       if (!title.trim()) {
@@ -273,7 +271,7 @@ function Page() {
         return false;
       }
       if (forSubmit && bankCount > 0 && questionsToAnswer > bankCount) {
-        toast.error(`Bank has only ${bankCount} active questions. Lower “questions to answer”.`);
+        toast.error(`Bank has only ${bankCount} active questions.`);
         return false;
       }
     }
@@ -291,11 +289,10 @@ function Page() {
     try {
       const plain = stripInternalMarkers(description.trim() || "");
       let desc: string | null = plain || null;
+      const sec = normalizeSecuritySettings(security);
       desc = embedExamMeta(desc, { questionsToAnswer });
-      desc = embedSecurityInDescription(desc, security);
-
+      desc = embedSecurityInDescription(desc, sec);
       const computedEnd = endAt || (startAt ? endFromStart(startAt, durationMinutes) : "");
-
       const payload = {
         school_id: teacher.schoolId,
         course_id: courseId,
@@ -307,9 +304,7 @@ function Page() {
         scheduled_end: computedEnd ? new Date(computedEnd).toISOString() : null,
         status,
       };
-
       let examId = editingId;
-
       if (editingId) {
         const { error } = await supabase
           .from("examinations")
@@ -327,16 +322,8 @@ function Page() {
         if (!created?.id) throw new Error("Examination was not created");
         examId = created.id as string;
       }
-
-      if (examId) await tryUpsertExamSettings(examId, security, questionsToAnswer);
-
-      toast.success(
-        status === "draft"
-          ? editingId
-            ? "Draft updated — next: Select questions for this paper"
-            : "Draft saved — open Select questions to pick the paper"
-          : "Submitted for Examination Officer approval",
-      );
+      if (examId) await tryUpsertExamSettings(examId, sec, questionsToAnswer);
+      toast.success(status === "draft" ? "Draft saved" : "Submitted for officer approval");
       setBuilder(false);
       setEditingId(null);
       await qc.invalidateQueries({ queryKey: ["teacher-exams"] });
@@ -358,8 +345,9 @@ function Page() {
         .maybeSingle();
       let desc = (existing as { description?: string } | null)?.description ?? null;
       const meta = parseExamMeta(desc);
-      const sec =
-        parseSecurityFromDescription(desc) ?? loadTeacherSecurityDefaults(teacher.teacherId);
+      const sec = normalizeSecuritySettings(
+        parseSecurityFromDescription(desc) ?? loadTeacherSecurityDefaults(teacher.teacherId),
+      );
       const plain = stripInternalMarkers(desc);
       desc = embedExamMeta(plain, meta);
       desc = embedSecurityInDescription(desc, sec);
@@ -379,7 +367,7 @@ function Page() {
 
   async function cancelSubmit(id: string) {
     if (!teacher) return;
-    if (!confirm("Withdraw this examination from officer review? It will return to draft.")) return;
+    if (!confirm("Withdraw this examination from officer review?")) return;
     try {
       const { error } = await supabase
         .from("examinations")
@@ -388,16 +376,16 @@ function Page() {
         .eq("school_id", teacher.schoolId)
         .in("status", ["pending_approval", "changes_requested"]);
       if (error) throw error;
-      toast.success("Submission cancelled — exam is draft again");
+      toast.success("Submission cancelled");
       await listQ.refetch();
     } catch (err) {
-      toast.error((err as Error).message || "Could not cancel submission");
+      toast.error((err as Error).message || "Could not cancel");
     }
   }
 
   async function deleteExam(id: string) {
     if (!teacher) return;
-    if (!confirm("Delete this draft permanently? This cannot be undone.")) return;
+    if (!confirm("Delete this draft permanently?")) return;
     try {
       const { error } = await supabase
         .from("examinations")
@@ -414,9 +402,7 @@ function Page() {
   }
 
   if (tLoading) return <p className="text-sm text-slate-500">Loading…</p>;
-  if (!teacher) {
-    return <EmptyState title="Teacher profile not found" description="Contact School Admin." />;
-  }
+  if (!teacher) return <EmptyState title="Teacher profile not found" description="Contact School Admin." />;
 
   if (builder) {
     const steps = [
@@ -425,25 +411,17 @@ function Page() {
       { id: 3, label: "Security" },
       { id: 4, label: "Review & submit" },
     ];
+    const shareMode = resolveScreenShareMode(security);
 
     return (
       <>
         <PageHeader
           title={editingId ? "Edit examination" : "Create examination"}
-          description="Set how many questions students answer, then use Select questions to pick which bank items are on the paper."
+          description="Configure paper size, schedule, and proctoring (camera / screen share)."
           actions={
-            <Button
-              variant="outline"
-              onClick={() => {
-                setBuilder(false);
-                setEditingId(null);
-              }}
-            >
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => { setBuilder(false); setEditingId(null); }}>Cancel</Button>
           }
         />
-
         <nav className="mb-6 flex flex-wrap gap-2">
           {steps.map((s) => (
             <button
@@ -463,26 +441,19 @@ function Page() {
             </button>
           ))}
         </nav>
-
         <SectionCard>
           {step === 1 && (
             <div className="mx-auto max-w-xl space-y-4">
               <div className="space-y-2">
                 <Label className="font-semibold">Assigned course</Label>
                 {lockedCourse ? (
-                  <p className="rounded-lg border bg-slate-50 px-3 py-2 text-sm font-semibold">
-                    {lockedCourse.code} — {lockedCourse.name}
-                  </p>
+                  <p className="rounded-lg border bg-slate-50 px-3 py-2 text-sm font-semibold">{lockedCourse.code} — {lockedCourse.name}</p>
                 ) : (
                   <Select value={courseId} onValueChange={setCourseId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select course" />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Select course" /></SelectTrigger>
                     <SelectContent>
                       {teacher.courses.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.code} — {c.name}
-                        </SelectItem>
+                        <SelectItem key={c.id} value={c.id}>{c.code} — {c.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -490,41 +461,37 @@ function Page() {
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">Title</Label>
-                <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. First Semester Examination" />
+                <Input value={title} onChange={(e) => setTitle(e.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">Instructions</Label>
-                <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Instructions for candidates…" />
+                <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="font-semibold">Duration (minutes)</Label>
-                  <Input type="text" inputMode="numeric" value={durationText} onChange={(e) => onDurationTextChange(e.target.value)} placeholder="e.g. 20" />
+                  <Input type="text" inputMode="numeric" value={durationText} onChange={(e) => onDurationTextChange(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label className="font-semibold">Students must answer</Label>
-                  <Input type="text" inputMode="numeric" value={questionsText} onChange={(e) => onQuestionsTextChange(e.target.value)} placeholder="e.g. 10" />
+                  <Input type="text" inputMode="numeric" value={questionsText} onChange={(e) => onQuestionsTextChange(e.target.value)} />
                 </div>
               </div>
-              <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-700">
-                Course bank has <strong>{bankCount}</strong> question(s). After save, open <strong>Select questions</strong> for the paper.
-              </p>
+              <p className="text-xs text-slate-500">Bank: <strong>{bankCount}</strong> questions</p>
             </div>
           )}
-
           {step === 2 && (
             <div className="mx-auto max-w-xl space-y-4">
               <div className="space-y-2">
-                <Label className="font-semibold">Start (date & time)</Label>
+                <Label className="font-semibold">Start</Label>
                 <Input type="datetime-local" value={startAt} onChange={(e) => onStartChange(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label className="font-semibold">End (date & time)</Label>
+                <Label className="font-semibold">End</Label>
                 <Input type="datetime-local" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
               </div>
             </div>
           )}
-
           {step === 3 && (
             <div className="mx-auto max-w-xl space-y-3">
               <SecToggle label="Fullscreen lockdown" hint="Candidate must stay in fullscreen" checked={security.fullscreen} onChange={(v) => toggleSec("fullscreen", v)} />
@@ -534,12 +501,11 @@ function Page() {
                 <Input type="number" min={1} max={20} value={security.maxTabSwitches} disabled={!security.tabMonitoring} onChange={(e) => toggleSec("maxTabSwitches", Number(e.target.value) || 5)} />
               </div>
               <SecToggle label="Block copy / paste" hint="Disable clipboard" checked={security.blockCopyPaste} onChange={(v) => toggleSec("blockCopyPaste", v)} />
-              <SecToggle label="Randomise questions" hint="Each student gets a random subset of the paper" checked={security.randomizeQuestions} onChange={(v) => toggleSec("randomizeQuestions", v)} />
+              <SecToggle label="Randomise questions" hint="Random subset per student" checked={security.randomizeQuestions} onChange={(v) => toggleSec("randomizeQuestions", v)} />
               <SecToggle label="Randomise options" hint="MCQ choices shuffled" checked={security.randomizeOptions} onChange={(v) => toggleSec("randomizeOptions", v)} />
-
               <p className="pt-2 text-xs font-bold uppercase tracking-wide text-slate-500">Proctoring</p>
-              <SecToggle label="Camera monitoring" hint="Require camera before and during the exam" checked={security.requireCamera} onChange={(v) => toggleSec("requireCamera", v)} />
-              <SecToggle label="Face detection" hint="Warn when 0 or 2+ faces are visible (needs camera)" checked={security.faceDetection} onChange={(v) => toggleSec("faceDetection", v)} />
+              <SecToggle label="Camera monitoring" hint="Require camera during the exam" checked={security.requireCamera} onChange={(v) => toggleSec("requireCamera", v)} />
+              <SecToggle label="Face detection" hint="Warn on 0 or 2+ faces (needs camera)" checked={security.faceDetection} onChange={(v) => toggleSec("faceDetection", v)} />
               <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
                 <Label className="font-semibold">Maximum face warnings</Label>
                 <Input type="number" min={1} max={50} value={security.maxFaceWarnings ?? 5} disabled={!security.faceDetection} onChange={(e) => toggleSec("maxFaceWarnings", Number(e.target.value) || 5)} />
@@ -556,49 +522,52 @@ function Page() {
                   </SelectContent>
                 </Select>
               </div>
-              <SecToggle label="Screen sharing required" hint="Student must share screen via browser before starting" checked={security.requireScreenShare} onChange={(v) => toggleSec("requireScreenShare", v)} />
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">Screen sharing</Label>
+                <p className="text-xs text-slate-500">Required blocks mobile/unsupported browsers. Optional allows continue without share.</p>
+                <Select value={shareMode} onValueChange={(v) => setScreenMode(v as ScreenShareMode)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="disabled">Disabled</SelectItem>
+                    <SelectItem value="optional">Optional</SelectItem>
+                    <SelectItem value="required">Required (desktop browsers)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <SecToggle label="Require microphone" hint="Optional audio permission" checked={security.requireMicrophone} onChange={(v) => toggleSec("requireMicrophone", v)} />
-
               <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
                 <Label className="font-semibold">When can students see results?</Label>
                 <Select value={security.resultVisibility} onValueChange={(v) => toggleSec("resultVisibility", v as ExamSecuritySettings["resultVisibility"])}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="immediate">Immediately after submit</SelectItem>
-                    <SelectItem value="after_officer_release">After Examination Officer releases</SelectItem>
+                    <SelectItem value="after_officer_release">After officer releases</SelectItem>
                     <SelectItem value="after_marking">After marking</SelectItem>
-                    <SelectItem value="after_exam_closes">After exam window closes</SelectItem>
+                    <SelectItem value="after_exam_closes">After exam closes</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
           )}
-
           {step === 4 && (
             <div className="mx-auto max-w-xl space-y-3 text-sm">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="font-extrabold text-slate-900">{title || "Untitled"}</p>
-                <dl className="mt-3 space-y-2 text-slate-600">
-                  <div className="flex justify-between gap-4"><dt>Course</dt><dd className="font-semibold text-slate-900">{teacher.courses.find((c) => c.id === courseId)?.code ?? "—"}</dd></div>
-                  <div className="flex justify-between gap-4"><dt>Duration</dt><dd className="font-semibold text-slate-900">{durationMinutes} min</dd></div>
-                  <div className="flex justify-between gap-4"><dt>Students answer</dt><dd className="font-semibold text-primary">{questionsToAnswer} questions</dd></div>
-                </dl>
+                <p className="mt-2 text-xs text-slate-600">{questionsToAnswer} questions · {durationMinutes} min</p>
               </div>
               <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                <p className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-900"><ShieldCheck className="h-4 w-4 text-primary" />Exam security</p>
+                <p className="mb-2 flex items-center gap-2 text-sm font-bold"><ShieldCheck className="h-4 w-4 text-primary" />Exam security</p>
                 <ul className="space-y-1 text-xs text-slate-700">{securitySummaryLines(security).map((line) => (<li key={line}>• {line}</li>))}</ul>
               </div>
             </div>
           )}
-
           <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <Button variant="outline" onClick={() => setStep((s) => Math.max(1, s - 1))} disabled={step === 1}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Back
             </Button>
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" disabled={busy} onClick={() => void persist("draft")}>
-                {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}
-                Save draft
+                {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />} Save draft
               </Button>
               {step < 4 ? (
                 <Button className="font-semibold" onClick={() => { if (validateStep(step)) setStep((s) => s + 1); }}>
@@ -606,8 +575,7 @@ function Page() {
                 </Button>
               ) : (
                 <Button className="font-semibold" disabled={busy} onClick={() => void persist("pending_approval")}>
-                  {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
-                  Submit for approval
+                  {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />} Submit for approval
                 </Button>
               )}
             </div>
@@ -623,21 +591,13 @@ function Page() {
     <>
       <PageHeader
         title={lockedCourse ? `Exams · ${lockedCourse.code}` : "Examinations"}
-        description="Create exam → Select questions → security (camera/screen) → submit for officer"
+        description="Create exam → Select questions → security → submit for officer"
         actions={
-          <div className="flex flex-wrap gap-2">
-            {lockedCourse && (
-              <Button variant="outline" className="font-semibold" asChild>
-                <Link to="/teacher/courses">All courses</Link>
-              </Button>
-            )}
-            <Button className="font-semibold" onClick={openBuilder} disabled={!teacher.courses.length}>
-              <Plus className="mr-1.5 h-4 w-4" /> Create examination
-            </Button>
-          </div>
+          <Button className="font-semibold" onClick={openBuilder} disabled={!teacher.courses.length}>
+            <Plus className="mr-1.5 h-4 w-4" /> Create examination
+          </Button>
         }
       />
-
       {!teacher.courses.length ? (
         <EmptyState title="No courses assigned" description="School Admin must assign courses first." />
       ) : (
@@ -678,7 +638,7 @@ function Page() {
                       )}
                       {(e.status === "pending_approval" || e.status === "changes_requested") && (
                         <Button size="sm" variant="outline" className="font-semibold" onClick={() => void cancelSubmit(e.id)}>
-                          <Undo2 className="mr-1 h-3.5 w-3.5" /> Cancel submit
+                          <Undo2 className="mr-1 h-3.5 w-3.5" /> Cancel
                         </Button>
                       )}
                       {canDelete && (
