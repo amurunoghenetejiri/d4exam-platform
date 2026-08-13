@@ -35,6 +35,7 @@ import {
   securitySummaryLines,
   type ExamSettingsRow,
 } from "@/lib/exam-security";
+import { parseExamMeta } from "@/lib/exam-meta";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/officer/approvals")({
@@ -93,7 +94,8 @@ function Page() {
   const listQ = useQuery({
     queryKey: ["officer-approvals", schoolId],
     enabled: Boolean(schoolId),
-    refetchInterval: 15_000,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
       const { data, error } = await supabase
@@ -115,6 +117,7 @@ function Page() {
   const qCountsQ = useQuery({
     queryKey: ["officer-approval-qcounts", schoolId, exams.map((e) => e.course_id).join(",")],
     enabled: Boolean(schoolId && exams.length),
+    staleTime: 20_000,
     queryFn: async () => {
       if (!schoolId) return {} as Record<string, number>;
       const courseIds = [...new Set(exams.map((e) => e.course_id).filter(Boolean))] as string[];
@@ -123,6 +126,7 @@ function Page() {
         .from("questions")
         .select("course_id")
         .eq("school_id", schoolId)
+        .eq("status", "active")
         .in("course_id", courseIds);
       const map: Record<string, number> = {};
       for (const q of data ?? []) {
@@ -137,17 +141,29 @@ function Page() {
   const settingsQ = useQuery({
     queryKey: ["officer-exam-settings", schoolId, examIds.join(",")],
     enabled: Boolean(schoolId && examIds.length),
+    staleTime: 20_000,
     queryFn: async () => {
       try {
         const { data, error } = await supabase
           .from("exam_settings")
           .select(
-            "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility",
+            "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility, questions_to_answer",
           )
           .in("exam_id", examIds);
         if (error) {
-          console.warn("exam_settings not available:", error.message);
-          return {} as Record<string, ExamSettingsRow>;
+          const { data: d2, error: e2 } = await supabase
+            .from("exam_settings")
+            .select(
+              "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility",
+            )
+            .in("exam_id", examIds);
+          if (e2) {
+            console.warn("exam_settings not available:", e2.message);
+            return {} as Record<string, ExamSettingsRow>;
+          }
+          const map: Record<string, ExamSettingsRow> = {};
+          for (const row of (d2 ?? []) as ExamSettingsRow[]) map[row.exam_id] = row;
+          return map;
         }
         const map: Record<string, ExamSettingsRow> = {};
         for (const row of (data ?? []) as ExamSettingsRow[]) {
@@ -160,6 +176,16 @@ function Page() {
     },
   });
   const settingsMap = settingsQ.data ?? {};
+
+  function questionsToAnswerFor(item: ExamRow): number | null {
+    const fromSettings = settingsMap[item.id]?.questions_to_answer;
+    if (typeof fromSettings === "number" && fromSettings > 0) return fromSettings;
+    const meta = parseExamMeta(item.description);
+    if (meta.questionsToAnswer && meta.questionsToAnswer > 0) return meta.questionsToAnswer;
+    const sec = parseSecurityFromDescription(item.description);
+    if (sec?.questionsToAnswer && sec.questionsToAnswer > 0) return sec.questionsToAnswer;
+    return null;
+  }
 
   const activeQueue = useMemo(
     () => exams.filter((q) => ["pending_approval", "changes_requested"].includes(q.status)),
@@ -197,9 +223,7 @@ function Page() {
     setSelected(item);
     setAction(a);
     setComment("");
-    const start = item.scheduled_start
-      ? toLocalInput(new Date(item.scheduled_start))
-      : "";
+    const start = item.scheduled_start ? toLocalInput(new Date(item.scheduled_start)) : "";
     setScheduleStart(start);
     const end =
       item.scheduled_end
@@ -338,7 +362,7 @@ function Page() {
     <>
       <PageHeader
         title="Examination Approvals"
-        description={`${user?.fullName ?? "Officer"} · Review schedule, questions and security before approving`}
+        description={`${user?.fullName ?? "Officer"} · Review schedule, questions to answer, and security before approving`}
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-3">
@@ -362,7 +386,8 @@ function Page() {
           ) : (
             <ul className="space-y-4">
               {activeQueue.map((item) => {
-                const qn = item.course_id ? qCounts[item.course_id] ?? 0 : 0;
+                const bank = item.course_id ? qCounts[item.course_id] ?? 0 : 0;
+                const toAnswer = questionsToAnswerFor(item);
                 const { security, source } = resolveSecurity(item);
                 const open = expandedId === item.id;
                 return (
@@ -383,18 +408,11 @@ function Page() {
                           <Clock className="h-3.5 w-3.5" />
                           {item.duration_minutes} min
                         </span>
-                        <span className="inline-flex items-center gap-1">
-                          <CalendarDays className="h-3.5 w-3.5" />
-                          {item.scheduled_start
-                            ? new Date(item.scheduled_start).toLocaleString()
-                            : "Not scheduled"}
-                          {item.scheduled_end
-                            ? ` → ${new Date(item.scheduled_end).toLocaleString()}`
-                            : ""}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1 font-semibold text-primary">
                           <FileText className="h-3.5 w-3.5" />
-                          {qn} question(s)
+                          {toAnswer != null
+                            ? `Students answer ${toAnswer} of ${bank} bank questions`
+                            : `${bank} question(s) in bank`}
                         </span>
                         <span className="inline-flex items-center gap-1 text-primary">
                           <ShieldCheck className="h-3.5 w-3.5" />
@@ -431,19 +449,13 @@ function Page() {
                                 <strong>Duration:</strong> {item.duration_minutes} minutes
                               </li>
                               <li>
-                                <strong>Start:</strong>{" "}
-                                {item.scheduled_start
-                                  ? new Date(item.scheduled_start).toLocaleString()
-                                  : "Not set"}
+                                <strong>Questions in bank:</strong> {bank}
                               </li>
-                              <li>
-                                <strong>End:</strong>{" "}
-                                {item.scheduled_end
-                                  ? new Date(item.scheduled_end).toLocaleString()
-                                  : "Not set"}
-                              </li>
-                              <li>
-                                <strong>Questions in bank:</strong> {qn}
+                              <li className="font-semibold text-primary">
+                                <strong>Students must answer:</strong>{" "}
+                                {toAnswer != null
+                                  ? `${toAnswer} (random subset per student when randomise is on)`
+                                  : `All ${bank} in the bank`}
                               </li>
                             </ul>
                           </div>
@@ -525,6 +537,9 @@ function Page() {
             </DialogTitle>
             <DialogDescription>
               {selected?.title} · {selected?.courses?.code} · {selected?.duration_minutes} min
+              {selected && questionsToAnswerFor(selected) != null
+                ? ` · Students answer ${questionsToAnswerFor(selected)}`
+                : ""}
             </DialogDescription>
           </DialogHeader>
 
