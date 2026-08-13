@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Flag, ChevronLeft, ChevronRight, Loader2, Camera, Mic } from "lucide-react";
+import { Flag, ChevronLeft, ChevronRight, Loader2, Camera, Mic, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
@@ -61,7 +61,6 @@ function decodeOptions(explanation: string | null): string[] {
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
-/** Resolve stored correct_answer (letter or text) to the actual option text using original order. */
 function resolveCorrectOptionText(
   correctAnswer: string | null,
   originalOptions: string[],
@@ -72,10 +71,7 @@ function resolveCorrectOptionText(
     const letterIdx = raw.toUpperCase().charCodeAt(0) - 65;
     return originalOptions[letterIdx] ?? null;
   }
-  // Already full text, or True/False
-  const byText = originalOptions.find(
-    (o) => o.trim().toLowerCase() === raw.toLowerCase(),
-  );
+  const byText = originalOptions.find((o) => o.trim().toLowerCase() === raw.toLowerCase());
   if (byText) return byText;
   return raw;
 }
@@ -86,6 +82,10 @@ function CbtExamPage() {
   const { data: student } = useStudentContext();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const lastFaceToast = useRef(0);
+  const pipPos = useRef({ x: 0, y: 0 });
+  const dragState = useRef<{ ox: number; oy: number; px: number; py: number } | null>(null);
+  const [pip, setPip] = useState({ x: 16, y: 16 }); // from bottom-right origin via CSS right/bottom
 
   const examQ = useQuery({
     queryKey: ["cbt-exam", id],
@@ -128,16 +128,40 @@ function CbtExamPage() {
     },
   });
 
+  /** Prefer questions the teacher put on this exam paper; fall back to full course bank. */
   const questionsQ = useQuery({
-    queryKey: ["cbt-questions", examQ.data?.course_id, examQ.data?.school_id],
-    enabled: Boolean(examQ.data?.course_id && examQ.data?.school_id),
+    queryKey: ["cbt-questions", id, examQ.data?.course_id, examQ.data?.school_id],
+    enabled: Boolean(examQ.data?.id && examQ.data?.school_id),
     queryFn: async () => {
       const exam = examQ.data!;
+
+      const { data: links } = await supabase
+        .from("exam_questions")
+        .select("question_id, question_order, marks")
+        .eq("exam_id", exam.id)
+        .order("question_order", { ascending: true });
+
+      const linkIds = (links ?? []).map((l) => (l as { question_id: string }).question_id);
+
+      if (linkIds.length > 0) {
+        const { data, error } = await supabase
+          .from("questions")
+          .select("id, question_text, question_type, marks, correct_answer, explanation")
+          .in("id", linkIds)
+          .eq("status", "active");
+        if (error) throw error;
+        const byId = new Map((data ?? []).map((q) => [q.id as string, q as QRow]));
+        // Keep teacher paper order
+        return linkIds.map((qid) => byId.get(qid)).filter(Boolean) as QRow[];
+      }
+
+      // Fallback: whole course bank (legacy exams without a paper)
+      if (!exam.course_id) return [] as QRow[];
       const { data, error } = await supabase
         .from("questions")
         .select("id, question_text, question_type, marks, correct_answer, explanation")
         .eq("school_id", exam.school_id)
-        .eq("course_id", exam.course_id!)
+        .eq("course_id", exam.course_id)
         .eq("status", "active")
         .order("created_at", { ascending: true })
         .limit(200);
@@ -170,11 +194,7 @@ function CbtExamPage() {
         opts = ["Option A", "Option B", "Option C", "Option D"];
       }
       const correctOptionText = resolveCorrectOptionText(q.correct_answer, opts);
-      return {
-        ...q,
-        options: opts,
-        correctOptionText,
-      };
+      return { ...q, options: opts, correctOptionText };
     });
     const limited = pickExamQuestions(bank, {
       questionsToAnswer,
@@ -185,7 +205,6 @@ function CbtExamPage() {
     if (security.randomizeOptions) {
       return limited.map((q) => ({
         ...q,
-        // Shuffle display order only — correctOptionText stays the real answer text
         options: seededShuffle(q.options, `${id}:${student?.studentId ?? "anon"}:${q.id}:opts`),
       }));
     }
@@ -269,7 +288,6 @@ function CbtExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, security.fullscreen, security.tabMonitoring, security.blockCopyPaste]);
 
-  // Attach live stream to PIP video + optional FaceDetector
   useEffect(() => {
     if (!started || !camReady || !streamRef.current) return;
     const video = videoRef.current;
@@ -282,12 +300,26 @@ function CbtExamPage() {
     let detector: { detect: (v: HTMLVideoElement) => Promise<{ boundingBox?: unknown }[]> } | null =
       null;
     try {
-      // Chrome Face Detection API (optional — deters cheating when available)
       const FD = (window as unknown as { FaceDetector?: new (o?: object) => typeof detector }).FaceDetector;
       if (FD) detector = new FD({ fastMode: true, maxDetectedFaces: 5 }) as typeof detector;
     } catch {
       detector = null;
     }
+
+    const notifyFace = (kind: "none" | "multi") => {
+      const now = Date.now();
+      if (now - lastFaceToast.current < 8000) return;
+      lastFaceToast.current = now;
+      if (kind === "none") {
+        toast.warning("We can't see your face — look at the camera and stay in frame", {
+          duration: 5000,
+        });
+      } else {
+        toast.warning("More than one face detected — only you should be visible", {
+          duration: 5000,
+        });
+      }
+    };
 
     const tick = async () => {
       if (cancelled || !video || video.readyState < 2) return;
@@ -300,6 +332,7 @@ function CbtExamPage() {
         const n = faces?.length ?? 0;
         if (n === 0) {
           setFaceStatus("none");
+          notifyFace("none");
           if (examQ.data && student) {
             void logSecurityEvent({
               schoolId: examQ.data.school_id,
@@ -313,7 +346,7 @@ function CbtExamPage() {
           }
         } else if (n >= 2) {
           setFaceStatus("multi");
-          toast.warning("More than one face detected — stay alone in frame");
+          notifyFace("multi");
           if (examQ.data && student) {
             void logSecurityEvent({
               schoolId: examQ.data.school_id,
@@ -334,7 +367,7 @@ function CbtExamPage() {
       }
     };
 
-    const interval = window.setInterval(() => void tick(), 4000);
+    const interval = window.setInterval(() => void tick(), 3500);
     void tick();
     return () => {
       cancelled = true;
@@ -353,6 +386,28 @@ function CbtExamPage() {
       }
     };
   }, []);
+
+  function onPipPointerDown(e: React.PointerEvent) {
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    dragState.current = {
+      ox: e.clientX,
+      oy: e.clientY,
+      px: pip.x,
+      py: pip.y,
+    };
+  }
+  function onPipPointerMove(e: React.PointerEvent) {
+    if (!dragState.current) return;
+    const dx = dragState.current.ox - e.clientX; // right-origin
+    const dy = dragState.current.oy - e.clientY; // bottom-origin
+    const nx = Math.max(8, Math.min(window.innerWidth - 160, dragState.current.px + dx));
+    const ny = Math.max(8, Math.min(window.innerHeight - 160, dragState.current.py + dy));
+    setPip({ x: nx, y: ny });
+  }
+  function onPipPointerUp() {
+    dragState.current = null;
+  }
 
   async function finishAttempt(auto = false) {
     if (!examQ.data || !student) {
@@ -425,7 +480,6 @@ function CbtExamPage() {
           return;
         }
       }
-      // Always try camera when required OR when teacher enabled camera — show live PIP
       const needCam = security.requireCamera;
       const needMic = security.requireMicrophone;
       if (needCam || needMic) {
@@ -441,7 +495,7 @@ function CbtExamPage() {
           setCamReady(Boolean(needCam && stream.getVideoTracks().length > 0));
           toast.success(
             needCam
-              ? "Camera on — your face stays visible during the exam"
+              ? "Camera on — drag the video if it covers questions"
               : "Microphone access granted",
           );
         } catch {
@@ -546,16 +600,18 @@ function CbtExamPage() {
             <li className="flex items-center gap-2">
               <Camera className="h-3.5 w-3.5" /> Camera:{" "}
               {security.requireCamera
-                ? "Required — live preview stays on screen during the exam"
+                ? "Required — live preview (draggable) during the exam"
                 : "Not required"}
             </li>
             <li className="flex items-center gap-2">
               <Mic className="h-3.5 w-3.5" /> Microphone:{" "}
-              {security.requireMicrophone ? "Required — browser will ask permission" : "Not required"}
+              {security.requireMicrophone ? "Required" : "Not required"}
             </li>
           </ul>
           {TOTAL === 0 ? (
-            <p className="mt-4 text-sm text-amber-700">No questions available. Contact your teacher.</p>
+            <p className="mt-4 text-sm text-amber-700">
+              No questions on this exam paper yet. Contact your teacher.
+            </p>
           ) : (
             <Button
               className="mt-6 w-full font-semibold"
@@ -640,7 +696,7 @@ function CbtExamPage() {
         </div>
       </header>
 
-      <div className="mx-auto grid w-full max-w-[1200px] flex-1 gap-4 p-3 sm:p-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="mx-auto grid w-full max-w-[1200px] flex-1 gap-4 p-3 pb-28 sm:p-6 lg:grid-cols-[220px_minmax(0,1fr)]">
         <aside className="order-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:order-1">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Questions</p>
           <div className="mt-3 grid grid-cols-5 gap-2">
@@ -752,9 +808,20 @@ function CbtExamPage() {
         </section>
       </div>
 
-      {/* Live camera PIP — fixed bottom-right so student always sees themselves while scrolling the paper */}
+      {/* Draggable live camera PIP — always visible, never blocks by default if moved */}
       {camReady && (
-        <div className="pointer-events-none fixed bottom-4 right-4 z-50 w-[140px] overflow-hidden rounded-xl border-2 border-primary bg-black shadow-2xl sm:bottom-6 sm:right-6 sm:w-[180px]">
+        <div
+          className="fixed z-50 w-[132px] touch-none overflow-hidden rounded-xl border-2 border-primary bg-black shadow-2xl sm:w-[168px]"
+          style={{ right: pip.x, bottom: pip.y }}
+          onPointerDown={onPipPointerDown}
+          onPointerMove={onPipPointerMove}
+          onPointerUp={onPipPointerUp}
+          onPointerCancel={onPipPointerUp}
+        >
+          <div className="flex cursor-grab items-center gap-1 bg-primary/90 px-2 py-0.5 active:cursor-grabbing">
+            <GripVertical className="h-3 w-3 text-white" />
+            <span className="text-[9px] font-bold uppercase tracking-wide text-white">Drag me</span>
+          </div>
           <video
             ref={videoRef}
             className="aspect-[4/3] w-full object-cover"
@@ -774,7 +841,7 @@ function CbtExamPage() {
             {faceStatus === "multi"
               ? "Multiple faces"
               : faceStatus === "none"
-                ? "No face detected"
+                ? "Face not seen"
                 : faceStatus === "ok"
                   ? "Monitoring · 1 face"
                   : "Live camera"}
