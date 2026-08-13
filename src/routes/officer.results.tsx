@@ -48,7 +48,6 @@ function Page() {
     },
   });
 
-  /** Attempts per exam — used to gate completion */
   const attemptsQ = useQuery({
     queryKey: ["officer-exam-attempts", schoolId, examsQ.data?.map((e) => e.id).join(",")],
     enabled: Boolean(schoolId && (examsQ.data?.length ?? 0) > 0),
@@ -58,16 +57,16 @@ function Page() {
       try {
         const { data, error } = await supabase
           .from("exam_attempts")
-          .select("examination_id, status")
-          .in("examination_id", ids);
+          .select("exam_id, status")
+          .in("exam_id", ids);
         if (error) throw error;
         const map: Record<string, { total: number; finished: number }> = {};
         for (const a of data ?? []) {
-          const eid = (a as { examination_id: string }).examination_id;
+          const eid = (a as { exam_id: string }).exam_id;
           if (!map[eid]) map[eid] = { total: 0, finished: 0 };
           map[eid].total += 1;
           const st = String((a as { status: string }).status || "").toLowerCase();
-          if (["submitted", "completed", "finished", "graded", "marked"].includes(st)) {
+          if (["submitted", "completed", "finished", "graded", "marked", "terminated"].includes(st)) {
             map[eid].finished += 1;
           }
         }
@@ -108,7 +107,6 @@ function Page() {
       return;
     }
     if (!stats || stats.total === 0) {
-      // No attempt rows yet — allow with confirmation
       if (
         !confirm(
           "No student attempts recorded yet. Mark completed only if you are sure all candidates have finished.",
@@ -141,6 +139,43 @@ function Page() {
     await examsQ.refetch();
   }
 
+  async function releaseResults(examId: string) {
+    if (!schoolId || !user) return;
+    if (
+      !confirm(
+        "Release all pending results for this examination to students and teachers? Flagged attempts stay under review until you clear them.",
+      )
+    ) {
+      return;
+    }
+    const { data, error } = await supabase
+      .from("results")
+      .update({
+        status: "published",
+        released_at: new Date().toISOString(),
+        released_by: user.userId,
+      } as never)
+      .eq("exam_id", examId)
+      .eq("school_id", schoolId)
+      .neq("security_review_status", "flagged")
+      .select("id");
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    await supabase.from("audit_logs").insert({
+      school_id: schoolId,
+      actor_user_id: user.userId,
+      actor_role: "examination_officer",
+      action: "results_released",
+      entity_type: "examination",
+      entity_id: examId,
+      description: `Released ${data?.length ?? 0} result(s) to students and teachers`,
+    } as never);
+    toast.success(`Released ${data?.length ?? 0} result(s)`);
+    await qc.invalidateQueries({ queryKey: ["officer-results-exams"] });
+  }
+
   const rows = examsQ.data ?? [];
   const attempts = attemptsQ.data ?? {};
   const qCounts = qCountQ.data ?? {};
@@ -149,7 +184,7 @@ function Page() {
     <>
       <PageHeader
         title="Results Release"
-        description="An exam can be marked completed only when all recorded student attempts are finished."
+        description="Mark exams completed when attempts finish. Release results so students and teachers can see official scores. Flagged attempts stay under review."
       />
 
       <SectionCard title="Examinations">
@@ -164,10 +199,6 @@ function Page() {
           <ul className="space-y-3">
             {rows.map((e) => {
               const st = attempts[e.id];
-              const canComplete =
-                e.status !== "completed" &&
-                e.status !== "closed" &&
-                (!st || st.total === 0 || st.finished >= st.total);
               const blocked =
                 st && st.total > 0 && st.finished < st.total && e.status !== "completed";
               const qn = e.course_id ? qCounts[e.course_id] ?? 0 : 0;
@@ -209,6 +240,13 @@ function Page() {
                         Mark completed
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      className="font-semibold"
+                      onClick={() => void releaseResults(e.id)}
+                    >
+                      Release results
+                    </Button>
                   </div>
                 </li>
               );
