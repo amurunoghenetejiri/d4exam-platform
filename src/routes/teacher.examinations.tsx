@@ -649,6 +649,40 @@ function Page() {
                 checked={security.requireMicrophone}
                 onChange={(v) => toggleSec("requireMicrophone", v)}
               />
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">When can students see results?</Label>
+                <p className="text-xs text-slate-500">
+                  Flagged or terminated attempts always stay under review until the Examination
+                  Officer releases them.
+                </p>
+                <Select
+                  value={security.resultVisibility}
+                  onValueChange={(v) =>
+                    toggleSec(
+                      "resultVisibility",
+                      v as ExamSecuritySettings["resultVisibility"],
+                    )
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="immediate">
+                      Immediately after the student submits
+                    </SelectItem>
+                    <SelectItem value="after_marking">
+                      After marking is finished
+                    </SelectItem>
+                    <SelectItem value="after_exam_closes">
+                      After the examination window closes
+                    </SelectItem>
+                    <SelectItem value="after_officer_release">
+                      Only after Examination Officer releases results
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
 
