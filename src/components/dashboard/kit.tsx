@@ -92,9 +92,7 @@ export function SectionCard({
         <div className="flex flex-col gap-2 border-b border-border px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-5">
           <div className="min-w-0">
             {title && <h2 className="text-sm font-semibold sm:text-base">{title}</h2>}
-            {description && (
-              <p className="text-xs text-muted-foreground">{description}</p>
-            )}
+            {description && <p className="text-xs text-muted-foreground">{description}</p>}
           </div>
           {action && <div className="shrink-0">{action}</div>}
         </div>
@@ -105,12 +103,14 @@ export function SectionCard({
 }
 
 const statusTones: Record<string, string> = {
-  active: "border-primary/30 bg-primary/12 text-primary",
   published: "border-primary/30 bg-primary/12 text-primary",
   approved: "border-primary/30 bg-primary/12 text-primary",
   completed: "border-primary/30 bg-primary/12 text-primary",
   marked: "border-primary/30 bg-primary/12 text-primary",
   success: "border-primary/30 bg-primary/12 text-primary",
+  pass: "border-emerald-300 bg-emerald-50 text-emerald-700",
+  passed: "border-emerald-300 bg-emerald-50 text-emerald-700",
+  ready: "border-emerald-300 bg-emerald-50 text-emerald-700",
   ongoing: "border-aqua/30 bg-aqua/12 text-aqua",
   live: "border-aqua/30 bg-aqua/12 text-aqua",
   scheduled: "border-info/30 bg-info/12 text-info",
@@ -129,14 +129,25 @@ const statusTones: Record<string, string> = {
   rejected: "border-destructive/30 bg-destructive/12 text-destructive",
   suspended: "border-destructive/30 bg-destructive/12 text-destructive",
   flagged: "border-destructive/30 bg-destructive/12 text-destructive",
+  fail: "border-destructive/30 bg-destructive/12 text-destructive",
+  failed: "border-destructive/30 bg-destructive/12 text-destructive",
   high: "border-destructive/30 bg-destructive/12 text-destructive",
   medium: "border-warning/30 bg-warning/12 text-warning",
   low: "border-info/30 bg-info/12 text-info",
 };
 
+/** Map generic "active" to a clearer label — never show bare Active badges. */
+function displayStatus(status: string): string {
+  const key = status.toLowerCase().trim();
+  if (key === "active") return "Available";
+  return status.replaceAll("_", " ");
+}
+
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
-  const key = status.toLowerCase();
-  const tone = statusTones[key] ?? statusTones["draft"];
+  const key = status.toLowerCase().trim();
+  const label = displayStatus(status);
+  const toneKey = key === "active" ? "ready" : key;
+  const tone = statusTones[toneKey] ?? statusTones["draft"];
   return (
     <span
       className={cn(
@@ -146,7 +157,7 @@ export function StatusBadge({ status, className }: { status: string; className?:
       )}
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
-      {status}
+      {label}
     </span>
   );
 }
