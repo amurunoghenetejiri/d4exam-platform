@@ -1,8 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { PageHeader, EmptyState } from "@/components/dashboard/kit";
+import { ChevronRight } from "lucide-react";
+import { PageHeader, EmptyState, StatusBadge } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/dashboard/kit";
 import { useStudentContext } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -33,6 +33,7 @@ type ResultRow = {
 };
 
 function Page() {
+  const navigate = useNavigate();
   const { data: student, isLoading } = useStudentContext();
 
   const resultsQ = useQuery({
@@ -62,6 +63,12 @@ function Page() {
 
   const rows = resultsQ.data ?? [];
 
+  function openResult(resultId: string, examId: string) {
+    const id = resultId || examId;
+    if (!id) return;
+    void navigate({ to: "/student/results/$id", params: { id } });
+  }
+
   return (
     <>
       <PageHeader
@@ -82,12 +89,13 @@ function Page() {
             const isPub = (r.status || "").toLowerCase() === "published";
             const code = r.examinations?.courses?.code ?? "—";
             const name = r.examinations?.courses?.name ?? r.examinations?.title ?? "Examination";
+            const targetId = r.id || r.exam_id;
             return (
               <li
                 key={r.id}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-extrabold text-slate-900">
                     {code} · {name}
                   </p>
@@ -104,13 +112,26 @@ function Page() {
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   <StatusBadge status={isPub ? "published" : "pending"} />
-                  <Button size="sm" className="font-semibold" asChild>
-                    <Link to="/student/results/$id" params={{ id: r.id }}>
-                      View Result
-                    </Link>
+                  {/* Native anchor + router navigate so the control is always clickable */}
+                  <Button
+                    size="sm"
+                    type="button"
+                    className="font-semibold"
+                    onClick={() => openResult(r.id, r.exam_id)}
+                  >
+                    View Result
+                    <ChevronRight className="ml-1 h-3.5 w-3.5" />
                   </Button>
+                  {/* Accessible fallback link for middle-click / open in new tab */}
+                  <Link
+                    to="/student/results/$id"
+                    params={{ id: targetId }}
+                    className="sr-only"
+                  >
+                    View Result
+                  </Link>
                 </div>
               </li>
             );
