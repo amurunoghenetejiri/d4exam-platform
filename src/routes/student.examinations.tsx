@@ -50,7 +50,8 @@ function Page() {
   const examsQ = useQuery({
     queryKey: ["student-exams", schoolId, student?.courseIds?.join(",")],
     enabled: Boolean(schoolId),
-    refetchInterval: 15_000,
+    staleTime: 15_000,
+    refetchInterval: 45_000,
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
       let q = supabase
@@ -76,7 +77,8 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["student-attempts", student?.studentId],
     enabled: Boolean(student?.studentId),
-    refetchInterval: 15_000,
+    staleTime: 15_000,
+    refetchInterval: 45_000,
     queryFn: async () => {
       if (!student?.studentId) return [] as AttemptRow[];
       const { data, error } = await supabase
@@ -132,11 +134,17 @@ function Page() {
     );
   }
 
+  const termLine = [student.sessionName, student.semesterName].filter(Boolean).join(" · ");
+
   return (
     <>
       <PageHeader
         title="My Examinations"
-        description="You only see exams after the Examination Officer has approved them. Once you submit, the exam is marked Completed and cannot be rewritten."
+        description={
+          termLine
+            ? `${termLine} · Only officer-approved exams appear here. After you submit, open View Result for that subject.`
+            : "You only see exams after the Examination Officer has approved them."
+        }
       />
 
       {examsQ.isLoading ? (
@@ -150,21 +158,38 @@ function Page() {
         <div className="space-y-6">
           {live.length > 0 && (
             <SectionCard title="Available now">
-              <ExamList items={live} canStart attemptByExam={attemptByExam} />
+              <ExamList
+                items={live}
+                canStart
+                attemptByExam={attemptByExam}
+                sessionName={student.sessionName}
+                semesterName={student.semesterName}
+              />
             </SectionCard>
           )}
           <SectionCard title="Upcoming">
             {upcoming.length === 0 ? (
               <p className="text-sm text-slate-500">No upcoming examinations.</p>
             ) : (
-              <ExamList items={upcoming} attemptByExam={attemptByExam} />
+              <ExamList
+                items={upcoming}
+                attemptByExam={attemptByExam}
+                sessionName={student.sessionName}
+                semesterName={student.semesterName}
+              />
             )}
           </SectionCard>
           <SectionCard title="Completed">
             {done.length === 0 ? (
               <p className="text-sm text-slate-500">No completed examinations yet.</p>
             ) : (
-              <ExamList items={done} attemptByExam={attemptByExam} completed />
+              <ExamList
+                items={done}
+                attemptByExam={attemptByExam}
+                completed
+                sessionName={student.sessionName}
+                semesterName={student.semesterName}
+              />
             )}
           </SectionCard>
         </div>
@@ -178,11 +203,15 @@ function ExamList({
   canStart,
   completed,
   attemptByExam,
+  sessionName,
+  semesterName,
 }: {
   items: ExamRow[];
   canStart?: boolean;
   completed?: boolean;
   attemptByExam: Map<string, AttemptRow>;
+  sessionName?: string | null;
+  semesterName?: string | null;
 }) {
   return (
     <ul className="space-y-3">
@@ -207,10 +236,11 @@ function ExamList({
                 {e.courses?.code ?? "—"} · {e.courses?.name ?? ""} · {e.duration_minutes} min
               </p>
               <p className="text-xs text-slate-400">
+                {[sessionName, semesterName].filter(Boolean).join(" · ")}
+                {sessionName || semesterName ? " · " : ""}
                 {e.scheduled_start
                   ? `Starts ${new Date(e.scheduled_start).toLocaleString()}`
                   : "Schedule TBC"}
-                {e.scheduled_end ? ` · Ends ${new Date(e.scheduled_end).toLocaleString()}` : ""}
                 {attempt?.submitted_at
                   ? ` · Submitted ${new Date(attempt.submitted_at).toLocaleString()}`
                   : ""}
@@ -227,7 +257,7 @@ function ExamList({
               )}
               {completed && studentFinished && (
                 <Button size="sm" variant="outline" className="font-semibold" asChild>
-                  <Link to="/student/results">View results</Link>
+                  <Link to="/student/results">View Result</Link>
                 </Button>
               )}
             </div>
