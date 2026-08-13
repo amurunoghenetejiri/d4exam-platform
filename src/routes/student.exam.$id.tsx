@@ -138,6 +138,8 @@ function CbtExamPage() {
   const [seconds, setSeconds] = useState<number | null>(null);
   const [tabSwitches, setTabSwitches] = useState(0);
   const [started, setStarted] = useState(false);
+const [done, setDone] = useState(false);
+const [doneTerminated, setDoneTerminated] = useState(false);
 
   // Init timer from duration
   useEffect(() => {
@@ -214,29 +216,46 @@ function CbtExamPage() {
   }, [started, security.fullscreen, security.tabMonitoring, security.blockCopyPaste]);
 
   async function finishAttempt(auto = false) {
-    if (!examQ.data || !student) {
-      navigate({ to: "/student/examinations" });
-      return;
-    }
-    try {
-      await supabase.from("exam_attempts").upsert(
-        {
-          school_id: examQ.data.school_id,
-          exam_id: examQ.data.id,
-          student_id: student.studentId,
-          status: auto && security.thresholdAction === "terminate" ? "terminated" : "submitted",
-          submitted_at: new Date().toISOString(),
-          tab_switch_count: tabSwitches,
-          answers: answers as never,
-          metadata: { auto, answered: Object.keys(answers).length, total: TOTAL } as never,
-        } as never,
-        { onConflict: "exam_id,student_id" },
-      );
-    } catch {
-      /* still leave CBT */
-    }
-    toast.success(auto ? "Examination closed" : "Examination submitted");
+  if (!examQ.data || !student) {
     navigate({ to: "/student/examinations" });
+    return;
+  }
+  const status =
+    auto && security.thresholdAction === "terminate" ? "terminated" : "submitted";
+  try {
+    await supabase.from("exam_attempts").upsert(
+      {
+        school_id: examQ.data.school_id,
+        exam_id: examQ.data.id,
+        student_id: student.studentId,
+        status,
+        submitted_at: new Date().toISOString(),
+        tab_switch_count: tabSwitches,
+        answers: answers as never,
+        metadata: { auto, answered: Object.keys(answers).length, total: TOTAL } as never,
+      } as never,
+      { onConflict: "exam_id,student_id" },
+    );
+    const visibility = (settingsQ.data?.result_visibility || "after_officer_release").toLowerCase();
+    const resultStatus = visibility === "immediate" ? "published" : "pending";
+    await supabase.from("results").upsert(
+      {
+        school_id: examQ.data.school_id,
+        exam_id: examQ.data.id,
+        student_id: student.studentId,
+        status: resultStatus,
+        security_review_status: status === "terminated" ? "flagged" : "pending",
+        released_at: resultStatus === "published" ? new Date().toISOString() : null,
+      } as never,
+      { onConflict: "exam_id,student_id" },
+    );
+  } catch {
+    /* still leave CBT */
+  }
+  if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+  toast.success(auto ? "Examination closed" : "Examination submitted successfully");
+  setDoneTerminated(status === "terminated");
+  setDone(true);
   }
 
   if (examQ.isLoading || questionsQ.isLoading) {
@@ -285,6 +304,38 @@ function CbtExamPage() {
     );
   }
 
+if (done) {
+  return (
+    <div className="grid min-h-dvh place-items-center bg-slate-50 p-4 sm:p-6">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+        <Logo size="sm" className="mx-auto" />
+        <h1 className="mt-4 text-2xl font-extrabold text-slate-900">Examination completed</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          {doneTerminated
+            ? "Your attempt was closed by the security system. It has been recorded for review."
+            : "Your answers were submitted successfully. You cannot rewrite this examination."}
+        </p>
+        <div className="mt-5 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-bold">Result status</p>
+          <p className="mt-1">
+            {(settingsQ.data?.result_visibility || "after_officer_release") === "immediate"
+              ? "Your score is available now in My Results."
+              : "Your result is pending approval. It will appear in My Results after the Examination Officer releases it."}
+          </p>
+        </div>
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+          <Button className="font-semibold" asChild>
+            <Link to="/student/results">Go to My Results</Link>
+          </Button>
+          <Button variant="outline" className="font-semibold" asChild>
+            <Link to="/student/examinations">Back to examinations</Link>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+  
   if (!started) {
     return (
       <div className="grid min-h-dvh place-items-center bg-slate-50 p-6">
@@ -310,10 +361,24 @@ function CbtExamPage() {
           ) : (
             <Button
               className="mt-6 w-full font-semibold"
-              onClick={() => {
-                setStarted(true);
-                setIndex(0);
-              }}
+              onClick={async () => {
+  if (student) {
+    const { data: existing } = await supabase
+      .from("exam_attempts")
+      .select("id, status")
+      .eq("exam_id", exam.id)
+      .eq("student_id", student.studentId)
+      .maybeSingle();
+    if (existing && ["submitted", "terminated", "flagged"].includes(String(existing.status))) {
+      toast.error("You have already completed this examination.");
+      setDoneTerminated(String(existing.status) === "terminated");
+      setDone(true);
+      return;
+    }
+  }
+  setStarted(true);
+  setIndex(0);
+}}
             >
               Begin examination
             </Button>
