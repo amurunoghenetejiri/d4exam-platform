@@ -1,4 +1,3 @@
-import logo from "@/assets/d4exam-logo.png.asset.json";
 import { cn } from "@/lib/utils";
 
 /**
@@ -32,7 +31,7 @@ export function Watermark({
       )}
     >
       <img
-        src={logo.url}
+        src="/logo.png"
         alt=""
         className={cn("w-auto select-none object-contain", sizeClass)}
         style={{
