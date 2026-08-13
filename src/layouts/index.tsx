@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useRouterState } from "@tanstack/react-router";
 import { AppShell } from "@/components/layout/AppShell";
 import {
   adminNav,
@@ -27,7 +28,15 @@ function RoleShell({ config, children }: { config: RoleConfig; children: ReactNo
   );
 }
 
+/** CBT exam must be distraction-free: no sidebar, top bar, or bottom nav. */
 export function StudentLayout({ children }: { children: ReactNode }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isExamMode = pathname.startsWith("/student/exam/");
+
+  if (isExamMode) {
+    return <>{children}</>;
+  }
+
   return <RoleShell config={studentNav}>{children}</RoleShell>;
 }
 
