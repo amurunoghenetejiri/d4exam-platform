@@ -10,6 +10,7 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   requireCamera: false,
   requireMicrophone: false,
   thresholdAction: "flag",
+  resultVisibility: "after_officer_release",
 };
 
 export const SECURITY_MARKER = "[[D4_SECURITY_JSON]]";
@@ -47,6 +48,7 @@ export function toExamSettingsRow(examId: string, s: ExamSecuritySettings, total
     require_camera: s.requireCamera,
     require_microphone: s.requireMicrophone,
     threshold_action: s.thresholdAction,
+    result_visibility: s.resultVisibility,
     total_marks: totalMarks,
   };
 }
@@ -79,6 +81,9 @@ export function fromExamSettingsRow(row: ExamSettingsRow | null | undefined): Ex
     requireCamera: row.require_camera,
     requireMicrophone: row.require_microphone,
     thresholdAction: (row.threshold_action as ExamSecuritySettings["thresholdAction"]) || "flag",
+    resultVisibility:
+      (row.result_visibility as ExamSecuritySettings["resultVisibility"]) ||
+      "after_officer_release",
   };
 }
 
@@ -90,10 +95,8 @@ export function stripInternalMarkers(description: string | null | undefined): st
   if (secIdx >= 0) s = s.slice(0, secIdx);
   const metaIdx = s.indexOf(META_MARKER);
   if (metaIdx >= 0) {
-    // meta may appear mid-text; drop from marker to end of that line / blob
     const before = s.slice(0, metaIdx);
     const after = s.slice(metaIdx + META_MARKER.length);
-    // drop JSON on same segment until newline or next marker
     const rest = after.replace(/^\s*\{[^\n]*\}/, "");
     s = before + rest;
   }
@@ -108,13 +111,11 @@ export function stripInternalMarkers(description: string | null | undefined): st
   return s;
 }
 
-/** Embed security JSON into description so officer can still read it if exam_settings table is missing. */
 export function embedSecurityInDescription(
   description: string | null | undefined,
   settings: ExamSecuritySettings,
 ): string {
   const clean = stripInternalMarkers(description);
-  // re-attach meta if caller already put it back — only security here
   const blob = `${SECURITY_MARKER}${JSON.stringify(settings)}`;
   return clean ? `${clean}\n${blob}` : blob;
 }
@@ -127,7 +128,6 @@ export function parseSecurityFromDescription(
   if (idx < 0) return null;
   try {
     let raw = description.slice(idx + SECURITY_MARKER.length).trim();
-    // only parse the first JSON object
     const start = raw.indexOf("{");
     if (start < 0) return null;
     let depth = 0;
@@ -165,5 +165,6 @@ export function securitySummaryLines(s: ExamSecuritySettings): string[] {
     `Randomise options: ${s.randomizeOptions ? "On" : "Off"}`,
     `Camera: ${s.requireCamera ? "Required" : "Not required"}`,
     `Microphone: ${s.requireMicrophone ? "Required" : "Not required"}`,
+    `Result release: ${s.resultVisibility}`,
   ];
 }
