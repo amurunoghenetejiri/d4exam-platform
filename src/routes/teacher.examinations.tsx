@@ -42,7 +42,7 @@ import {
 import { embedExamMeta, parseExamMeta } from "@/lib/exam-meta";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import type { ExamSecuritySettings } from "@/types";
+import type { ExamSecuritySettings, FaceViolationAction } from "@/types";
 
 export const Route = createFileRoute("/teacher/examinations")({
   validateSearch: (search: Record<string, unknown>) =>
@@ -490,48 +490,24 @@ function Page() {
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">Title</Label>
-                <Input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. First Semester Examination"
-                />
+                <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. First Semester Examination" />
               </div>
               <div className="space-y-2">
                 <Label className="font-semibold">Instructions</Label>
-                <Textarea
-                  rows={3}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Instructions for candidates…"
-                />
+                <Textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Instructions for candidates…" />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="font-semibold">Duration (minutes)</Label>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    value={durationText}
-                    onChange={(e) => onDurationTextChange(e.target.value)}
-                    placeholder="e.g. 20"
-                  />
+                  <Input type="text" inputMode="numeric" value={durationText} onChange={(e) => onDurationTextChange(e.target.value)} placeholder="e.g. 20" />
                 </div>
                 <div className="space-y-2">
                   <Label className="font-semibold">Students must answer</Label>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    value={questionsText}
-                    onChange={(e) => onQuestionsTextChange(e.target.value)}
-                    placeholder="e.g. 10"
-                  />
+                  <Input type="text" inputMode="numeric" value={questionsText} onChange={(e) => onQuestionsTextChange(e.target.value)} placeholder="e.g. 10" />
                 </div>
               </div>
               <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-700">
-                Course bank has <strong>{bankCount}</strong> question(s). After you save the exam,
-                open <strong>Select questions</strong> and tick the ones for this paper (e.g. 20).
-                Students then answer <strong>{questionsText || "?"}</strong> of those (random per
-                student if randomise is on).
+                Course bank has <strong>{bankCount}</strong> question(s). After save, open <strong>Select questions</strong> for the paper.
               </p>
             </div>
           )}
@@ -560,8 +536,29 @@ function Page() {
               <SecToggle label="Block copy / paste" hint="Disable clipboard" checked={security.blockCopyPaste} onChange={(v) => toggleSec("blockCopyPaste", v)} />
               <SecToggle label="Randomise questions" hint="Each student gets a random subset of the paper" checked={security.randomizeQuestions} onChange={(v) => toggleSec("randomizeQuestions", v)} />
               <SecToggle label="Randomise options" hint="MCQ choices shuffled" checked={security.randomizeOptions} onChange={(v) => toggleSec("randomizeOptions", v)} />
-              <SecToggle label="Require camera" hint="Live face preview during CBT" checked={security.requireCamera} onChange={(v) => toggleSec("requireCamera", v)} />
-              <SecToggle label="Require microphone" hint="Optional audio" checked={security.requireMicrophone} onChange={(v) => toggleSec("requireMicrophone", v)} />
+
+              <p className="pt-2 text-xs font-bold uppercase tracking-wide text-slate-500">Proctoring</p>
+              <SecToggle label="Camera monitoring" hint="Require camera before and during the exam" checked={security.requireCamera} onChange={(v) => toggleSec("requireCamera", v)} />
+              <SecToggle label="Face detection" hint="Warn when 0 or 2+ faces are visible (needs camera)" checked={security.faceDetection} onChange={(v) => toggleSec("faceDetection", v)} />
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">Maximum face warnings</Label>
+                <Input type="number" min={1} max={50} value={security.maxFaceWarnings ?? 5} disabled={!security.faceDetection} onChange={(e) => toggleSec("maxFaceWarnings", Number(e.target.value) || 5)} />
+              </div>
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">Action after repeated face violations</Label>
+                <Select value={security.faceViolationAction || "flag"} onValueChange={(v) => toggleSec("faceViolationAction", v as FaceViolationAction)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="warn">Warning only</SelectItem>
+                    <SelectItem value="flag">Flag for review</SelectItem>
+                    <SelectItem value="pause">Pause exam</SelectItem>
+                    <SelectItem value="terminate">Terminate exam</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <SecToggle label="Screen sharing required" hint="Student must share screen via browser before starting" checked={security.requireScreenShare} onChange={(v) => toggleSec("requireScreenShare", v)} />
+              <SecToggle label="Require microphone" hint="Optional audio permission" checked={security.requireMicrophone} onChange={(v) => toggleSec("requireMicrophone", v)} />
+
               <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
                 <Label className="font-semibold">When can students see results?</Label>
                 <Select value={security.resultVisibility} onValueChange={(v) => toggleSec("resultVisibility", v as ExamSecuritySettings["resultVisibility"])}>
@@ -591,9 +588,6 @@ function Page() {
                 <p className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-900"><ShieldCheck className="h-4 w-4 text-primary" />Exam security</p>
                 <ul className="space-y-1 text-xs text-slate-700">{securitySummaryLines(security).map((line) => (<li key={line}>• {line}</li>))}</ul>
               </div>
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                After save: use <strong>Select questions</strong> on the exam row to choose which bank items are on the paper. Officer will see paper size and students-must-answer count.
-              </p>
             </div>
           )}
 
@@ -629,7 +623,7 @@ function Page() {
     <>
       <PageHeader
         title={lockedCourse ? `Exams · ${lockedCourse.code}` : "Examinations"}
-        description="Create exam → Select questions for the paper → set how many students answer → submit for officer"
+        description="Create exam → Select questions → security (camera/screen) → submit for officer"
         actions={
           <div className="flex flex-wrap gap-2">
             {lockedCourse && (
@@ -671,8 +665,7 @@ function Page() {
                       <StatusBadge status={String(e.status).replaceAll("_", " ")} />
                       <Button size="sm" variant="outline" className="font-semibold" asChild>
                         <Link to="/teacher/exam-paper/$id" params={{ id: e.id }}>
-                          <ListChecks className="mr-1 h-3.5 w-3.5" />
-                          Select questions
+                          <ListChecks className="mr-1 h-3.5 w-3.5" /> Select questions
                         </Link>
                       </Button>
                       {canEdit && (
@@ -681,9 +674,7 @@ function Page() {
                         </Button>
                       )}
                       {e.status === "draft" && (
-                        <Button size="sm" className="font-semibold" onClick={() => void submitExisting(e.id)}>
-                          Submit
-                        </Button>
+                        <Button size="sm" className="font-semibold" onClick={() => void submitExisting(e.id)}>Submit</Button>
                       )}
                       {(e.status === "pending_approval" || e.status === "changes_requested") && (
                         <Button size="sm" variant="outline" className="font-semibold" onClick={() => void cancelSubmit(e.id)}>
