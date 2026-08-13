@@ -80,61 +80,6 @@ export interface Exam {
   resultVisibility?: ResultVisibility;
 }
 
-export interface ResultRecord {
-  id: string;
-  course: string;
-  title: string;
-  score: number;
-  grade: string;
-  status: "published" | "pending" | "awaiting_marking" | "awaiting_release";
-  session: string;
-}
-
-export interface Question {
-  id: string;
-  text: string;
-  options: string[];
-  answer?: number | string;
-  type: QuestionType;
-  marks: number;
-  topic: string;
-  difficulty: "Easy" | "Medium" | "Hard";
-  courseId?: string;
-  courseCode?: string;
-  creatorId?: string;
-  status?: "active" | "draft" | "archived";
-}
-
-export interface NotificationItem {
-  id: string;
-  title: string;
-  body: string;
-  time: string;
-  type: "info" | "success" | "warning" | "error";
-  read: boolean;
-}
-
-export interface AcademicScope {
-  schoolId: string;
-  facultyId?: string | null;
-  departmentId?: string | null;
-  levelId?: string | null;
-  courseId?: string | null;
-  sessionId?: string | null;
-  semesterId?: string | null;
-}
-
-export interface ExamEligibilityContext {
-  studentId: string;
-  schoolId: string;
-  facultyId?: string | null;
-  departmentId?: string | null;
-  levelId?: string | null;
-  enrolledCourseIds: string[];
-  sessionId?: string | null;
-  semesterId?: string | null;
-}
-
 export interface ExamSecuritySettings {
   fullscreen: boolean;
   tabMonitoring: boolean;
@@ -144,8 +89,7 @@ export interface ExamSecuritySettings {
   randomizeOptions: boolean;
   requireCamera: boolean;
   requireMicrophone: boolean;
-  /** Action when threshold reached: warn | flag | terminate */
-  thresholdAction: "warn" | "flag" | "terminate";
-  /** When students can see official scores */
+  thresholdAction: "flag" | "terminate" | "warn";
   resultVisibility: ResultVisibility;
+  questionsToAnswer?: number | null;
 }
