@@ -1,4 +1,3 @@
-import { LOGO_SRC } from "@/components/brand/brand-assets";
 import { cn } from "@/lib/utils";
 
 /**
@@ -11,7 +10,6 @@ export function Watermark({
   size = "lg",
 }: {
   className?: string;
-  /** 0–1 opacity. Default is visible but soft on light backgrounds. */
   opacity?: number;
   size?: "md" | "lg" | "xl";
 }) {
@@ -31,7 +29,7 @@ export function Watermark({
       )}
     >
       <img
-        src={LOGO_SRC}
+        src="/logo.png"
         alt=""
         className={cn("w-auto select-none object-contain", sizeClass)}
         style={{
