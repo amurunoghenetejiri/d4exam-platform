@@ -7,13 +7,21 @@ export type SecurityEventType =
   | "CUT_ATTEMPT"
   | "PASTE_ATTEMPT"
   | "CONTEXT_MENU"
+  | "FACE_NOT_DETECTED"
+  | "ONE_FACE_DETECTED"
+  | "MULTIPLE_FACES_DETECTED"
   | "NO_FACE"
   | "MULTIPLE_FACES"
   | "ONE_FACE"
+  | "CAMERA_UNAVAILABLE"
+  | "CAMERA_PERMISSION_REVOKED"
   | "CAMERA_PERMISSION_DENIED"
   | "CAMERA_PERMISSION_GRANTED"
   | "MIC_PERMISSION_DENIED"
   | "MIC_PERMISSION_GRANTED"
+  | "SCREEN_SHARE_STARTED"
+  | "SCREEN_SHARE_STOPPED"
+  | "SCREEN_SHARE_RESTORED"
   | "CONNECTION_LOST"
   | "CONNECTION_RESTORED"
   | "WARNING_SHOWN"
@@ -77,14 +85,12 @@ function normalizeAnswer(s: string): string {
 /**
  * Score objective answers.
  * Prefer `correctOptionText` (resolved before option shuffle) so letter answers
- * still match after randomize_options. Falls back to letter index only when
- * options were not shuffled / text is unavailable.
+ * still match after randomize_options.
  */
 export function scoreObjectiveAnswers(
   questions: {
     id: string;
     correct_answer: string | null;
-    /** Canonical correct option text (preferred when options may be shuffled) */
     correctOptionText?: string | null;
     marks: number;
     options: string[];
@@ -116,19 +122,15 @@ export function scoreObjectiveAnswers(
     let ok = false;
 
     if (textKey) {
-      // Primary path: match by option content (works after shuffle)
       ok = chosen === normalizeAnswer(textKey);
     } else if (/^[A-Da-d]$/.test(raw)) {
-      // Letter stored in DB — only valid if options kept original order
       const letterIdx = raw.toUpperCase().charCodeAt(0) - 65;
       ok = idx === letterIdx;
-      // Also accept if the chosen text equals that letter (rare)
       if (!ok) ok = chosen === raw.toLowerCase();
     } else if (raw) {
       ok =
         chosen === normalizeAnswer(raw) ||
         String(idx) === raw ||
-        // allow "A. answer" style storage
         chosen === normalizeAnswer(raw.replace(/^[A-Da-d][).:\-\s]+/, ""));
     }
 
