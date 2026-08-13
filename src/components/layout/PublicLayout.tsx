@@ -23,9 +23,9 @@ export function PublicLayout({ children }: { children: ReactNode }) {
       <Watermark opacity={0.1} size="xl" />
 
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-[1180px] items-center justify-between gap-4 px-4 sm:px-6">
+        <div className="mx-auto flex h-[4.5rem] w-full max-w-[1180px] items-center justify-between gap-4 px-4 sm:px-6">
           <Link to="/" aria-label="D4EXAM home" className="shrink-0">
-            <Logo size="md" />
+            <Logo size="lg" />
           </Link>
 
           <nav className="hidden items-center gap-1 lg:flex" aria-label="Main">
@@ -33,7 +33,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
               <Link
                 key={l.label}
                 to={l.to}
-                className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:text-primary"
+                className="rounded-md px-3 py-2 text-sm font-semibold text-primary/80 transition-colors hover:text-primary"
                 activeProps={{ className: "text-primary" }}
               >
                 {l.label}
@@ -42,7 +42,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
           </nav>
 
           <div className="hidden shrink-0 items-center gap-2 lg:flex">
-            <Button variant="ghost" size="sm" className="font-semibold text-slate-700" asChild>
+            <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
               <Link to="/login">Login</Link>
             </Button>
             <Button size="sm" className="rounded-full px-5 font-semibold" asChild>
@@ -58,8 +58,8 @@ export function PublicLayout({ children }: { children: ReactNode }) {
             </SheetTrigger>
             <SheetContent side="right" className="w-[min(100%,20rem)] border-l border-slate-200 bg-white p-0">
               <SheetTitle className="sr-only">Main navigation</SheetTitle>
-              <div className="flex h-16 items-center justify-between border-b border-slate-200 px-4">
-                <Logo size="md" />
+              <div className="flex h-[4.5rem] items-center justify-between border-b border-slate-200 px-4">
+                <Logo size="lg" />
                 <Button variant="ghost" size="icon" aria-label="Close menu" onClick={() => setOpen(false)}>
                   <X className="h-5 w-5" />
                 </Button>
@@ -70,13 +70,13 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                     key={l.label}
                     to={l.to}
                     onClick={() => setOpen(false)}
-                    className="rounded-lg px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:text-primary"
+                    className="rounded-lg px-3 py-3 text-sm font-semibold text-primary hover:bg-slate-50"
                   >
                     {l.label}
                   </Link>
                 ))}
                 <div className="mt-4 flex flex-col gap-2">
-                  <Button variant="outline" className="w-full" asChild>
+                  <Button variant="outline" className="w-full font-semibold text-primary" asChild>
                     <Link to="/login" onClick={() => setOpen(false)}>
                       Login
                     </Link>
@@ -98,7 +98,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
       <footer className="relative z-10 border-t border-slate-200 bg-slate-50/95">
         <div className="mx-auto grid w-full max-w-[1180px] gap-8 px-4 py-12 sm:px-6 md:grid-cols-[1.4fr_repeat(3,1fr)]">
           <div>
-            <Logo size="lg" showTagline />
+            <Logo size="xl" showTagline />
             <p className="mt-4 max-w-xs text-sm text-slate-600">
               Professional examination management for schools, colleges and universities worldwide.
             </p>
@@ -141,7 +141,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
 function FooterCol({ title, items }: { title: string; items: { to: string; label: string }[] }) {
   return (
     <div>
-      <h3 className="text-sm font-bold text-slate-900">{title}</h3>
+      <h3 className="text-sm font-bold text-primary">{title}</h3>
       <ul className="mt-4 space-y-2.5">
         {items.map((i) => (
           <li key={i.to + i.label}>
