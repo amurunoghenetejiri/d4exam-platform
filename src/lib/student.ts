@@ -22,6 +22,10 @@ export type StudentContext = {
   departmentName: string | null;
   facultyName: string | null;
   levelName: string | null;
+  /** Active academic session name set by school admin */
+  sessionName: string | null;
+  /** Active semester name set by school admin */
+  semesterName: string | null;
   courses: StudentCourse[];
   courseIds: string[];
 };
@@ -51,7 +55,6 @@ async function loadProgrammeCourses(
 ): Promise<StudentCourse[]> {
   const byId = new Map<string, StudentCourse>();
 
-  // 1) Courses offered to this department + level (shared offerings)
   if (departmentId && levelId) {
     const { data: offerings } = await supabase
       .from("course_offerings")
@@ -66,7 +69,6 @@ async function loadProgrammeCourses(
     }
   }
 
-  // 2) Fallback: courses tagged with this department (and level when set)
   if (departmentId) {
     let q = supabase
       .from("courses")
@@ -86,13 +88,51 @@ async function loadProgrammeCourses(
   return list;
 }
 
+async function loadActiveSessionSemester(schoolId: string): Promise<{
+  sessionName: string | null;
+  semesterName: string | null;
+}> {
+  const { data: sessions } = await supabase
+    .from("academic_sessions")
+    .select("id, name, status")
+    .eq("school_id", schoolId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  const activeSession =
+    (sessions ?? []).find((s) => String(s.status).toLowerCase() === "active") ??
+    (sessions ?? [])[0] ??
+    null;
+
+  let semesterName: string | null = null;
+  if (activeSession?.id) {
+    const { data: semesters } = await supabase
+      .from("semesters")
+      .select("id, name, status")
+      .eq("school_id", schoolId)
+      .eq("academic_session_id", activeSession.id)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    const activeSem =
+      (semesters ?? []).find((s) => String(s.status).toLowerCase() === "active") ??
+      (semesters ?? [])[0] ??
+      null;
+    semesterName = (activeSem?.name as string | null) ?? null;
+  }
+
+  return {
+    sessionName: (activeSession?.name as string | null) ?? null,
+    semesterName,
+  };
+}
+
 export function useStudentContext() {
   const { data: session } = useSessionUser();
 
   return useQuery({
     queryKey: ["student-context", session?.profileId, session?.schoolId],
     enabled: Boolean(session?.profileId && session?.schoolId && session.role === "student"),
-    staleTime: 15_000,
+    staleTime: 60_000,
     queryFn: async (): Promise<StudentContext | null> => {
       if (!session?.profileId || !session.schoolId) return null;
 
@@ -108,7 +148,6 @@ export function useStudentContext() {
       if (sErr) throw sErr;
       if (!student) return null;
 
-      // Explicit enrolments (optional)
       const { data: links } = await supabase
         .from("student_courses")
         .select("course_id, courses(id, code, name)")
@@ -121,7 +160,6 @@ export function useStudentContext() {
         if (c?.id) byId.set(c.id, { id: c.id, code: c.code, name: c.name });
       }
 
-      // Programme courses (department + level) — main source for My Courses
       const programme = await loadProgrammeCourses(
         session.schoolId,
         (student.department_id as string | null) ?? null,
@@ -134,6 +172,8 @@ export function useStudentContext() {
       const departments = student.departments as { name: string } | null;
       const faculties = student.faculties as { name: string } | null;
       const levels = student.levels as { name: string } | null;
+
+      const { sessionName, semesterName } = await loadActiveSessionSemester(session.schoolId);
 
       return {
         studentId: student.id as string,
@@ -149,6 +189,8 @@ export function useStudentContext() {
         departmentName: departments?.name ?? null,
         facultyName: faculties?.name ?? null,
         levelName: levels?.name ?? null,
+        sessionName,
+        semesterName,
         courses,
         courseIds: courses.map((c) => c.id),
       };
