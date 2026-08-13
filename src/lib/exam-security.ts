@@ -1,4 +1,4 @@
-import type { ExamSecuritySettings } from "@/types";
+import type { ExamSecuritySettings, ScreenShareMode } from "@/types";
 
 export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   fullscreen: true,
@@ -10,6 +10,7 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   requireCamera: false,
   requireMicrophone: false,
   requireScreenShare: false,
+  screenShareMode: "disabled",
   faceDetection: true,
   maxFaceWarnings: 5,
   faceViolationAction: "flag",
@@ -23,13 +24,33 @@ export const META_MARKER = "[[D4_EXAM_META]]";
 
 const storageKey = (teacherId: string) => `d4exam.teacher.security.${teacherId}`;
 
+/** Resolve screen-share policy from new or legacy fields */
+export function resolveScreenShareMode(s: Partial<ExamSecuritySettings> | null | undefined): ScreenShareMode {
+  if (!s) return "disabled";
+  if (s.screenShareMode === "optional" || s.screenShareMode === "required" || s.screenShareMode === "disabled") {
+    return s.screenShareMode;
+  }
+  if (s.requireScreenShare === true) return "required";
+  return "disabled";
+}
+
+export function normalizeSecuritySettings(
+  partial: Partial<ExamSecuritySettings> | null | undefined,
+): ExamSecuritySettings {
+  const merged = { ...DEFAULT_EXAM_SECURITY, ...(partial ?? {}) };
+  const mode = resolveScreenShareMode(merged);
+  merged.screenShareMode = mode;
+  merged.requireScreenShare = mode === "required";
+  return merged;
+}
+
 export function loadTeacherSecurityDefaults(teacherId: string): ExamSecuritySettings {
   if (typeof window === "undefined" || !teacherId) return { ...DEFAULT_EXAM_SECURITY };
   try {
     const raw = localStorage.getItem(storageKey(teacherId));
     if (!raw) return { ...DEFAULT_EXAM_SECURITY };
     const parsed = JSON.parse(raw) as Partial<ExamSecuritySettings>;
-    return { ...DEFAULT_EXAM_SECURITY, ...parsed };
+    return normalizeSecuritySettings(parsed);
   } catch {
     return { ...DEFAULT_EXAM_SECURITY };
   }
@@ -37,28 +58,28 @@ export function loadTeacherSecurityDefaults(teacherId: string): ExamSecuritySett
 
 export function saveTeacherSecurityDefaults(teacherId: string, settings: ExamSecuritySettings) {
   if (typeof window === "undefined" || !teacherId) return;
-  localStorage.setItem(storageKey(teacherId), JSON.stringify(settings));
+  localStorage.setItem(storageKey(teacherId), JSON.stringify(normalizeSecuritySettings(settings)));
 }
 
-/** Row shape for public.exam_settings (core columns only — extras live in description JSON) */
 export function toExamSettingsRow(
   examId: string,
   s: ExamSecuritySettings,
   totalMarks = 0,
   questionsToAnswer: number | null = null,
 ) {
+  const n = normalizeSecuritySettings(s);
   return {
     exam_id: examId,
-    fullscreen: s.fullscreen,
-    tab_monitoring: s.tabMonitoring,
-    max_tab_switches: s.maxTabSwitches,
-    block_copy_paste: s.blockCopyPaste,
-    randomize_questions: s.randomizeQuestions,
-    randomize_options: s.randomizeOptions,
-    require_camera: s.requireCamera,
-    require_microphone: s.requireMicrophone,
-    threshold_action: s.thresholdAction,
-    result_visibility: s.resultVisibility,
+    fullscreen: n.fullscreen,
+    tab_monitoring: n.tabMonitoring,
+    max_tab_switches: n.maxTabSwitches,
+    block_copy_paste: n.blockCopyPaste,
+    randomize_questions: n.randomizeQuestions,
+    randomize_options: n.randomizeOptions,
+    require_camera: n.requireCamera,
+    require_microphone: n.requireMicrophone,
+    threshold_action: n.thresholdAction,
+    result_visibility: n.resultVisibility,
     total_marks: totalMarks,
     questions_to_answer: questionsToAnswer,
   };
@@ -88,8 +109,8 @@ export function fromExamSettingsRow(
   const fromDesc = descriptionFallback ? parseSecurityFromDescription(descriptionFallback) : null;
   if (!row && !fromDesc) return { ...DEFAULT_EXAM_SECURITY };
   const base = fromDesc ?? { ...DEFAULT_EXAM_SECURITY };
-  if (!row) return base;
-  return {
+  if (!row) return normalizeSecuritySettings(base);
+  return normalizeSecuritySettings({
     ...base,
     fullscreen: row.fullscreen,
     tabMonitoring: row.tab_monitoring,
@@ -108,10 +129,9 @@ export function fromExamSettingsRow(
       typeof row.questions_to_answer === "number" && row.questions_to_answer > 0
         ? row.questions_to_answer
         : base.questionsToAnswer ?? null,
-  };
+  });
 }
 
-/** Remove all internal markers so teachers only see human instructions. */
 export function stripInternalMarkers(description: string | null | undefined): string {
   if (!description) return "";
   let s = description;
@@ -140,7 +160,7 @@ export function embedSecurityInDescription(
   settings: ExamSecuritySettings,
 ): string {
   const clean = stripInternalMarkers(description);
-  const blob = `${SECURITY_MARKER}${JSON.stringify(settings)}`;
+  const blob = `${SECURITY_MARKER}${JSON.stringify(normalizeSecuritySettings(settings))}`;
   return clean ? `${clean}\n${blob}` : blob;
 }
 
@@ -168,29 +188,35 @@ export function parseSecurityFromDescription(
     }
     if (end < 0) return null;
     const parsed = JSON.parse(raw.slice(start, end + 1)) as Partial<ExamSecuritySettings>;
-    return { ...DEFAULT_EXAM_SECURITY, ...parsed };
+    return normalizeSecuritySettings(parsed);
   } catch {
     return null;
   }
 }
 
-/** @deprecated use stripInternalMarkers */
 export function stripSecurityMarker(description: string | null | undefined): string {
   return stripInternalMarkers(description);
 }
 
 export function securitySummaryLines(s: ExamSecuritySettings): string[] {
+  const n = normalizeSecuritySettings(s);
+  const shareLabel =
+    n.screenShareMode === "required"
+      ? "Required"
+      : n.screenShareMode === "optional"
+        ? "Optional"
+        : "Disabled";
   return [
-    `Fullscreen lockdown: ${s.fullscreen ? "On" : "Off"}`,
-    `Tab monitoring: ${s.tabMonitoring ? `On (max ${s.maxTabSwitches})` : "Off"}`,
-    `On threshold: ${s.thresholdAction}`,
-    `Block copy/paste: ${s.blockCopyPaste ? "On" : "Off"}`,
-    `Randomise questions: ${s.randomizeQuestions ? "On" : "Off"}`,
-    `Randomise options: ${s.randomizeOptions ? "On" : "Off"}`,
-    `Camera monitoring: ${s.requireCamera ? "Required" : "Off"}`,
-    `Face detection: ${s.faceDetection && s.requireCamera ? `On (max ${s.maxFaceWarnings} warnings → ${s.faceViolationAction})` : "Off"}`,
-    `Screen sharing: ${s.requireScreenShare ? "Required" : "Off"}`,
-    `Microphone: ${s.requireMicrophone ? "Required" : "Not required"}`,
-    `Result release: ${s.resultVisibility}`,
+    `Fullscreen lockdown: ${n.fullscreen ? "On" : "Off"}`,
+    `Tab monitoring: ${n.tabMonitoring ? `On (max ${n.maxTabSwitches})` : "Off"}`,
+    `On threshold: ${n.thresholdAction}`,
+    `Block copy/paste: ${n.blockCopyPaste ? "On" : "Off"}`,
+    `Randomise questions: ${n.randomizeQuestions ? "On" : "Off"}`,
+    `Randomise options: ${n.randomizeOptions ? "On" : "Off"}`,
+    `Camera monitoring: ${n.requireCamera ? "Required" : "Off"}`,
+    `Face detection: ${n.faceDetection && n.requireCamera ? `On (max ${n.maxFaceWarnings} → ${n.faceViolationAction})` : "Off"}`,
+    `Screen sharing: ${shareLabel}`,
+    `Microphone: ${n.requireMicrophone ? "Required" : "Not required"}`,
+    `Result release: ${n.resultVisibility}`,
   ];
 }
