@@ -425,6 +425,7 @@ export type Database = {
           instructions: string | null
           max_fullscreen_exits: number
           max_tab_switches: number
+          questions_to_answer: number | null
           randomize_options: boolean
           randomize_questions: boolean
           require_camera: boolean
@@ -445,6 +446,7 @@ export type Database = {
           instructions?: string | null
           max_fullscreen_exits?: number
           max_tab_switches?: number
+          questions_to_answer?: number | null
           randomize_options?: boolean
           randomize_questions?: boolean
           require_camera?: boolean
@@ -465,6 +467,7 @@ export type Database = {
           instructions?: string | null
           max_fullscreen_exits?: number
           max_tab_switches?: number
+          questions_to_answer?: number | null
           randomize_options?: boolean
           randomize_questions?: boolean
           require_camera?: boolean
