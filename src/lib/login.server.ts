@@ -35,16 +35,15 @@ export async function provisionStudentLogin(params: {
   const ident = identifier.trim();
 
   // Targeted lookup — was .limit(2000) full table scan in memory (multi-second)
-  let student:
-    | {
-        id: string;
-        student_id: string;
-        matric_number: string | null;
-        full_name: string | null;
-        status: string;
-        profile_id: string | null;
-      }
-    | null = null;
+  type StudentLookupRow = {
+    id: string;
+    student_id: string;
+    matric_number: string | null;
+    full_name: string | null;
+    status: string;
+    profile_id: string | null;
+  };
+  let student: StudentLookupRow | null = null;
 
   const { data: byMatric } = await supabaseAdmin
     .from("students")
@@ -55,7 +54,7 @@ export async function provisionStudentLogin(params: {
     .maybeSingle();
 
   if (byMatric) {
-    student = byMatric as typeof student;
+    student = byMatric as unknown as StudentLookupRow;
   } else {
     const { data: bySid } = await supabaseAdmin
       .from("students")
