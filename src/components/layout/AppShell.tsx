@@ -2,6 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
 import { Bell, LogOut, Menu, Search, X } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
+import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { Watermark } from "@/components/brand/Watermark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { signOut, useSessionUser } from "@/lib/session";
+import { useSchoolIdentity } from "@/lib/school-identity";
 import { useCount } from "@/lib/queries";
 import type { RoleConfig } from "@/components/navigation/navConfig";
 
@@ -78,6 +80,7 @@ export function AppShell({
 }) {
   const [open, setOpen] = useState(false);
   const { data: session } = useSessionUser();
+  const { data: school } = useSchoolIdentity(session?.schoolId);
   const unread = useCount(
     "notifications",
     session?.userId
@@ -90,18 +93,31 @@ export function AppShell({
 
   const notifPath = `${config.home}/notifications`;
   const showDot = (unread.data ?? 0) > 0;
+  const logoUrl = school?.logoUrl ?? session?.schoolLogoUrl ?? null;
+  const schoolName = school?.name ?? session?.schoolName ?? null;
+  const isSchoolPortal = Boolean(session?.schoolId) && session?.role !== "super_admin";
 
   return (
     <div className="relative min-h-dvh bg-slate-50">
-      {/* Fixed brand watermark — stays still while content scrolls */}
       <Watermark opacity={0.1} size="xl" className="lg:left-64" />
 
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-[#0b1b3a] lg:flex">
-        <div className="flex h-[4.5rem] items-center border-b border-white/10 px-4">
-          <Link to="/" aria-label="D4EXAM home">
-            <Logo size="lg" />
+        <div className="flex h-[4.5rem] items-center gap-2 border-b border-white/10 px-4">
+          <Link to="/" aria-label="D4EXAM home" className="min-w-0">
+            <Logo size="md" />
           </Link>
+          {isSchoolPortal && (
+            <>
+              <span className="h-8 w-px shrink-0 bg-white/15" aria-hidden />
+              <SchoolLogo logoUrl={logoUrl} schoolName={schoolName} size="sm" className="bg-white/90 p-0.5" />
+            </>
+          )}
         </div>
+        {isSchoolPortal && schoolName && (
+          <p className="truncate border-b border-white/10 px-4 py-2 text-[11px] font-semibold text-slate-400">
+            {schoolName}
+          </p>
+        )}
         <div className="flex-1 overflow-y-auto hide-scrollbar">
           <NavLinks config={config} />
         </div>
@@ -130,7 +146,12 @@ export function AppShell({
                 <SheetContent side="left" className="w-72 border-r-0 bg-[#0b1b3a] p-0">
                   <SheetTitle className="sr-only">{config.label} navigation</SheetTitle>
                   <div className="flex h-[4.5rem] items-center justify-between border-b border-white/10 px-4">
-                    <Logo size="lg" />
+                    <div className="flex items-center gap-2">
+                      <Logo size="md" />
+                      {isSchoolPortal && (
+                        <SchoolLogo logoUrl={logoUrl} schoolName={schoolName} size="sm" className="bg-white/90 p-0.5" />
+                      )}
+                    </div>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -149,8 +170,11 @@ export function AppShell({
               <span className="hidden text-sm font-bold text-primary lg:inline">
                 {config.label} Portal
               </span>
-              <Link to="/" className="lg:hidden" aria-label="D4EXAM home">
-                <Logo size="md" />
+              <Link to="/" className="flex items-center gap-2 lg:hidden" aria-label="D4EXAM home">
+                <Logo size="md" wordmark={false} />
+                {isSchoolPortal && (
+                  <SchoolLogo logoUrl={logoUrl} schoolName={schoolName} size="sm" />
+                )}
               </Link>
             </div>
 
