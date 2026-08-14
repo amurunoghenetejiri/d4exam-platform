@@ -38,62 +38,84 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   const user = userData.user;
   if (!user) return null;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, full_name, email, status, school_id")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
+  // Parallel: profile + roles at once (was sequential)
+  const [profileRes, roleRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, status, school_id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle(),
+    supabase.from("user_roles").select("role").eq("user_id", user.id),
+  ]);
 
-  const { data: roleRows } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", user.id);
-
-  const roles = (roleRows ?? []).map((r) => r.role as AppRole);
+  const profile = profileRes.data;
+  const roles = (roleRes.data ?? []).map((r) => r.role as AppRole);
 
   let schoolName: string | null = null;
   let schoolCode: string | null = null;
   let schoolLogoUrl: string | null = null;
-  if (profile?.school_id) {
-    const { data: school } = await supabase
-      .from("schools")
-      .select("name, school_code, logo_url")
-      .eq("id", profile.school_id)
-      .maybeSingle();
-    schoolName = school?.name ?? null;
-    schoolCode = school?.school_code ?? null;
-    schoolLogoUrl = (school?.logo_url as string | null) ?? null;
-  }
-
   let identifier: string | null = null;
   let identifierLabel = "Email";
+
+  // Parallel school + role-specific identifier
+  const extra: Promise<void>[] = [];
+
+  if (profile?.school_id) {
+    extra.push(
+      (async () => {
+        const { data: school } = await supabase
+          .from("schools")
+          .select("name, school_code, logo_url")
+          .eq("id", profile.school_id!)
+          .maybeSingle();
+        schoolName = school?.name ?? null;
+        schoolCode = school?.school_code ?? null;
+        schoolLogoUrl = (school?.logo_url as string | null) ?? null;
+      })(),
+    );
+  }
+
   if (profile) {
     if (roles.includes("student")) {
-      const { data: s } = await supabase
-        .from("students")
-        .select("matric_number, student_id")
-        .eq("profile_id", profile.id)
-        .maybeSingle();
-      identifier = s?.matric_number ?? s?.student_id ?? null;
-      identifierLabel = "Matric number";
+      extra.push(
+        (async () => {
+          const { data: s } = await supabase
+            .from("students")
+            .select("matric_number, student_id")
+            .eq("profile_id", profile.id)
+            .maybeSingle();
+          identifier = s?.matric_number ?? s?.student_id ?? null;
+          identifierLabel = "Matric number";
+        })(),
+      );
     } else if (roles.includes("teacher")) {
-      const { data: t } = await supabase
-        .from("teachers")
-        .select("staff_id")
-        .eq("profile_id", profile.id)
-        .maybeSingle();
-      identifier = t?.staff_id ?? null;
-      identifierLabel = "Staff ID";
+      extra.push(
+        (async () => {
+          const { data: t } = await supabase
+            .from("teachers")
+            .select("staff_id")
+            .eq("profile_id", profile.id)
+            .maybeSingle();
+          identifier = t?.staff_id ?? null;
+          identifierLabel = "Staff ID";
+        })(),
+      );
     } else if (roles.includes("examination_officer")) {
-      const { data: o } = await supabase
-        .from("examination_officers")
-        .select("officer_id")
-        .eq("profile_id", profile.id)
-        .maybeSingle();
-      identifier = o?.officer_id ?? null;
-      identifierLabel = "Officer ID";
+      extra.push(
+        (async () => {
+          const { data: o } = await supabase
+            .from("examination_officers")
+            .select("officer_id")
+            .eq("profile_id", profile.id)
+            .maybeSingle();
+          identifier = o?.officer_id ?? null;
+          identifierLabel = "Officer ID";
+        })(),
+      );
     }
   }
+
+  if (extra.length) await Promise.all(extra);
 
   const priority: AppRole[] = [
     "super_admin",
@@ -135,7 +157,9 @@ export function useSessionUser() {
   return useQuery({
     queryKey: ["session-user"],
     queryFn: fetchSessionUser,
-    staleTime: 30_000,
+    staleTime: 5 * 60_000, // 5 minutes — was 30s, caused constant re-auth work
+    gcTime: 15 * 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 
