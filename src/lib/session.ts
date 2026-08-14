@@ -26,6 +26,7 @@ export interface SessionUser {
   schoolId: string | null;
   schoolName: string | null;
   schoolCode: string | null;
+  schoolLogoUrl: string | null;
   roles: AppRole[];
   role: AppRole | null;
   identifier: string | null;
@@ -52,14 +53,16 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
 
   let schoolName: string | null = null;
   let schoolCode: string | null = null;
+  let schoolLogoUrl: string | null = null;
   if (profile?.school_id) {
     const { data: school } = await supabase
       .from("schools")
-      .select("name, school_code")
+      .select("name, school_code, logo_url")
       .eq("id", profile.school_id)
       .maybeSingle();
     schoolName = school?.name ?? null;
     schoolCode = school?.school_code ?? null;
+    schoolLogoUrl = (school?.logo_url as string | null) ?? null;
   }
 
   let identifier: string | null = null;
@@ -109,6 +112,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     schoolId: profile?.school_id ?? null,
     schoolName,
     schoolCode,
+    schoolLogoUrl,
     roles,
     role: priority.find((r) => roles.includes(r)) ?? null,
     identifier: identifier ?? profile?.email ?? null,
