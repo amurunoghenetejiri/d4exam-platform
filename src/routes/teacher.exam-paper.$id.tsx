@@ -24,7 +24,7 @@ import { parseQuestionOptions } from "@/lib/question-options";
 
 export const Route = createFileRoute("/teacher/exam-paper/$id")({
   head: () => ({
-    meta: [{ title: "Exam paper — D4EXAM" }],
+    meta: [{ title: "Exam paper builder - D4EXAM" }],
   }),
   component: Page,
 });
@@ -57,12 +57,18 @@ type PaperItem = {
   section: string;
 };
 
+/** Escape for HTML export. Built without entity literals so tooling cannot strip them. */
 function escapeHtml(s: string) {
+  const amp = String.fromCharCode(38); // &
   return s
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
-    .replace(/"/g, """);
+    .split(amp)
+    .join(amp + "amp;")
+    .split("<")
+    .join(amp + "lt;")
+    .split(">")
+    .join(amp + "gt;")
+    .split('"')
+    .join(amp + "quot;");
 }
 
 function Page() {
@@ -312,12 +318,12 @@ function Page() {
     lines.push(
       '<p class="meta">' +
         escapeHtml(exam.courses?.code || "") +
-        " — " +
+        " - " +
         escapeHtml(exam.courses?.name || "") +
         " · " +
-        paper.length +
+        String(paper.length) +
         " questions · " +
-        totalMarks +
+        String(totalMarks) +
         " marks</p>",
     );
     paper.forEach((p, i) => {
@@ -326,11 +332,11 @@ function Page() {
       const opts = parseQuestionOptions(q);
       lines.push(
         '<div class="q"><h3>Q' +
-          (i + 1) +
+          String(i + 1) +
           ". " +
           escapeHtml(q.question_text) +
           ' <span style="color:#64748b;font-weight:500">(' +
-          p.marks +
+          String(p.marks) +
           " mk)</span></h3>",
       );
       if (opts.length) {
@@ -358,7 +364,7 @@ function Page() {
 
   const exam = examQ.data;
 
-  if (examQ.isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (examQ.isLoading) return <p className="text-sm text-slate-500">Loading...</p>;
   if (!exam) {
     return <EmptyState title="Exam not found" description="It may have been deleted." />;
   }
@@ -368,14 +374,14 @@ function Page() {
       <>
         <PageHeader
           title="Preview as student"
-          description={`${exam.title} — read-only student view`}
+          description={exam.title + " - read-only student view"}
           actions={
             <Button variant="outline" onClick={() => setPreview(false)}>
               Exit preview
             </Button>
           }
         />
-        <SectionCard title={`Paper (${paper.length} questions · ${totalMarks} marks)`}>
+        <SectionCard title={"Paper (" + paper.length + " questions · " + totalMarks + " marks)"}>
           <ol className="space-y-4">
             {paper.map((p, i) => {
               const q = bank.find((b) => b.id === p.question_id);
@@ -413,7 +419,12 @@ function Page() {
     <>
       <PageHeader
         title="Exam paper builder"
-        description={`${exam.title} · ${exam.courses?.code ?? "Course"} — select, order and set marks from the real question bank.`}
+        description={
+          exam.title +
+          " · " +
+          (exam.courses?.code ?? "Course") +
+          " - select, order and set marks from the real question bank."
+        }
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" asChild>
@@ -479,7 +490,7 @@ function Page() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <SectionCard
-          title={`Question bank (${filteredBank.length})`}
+          title={"Question bank (" + filteredBank.length + ")"}
           description="Search, filter and bulk-select"
           action={
             <div className="flex gap-2">
@@ -497,7 +508,7 @@ function Page() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
                 className="pl-9"
-                placeholder="Search questions…"
+                placeholder="Search questions..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -516,7 +527,7 @@ function Page() {
           </div>
 
           {bankQ.isLoading ? (
-            <p className="text-sm text-slate-500">Loading bank…</p>
+            <p className="text-sm text-slate-500">Loading bank...</p>
           ) : filteredBank.length === 0 ? (
             <EmptyState
               title="No questions in this course bank"
@@ -550,7 +561,7 @@ function Page() {
         </SectionCard>
 
         <SectionCard
-          title={`Paper composition (${paper.length})`}
+          title={"Paper composition (" + paper.length + ")"}
           description="Reorder and set marks per question"
         >
           {paper.length === 0 ? (
@@ -570,7 +581,7 @@ function Page() {
                         {q?.question_text ?? "(missing question)"}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {q?.question_type?.replaceAll("_", " ") ?? "—"}
+                        {q?.question_type?.replaceAll("_", " ") ?? "-"}
                       </p>
                       <div className="mt-2 flex items-center gap-2">
                         <Label className="text-xs">Marks</Label>
