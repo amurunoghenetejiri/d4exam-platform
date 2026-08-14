@@ -13,30 +13,35 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { useSessionUser } from "@/lib/session";
+import { useEffect, useRef, useState } from "react";
+import { useSessionUser, signOut } from "@/lib/session";
 import {
   updateSchoolLogoUrl,
+  updateSchoolName,
   uploadSchoolLogo,
   useSchoolIdentity,
   validateLogoFile,
 } from "@/lib/school-identity";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
-import { Loader2, Upload } from "lucide-react";
+import { Loader2, Upload, Building2 } from "lucide-react";
 
 export function SettingsPage({ scope }: { scope: string }) {
   const [saving, setSaving] = useState(false);
-  const isSchoolAdmin = scope.toLowerCase().includes("school admin");
+  const scopeLower = (scope || "").toLowerCase();
+  const isSchoolAdmin =
+    scopeLower.includes("school admin") ||
+    scopeLower.includes("admin") ||
+    scopeLower === "school";
 
   return (
     <>
       <PageHeader
         title="Settings"
-        description={`Manage preferences, notifications and security for your ${scope} account.`}
+        description={`Manage your school identity, preferences and account for ${scope}.`}
       />
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {isSchoolAdmin && <SchoolBrandingCard />}
+        {isSchoolAdmin && <SchoolIdentityCard />}
 
         <SectionCard title="Preferences" description="Regional and display options">
           <div className="space-y-4">
@@ -85,11 +90,11 @@ export function SettingsPage({ scope }: { scope: string }) {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="cur">Current password</Label>
-              <Input id="cur" type="password" placeholder="••••••••" />
+              <Input id="cur" type="password" autoComplete="current-password" placeholder="••••••••" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="new">New password</Label>
-              <Input id="new" type="password" placeholder="At least 8 characters" />
+              <Input id="new" type="password" autoComplete="new-password" placeholder="At least 8 characters" />
             </div>
             <ToggleRow id="2fa" label="Two-factor authentication" hint="Email one-time code" />
             <Button
@@ -98,11 +103,11 @@ export function SettingsPage({ scope }: { scope: string }) {
                 setSaving(true);
                 setTimeout(() => {
                   setSaving(false);
-                  toast.success("Settings saved");
-                }, 900);
+                  toast.success("Preferences noted (password change requires auth setup).");
+                }, 600);
               }}
             >
-              {saving ? "Saving…" : "Save changes"}
+              {saving ? "Saving…" : "Save preferences"}
             </Button>
           </div>
         </SectionCard>
@@ -110,7 +115,9 @@ export function SettingsPage({ scope }: { scope: string }) {
         <SectionCard title="Session" description="Device and access information">
           <InfoRow label="Account scope" value={scope} />
           <div className="pt-4">
-            <Button variant="outline">Sign out of all devices</Button>
+            <Button variant="outline" onClick={() => void signOut()}>
+              Sign out
+            </Button>
           </div>
         </SectionCard>
       </div>
@@ -118,16 +125,24 @@ export function SettingsPage({ scope }: { scope: string }) {
   );
 }
 
-function SchoolBrandingCard() {
-  const { data: session } = useSessionUser();
+function SchoolIdentityCard() {
+  const { data: session, isLoading: sessionLoading } = useSessionUser();
   const schoolId = session?.schoolId ?? null;
-  const { data: school, refetch } = useSchoolIdentity(schoolId);
+  const { data: school, isLoading: schoolLoading, refetch, error: schoolError } =
+    useSchoolIdentity(schoolId);
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [name, setName] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [nameBusy, setNameBusy] = useState(false);
+
+  useEffect(() => {
+    if (school?.name) setName(school.name);
+    else if (session?.schoolName) setName(session.schoolName);
+  }, [school?.name, session?.schoolName]);
 
   function onPick(f: File | null) {
     if (!f) return;
@@ -140,8 +155,34 @@ function SchoolBrandingCard() {
     setPreview(URL.createObjectURL(f));
   }
 
+  async function saveName() {
+    if (!schoolId) {
+      toast.error("No school linked to this account.");
+      return;
+    }
+    setNameBusy(true);
+    try {
+      await updateSchoolName(schoolId, name);
+      await refetch();
+      await qc.invalidateQueries({ queryKey: ["school-identity"] });
+      await qc.invalidateQueries({ queryKey: ["session-user"] });
+      toast.success("School name updated.");
+    } catch (e) {
+      toast.error((e as Error).message || "Could not update school name");
+    } finally {
+      setNameBusy(false);
+    }
+  }
+
   async function saveLogo() {
-    if (!schoolId || !file) return;
+    if (!schoolId) {
+      toast.error("No school linked to this account.");
+      return;
+    }
+    if (!file) {
+      toast.error("Choose a logo file first.");
+      return;
+    }
     setBusy(true);
     try {
       const { url } = await uploadSchoolLogo({ file, folder: schoolId });
@@ -149,28 +190,53 @@ function SchoolBrandingCard() {
       await refetch();
       await qc.invalidateQueries({ queryKey: ["school-identity"] });
       await qc.invalidateQueries({ queryKey: ["session-user"] });
-      toast.success("School logo updated. It will appear across your portal.");
+      toast.success("School logo saved. It will show across your portal.");
       setFile(null);
+      if (preview) URL.revokeObjectURL(preview);
       setPreview(null);
       if (inputRef.current) inputRef.current.value = "";
     } catch (e) {
-      toast.error((e as Error).message || "Could not update logo");
+      const msg = (e as Error).message || "Could not update logo";
+      toast.error(msg);
+      console.error("[school logo]", e);
     } finally {
       setBusy(false);
     }
   }
 
-  function cancel() {
+  function cancelLogo() {
     setFile(null);
     if (preview) URL.revokeObjectURL(preview);
     setPreview(null);
     if (inputRef.current) inputRef.current.value = "";
   }
 
+  if (sessionLoading || schoolLoading) {
+    return (
+      <SectionCard title="School Identity / Branding" className="lg:col-span-2">
+        <p className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading school…
+        </p>
+      </SectionCard>
+    );
+  }
+
   if (!schoolId) {
     return (
-      <SectionCard title="School Identity / Branding">
-        <p className="text-sm text-slate-500">No school linked to this account.</p>
+      <SectionCard title="School Identity / Branding" className="lg:col-span-2">
+        <p className="text-sm text-slate-500">
+          No school is linked to this account. Sign in as a school administrator to manage branding.
+        </p>
+      </SectionCard>
+    );
+  }
+
+  if (schoolError) {
+    return (
+      <SectionCard title="School Identity / Branding" className="lg:col-span-2">
+        <p className="text-sm text-red-600">
+          Could not load school: {(schoolError as Error).message}
+        </p>
       </SectionCard>
     );
   }
@@ -178,78 +244,120 @@ function SchoolBrandingCard() {
   return (
     <SectionCard
       title="School Identity / Branding"
-      description="Official logo for your institution across D4EXAM"
+      description="Official name and logo for your institution on D4EXAM"
       className="lg:col-span-2"
     >
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
-        <div className="flex flex-col items-center gap-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Current logo</p>
-          <div className="grid h-24 w-24 place-items-center rounded-2xl border border-slate-200 bg-slate-50 p-2">
-            <SchoolLogo
-              logoUrl={school?.logoUrl}
-              schoolName={school?.name}
-              size="xl"
-              className="h-20 w-20"
+      <div className="space-y-6">
+        {/* Name */}
+        <div className="space-y-2">
+          <Label htmlFor="school-name" className="flex items-center gap-1.5">
+            <Building2 className="h-3.5 w-3.5" /> School name
+          </Label>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              id="school-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Institution name"
+              className="flex-1"
             />
-          </div>
-          <p className="max-w-[140px] text-center text-xs font-semibold text-slate-700">
-            {school?.name ?? session?.schoolName ?? "School"}
-          </p>
-        </div>
-
-        <div className="min-w-0 flex-1 space-y-3">
-          <p className="text-sm text-slate-600">
-            Upload PNG, JPG or WebP (max 2MB). This becomes your official school identity on
-            dashboards, exams and results.
-          </p>
-
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            className="hidden"
-            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
-          />
-
-          {preview && (
-            <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <img src={preview} alt="New logo preview" className="h-16 w-16 rounded-lg object-contain" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-slate-900">New logo preview</p>
-                <p className="truncate text-xs text-slate-500">{file?.name}</p>
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2">
             <Button
               type="button"
-              variant="outline"
-              className="gap-2 font-semibold"
-              onClick={() => inputRef.current?.click()}
-              disabled={busy}
+              className="font-semibold sm:w-auto"
+              disabled={nameBusy || !name.trim() || name.trim() === school?.name}
+              onClick={() => void saveName()}
             >
-              <Upload className="h-4 w-4" />
-              {school?.logoUrl ? "Change logo" : "Upload logo"}
+              {nameBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save name
             </Button>
-            {file && (
-              <>
-                <Button type="button" className="font-semibold" disabled={busy} onClick={() => void saveLogo()}>
-                  {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Save logo
-                </Button>
-                <Button type="button" variant="ghost" disabled={busy} onClick={cancel}>
-                  Cancel
-                </Button>
-              </>
-            )}
           </div>
-
-          {!school?.logoUrl && !preview && (
-            <p className="text-xs text-amber-700">
-              No logo yet — the D4EXAM mark is shown until you upload one.
+          {school?.schoolCode && (
+            <p className="text-xs text-slate-500">
+              School code: <span className="font-mono font-semibold">{school.schoolCode}</span>{" "}
+              (cannot be changed here)
             </p>
           )}
+        </div>
+
+        <Separator />
+
+        {/* Logo */}
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Current logo</p>
+            <div className="grid h-24 w-24 place-items-center rounded-2xl border border-slate-200 bg-slate-50 p-2">
+              <SchoolLogo
+                logoUrl={school?.logoUrl}
+                schoolName={school?.name}
+                size="xl"
+                className="h-20 w-20"
+              />
+            </div>
+          </div>
+
+          <div className="min-w-0 flex-1 space-y-3">
+            <p className="text-sm text-slate-600">
+              Upload PNG, JPG or WebP (max 2MB). Saved to your school record and shown on dashboards
+              and exams.
+            </p>
+
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/webp,.png,.jpg,.jpeg,.webp"
+              className="hidden"
+              onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+            />
+
+            {preview && (
+              <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <img
+                  src={preview}
+                  alt="New logo preview"
+                  className="h-16 w-16 rounded-lg object-contain bg-white"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-900">New logo preview</p>
+                  <p className="truncate text-xs text-slate-500">{file?.name}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-2 font-semibold"
+                onClick={() => inputRef.current?.click()}
+                disabled={busy}
+              >
+                <Upload className="h-4 w-4" />
+                {school?.logoUrl ? "Change logo" : "Upload logo"}
+              </Button>
+              {file && (
+                <>
+                  <Button
+                    type="button"
+                    className="font-semibold"
+                    disabled={busy}
+                    onClick={() => void saveLogo()}
+                  >
+                    {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Save logo
+                  </Button>
+                  <Button type="button" variant="ghost" disabled={busy} onClick={cancelLogo}>
+                    Cancel
+                  </Button>
+                </>
+              )}
+            </div>
+
+            {!school?.logoUrl && !preview && (
+              <p className="text-xs text-amber-700">
+                No logo yet — D4EXAM mark is shown until you upload one.
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </SectionCard>
