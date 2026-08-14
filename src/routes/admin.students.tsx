@@ -60,6 +60,7 @@ function Page() {
   const listQ = useQuery({
     queryKey: ["admin-all-students", schoolId],
     enabled: Boolean(schoolId),
+    staleTime: 60_000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("students")
@@ -72,7 +73,7 @@ function Page() {
            levels(name, code)`,
         )
         .eq("school_id", schoolId!)
-        .limit(5000);
+        .limit(300);
 
       if (error) {
         const { data: d2, error: e2 } = await supabase
@@ -86,7 +87,7 @@ function Page() {
              levels(name, code)`,
           )
           .eq("school_id", schoolId!)
-          .limit(5000);
+          .limit(300);
         if (e2) throw e2;
         return ((d2 ?? []) as StudentRow[]).map((s) => ({ ...s, full_name: null }));
       }
@@ -97,6 +98,7 @@ function Page() {
   const facultiesQ = useQuery({
     queryKey: ["admin-filter-faculties", schoolId],
     enabled: Boolean(schoolId),
+    staleTime: 5 * 60_000,
     queryFn: async () => {
       const { data } = await supabase
         .from("faculties")
@@ -110,6 +112,7 @@ function Page() {
   const deptsQ = useQuery({
     queryKey: ["admin-filter-depts", schoolId, facultyFilter],
     enabled: Boolean(schoolId),
+    staleTime: 5 * 60_000,
     queryFn: async () => {
       let q = supabase
         .from("departments")
@@ -125,6 +128,7 @@ function Page() {
   const levelsQ = useQuery({
     queryKey: ["admin-filter-levels", schoolId],
     enabled: Boolean(schoolId),
+    staleTime: 5 * 60_000,
     queryFn: async () => {
       const { data } = await supabase
         .from("levels")
@@ -157,7 +161,6 @@ function Page() {
       return hay.includes(q);
     });
 
-    // Default: alphabetical by full name A → Z
     filtered.sort((a, b) => {
       if (sortBy === "matric") {
         const ma = (a.matric_number || a.student_id || "").toLowerCase();
@@ -197,7 +200,7 @@ function Page() {
     <>
       <PageHeader
         title="Students"
-        description="All students in your school, sorted A–Z by name. Import updates existing matric numbers without wiping exam history."
+        description="Students in your school (up to 300 loaded; use search/filters). Sorted A–Z by name."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" className="font-semibold" asChild>
