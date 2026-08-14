@@ -20,7 +20,7 @@ export function useSchoolIdentity(schoolId?: string | null) {
   useEffect(() => {
     if (!id) return;
     const channel = supabase
-      .channel(`school-identity-${id}`)
+      .channel(`school-identity-${id}-${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "schools", filter: `id=eq.${id}` },
