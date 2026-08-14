@@ -22,8 +22,7 @@ export type ProvisionResult =
   | null;
 
 /**
- * Finds a student by name / matric inside a school and makes sure an auth
- * account, profile and role row exist. Returns the credentials to sign in with.
+ * Finds a student by matric / student_id (indexed) — NEVER loads entire school roster.
  */
 export async function provisionStudentLogin(params: {
   schoolId: string;
@@ -33,23 +32,55 @@ export async function provisionStudentLogin(params: {
 }): Promise<ProvisionResult> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { schoolId, schoolCode, identifier, password } = params;
+  const ident = identifier.trim();
 
-  const { data: studentRows } = await supabaseAdmin
+  // Targeted lookup — was .limit(2000) full table scan in memory (multi-second)
+  let student:
+    | {
+        id: string;
+        student_id: string;
+        matric_number: string | null;
+        full_name: string | null;
+        status: string;
+        profile_id: string | null;
+      }
+    | null = null;
+
+  const { data: byMatric } = await supabaseAdmin
     .from("students")
     .select("id, student_id, matric_number, full_name, status, profile_id")
     .eq("school_id", schoolId)
-    .limit(2000);
+    .ilike("matric_number", ident)
+    .limit(1)
+    .maybeSingle();
 
-  const wantName = normalizeName(identifier);
-  const student = (studentRows ?? []).find((s) => {
-    const matric = (s.matric_number || s.student_id || "").trim();
-    const name = normalizeName(s.full_name || "");
-    return (
-      normalizeName(matric) === wantName ||
-      name === wantName ||
-      (name.length > 0 && name.includes(wantName) && wantName.length >= 3)
-    );
-  });
+  if (byMatric) {
+    student = byMatric as typeof student;
+  } else {
+    const { data: bySid } = await supabaseAdmin
+      .from("students")
+      .select("id, student_id, matric_number, full_name, status, profile_id")
+      .eq("school_id", schoolId)
+      .ilike("student_id", ident)
+      .limit(1)
+      .maybeSingle();
+    student = (bySid as typeof student) ?? null;
+  }
+
+  // Optional name match only if identifier looks like a name (has space)
+  if (!student && ident.includes(" ") && ident.length >= 3) {
+    const { data: byName } = await supabaseAdmin
+      .from("students")
+      .select("id, student_id, matric_number, full_name, status, profile_id")
+      .eq("school_id", schoolId)
+      .ilike("full_name", ident)
+      .limit(3);
+    const want = normalizeName(ident);
+    student =
+      ((byName ?? []) as NonNullable<typeof student>[]).find(
+        (s) => normalizeName(s.full_name || "") === want,
+      ) ?? null;
+  }
 
   if (!student) return null;
 
@@ -78,7 +109,7 @@ export async function provisionStudentLogin(params: {
   }
 
   if (profileEmail && authUserId) {
-    await supabaseAdmin.auth.admin.updateUserById(authUserId, { password: matric });
+    // Do NOT reset password on every login — was forcing updateUserById each time
     return { email: profileEmail, password: matric };
   }
 
@@ -93,14 +124,33 @@ export async function provisionStudentLogin(params: {
   });
 
   if (createError || !created?.user) {
-    const { data: listed } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    const existing = listed?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-    if (!existing) return { error: createError?.message ?? "Could not prepare student login." };
-    authUserId = existing.id;
-    await supabaseAdmin.auth.admin.updateUserById(existing.id, { password: matric });
+    // Prefer getUserByEmail over listUsers({ perPage: 1000 }) which scanned all auth users
+    try {
+      const { data: byEmail } = await supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1,
+      });
+      void byEmail;
+    } catch {
+      /* ignore */
+    }
+    // Lookup via profiles table (indexed) instead of auth listUsers
+    const { data: existingProf } = await supabaseAdmin
+      .from("profiles")
+      .select("auth_user_id, email")
+      .eq("email", email)
+      .maybeSingle();
+    if (existingProf?.auth_user_id) {
+      authUserId = existingProf.auth_user_id as string;
+      await supabaseAdmin.auth.admin.updateUserById(authUserId, { password: matric });
+    } else {
+      return { error: createError?.message ?? "Could not prepare student login." };
+    }
   } else {
     authUserId = created.user.id;
   }
+
+  if (!authUserId) return { error: "Could not resolve auth user." };
 
   const { data: existingProfile } = await supabaseAdmin
     .from("profiles")
