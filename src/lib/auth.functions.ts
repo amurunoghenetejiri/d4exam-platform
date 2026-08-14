@@ -335,6 +335,19 @@ const personSchema = z.object({
   levelId: z.string().uuid().optional().nullable(),
 });
 
+/** CSV import rows — email optional (synthetic email used when missing). */
+const importRowSchema = z.object({
+  firstName: z.string().trim().min(1).max(80),
+  lastName: z.string().trim().min(1).max(80),
+  email: z.string().trim().max(255).optional().default(""),
+  identifier: z.string().trim().min(1).max(60),
+  matricNumber: z.string().trim().max(60).optional(),
+  departmentId: z.string().uuid().optional().nullable(),
+  facultyId: z.string().uuid().optional().nullable(),
+  levelId: z.string().uuid().optional().nullable(),
+  rowNumber: z.number().int().positive().optional(),
+});
+
 export const createSchoolUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => personSchema.parse(data))
@@ -360,7 +373,7 @@ export const createSchoolUser = createServerFn({ method: "POST" })
       school_id: schoolId,
       actor_user_id: context.userId,
       actor_role: "school_admin",
-      action: `${data.role}_created`,
+      action: `${data.role}_${result.action ?? "created"}`,
       entity_type: data.role,
       entity_id: result.id ?? null,
       description: `${data.firstName} ${data.lastName} (${data.identifier})`,
@@ -372,7 +385,7 @@ export const createSchoolUser = createServerFn({ method: "POST" })
 export const importStudents = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) =>
-    z.object({ rows: z.array(personSchema.omit({ role: true })).max(500) }).parse(data),
+    z.object({ rows: z.array(importRowSchema).min(1).max(2000) }).parse(data),
   )
   .handler(async ({ data, context }) => {
     const { data: profileRow } = await context.supabase
@@ -389,31 +402,66 @@ export const importStudents = createServerFn({ method: "POST" })
     if (!canManage) throw new Error("Forbidden");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { createPerson } = await import("@/lib/users.server");
+    const { upsertStudent } = await import("@/lib/users.server");
 
     let created = 0;
-    const failures: { identifier: string; reason: string }[] = [];
-    const credentials: {
-      fullName: string;
+    let updated = 0;
+    const failures: {
+      rowNumber?: number;
+      name: string;
       identifier: string;
-      email: string;
-      password: string;
+      matricNumber: string;
+      reason: string;
     }[] = [];
 
-    for (const row of data.rows) {
+    // Process every row — no silent skips
+    for (let i = 0; i < data.rows.length; i++) {
+      const row = data.rows[i];
+      const rowNumber = row.rowNumber ?? i + 2; // +2 accounts for header row in typical CSVs
+      const name = `${row.firstName} ${row.lastName}`.trim();
+      const matric = (row.matricNumber || row.identifier || "").trim();
+
       try {
-        const person = await createPerson(schoolId, { ...row, role: "student" as const });
-        created += 1;
-        credentials.push({
-          fullName: person.fullName,
-          identifier: person.identifier,
-          email: person.email,
-          password: person.password,
+        if (!row.firstName?.trim()) {
+          throw new Error("First name is required");
+        }
+        if (!matric || matric.length < 4) {
+          throw new Error("Matric / student ID must be at least 4 characters");
+        }
+
+        // Valid email optional — upsertStudent synthesizes one if missing/invalid
+        let email = (row.email || "").trim().toLowerCase();
+        if (email && !looksLikeEmail(email)) {
+          email = "";
+        }
+
+        const person = await upsertStudent(schoolId, {
+          role: "student",
+          firstName: row.firstName.trim(),
+          lastName: (row.lastName || "Student").trim(),
+          email: email || `${matric.replace(/[^a-z0-9]+/gi, ".").toLowerCase()}@placeholder.local`,
+          identifier: row.identifier.trim() || matric,
+          matricNumber: matric,
+          departmentId: row.departmentId ?? null,
+          facultyId: row.facultyId ?? null,
+          levelId: row.levelId ?? null,
         });
+
+        if (person.action === "updated") updated += 1;
+        else created += 1;
       } catch (e) {
-        failures.push({ identifier: row.identifier, reason: (e as Error).message });
+        failures.push({
+          rowNumber,
+          name,
+          identifier: row.identifier || matric,
+          matricNumber: matric,
+          reason: (e as Error).message || "Unknown error",
+        });
       }
     }
+
+    const total = data.rows.length;
+    const processed = created + updated;
 
     await supabaseAdmin.from("audit_logs").insert({
       school_id: schoolId,
@@ -421,8 +469,21 @@ export const importStudents = createServerFn({ method: "POST" })
       actor_role: "school_admin",
       action: "student_import",
       entity_type: "student",
-      description: `Imported ${created} of ${data.rows.length} students`,
+      description: `CSV import: ${total} rows → ${created} new, ${updated} updated, ${failures.length} invalid`,
+      metadata: {
+        total,
+        created,
+        updated,
+        failed: failures.length,
+      },
     });
 
-    return { created, failed: failures.length, failures, credentials };
+    return {
+      total,
+      created,
+      updated,
+      failed: failures.length,
+      processed,
+      failures,
+    };
   });
