@@ -42,6 +42,8 @@ function displayName(s: StudentRow) {
   return (s.full_name || s.profiles?.full_name || "").trim() || "—";
 }
 
+type SortKey = "name" | "matric" | "level";
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
@@ -53,6 +55,7 @@ function Page() {
   const [deptFilter, setDeptFilter] = useState<string>("all");
   const [levelFilter, setLevelFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<SortKey>("name");
 
   const listQ = useQuery({
     queryKey: ["admin-all-students", schoolId],
@@ -69,8 +72,7 @@ function Page() {
            levels(name, code)`,
         )
         .eq("school_id", schoolId!)
-        .order("created_at", { ascending: false })
-        .limit(2000);
+        .limit(5000);
 
       if (error) {
         const { data: d2, error: e2 } = await supabase
@@ -84,8 +86,7 @@ function Page() {
              levels(name, code)`,
           )
           .eq("school_id", schoolId!)
-          .order("created_at", { ascending: false })
-          .limit(2000);
+          .limit(5000);
         if (e2) throw e2;
         return ((d2 ?? []) as StudentRow[]).map((s) => ({ ...s, full_name: null }));
       }
@@ -137,7 +138,7 @@ function Page() {
   const rows = useMemo(() => {
     const all = listQ.data ?? [];
     const q = search.trim().toLowerCase();
-    return all.filter((s) => {
+    const filtered = all.filter((s) => {
       if (facultyFilter !== "all" && s.faculty_id !== facultyFilter) return false;
       if (deptFilter !== "all" && s.department_id !== deptFilter) return false;
       if (levelFilter !== "all" && s.level_id !== levelFilter) return false;
@@ -155,7 +156,24 @@ function Page() {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [listQ.data, search, facultyFilter, deptFilter, levelFilter, statusFilter]);
+
+    // Default: alphabetical by full name A → Z
+    filtered.sort((a, b) => {
+      if (sortBy === "matric") {
+        const ma = (a.matric_number || a.student_id || "").toLowerCase();
+        const mb = (b.matric_number || b.student_id || "").toLowerCase();
+        return ma.localeCompare(mb, undefined, { sensitivity: "base" });
+      }
+      if (sortBy === "level") {
+        const la = (a.levels?.name || "").toLowerCase();
+        const lb = (b.levels?.name || "").toLowerCase();
+        if (la !== lb) return la.localeCompare(lb, undefined, { sensitivity: "base" });
+      }
+      return displayName(a).localeCompare(displayName(b), undefined, { sensitivity: "base" });
+    });
+
+    return filtered;
+  }, [listQ.data, search, facultyFilter, deptFilter, levelFilter, statusFilter, sortBy]);
 
   async function toggleStatus(s: StudentRow) {
     if (!schoolId) return;
@@ -179,11 +197,16 @@ function Page() {
     <>
       <PageHeader
         title="Students"
-        description="All students in your school. Add or import them from Academic Structure (under each level)."
+        description="All students in your school, sorted A–Z by name. Import updates existing matric numbers without wiping exam history."
         actions={
-          <Button variant="outline" className="font-semibold" asChild>
-            <Link to="/admin/structure">Academic Structure</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="font-semibold" asChild>
+              <Link to="/admin/student-import">Import students</Link>
+            </Button>
+            <Button variant="outline" className="font-semibold" asChild>
+              <Link to="/admin/structure">Academic Structure</Link>
+            </Button>
+          </div>
         }
       />
 
@@ -265,6 +288,17 @@ function Page() {
               <SelectItem value="invited">Invited</SelectItem>
             </SelectContent>
           </Select>
+
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
+            <SelectTrigger className="w-full sm:w-[160px]">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Name (A–Z)</SelectItem>
+              <SelectItem value="matric">Matric number</SelectItem>
+              <SelectItem value="level">Level</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {listQ.isLoading ? (
@@ -272,7 +306,7 @@ function Page() {
         ) : rows.length === 0 ? (
           <EmptyState
             title="No students found"
-            description="Add students under Academic Structure → Department → Level."
+            description="Import a CSV or add students under Academic Structure → Department → Level."
           />
         ) : (
           <div className="overflow-x-auto">
