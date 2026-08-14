@@ -55,6 +55,90 @@ export type Database = {
           },
         ]
       }
+      attempt_marks: {
+        Row: {
+          attempt_id: string
+          created_at: string
+          exam_id: string
+          feedback: string | null
+          id: string
+          marked_at: string | null
+          marked_by: string | null
+          marks_awarded: number
+          max_marks: number
+          question_id: string
+          school_id: string
+          student_id: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_id: string
+          created_at?: string
+          exam_id: string
+          feedback?: string | null
+          id?: string
+          marked_at?: string | null
+          marked_by?: string | null
+          marks_awarded?: number
+          max_marks?: number
+          question_id: string
+          school_id: string
+          student_id: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_id?: string
+          created_at?: string
+          exam_id?: string
+          feedback?: string | null
+          id?: string
+          marked_at?: string | null
+          marked_by?: string | null
+          marks_awarded?: number
+          max_marks?: number
+          question_id?: string
+          school_id?: string
+          student_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attempt_marks_attempt_id_fkey"
+            columns: ["attempt_id"]
+            isOneToOne: false
+            referencedRelation: "exam_attempts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attempt_marks_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "examinations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attempt_marks_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attempt_marks_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "attempt_marks_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_logs: {
         Row: {
           action: string
