@@ -27,7 +27,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/student/results")({
-  validateSearch: (s: Record<string, unknown>) => ({
+  validateSearch: (s: Record<string, unknown>): { id?: string } => ({
     id: typeof s.id === "string" ? s.id : undefined,
   }),
   head: () => ({

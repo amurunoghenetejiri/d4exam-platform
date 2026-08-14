@@ -20,7 +20,9 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/super-admin/schools/$id")({
-  validateSearch: (s: Record<string, unknown>) => ({
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { tab?: string; faculty?: string; department?: string; level?: string } => ({
     tab: typeof s.tab === "string" ? s.tab : undefined,
     faculty: typeof s.faculty === "string" ? s.faculty : undefined,
     department: typeof s.department === "string" ? s.department : undefined,
@@ -176,7 +178,7 @@ function Page() {
     queryFn: async () => {
       const { data: profiles, error } = await supabase
         .from("profiles")
-        .select("id, full_name, email, status, created_at, department_id, level_id")
+        .select("id, full_name, email, status, created_at")
         .eq("school_id", id)
         .order("created_at", { ascending: false })
         .limit(500);
@@ -235,7 +237,7 @@ function Page() {
     queryFn: async () => {
       const { data: profiles, error } = await supabase
         .from("profiles")
-        .select("id, full_name, email, status, created_at, department_id")
+        .select("id, full_name, email, status, created_at")
         .eq("school_id", id)
         .order("full_name")
         .limit(500);
@@ -431,7 +433,7 @@ function Page() {
     enabled: Boolean(id) && tab === "activity",
     queryFn: async () => {
       const { data: events, error } = await supabase
-        .from("security_events")
+        .from("integrity_events")
         .select("id, event_type, severity, description, created_at, student_id, exam_id")
         .eq("school_id", id)
         .order("created_at", { ascending: false })
