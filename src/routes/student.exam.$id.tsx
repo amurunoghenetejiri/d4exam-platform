@@ -328,10 +328,12 @@ function CbtExamPage() {
     }
     let cancelled = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let detector: { detect: (v: HTMLVideoElement) => Promise<any[]> } | null = null;
+    type FaceDetectorLike = { detect: (v: HTMLVideoElement) => Promise<any[]> };
+    let detector: FaceDetectorLike | null = null;
     try {
-      const FD = (window as unknown as { FaceDetector?: new (o?: object) => typeof detector }).FaceDetector;
-      if (FD) detector = new FD({ fastMode: true, maxDetectedFaces: 5 }) as typeof detector;
+      const FD = (window as unknown as { FaceDetector?: new (o?: object) => FaceDetectorLike })
+        .FaceDetector;
+      if (FD) detector = new FD({ fastMode: true, maxDetectedFaces: 5 });
     } catch {
       detector = null;
     }
