@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PublicLayout } from "@/components/layout/PublicLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,9 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { uploadSchoolLogo, validateLogoFile } from "@/lib/school-identity";
 
 export const Route = createFileRoute("/school-application")({
   head: () => ({
@@ -44,7 +45,7 @@ async function notifySuperAdmins(schoolName: string, applicationId: string) {
       })),
     );
   } catch {
-    // Application is already saved; notification is best-effort
+    // best-effort
   }
 }
 
@@ -68,10 +69,34 @@ function Page() {
   const [applicantPhone, setApplicantPhone] = useState("");
   const [notes, setNotes] = useState("");
 
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const logoRef = useRef<HTMLInputElement>(null);
+
+  function onLogoPick(f: File | null) {
+    if (!f) return;
+    const err = validateLogoFile(f);
+    if (err) {
+      setError(err);
+      return;
+    }
+    setError("");
+    setLogoFile(f);
+    setLogoPreview(URL.createObjectURL(f));
+  }
+
   async function submitApplication() {
     setError("");
+    if (!logoFile) {
+      setError("Please upload your official school logo (PNG, JPG or WebP).");
+      setStep(0);
+      return;
+    }
     setLoading(true);
     try {
+      const folder = `applications/${Date.now()}`;
+      const { url: logoUrl } = await uploadSchoolLogo({ file: logoFile, folder });
+
       const { data, error: insertError } = await supabase
         .from("school_applications")
         .insert({
@@ -88,6 +113,7 @@ function Page() {
           applicant_phone: applicantPhone.trim() || null,
           review_notes: notes.trim() || null,
           status: "pending",
+          documents: { logo_url: logoUrl } as never,
         })
         .select("id")
         .single();
@@ -98,8 +124,8 @@ function Page() {
       }
       setRefId(data.id);
       void notifySuperAdmins(schoolName.trim(), data.id);
-    } catch {
-      setError("Could not submit application. Please try again.");
+    } catch (e) {
+      setError((e as Error).message || "Could not submit application. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -107,6 +133,10 @@ function Page() {
 
   async function onFormSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (step === 0 && !logoFile) {
+      setError("School logo is required.");
+      return;
+    }
     if (step < steps.length - 1) {
       setStep((s) => s + 1);
       return;
@@ -145,7 +175,8 @@ function Page() {
       <div className="mx-auto w-full max-w-3xl px-4 py-14 sm:px-6">
         <h1 className="text-3xl font-extrabold text-slate-900 sm:text-4xl">School application</h1>
         <p className="mt-3 text-slate-600">
-          Apply for your institution. After approval you receive a school code and admin access.
+          Apply for your institution. After approval you receive a school code and admin access. An
+          official logo is required.
         </p>
 
         <ol className="mt-8 grid grid-cols-4 gap-2" aria-label="Application progress">
@@ -177,6 +208,40 @@ function Page() {
                 <Label htmlFor="iname">Institution name</Label>
                 <Input id="iname" required value={schoolName} onChange={(e) => setSchoolName(e.target.value)} placeholder="Institution name" />
               </div>
+
+              <div className="space-y-2">
+                <Label>Official school logo <span className="text-red-500">*</span></Label>
+                <input
+                  ref={logoRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => onLogoPick(e.target.files?.[0] ?? null)}
+                />
+                <div className="flex flex-wrap items-center gap-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                  {logoPreview ? (
+                    <img src={logoPreview} alt="Logo preview" className="h-16 w-16 rounded-lg object-contain bg-white" />
+                  ) : (
+                    <div className="grid h-16 w-16 place-items-center rounded-lg bg-white text-xs text-slate-400">
+                      Logo
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-slate-600">PNG, JPG or WebP · max 2MB</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 gap-1.5 font-semibold"
+                      onClick={() => logoRef.current?.click()}
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      {logoFile ? "Change logo" : "Upload logo"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="itype">Institution type</Label>
@@ -247,7 +312,12 @@ function Page() {
 
           {step === 3 && (
             <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-              <p><strong>School:</strong> {schoolName || "—"} ({schoolType})</p>
+              <div className="flex items-center gap-3">
+                {logoPreview && (
+                  <img src={logoPreview} alt="" className="h-12 w-12 rounded-lg object-contain bg-white" />
+                )}
+                <p><strong>School:</strong> {schoolName || "—"} ({schoolType})</p>
+              </div>
               <p><strong>Location:</strong> {[city, state, country].filter(Boolean).join(", ") || "—"}</p>
               <p><strong>Official email:</strong> {officialEmail || "—"}</p>
               <p><strong>Applicant:</strong> {applicantName || "—"} · {applicantEmail || "—"}</p>
