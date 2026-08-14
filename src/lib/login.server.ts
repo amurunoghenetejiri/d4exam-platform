@@ -35,16 +35,15 @@ export async function provisionStudentLogin(params: {
   const ident = identifier.trim();
 
   // Targeted lookup — was .limit(2000) full table scan in memory (multi-second)
-  let student:
-    | {
-        id: string;
-        student_id: string;
-        matric_number: string | null;
-        full_name: string | null;
-        status: string;
-        profile_id: string | null;
-      }
-    | null = null;
+  type StudentLookupRow = {
+    id: string;
+    student_id: string;
+    matric_number: string | null;
+    full_name: string | null;
+    status: string;
+    profile_id: string | null;
+  };
+  let student: StudentLookupRow | null = null;
 
   const { data: byMatric } = await supabaseAdmin
     .from("students")
@@ -55,7 +54,7 @@ export async function provisionStudentLogin(params: {
     .maybeSingle();
 
   if (byMatric) {
-    student = byMatric as typeof student;
+    student = byMatric as unknown as StudentLookupRow;
   } else {
     const { data: bySid } = await supabaseAdmin
       .from("students")
@@ -64,7 +63,7 @@ export async function provisionStudentLogin(params: {
       .ilike("student_id", ident)
       .limit(1)
       .maybeSingle();
-    student = (bySid as typeof student) ?? null;
+    student = (bySid as unknown as StudentLookupRow | null) ?? null;
   }
 
   // Optional name match only if identifier looks like a name (has space)
@@ -77,7 +76,7 @@ export async function provisionStudentLogin(params: {
       .limit(3);
     const want = normalizeName(ident);
     student =
-      ((byName ?? []) as NonNullable<typeof student>[]).find(
+      ((byName ?? []) as unknown as StudentLookupRow[]).find(
         (s) => normalizeName(s.full_name || "") === want,
       ) ?? null;
   }

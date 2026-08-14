@@ -327,16 +327,16 @@ function CbtExamPage() {
       void video.play().catch(() => {});
     }
     let cancelled = false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    type FaceDetectorLike = { detect: (v: HTMLVideoElement) => Promise<any[]> };
-    let detector: FaceDetectorLike | null = null;
-    try {
-      const FD = (window as unknown as { FaceDetector?: new (o?: object) => FaceDetectorLike })
-        .FaceDetector;
-      if (FD) detector = new FD({ fastMode: true, maxDetectedFaces: 5 });
-    } catch {
-      detector = null;
-    }
+    let engine: FaceEngine | null = null;
+    let interval = 0;
+
+    // Debounce: require N consecutive frames before changing state, and only
+    // log a database event on a real state change (plus a periodic heartbeat
+    // carrying the duration of a continuing violation).
+    let candidate: FaceState | null = null;
+    let candidateHits = 0;
+    let stateSince = Date.now();
+    let lastPeriodicLog = 0;
 
     const maybeFaceThreshold = () => {
       const max = security.maxFaceWarnings || 5;
@@ -354,49 +354,120 @@ function CbtExamPage() {
       }
     };
 
-    const applyFaceState = (next: FaceState, faceCount: number) => {
+    const enterState = (next: FaceState, faceCount: number) => {
       const prev = prevFaceRef.current;
+      const heldMs = Date.now() - stateSince;
       setFaceStatus(next);
       prevFaceRef.current = next;
+      stateSince = Date.now();
+      lastPeriodicLog = Date.now();
+
       if (next === "none") {
-        toastCooldowned("face-none", "⚠️ Face not detected. Please position your face within the camera view.");
-        logEvent("FACE_NOT_DETECTED", "medium", "No face detected", { faces: 0 });
+        toastCooldowned("face-none", "⚠️ Face not detected. Please position your face clearly in front of the camera.");
+        logEvent("FACE_NOT_DETECTED", "medium", "No face detected", {
+          faces: 0,
+          engine: engine?.backend ?? "none",
+        });
         faceWarnCountRef.current += 1;
         maybeFaceThreshold();
       } else if (next === "multi") {
         toastCooldowned(
-          `face-multi-${faceCount}`,
-          faceCount === 2
-            ? "⚠️ 2 faces detected. Only the registered student should be visible."
-            : "⚠️ Multiple faces detected. Please ensure only you are visible.",
+          "face-multi",
+          "⚠️ Multiple faces detected. Only the registered student should be visible.",
         );
-        logEvent("MULTIPLE_FACES_DETECTED", "high", `${faceCount} faces detected`, { faces: faceCount });
+        logEvent("MULTIPLE_FACES_DETECTED", "high", `${faceCount} faces detected`, {
+          faces: faceCount,
+          engine: engine?.backend ?? "none",
+        });
         faceWarnCountRef.current += 1;
         maybeFaceThreshold();
       } else if (next === "ok" && (prev === "none" || prev === "multi")) {
-        toastCooldowned("face-ok", "✓ Face detected. Monitoring restored.", "ok");
-        logEvent("ONE_FACE_DETECTED", "low", "Face monitoring restored", { faces: 1 });
+        toastCooldowned("face-ok", "✓ Face detected.", "ok");
+        logEvent("ONE_FACE_DETECTED", "low", "Face detection restored", {
+          faces: 1,
+          previous_state: prev,
+          violation_duration_ms: heldMs,
+          violation_duration_seconds: Math.round(heldMs / 1000),
+        });
+      }
+    };
+
+    const applyFaceState = (next: FaceState, faceCount: number) => {
+      const current = prevFaceRef.current;
+      if (next === current) {
+        candidate = null;
+        candidateHits = 0;
+        // Continuing violation: warn + record a periodic summary (max 1/min)
+        if (next === "none" || next === "multi") {
+          const held = Date.now() - stateSince;
+          if (next === "none") {
+            toastCooldowned(
+              "face-none",
+              "⚠️ Face not detected. Please position your face clearly in front of the camera.",
+            );
+          } else {
+            toastCooldowned(
+              "face-multi",
+              "⚠️ Multiple faces detected. Only the registered student should be visible.",
+            );
+          }
+          if (Date.now() - lastPeriodicLog >= 60_000) {
+            lastPeriodicLog = Date.now();
+            logEvent(
+              next === "none" ? "FACE_NOT_DETECTED" : "MULTIPLE_FACES_DETECTED",
+              next === "none" ? "medium" : "high",
+              `${next === "none" ? "No face" : "Multiple faces"} ongoing for ${Math.round(held / 1000)}s`,
+              {
+                faces: faceCount,
+                ongoing: true,
+                duration_ms: held,
+                duration_seconds: Math.round(held / 1000),
+              },
+            );
+          }
+        }
+        return;
+      }
+      if (candidate !== next) {
+        candidate = next;
+        candidateHits = 1;
+        return;
+      }
+      candidateHits += 1;
+      // 2 consecutive confirmations (~2s) avoid flicker false-positives
+      if (candidateHits >= 2) {
+        candidate = null;
+        candidateHits = 0;
+        enterState(next, faceCount);
       }
     };
 
     const tick = async () => {
-      if (cancelled || !video || video.readyState < 2) return;
-      if (!detector) {
-        setFaceStatus("unknown");
+      if (cancelled || !video) return;
+      if (!engine) return;
+      const n = await engine.count(video);
+      if (n == null) return;
+      if (n === 0) applyFaceState("none", 0);
+      else if (n >= 2) applyFaceState("multi", n);
+      else applyFaceState("ok", 1);
+    };
+
+    void (async () => {
+      const e = await createFaceEngine();
+      if (cancelled) {
+        e?.close();
         return;
       }
-      try {
-        const faces = await detector.detect(video);
-        const n = faces?.length ?? 0;
-        if (n === 0) applyFaceState("none", 0);
-        else if (n >= 2) applyFaceState("multi", n);
-        else applyFaceState("ok", 1);
-      } catch {
-        setFaceStatus("unknown");
+      engine = e;
+      if (!engine) {
+        setFaceStatus("unavailable");
+        logEvent("SECURITY_CHECK_FAILED", "low", "Face detection unsupported on this device");
+        return;
       }
-    };
-    const interval = window.setInterval(() => void tick(), 3000);
-    void tick();
+      interval = window.setInterval(() => void tick(), 1000);
+      void tick();
+    })();
+
     return () => {
       cancelled = true;
       window.clearInterval(interval);
