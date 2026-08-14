@@ -63,7 +63,7 @@ export async function provisionStudentLogin(params: {
       .ilike("student_id", ident)
       .limit(1)
       .maybeSingle();
-    student = (bySid as typeof student) ?? null;
+    student = (bySid as unknown as StudentLookupRow | null) ?? null;
   }
 
   // Optional name match only if identifier looks like a name (has space)
@@ -76,7 +76,7 @@ export async function provisionStudentLogin(params: {
       .limit(3);
     const want = normalizeName(ident);
     student =
-      ((byName ?? []) as NonNullable<typeof student>[]).find(
+      ((byName ?? []) as unknown as StudentLookupRow[]).find(
         (s) => normalizeName(s.full_name || "") === want,
       ) ?? null;
   }
