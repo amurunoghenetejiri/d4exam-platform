@@ -116,6 +116,7 @@ export type Database = {
           id: string
           level_id: string
           school_id: string
+          semester_id: string | null
           status: string
         }
         Insert: {
@@ -125,6 +126,7 @@ export type Database = {
           id?: string
           level_id: string
           school_id: string
+          semester_id?: string | null
           status?: string
         }
         Update: {
@@ -134,6 +136,7 @@ export type Database = {
           id?: string
           level_id?: string
           school_id?: string
+          semester_id?: string | null
           status?: string
         }
         Relationships: [
@@ -165,6 +168,13 @@ export type Database = {
             referencedRelation: "schools"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "course_offerings_semester_id_fkey"
+            columns: ["semester_id"]
+            isOneToOne: false
+            referencedRelation: "semesters"
+            referencedColumns: ["id"]
+          },
         ]
       }
       courses: {
@@ -178,6 +188,7 @@ export type Database = {
           level_id: string | null
           name: string
           school_id: string
+          semester_id: string | null
           status: string
           updated_at: string
         }
@@ -191,6 +202,7 @@ export type Database = {
           level_id?: string | null
           name: string
           school_id: string
+          semester_id?: string | null
           status?: string
           updated_at?: string
         }
@@ -204,6 +216,7 @@ export type Database = {
           level_id?: string | null
           name?: string
           school_id?: string
+          semester_id?: string | null
           status?: string
           updated_at?: string
         }
@@ -227,6 +240,13 @@ export type Database = {
             columns: ["school_id"]
             isOneToOne: false
             referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "courses_semester_id_fkey"
+            columns: ["semester_id"]
+            isOneToOne: false
+            referencedRelation: "semesters"
             referencedColumns: ["id"]
           },
         ]
@@ -1250,6 +1270,54 @@ export type Database = {
           },
           {
             foreignKeyName: "student_courses_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      student_history: {
+        Row: {
+          action: string
+          actor_user_id: string | null
+          created_at: string
+          description: string | null
+          id: string
+          metadata: Json
+          school_id: string
+          student_id: string
+        }
+        Insert: {
+          action: string
+          actor_user_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          metadata?: Json
+          school_id: string
+          student_id: string
+        }
+        Update: {
+          action?: string
+          actor_user_id?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          metadata?: Json
+          school_id?: string
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "student_history_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "student_history_student_id_fkey"
             columns: ["student_id"]
             isOneToOne: false
             referencedRelation: "students"
