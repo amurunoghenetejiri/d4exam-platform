@@ -62,8 +62,6 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
     const password = data.password;
     const genericError = "Invalid school code, identifier or password.";
 
-    // ——— Super admin / platform staff: email + password, no school code ———
-    // Accept empty code, SYSTEM, D4, D4EXAM, PLATFORM
     const platformCodes = new Set(["", "SYSTEM", "D4", "D4EXAM", "PLATFORM", "SUPER"]);
     if (platformCodes.has(code) && looksLikeEmail(ident)) {
       const { data: signIn, error } = await publicClient.auth.signInWithPassword({
@@ -71,7 +69,6 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
         password,
       });
       if (!error && signIn.session) {
-        // Prefer super_admin role; still allow if any role resolves later
         await writeLoginAudit({
           schoolId: null,
           userId: signIn.user?.id ?? null,
@@ -84,13 +81,11 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
           },
         };
       }
-      // If platform path failed and code was empty, stop (don't force school lookup)
       if (!code) {
         return { error: "Invalid email or password. Super admin does not need a school code." };
       }
     }
 
-    // 1) Resolve the sign-in email through a database function
     let email: string | null = null;
     let accountStatus: string | null = null;
 
@@ -122,7 +117,6 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
 
     let signInPassword = password;
 
-    // 2) Student auto-provision fallback
     if (!email && code) {
       if (hasAdminKey()) {
         const { data: school } = await publicClient
@@ -148,7 +142,6 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
       }
     }
 
-    // 3) Direct email login for staff when identifier is an email (with school code)
     if (!email && looksLikeEmail(ident)) {
       email = ident.toLowerCase();
     }
@@ -234,6 +227,9 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
       });
       schoolCode = code as string;
 
+      const docs = (app.documents ?? {}) as { logo_url?: string };
+      const logoUrl = typeof docs.logo_url === "string" && docs.logo_url ? docs.logo_url : null;
+
       const { data: school, error: schoolError } = await supabaseAdmin
         .from("schools")
         .insert({
@@ -246,6 +242,7 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
           address: app.address,
           official_email: app.official_email,
           official_phone: app.official_phone,
+          logo_url: logoUrl,
           status: "active",
           approved_at: new Date().toISOString(),
           approved_by: context.userId,
@@ -304,7 +301,7 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
         entity_type: "school",
         entity_id: school.id,
         description: `Approved ${app.school_name} (${schoolCode}) with instant school admin credentials`,
-        metadata: { profile_id: profile?.id ?? null },
+        metadata: { profile_id: profile?.id ?? null, logo_url: logoUrl },
       });
     } else {
       await supabaseAdmin.from("audit_logs").insert({
