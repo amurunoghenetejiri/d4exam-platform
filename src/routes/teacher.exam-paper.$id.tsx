@@ -136,7 +136,7 @@ function Page() {
         if (e2) throw e2;
         return ((d2 ?? []) as Q[]).map((q) => ({ ...q, options: [] }));
       }
-      return (data ?? []) as Q[];
+      return (data ?? []) as unknown as Q[];
     },
   });
 
