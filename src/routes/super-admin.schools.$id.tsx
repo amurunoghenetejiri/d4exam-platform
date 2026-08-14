@@ -176,7 +176,7 @@ function Page() {
     queryFn: async () => {
       const { data: profiles, error } = await supabase
         .from("profiles")
-        .select("id, full_name, email, status, created_at, department_id, level_id")
+        .select("id, full_name, email, status, created_at")
         .eq("school_id", id)
         .order("created_at", { ascending: false })
         .limit(500);
@@ -431,7 +431,7 @@ function Page() {
     enabled: Boolean(id) && tab === "activity",
     queryFn: async () => {
       const { data: events, error } = await supabase
-        .from("security_events")
+        .from("integrity_events")
         .select("id, event_type, severity, description, created_at, student_id, exam_id")
         .eq("school_id", id)
         .order("created_at", { ascending: false })
