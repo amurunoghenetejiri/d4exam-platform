@@ -105,3 +105,44 @@ export interface ExamSecuritySettings {
   resultVisibility: ResultVisibility;
   questionsToAnswer?: number | null;
 }
+
+export interface Question {
+  id: string;
+  text: string;
+  options: string[];
+  answer: number;
+  type: string;
+  marks: number;
+  topic?: string;
+  difficulty?: string;
+  courseCode?: string;
+}
+
+export interface ResultRecord {
+  id: string;
+  course: string;
+  title: string;
+  score: number;
+  grade: string;
+  status: string;
+  session?: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  title: string;
+  body: string;
+  time: string;
+  type: "info" | "success" | "warning" | "error" | string;
+  read: boolean;
+}
+
+export interface ExamEligibilityContext {
+  schoolId?: string | null;
+  facultyId?: string | null;
+  departmentId?: string | null;
+  levelId?: string | null;
+  sessionId?: string | null;
+  semesterId?: string | null;
+  enrolledCourseIds: string[];
+}
