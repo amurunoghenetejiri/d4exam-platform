@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Ban, CheckCircle2 } from "lucide-react";
+import { Search, Ban, CheckCircle2, Eye } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,7 +73,6 @@ function Page() {
         .limit(2000);
 
       if (error) {
-        // full_name column may not exist yet
         const { data: d2, error: e2 } = await supabase
           .from("students")
           .select(
@@ -277,7 +276,7 @@ function Page() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
+            <table className="w-full min-w-[800px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                   <th className="py-2 pr-3">SN</th>
@@ -305,24 +304,32 @@ function Page() {
                         <StatusBadge status={s.status} />
                       </td>
                       <td className="py-2.5">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 gap-1 text-xs font-semibold"
-                          onClick={() => void toggleStatus(s)}
-                        >
-                          {suspended ? (
-                            <>
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                              Unsuspend
-                            </>
-                          ) : (
-                            <>
-                              <Ban className="h-3.5 w-3.5" />
-                              Suspend
-                            </>
-                          )}
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Button size="sm" variant="outline" className="h-8 gap-1 text-xs font-semibold" asChild>
+                            <a href={`/admin/student/${s.id}`}>
+                              <Eye className="h-3.5 w-3.5 text-primary" />
+                              View
+                            </a>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 gap-1 text-xs font-semibold"
+                            onClick={() => void toggleStatus(s)}
+                          >
+                            {suspended ? (
+                              <>
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                                Unsuspend
+                              </>
+                            ) : (
+                              <>
+                                <Ban className="h-3.5 w-3.5" />
+                                Suspend
+                              </>
+                            )}
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
