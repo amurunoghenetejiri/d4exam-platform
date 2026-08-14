@@ -57,6 +57,14 @@ type PaperItem = {
   section: string;
 };
 
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, "&")
+    .replace(/</g, "<")
+    .replace(/>/g, ">")
+    .replace(/"/g, """);
+}
+
 function Page() {
   const { id } = Route.useParams();
   const { data: teacher } = useTeacherContext();
@@ -290,34 +298,54 @@ function Page() {
     }
     const exam = examQ.data!;
     const lines: string[] = [];
-    lines.push(`<html><head><title>${exam.title}</title>`);
-    lines.push(`<style>
-      body{font-family:system-ui,sans-serif;max-width:800px;margin:24px auto;padding:0 16px;color:#0f172a}
-      h1{font-size:20px;margin:0 0 4px} .meta{color:#64748b;font-size:13px;margin-bottom:20px}
-      .q{border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin-bottom:12px}
-      .q h3{margin:0 0 8px;font-size:14px} .opts{margin:0;padding-left:18px;font-size:13px}
-      .key{color:#059669;font-size:12px;margin-top:6px} @media print{.no-print{display:none}}
-    </style></head><body>`);
-    lines.push(`<h1>${escapeHtml(exam.title)}</h1>`);
+    lines.push("<html><head><title>" + escapeHtml(exam.title) + "</title>");
     lines.push(
-      `<p class="meta">${escapeHtml(exam.courses?.code || "")} — ${escapeHtml(exam.courses?.name || "")} · ${paper.length} questions · ${totalMarks} marks</p>`,
+      "<style>" +
+        "body{font-family:system-ui,sans-serif;max-width:800px;margin:24px auto;padding:0 16px;color:#0f172a}" +
+        "h1{font-size:20px;margin:0 0 4px}.meta{color:#64748b;font-size:13px;margin-bottom:20px}" +
+        ".q{border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin-bottom:12px}" +
+        ".q h3{margin:0 0 8px;font-size:14px}.opts{margin:0;padding-left:18px;font-size:13px}" +
+        ".key{color:#059669;font-size:12px;margin-top:6px}@media print{.no-print{display:none}}" +
+        "</style></head><body>",
+    );
+    lines.push("<h1>" + escapeHtml(exam.title) + "</h1>");
+    lines.push(
+      '<p class="meta">' +
+        escapeHtml(exam.courses?.code || "") +
+        " — " +
+        escapeHtml(exam.courses?.name || "") +
+        " · " +
+        paper.length +
+        " questions · " +
+        totalMarks +
+        " marks</p>",
     );
     paper.forEach((p, i) => {
       const q = bank.find((b) => b.id === p.question_id);
       if (!q) return;
       const opts = parseQuestionOptions(q);
-      lines.push(`<div class="q"><h3>Q${i + 1}. ${escapeHtml(q.question_text)} <span style="color:#64748b;font-weight:500">(${p.marks} mk)</span></h3>`);
+      lines.push(
+        '<div class="q"><h3>Q' +
+          (i + 1) +
+          ". " +
+          escapeHtml(q.question_text) +
+          ' <span style="color:#64748b;font-weight:500">(' +
+          p.marks +
+          " mk)</span></h3>",
+      );
       if (opts.length) {
-        lines.push("<ol class=\"opts\" type=\"A\">");
-        for (const o of opts) lines.push(`<li>${escapeHtml(o.text)}</li>`);
+        lines.push('<ol class="opts" type="A">');
+        for (const o of opts) lines.push("<li>" + escapeHtml(o.text) + "</li>");
         lines.push("</ol>");
       }
       if (includeKey && q.correct_answer) {
-        lines.push(`<p class="key">Answer: ${escapeHtml(q.correct_answer)}</p>`);
+        lines.push('<p class="key">Answer: ' + escapeHtml(q.correct_answer) + "</p>");
       }
       lines.push("</div>");
     });
-    lines.push(`<p class="no-print"><button onclick="window.print()">Print / Save PDF</button></p>`);
+    lines.push(
+      '<p class="no-print"><button onclick="window.print()">Print / Save PDF</button></p>',
+    );
     lines.push("</body></html>");
     const w = window.open("", "_blank");
     if (!w) {
@@ -409,10 +437,14 @@ function Page() {
               <FileDown className="mr-1.5 h-4 w-4" />
               Export (with key)
             </Button>
-            <Button variant="outline" disabled={!paper.length} onClick={() => {
-              setIncludeKey(false);
-              setTimeout(() => exportPrintable(), 0);
-            }}>
+            <Button
+              variant="outline"
+              disabled={!paper.length}
+              onClick={() => {
+                setIncludeKey(false);
+                setTimeout(() => exportPrintable(), 0);
+              }}
+            >
               <FileDown className="mr-1.5 h-4 w-4" />
               Export / Print
             </Button>
@@ -569,12 +601,4 @@ function Page() {
       </div>
     </>
   );
-}
-
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
-    .replace(/"/g, """);
 }
