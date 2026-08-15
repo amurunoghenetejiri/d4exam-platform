@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
+import { PageHeader, SectionCard, StatusBadge, EmptyState, NavCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { CheckSquare, Radio, FileText, ShieldAlert } from "lucide-react";
 import { useCount, useRows } from "@/lib/queries";
@@ -116,20 +116,23 @@ function Page() {
           ) : (
             <ul className="space-y-3">
               {(exams.data ?? []).map((e) => (
-                <li
-                  key={e.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
-                    <p className="text-xs text-slate-500">
-                      {e.courses?.code ?? "—"} ·{" "}
-                      {e.scheduled_start
-                        ? new Date(e.scheduled_start).toLocaleString()
-                        : "Not scheduled"}
-                    </p>
-                  </div>
-                  <StatusBadge status={String(e.status).replaceAll("_", " ")} />
+                <li key={e.id}>
+                  <NavCard
+                    to="/officer/approvals"
+                    ariaLabel={`Review ${e.title}`}
+                    className="flex items-center justify-between gap-3 rounded-xl border-slate-100 p-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {e.courses?.code ?? "—"} ·{" "}
+                        {e.scheduled_start
+                          ? new Date(e.scheduled_start).toLocaleString()
+                          : "Not scheduled"}
+                      </p>
+                    </div>
+                    <StatusBadge status={String(e.status).replaceAll("_", " ")} />
+                  </NavCard>
                 </li>
               ))}
             </ul>
@@ -152,14 +155,17 @@ function Page() {
           ) : (
             <ul className="space-y-3">
               {(logs.data ?? []).map((l) => (
-                <li
-                  key={l.id}
-                  className="border-b border-slate-100 pb-3 last:border-0 last:pb-0"
-                >
-                  <p className="text-sm font-semibold text-slate-900">{l.action}</p>
-                  <p className="text-xs text-slate-500">
-                    {l.description || "—"} · {new Date(l.created_at).toLocaleString()}
-                  </p>
+                <li key={l.id}>
+                  <NavCard
+                    to="/officer/audit-logs"
+                    ariaLabel={l.action}
+                    className="border-slate-100 p-3"
+                  >
+                    <p className="text-sm font-semibold text-slate-900">{l.action}</p>
+                    <p className="text-xs text-slate-500">
+                      {l.description || "—"} · {new Date(l.created_at).toLocaleString()}
+                    </p>
+                  </NavCard>
                 </li>
               ))}
             </ul>
@@ -188,10 +194,7 @@ function Stat({
   color: string;
 }) {
   return (
-    <Link
-      to={to}
-      className="block rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm transition hover:border-primary/40 hover:shadow-md"
-    >
+    <NavCard to={to} ariaLabel={label}>
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs font-semibold text-slate-500">{label}</p>
@@ -201,6 +204,6 @@ function Stat({
           <Icon className="h-4 w-4" />
         </span>
       </div>
-    </Link>
+    </NavCard>
   );
 }
