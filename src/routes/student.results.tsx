@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { PageHeader, EmptyState, StatusBadge } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
-import { Logo } from "@/components/brand/Logo";
+import { SchoolResultHeader } from "@/components/brand/SchoolResultHeader";
 import { useStudentContext } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -164,7 +164,7 @@ function Page() {
     if (!r) {
       return (
         <div className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-          <Logo size="md" className="mx-auto justify-center" />
+          <SchoolResultHeader schoolId={student.schoolId} centered className="justify-center" />
           <p className="mt-4 font-bold text-slate-900">Result not found</p>
           <p className="mt-2 text-sm text-slate-500">This result is not available for your account.</p>
           <Button className="mt-6" variant="outline" onClick={() => void navigate({ to: "/student/results", search: {} })}>
@@ -174,7 +174,6 @@ function Page() {
       );
     }
 
-    // Prefer dedicated detail route when we have a real result id
     if (r.id && detailId !== r.id) {
       void navigate({ to: "/student/results/$id", params: { id: r.id }, replace: true });
     }
@@ -197,7 +196,7 @@ function Page() {
       <div className="mx-auto max-w-5xl space-y-5 pb-10">
         <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
           <div className="min-w-0 flex-1">
-            <Logo size="md" />
+            <SchoolResultHeader schoolId={student.schoolId} size="lg" />
             <p className="mt-3 text-xs font-semibold text-slate-400">
               <button type="button" className="hover:text-primary" onClick={() => void navigate({ to: "/student/results", search: {} })}>
                 My Results
