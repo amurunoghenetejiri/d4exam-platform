@@ -174,7 +174,7 @@ export function useStudentContext() {
   return useQuery({
     queryKey: ["student-context", session?.profileId, session?.schoolId],
     enabled: Boolean(session?.profileId && session?.schoolId && session.role === "student"),
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
     queryFn: async (): Promise<StudentContext | null> => {
       if (!session?.profileId || !session.schoolId) return null;
 
@@ -207,15 +207,16 @@ export function useStudentContext() {
 
       if (!student) return null;
 
-      const { sessionName, semesterName, semesterId } = await loadActiveSessionSemester(
-        session.schoolId,
-      );
-
-      const { data: links } = await supabase
-        .from("student_courses")
-        .select("course_id, semester_id, courses(id, code, name)")
-        .eq("student_id", student.id as string)
-        .eq("school_id", session.schoolId);
+      const [term, linksRes] = await Promise.all([
+        loadActiveSessionSemester(session.schoolId),
+        supabase
+          .from("student_courses")
+          .select("course_id, semester_id, courses(id, code, name)")
+          .eq("student_id", student.id as string)
+          .eq("school_id", session.schoolId),
+      ]);
+      const { sessionName, semesterName, semesterId } = term;
+      const { data: links } = linksRes;
 
       const byId = new Map<string, StudentCourse>();
       for (const row of links ?? []) {
@@ -271,17 +272,10 @@ export function useStudentContext() {
 export function useStudentRealtimeSync(enabled = true) {
   useRealtimeInvalidate(
     "student-context-sync",
-    [
-      { table: "students" },
-      { table: "student_courses" },
-      { table: "courses" },
-      { table: "course_offerings" },
-      { table: "semesters" },
-      { table: "academic_sessions" },
-      { table: "profiles" },
-    ],
+    [{ table: "student_courses" }],
     [["student-context"]],
     enabled,
+    2500,
   );
 }
 
