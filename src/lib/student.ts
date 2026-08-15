@@ -37,7 +37,6 @@ export type StudentContext = {
   courseIds: string[];
 };
 
-
 /** Statuses a student is allowed to see (officer must have approved). */
 export const STUDENT_VISIBLE_EXAM_STATUSES = [
   "approved",
@@ -63,38 +62,59 @@ async function loadProgrammeCourses(
   semesterId: string | null,
 ): Promise<StudentCourse[]> {
   const byId = new Map<string, StudentCourse>();
-  // Courses carrying no semester tag stay visible all year round.
+  // Courses with no semester stay visible all year.
   const semesterFilter = semesterId ? `semester_id.eq.${semesterId},semester_id.is.null` : null;
 
-  if (departmentId && levelId) {
+  function addCourse(c: { id?: string; code?: string; name?: string } | null | undefined) {
+    if (c?.id) byId.set(c.id, { id: c.id, code: c.code ?? "", name: c.name ?? "" });
+  }
+
+  // 1) Offerings for this student's department (and level when set)
+  if (departmentId) {
     let oq = supabase
       .from("course_offerings")
-      .select("course_id, semester_id, courses(id, code, name)")
+      .select("course_id, semester_id, level_id, courses(id, code, name)")
       .eq("school_id", schoolId)
-      .eq("department_id", departmentId)
-      .eq("level_id", levelId);
+      .eq("department_id", departmentId);
+    if (levelId) oq = oq.eq("level_id", levelId);
     if (semesterFilter) oq = oq.or(semesterFilter);
     const { data: offerings } = await oq;
-
     for (const row of offerings ?? []) {
-      const c = row.courses as { id: string; code: string; name: string } | null;
-      if (c?.id) byId.set(c.id, { id: c.id, code: c.code, name: c.name });
+      addCourse(row.courses as { id: string; code: string; name: string } | null);
     }
   }
 
+  // 2) Courses tagged to this department
   if (departmentId) {
     let q = supabase
       .from("courses")
-      .select("id, code, name, semester_id")
+      .select("id, code, name, semester_id, level_id")
       .eq("school_id", schoolId)
       .eq("department_id", departmentId)
       .eq("status", "active");
-    if (levelId) q = q.eq("level_id", levelId);
+    // Level: match student's level OR courses with no level (any level)
+    if (levelId) {
+      q = q.or(`level_id.eq.${levelId},level_id.is.null`);
+    }
     if (semesterFilter) q = q.or(semesterFilter);
     const { data: tagged } = await q;
-    for (const c of tagged ?? []) {
-      if (c?.id) byId.set(c.id as string, { id: c.id as string, code: c.code as string, name: c.name as string });
+    for (const c of tagged ?? []) addCourse(c);
+  }
+
+  // 3) "All departments" courses (department_id is null) — visible to every student
+  {
+    let q = supabase
+      .from("courses")
+      .select("id, code, name, semester_id, level_id")
+      .eq("school_id", schoolId)
+      .is("department_id", null)
+      .eq("status", "active");
+    if (levelId) {
+      q = q.or(`level_id.eq.${levelId},level_id.is.null`);
     }
+    if (semesterFilter) q = q.or(semesterFilter);
+    const { data: globalCourses } = await q;
+    for (const c of globalCourses ?? []) addCourse(c);
   }
 
   const list = [...byId.values()];
@@ -102,12 +122,12 @@ async function loadProgrammeCourses(
   return list;
 }
 
-
 async function loadActiveSessionSemester(schoolId: string): Promise<{
   sessionName: string | null;
   semesterName: string | null;
   semesterId: string | null;
 }> {
+  // Prefer explicitly active session; else fall back to school-wide active semester
   const { data: sessions } = await supabase
     .from("academic_sessions")
     .select("id, name, status")
@@ -122,6 +142,7 @@ async function loadActiveSessionSemester(schoolId: string): Promise<{
 
   let semesterName: string | null = null;
   let semesterId: string | null = null;
+
   if (activeSession?.id) {
     const { data: semesters } = await supabase
       .from("semesters")
@@ -138,13 +159,28 @@ async function loadActiveSessionSemester(schoolId: string): Promise<{
     semesterId = (activeSem?.id as string | null) ?? null;
   }
 
+  // Fallback: any active semester for the school (not linked to session)
+  if (!semesterId) {
+    const { data: anySem } = await supabase
+      .from("semesters")
+      .select("id, name, status")
+      .eq("school_id", schoolId)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    const activeSem =
+      (anySem ?? []).find((s) => String(s.status).toLowerCase() === "active") ??
+      (anySem ?? [])[0] ??
+      null;
+    semesterName = (activeSem?.name as string | null) ?? semesterName;
+    semesterId = (activeSem?.id as string | null) ?? null;
+  }
+
   return {
     sessionName: (activeSession?.name as string | null) ?? null,
     semesterName,
     semesterId,
   };
 }
-
 
 export function useStudentContext() {
   const { data: session } = useSessionUser();
@@ -156,7 +192,10 @@ export function useStudentContext() {
     queryFn: async (): Promise<StudentContext | null> => {
       if (!session?.profileId || !session.schoolId) return null;
 
-      const { data: student, error: sErr } = await supabase
+      // Prefer profile link; fall back to matric match if import cleared profile_id
+      let student: Record<string, unknown> | null = null;
+
+      const { data: byProfile, error: sErr } = await supabase
         .from("students")
         .select(
           "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, full_name, status, departments(name), faculties(name), levels(name)",
@@ -166,6 +205,21 @@ export function useStudentContext() {
         .maybeSingle();
 
       if (sErr) throw sErr;
+      student = byProfile as Record<string, unknown> | null;
+
+      if (!student && session.identifier) {
+        const { data: byMatric } = await supabase
+          .from("students")
+          .select(
+            "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, full_name, status, departments(name), faculties(name), levels(name)",
+          )
+          .eq("school_id", session.schoolId)
+          .ilike("matric_number", session.identifier)
+          .limit(1)
+          .maybeSingle();
+        student = (byMatric as Record<string, unknown> | null) ?? null;
+      }
+
       if (!student) return null;
 
       const { sessionName, semesterName, semesterId } = await loadActiveSessionSemester(
@@ -175,7 +229,7 @@ export function useStudentContext() {
       const { data: links } = await supabase
         .from("student_courses")
         .select("course_id, semester_id, courses(id, code, name)")
-        .eq("student_id", student.id)
+        .eq("student_id", student.id as string)
         .eq("school_id", session.schoolId);
 
       const byId = new Map<string, StudentCourse>();
@@ -200,12 +254,12 @@ export function useStudentContext() {
       const faculties = student.faculties as { name: string } | null;
       const levels = student.levels as { name: string } | null;
 
-      const status = String((student as { status?: string | null }).status ?? "active");
-
+      const status = String((student.status as string | null) ?? "active");
 
       return {
         studentId: student.id as string,
-        matric: (student.matric_number as string | null) ?? (student.student_id as string | null) ?? null,
+        matric:
+          (student.matric_number as string | null) ?? (student.student_id as string | null) ?? null,
         schoolId: student.school_id as string,
         profileId: (student.profile_id as string | null) ?? session.profileId,
         fullName: (student.full_name as string | null) || session.fullName,
@@ -250,8 +304,6 @@ export function useStudentRealtimeSync(enabled = true) {
     enabled,
   );
 }
-
-
 
 export function canStartExam(status: string, scheduledStart: string | null): boolean {
   const s = status.toLowerCase();
