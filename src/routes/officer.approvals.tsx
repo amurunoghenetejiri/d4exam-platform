@@ -144,31 +144,30 @@ function Page() {
     staleTime: 20_000,
     queryFn: async () => {
       try {
-        const { data, error } = await supabase
-          .from("exam_settings")
-          .select(
-            "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility, questions_to_answer",
-          )
-          .in("exam_id", examIds);
-        if (error) {
-          const { data: d2, error: e2 } = await supabase
-            .from("exam_settings")
-            .select(
-              "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility",
-            )
-            .in("exam_id", examIds);
-          if (e2) {
-            console.warn("exam_settings not available:", e2.message);
-            return {} as Record<string, ExamSettingsRow>;
+        const FULL_COLS =
+          "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, require_screen_share, screen_share_mode, face_detection, max_face_warnings, face_violation_action, threshold_action, total_marks, instructions, result_visibility, questions_to_answer";
+        const MID_COLS =
+          "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility, questions_to_answer";
+        const BASIC_COLS =
+          "exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility";
+
+        let data: ExamSettingsRow[] | null = null;
+        let error: { message: string } | null = null;
+        for (const cols of [FULL_COLS, MID_COLS, BASIC_COLS]) {
+          const res = await supabase.from("exam_settings").select(cols).in("exam_id", examIds);
+          if (!res.error) {
+            data = (res.data ?? []) as ExamSettingsRow[];
+            error = null;
+            break;
           }
-          const map: Record<string, ExamSettingsRow> = {};
-          for (const row of (d2 ?? []) as ExamSettingsRow[]) map[row.exam_id] = row;
-          return map;
+          error = res.error;
+        }
+        if (error || !data) {
+          console.warn("exam_settings not available:", error?.message);
+          return {} as Record<string, ExamSettingsRow>;
         }
         const map: Record<string, ExamSettingsRow> = {};
-        for (const row of (data ?? []) as ExamSettingsRow[]) {
-          map[row.exam_id] = row;
-        }
+        for (const row of data) map[row.exam_id] = row;
         return map;
       } catch {
         return {} as Record<string, ExamSettingsRow>;
@@ -213,7 +212,13 @@ function Page() {
 
   function resolveSecurity(item: ExamRow) {
     const row = settingsMap[item.id];
-    if (row) return { security: fromExamSettingsRow(row), source: "table" as const };
+    // ALWAYS pass description so face/screen settings never drop when table lacks columns
+    if (row) {
+      return {
+        security: fromExamSettingsRow(row, item.description),
+        source: "table" as const,
+      };
+    }
     const fromDesc = parseSecurityFromDescription(item.description);
     if (fromDesc) return { security: fromDesc, source: "snapshot" as const };
     return { security: DEFAULT_EXAM_SECURITY, source: "default" as const };
