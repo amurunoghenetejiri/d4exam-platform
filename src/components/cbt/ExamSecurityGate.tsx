@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Camera,
+  CameraOff,
   Loader2,
   Mic,
   Monitor,
@@ -9,6 +10,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Logo } from "@/components/brand/Logo";
 import {
   capabilitiesSnapshot,
