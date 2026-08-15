@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
+import type { ReactNode, MouseEvent } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,8 +34,8 @@ export function PageHeader({
 }
 
 /**
- * Clickable dashboard / list card. Uses a real anchor so navigation always works
- * (including open-in-new-tab) and is keyboard accessible.
+ * Clickable dashboard / list card.
+ * Press animation + immediate client navigation.
  */
 export function NavCard({
   to,
@@ -50,14 +50,30 @@ export function NavCard({
   className?: string;
   ariaLabel?: string;
 }) {
+  const navigate = useNavigate();
+
+  function go(e: MouseEvent) {
+    // Let modifier-clicks open new tab via the real anchor
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+    e.preventDefault();
+    void navigate({
+      to: to as never,
+      search: (search ?? {}) as never,
+    });
+  }
+
   return (
     <Link
       to={to as never}
       search={search as never}
       aria-label={ariaLabel}
+      preload="intent"
+      onClick={go}
       className={cn(
-        "block cursor-pointer rounded-2xl border border-slate-200 bg-white/90 p-4 text-left shadow-sm transition",
-        "hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        "pressable pressable-soft block cursor-pointer rounded-2xl border border-slate-200 bg-white/90 p-4 text-left shadow-sm",
+        "hover:border-primary/40 hover:shadow-md",
+        "active:scale-[0.985] active:border-primary/50 active:bg-primary/5 active:shadow-sm",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
         className,
       )}
     >
