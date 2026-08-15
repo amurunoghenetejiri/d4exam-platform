@@ -34,13 +34,11 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
       process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ??
       process.env["SUPABASE_ANON_KEY"] ??
       process.env["VITE_SUPABASE_ANON_KEY"];
+    const serviceKey = process.env["SUPABASE_SERVICE_ROLE_KEY"];
 
     if (!url || !publishableKey) {
       console.error("[login] Missing SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY on the server");
-      return {
-        error:
-          "Server is not configured for sign-in (missing backend URL or public key). Add SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY to your hosting environment variables.",
-      };
+      return { error: "Server is not configured for sign-in. Contact support." };
     }
 
     const publicClient = createClient(url, publishableKey, {
@@ -57,44 +55,109 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
       },
     });
 
+    const adminClient =
+      serviceKey && url
+        ? createClient(url, serviceKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          })
+        : null;
+
     const code = (data.schoolCode || "").trim().toUpperCase();
     const ident = data.identifier.trim();
     const password = data.password;
-    const genericError = "Invalid school code, identifier or password.";
+    const genericError =
+      "Invalid school code, name/matric or password. Students: school code + your name (or matric) + matric number as password.";
 
     const platformCodes = new Set(["", "SYSTEM", "D4", "D4EXAM", "PLATFORM", "SUPER"]);
-    if (platformCodes.has(code) && looksLikeEmail(ident)) {
+    const isPlatform = platformCodes.has(code);
+
+    // Super admin: email + password, no school code
+    if ((!code || isPlatform) && looksLikeEmail(ident)) {
       const { data: signIn, error } = await publicClient.auth.signInWithPassword({
         email: ident.toLowerCase(),
         password,
       });
-      if (!error && signIn.session) {
-        await writeLoginAudit({
-          schoolId: null,
-          userId: signIn.user?.id ?? null,
-          description: "Platform / super-admin sign-in",
-        });
-        return {
-          session: {
-            access_token: signIn.session.access_token,
-            refresh_token: signIn.session.refresh_token,
-          },
-        };
+      if (error || !signIn.session) {
+        return { error: "Invalid email or password." };
       }
-      if (!code) {
-        return { error: "Invalid email or password. Super admin does not need a school code." };
+      await writeLoginAudit({
+        schoolId: null,
+        userId: signIn.user?.id ?? null,
+        description: "Super admin / platform sign-in",
+      });
+      return {
+        session: {
+          access_token: signIn.session.access_token,
+          refresh_token: signIn.session.refresh_token,
+        },
+      };
+    }
+
+    if (!code) {
+      return {
+        error:
+          "Enter your school code (students / school staff) or leave it blank and use your email for super admin.",
+      };
+    }
+
+    if (!hasAdminKey() || !adminClient) {
+      console.error("[login] SUPABASE_SERVICE_ROLE_KEY missing — student login cannot provision.");
+      return {
+        error:
+          "Student sign-in is not fully configured (missing SUPABASE_SERVICE_ROLE_KEY on the server). Ask the platform admin to set it on Vercel.",
+      };
+    }
+
+    // Resolve school with SERVICE ROLE (anon is often blocked by RLS)
+    const { data: schoolRow, error: schoolErr } = await adminClient
+      .from("schools")
+      .select("id, status, school_code")
+      .ilike("school_code", code)
+      .limit(1)
+      .maybeSingle();
+
+    if (schoolErr) {
+      console.error("[login] school lookup failed:", schoolErr.message);
+    }
+
+    if (!schoolRow) {
+      return { error: "Invalid school code. Check the code from your school admin." };
+    }
+
+    const schoolStatus = String((schoolRow as { status?: string }).status || "").toLowerCase();
+    if (schoolStatus && schoolStatus !== "active") {
+      return { error: "This school account is not active. Contact D4EXAM support." };
+    }
+
+    const schoolId = (schoolRow as { id: string }).id;
+    const schoolCode = ((schoolRow as { school_code?: string }).school_code || code) as string;
+
+    let email: string | null = null;
+    let signInPassword = password;
+
+    // 1) STUDENT PATH FIRST — name or matric + matric password
+    if (!looksLikeEmail(ident)) {
+      const provisioned = await provisionStudentLogin({
+        schoolId,
+        schoolCode,
+        identifier: ident,
+        password,
+      });
+      if (provisioned && "error" in provisioned) {
+        return { error: provisioned.error };
+      }
+      if (provisioned && "email" in provisioned) {
+        email = provisioned.email;
+        signInPassword = provisioned.password;
       }
     }
 
-    let email: string | null = null;
-    let accountStatus: string | null = null;
-
-    if (code) {
+    // 2) Staff / existing profile via RPC
+    if (!email) {
       const { data: resolved, error: rpcError } = await publicClient.rpc("resolve_login_identity", {
         _school_code: code,
         _identifier: ident,
       });
-
       if (rpcError) {
         console.error("[login] resolve_login_identity failed:", rpcError.message);
       } else {
@@ -103,93 +166,20 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
           if ((row as { kind?: string }).kind === "school_inactive") {
             return { error: "This school account is not active. Contact D4EXAM support." };
           }
+          const status = ((row as { account_status?: string | null }).account_status ?? null) as string | null;
+          if (status === "suspended" || status === "deactivated" || status === "locked") {
+            return {
+              error: "This account is not permitted to sign in. Contact your school administrator.",
+            };
+          }
           email = ((row as { email?: string | null }).email ?? null) as string | null;
-          accountStatus = ((row as { account_status?: string | null }).account_status ?? null) as
-            | string
-            | null;
         }
       }
     }
 
-    if (accountStatus === "suspended" || accountStatus === "deactivated" || accountStatus === "locked") {
-      return { error: "This account is not permitted to sign in. Contact your school administrator." };
-    }
-
-    let signInPassword = password;
-
-    async function tryProvisionStudent(): Promise<string | null> {
-      if (!code || !hasAdminKey()) {
-        if (code && !hasAdminKey()) {
-          console.warn("[login] SUPABASE_SERVICE_ROLE_KEY missing — student auto-login cannot run.");
-        }
-        return null;
-      }
-      let school: { id: string; status?: string; school_code?: string } | null = null;
-      const { data: byExact } = await publicClient
-        .from("schools")
-        .select("id, status, school_code")
-        .ilike("school_code", code)
-        .limit(1)
-        .maybeSingle();
-      school = (byExact as typeof school) ?? null;
-      if (!school) return null;
-      const st = String(school.status || "").toLowerCase();
-      if (st && st !== "active") {
-        return "__SCHOOL_INACTIVE__";
-      }
-      const provisioned = await provisionStudentLogin({
-        schoolId: school.id,
-        schoolCode: (school.school_code || code) as string,
-        identifier: ident,
-        password,
-      });
-      if (provisioned && "error" in provisioned) {
-        return `__ERR__${provisioned.error}`;
-      }
-      if (provisioned && "email" in provisioned) {
-        signInPassword = provisioned.password;
-        return provisioned.email;
-      }
-      return null;
-    }
-
-    if (code && !looksLikeEmail(ident)) {
-      const provisionedEmail = await tryProvisionStudent();
-      if (provisionedEmail === "__SCHOOL_INACTIVE__") {
-        return { error: "This school account is not active. Contact D4EXAM support." };
-      }
-      if (provisionedEmail?.startsWith("__ERR__")) {
-        return { error: provisionedEmail.slice(7) };
-      }
-      if (provisionedEmail) {
-        email = provisionedEmail;
-      }
-    } else if (!email && code) {
-      const provisionedEmail = await tryProvisionStudent();
-      if (provisionedEmail === "__SCHOOL_INACTIVE__") {
-        return { error: "This school account is not active. Contact D4EXAM support." };
-      }
-      if (provisionedEmail?.startsWith("__ERR__")) {
-        return { error: provisionedEmail.slice(7) };
-      }
-      if (provisionedEmail) email = provisionedEmail;
-    }
-
+    // 3) Raw email identifier
     if (!email && looksLikeEmail(ident)) {
       email = ident.toLowerCase();
-    }
-
-    if (!email) {
-      if (!code) {
-        return {
-          error:
-            "Enter your school code (students / school staff) or leave it blank and use your email for super admin.",
-        };
-      }
-      const provisionedEmail = await tryProvisionStudent();
-      if (provisionedEmail && !provisionedEmail.startsWith("__")) {
-        email = provisionedEmail;
-      }
     }
 
     if (!email) {
@@ -201,10 +191,17 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
       password: signInPassword,
     });
 
-    if ((error || !signIn?.session) && code && hasAdminKey()) {
-      const provisionedEmail = await tryProvisionStudent();
-      if (provisionedEmail && !provisionedEmail.startsWith("__")) {
-        email = provisionedEmail;
+    // Retry after re-provision (password reset to matric)
+    if ((error || !signIn?.session) && !looksLikeEmail(ident)) {
+      const provisioned = await provisionStudentLogin({
+        schoolId,
+        schoolCode,
+        identifier: ident,
+        password,
+      });
+      if (provisioned && "email" in provisioned) {
+        email = provisioned.email;
+        signInPassword = provisioned.password;
         const retry = await publicClient.auth.signInWithPassword({
           email,
           password: signInPassword,
@@ -215,11 +212,12 @@ export const signInWithSchoolCode = createServerFn({ method: "POST" })
     }
 
     if (error || !signIn?.session) {
+      console.error("[login] signIn failed:", error?.message, "email=", email);
       return { error: genericError };
     }
 
     await writeLoginAudit({
-      schoolId: null,
+      schoolId,
       userId: signIn.user?.id ?? null,
       description: "User signed in",
     });
