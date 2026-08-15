@@ -3,19 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
   ArrowLeft,
-  CheckCircle2,
-  XCircle,
-  MinusCircle,
-  Percent,
-  Star,
-  FileText,
-  Building2,
-  GraduationCap,
-  CalendarDays,
-  Clock,
-  ShieldCheck,
-  User,
-  Hash,
   Loader2,
   Download,
 } from "lucide-react";
@@ -115,8 +102,7 @@ function Page() {
   const resultsQ = useQuery({
     queryKey: ["student-results", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 20_000,
-    refetchInterval: 45_000,
+    staleTime: 60_000,
     queryFn: async () => {
       if (!student) return [] as ResultRow[];
       const { data, error } = await supabase
@@ -137,7 +123,6 @@ function Page() {
     enabled: Boolean(detailId && student?.studentId && student?.schoolId),
     queryFn: async () => {
       if (!student || !detailId) return null;
-      // Try as result id
       const byId = await supabase
         .from("results")
         .select(
@@ -148,7 +133,6 @@ function Page() {
         .eq("school_id", student.schoolId)
         .maybeSingle();
       if (byId.data) return byId.data as ResultRow;
-      // Try as exam id
       const byExam = await supabase
         .from("results")
         .select(
@@ -168,7 +152,6 @@ function Page() {
     return <EmptyState title="Student profile not found" description="Contact School Admin." />;
   }
 
-  // ——— DETAIL VIEW when ?id= is present ———
   if (detailId) {
     if (detailQ.isLoading) {
       return (
@@ -189,6 +172,11 @@ function Page() {
           </Button>
         </div>
       );
+    }
+
+    // Prefer dedicated detail route when we have a real result id
+    if (r.id && detailId !== r.id) {
+      void navigate({ to: "/student/results/$id", params: { id: r.id }, replace: true });
     }
 
     const isPub = (r.status || "").toLowerCase() === "published";
@@ -308,7 +296,6 @@ function Page() {
     );
   }
 
-  // ——— LIST VIEW ———
   const rows = resultsQ.data ?? [];
 
   return (
@@ -323,52 +310,73 @@ function Page() {
       ) : rows.length === 0 ? (
         <EmptyState
           title="No results yet"
-          description="After you submit an exam, each subject appears here. Open View Result to see your score breakdown."
+          description="After you submit an exam, each subject appears here. Open View to see your score breakdown."
         />
       ) : (
-        <ul className="space-y-3">
+        <ul className="space-y-2.5">
           {rows.map((r) => {
             const isPub = (r.status || "").toLowerCase() === "published";
             const code = r.examinations?.courses?.code ?? "—";
-            const name = r.examinations?.courses?.name ?? r.examinations?.title ?? "Examination";
-            const targetId = r.id || r.exam_id;
+            const name = r.examinations?.courses?.name ?? "Course";
+            const examTitle = r.examinations?.title ?? "Examination";
+            const meta = [examTitle, student.sessionName, student.semesterName]
+              .filter(Boolean)
+              .join(" · ");
             return (
               <li
                 key={r.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm"
               >
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-extrabold text-slate-900">
-                    {code} · {name}
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {r.examinations?.title ?? ""}
-                    {student.sessionName ? ` · ${student.sessionName}` : ""}
-                    {student.semesterName ? ` · ${student.semesterName}` : ""}
-                  </p>
-                  {isPub && (
-                    <p className="mt-1 text-sm font-bold text-primary">
-                      {r.percentage != null ? `${r.percentage}%` : "—"}
-                      {r.grade ? ` · Grade ${r.grade}` : ""}
-                      {r.pass_fail ? ` · ${r.pass_fail}` : ""}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="text-sm font-extrabold text-slate-900">{code}</p>
+                      <StatusBadge status={isPub ? "published" : "pending"} />
+                    </div>
+                    <p className="mt-0.5 line-clamp-2 text-sm font-semibold leading-snug text-slate-800">
+                      {name}
                     </p>
-                  )}
+                    <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500">{meta}</p>
+                  </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <StatusBadge status={isPub ? "published" : "pending"} />
+                <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+                  <div className="min-w-0">
+                    {isPub ? (
+                      <p className="text-sm font-bold text-slate-900">
+                        <span className="text-primary">
+                          {r.percentage != null ? `${r.percentage}%` : "—"}
+                        </span>
+                        {r.grade ? <span className="text-slate-400"> · </span> : null}
+                        {r.grade ? <span>Grade {r.grade}</span> : null}
+                        {r.pass_fail ? (
+                          <span
+                            className={
+                              (r.pass_fail || "").toLowerCase() === "pass"
+                                ? " text-emerald-600"
+                                : " text-red-600"
+                            }
+                          >
+                            {" "}· {r.pass_fail}
+                          </span>
+                        ) : null}
+                      </p>
+                    ) : (
+                      <p className="text-xs font-semibold text-amber-700">Held for review</p>
+                    )}
+                  </div>
                   <Button
                     size="sm"
                     type="button"
-                    className="font-semibold"
+                    className="h-8 shrink-0 px-3 text-sm font-semibold"
                     onClick={() =>
                       void navigate({
-                        to: "/student/results",
-                        search: { id: targetId },
+                        to: "/student/results/$id",
+                        params: { id: r.id },
                       })
                     }
                   >
-                    View Result
-                    <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                    View
+                    <ChevronRight className="ml-0.5 h-3.5 w-3.5" />
                   </Button>
                 </div>
               </li>
