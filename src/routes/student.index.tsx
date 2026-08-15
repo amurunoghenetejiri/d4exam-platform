@@ -8,7 +8,7 @@ import {
   Play,
   Trophy,
 } from "lucide-react";
-import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
+import { PageHeader, SectionCard, StatusBadge, EmptyState, NavCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { useSessionUser } from "@/lib/session";
 import {
@@ -104,6 +104,7 @@ function Page() {
   const examsQ = useQuery({
     queryKey: ["student-dashboard-exams", schoolId, student?.courseIds?.join(",")],
     enabled: Boolean(schoolId),
+    staleTime: 30_000,
     refetchInterval: 30_000,
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
@@ -128,6 +129,7 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["student-dashboard-attempts", student?.studentId],
     enabled: Boolean(student?.studentId),
+    staleTime: 30_000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("exam_attempts")
@@ -141,6 +143,7 @@ function Page() {
   const resultsQ = useQuery({
     queryKey: ["student-dashboard-results", student?.studentId],
     enabled: Boolean(student?.studentId),
+    staleTime: 60_000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("results")
@@ -158,6 +161,7 @@ function Page() {
   const notifsQ = useQuery({
     queryKey: ["student-dashboard-notifs", user?.userId],
     enabled: Boolean(user?.userId),
+    staleTime: 60_000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("notifications")
@@ -263,19 +267,25 @@ function Page() {
               {results.slice(0, 3).map((r) => {
                 const isPub = (r.status || "").toLowerCase() === "published";
                 return (
-                  <li key={r.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">
-                        {r.examinations?.courses?.code ? `${r.examinations.courses.code} · ` : ""}
-                        {r.examinations?.title ?? "Exam"}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {isPub
-                          ? `${r.percentage != null ? `${r.percentage}%` : "—"}${r.grade ? ` · ${r.grade}` : ""}`
-                          : "Held for review"}
-                      </p>
-                    </div>
-                    <StatusBadge status={isPub ? "published" : "pending"} />
+                  <li key={r.id}>
+                    <NavCard
+                      to="/student/results"
+                      ariaLabel={`Results for ${r.examinations?.title ?? "exam"}`}
+                      className="flex items-center justify-between gap-2 rounded-lg border-slate-100 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">
+                          {r.examinations?.courses?.code ? `${r.examinations.courses.code} · ` : ""}
+                          {r.examinations?.title ?? "Exam"}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {isPub
+                            ? `${r.percentage != null ? `${r.percentage}%` : "—"}${r.grade ? ` · ${r.grade}` : ""}`
+                            : "Held for review"}
+                        </p>
+                      </div>
+                      <StatusBadge status={isPub ? "published" : "pending"} />
+                    </NavCard>
                   </li>
                 );
               })}
@@ -296,11 +306,17 @@ function Page() {
           ) : (
             <ul className="space-y-2">
               {upcoming.slice(0, 3).map((e) => (
-                <li key={e.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-sm">
-                  <span className="font-semibold text-slate-900">{e.title}</span>
-                  <span className="text-xs text-slate-500">
-                    {e.scheduled_start ? new Date(e.scheduled_start).toLocaleString() : "—"}
-                  </span>
+                <li key={e.id}>
+                  <NavCard
+                    to="/student/examinations"
+                    ariaLabel={e.title}
+                    className="flex items-center justify-between rounded-lg border-slate-100 px-3 py-2 text-sm"
+                  >
+                    <span className="font-semibold text-slate-900">{e.title}</span>
+                    <span className="text-xs text-slate-500">
+                      {e.scheduled_start ? new Date(e.scheduled_start).toLocaleString() : "—"}
+                    </span>
+                  </NavCard>
                 </li>
               ))}
             </ul>
@@ -320,12 +336,18 @@ function Page() {
           ) : (
             <ul className="space-y-3">
               {notifications.slice(0, 3).map((n) => (
-                <li key={n.id} className="flex items-start gap-3 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-                  <Bell className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <div className="min-w-0">
-                    <p className={`text-sm ${n.read_at ? "font-medium" : "font-semibold"} text-slate-900`}>{n.title}</p>
-                    <p className="text-xs text-slate-500">{new Date(n.created_at).toLocaleString()}</p>
-                  </div>
+                <li key={n.id}>
+                  <NavCard
+                    to="/student/notifications"
+                    ariaLabel={n.title}
+                    className="flex items-start gap-3 border-slate-100 p-3"
+                  >
+                    <Bell className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <div className="min-w-0">
+                      <p className={`text-sm ${n.read_at ? "font-medium" : "font-semibold"} text-slate-900`}>{n.title}</p>
+                      <p className="text-xs text-slate-500">{new Date(n.created_at).toLocaleString()}</p>
+                    </div>
+                  </NavCard>
                 </li>
               ))}
             </ul>
@@ -350,10 +372,7 @@ function MiniStat({
   color: string;
 }) {
   return (
-    <Link
-      to={to}
-      className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-primary/40 hover:shadow-md"
-    >
+    <NavCard to={to} ariaLabel={label}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-xs font-semibold text-slate-500">{label}</p>
@@ -363,6 +382,6 @@ function MiniStat({
           <Icon className="h-4 w-4" />
         </span>
       </div>
-    </Link>
+    </NavCard>
   );
 }
