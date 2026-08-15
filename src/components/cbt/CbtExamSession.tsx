@@ -1,13 +1,15 @@
-import { Link, useNavigate, useParams } from "@tanstack/react-router";
+import { Link, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Flag, ChevronLeft, ChevronRight, Loader2, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/brand/Logo";
 import { ExamSecurityGate } from "@/components/cbt/ExamSecurityGate";
+import { SubmitConfirmDialog, ResumeBanner } from "@/components/cbt/CbtExamExtras";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { useStudentContext, canStartExam } from "@/lib/student";
+import { useStudentContext, canStartExam, examAvailability, formatExamWindow } from "@/lib/student";
+import { remainingSecondsFromStart, restoreAnswers } from "@/lib/cbt-resume";
 import { fromExamSettingsRow, resolveScreenShareMode, type ExamSettingsRow } from "@/lib/exam-security";
 import { scoreObjectiveAnswers, logSecurityEvent } from "@/lib/cbt-security";
 import { createFaceEngine, type FaceEngine } from "@/lib/face-detector";
@@ -48,7 +50,6 @@ function resolveCorrectOptionText(correctAnswer: string | null, originalOptions:
 
 export function CbtExamPage() {
   const { id } = useParams({ from: "/student/exam/$id" });
-  const navigate = useNavigate();
   const { data: student } = useStudentContext();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const camStreamRef = useRef<MediaStream | null>(null);
@@ -93,11 +94,11 @@ export function CbtExamPage() {
     enabled: Boolean(id),
     queryFn: async () => {
       const { data, error } = await supabase.from("exam_settings")
-        .select("exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility, questions_to_answer")
+        .select("exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, face_detection, max_face_warnings, require_screen_share, screen_share_mode, threshold_action, face_violation_action, total_marks, instructions, result_visibility, questions_to_answer")
         .eq("exam_id", id).maybeSingle();
       if (error) {
         const { data: d2, error: e2 } = await supabase.from("exam_settings")
-          .select("exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, threshold_action, total_marks, instructions, result_visibility")
+          .select("exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, face_detection, max_face_warnings, threshold_action, total_marks, instructions, result_visibility")
           .eq("exam_id", id).maybeSingle();
         if (e2) throw e2;
         return d2 as ExamSettingsRow | null;
@@ -129,6 +130,28 @@ export function CbtExamPage() {
   const security = useMemo(() => fromExamSettingsRow(settingsQ.data, examQ.data?.description), [settingsQ.data, examQ.data?.description]);
   const shareMode = resolveScreenShareMode(security);
   const screenRequired = shareMode === "required";
+
+  // Detect in-progress attempt for Continue Exam
+  useEffect(() => {
+    if (!student?.studentId || !id) return;
+    void (async () => {
+      const { data } = await supabase.from("exam_attempts")
+        .select("id, status, started_at, answers")
+        .eq("exam_id", id).eq("student_id", student.studentId).maybeSingle();
+      if (!data) return;
+      if (["submitted", "terminated", "flagged"].includes(String(data.status))) {
+        setDoneTerminated(String(data.status) === "terminated");
+        setDone(true);
+        return;
+      }
+      if (String(data.status) === "in_progress" && data.started_at) {
+        attemptIdRef.current = data.id as string;
+        setResumeMeta({ attemptId: data.id as string, startedAt: data.started_at as string });
+        const restored = restoreAnswers(data.answers);
+        if (Object.keys(restored).length) setAnswers(restored);
+      }
+    })();
+  }, [student?.studentId, id]);
 
   const questionsToAnswer = useMemo(() => {
     const fromSettings = (settingsQ.data as ExamSettingsRow | null)?.questions_to_answer;
@@ -164,6 +187,8 @@ export function CbtExamPage() {
   const [camReady, setCamReady] = useState(false);
   const [screenReady, setScreenReady] = useState(false);
   const [faceStatus, setFaceStatus] = useState<FaceState>("unknown");
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const [resumeMeta, setResumeMeta] = useState<{ attemptId: string; startedAt: string } | null>(null);
 
   const toastCooldowned = (key: string, msg: string, kind: "warn" | "ok" = "warn") => {
     const now = Date.now();
@@ -180,6 +205,19 @@ export function CbtExamPage() {
       extra: { ...capabilitiesSnapshot(capsRef.current ?? detectDeviceCapabilities(), { cameraActive: camReady, screenShareActive: screenReady, faceStatus }), ...(extra ?? {}) },
     });
   }, [examQ.data, student, questions, camReady, screenReady, faceStatus]);
+
+  // Persist answers while in progress so resume works
+  useEffect(() => {
+    if (!started || !attemptIdRef.current) return;
+    const payload = answers;
+    const tId = window.setTimeout(() => {
+      void supabase.from("exam_attempts").update({
+        answers: payload,
+        updated_at: new Date().toISOString(),
+      } as never).eq("id", attemptIdRef.current!);
+    }, 800);
+    return () => window.clearTimeout(tId);
+  }, [answers, started]);
 
   useEffect(() => {
     if (!started || paused || seconds == null) return;
@@ -332,14 +370,19 @@ export function CbtExamPage() {
     }
   }
 
-  async function ensureAttemptRow() {
-    if (!student || !examQ.data) return;
-    if (attemptIdRef.current) return;
+  async function ensureAttemptRow(startedAtIso?: string) {
+    if (!student || !examQ.data) return attemptIdRef.current ? { id: attemptIdRef.current } : null;
+    if (attemptIdRef.current) return { id: attemptIdRef.current };
+    const startedAt = startedAtIso || new Date().toISOString();
     const { data, error } = await supabase.from("exam_attempts").upsert({
       exam_id: id, student_id: student.studentId, school_id: examQ.data.school_id, status: "in_progress",
-      started_at: new Date().toISOString(),
-    } as never, { onConflict: "exam_id,student_id" }).select("id").maybeSingle();
-    if (!error && data?.id) attemptIdRef.current = data.id as string;
+      started_at: startedAt, answers: answers,
+    } as never, { onConflict: "exam_id,student_id" }).select("id, started_at, answers").maybeSingle();
+    if (!error && data?.id) {
+      attemptIdRef.current = data.id as string;
+      return data as { id: string; started_at?: string; answers?: unknown };
+    }
+    return null;
   }
 
   async function finishAttempt(auto = false) {
@@ -351,7 +394,7 @@ export function CbtExamPage() {
       );
       if (attemptIdRef.current) {
         await supabase.from("exam_attempts").update({
-          status, submitted_at: new Date().toISOString(), score: scored.score, max_score: scored.maxScore,
+          status, submitted_at: new Date().toISOString(), score: scored.score, max_score: scored.maxScore, answers,
         } as never).eq("id", attemptIdRef.current);
       }
       await supabase.from("exam_results").upsert({
@@ -375,7 +418,7 @@ export function CbtExamPage() {
     capsRef.current = opts.caps;
     try {
       if (student) {
-        const { data: existing } = await supabase.from("exam_attempts").select("id, status").eq("exam_id", id).eq("student_id", student.studentId).maybeSingle();
+        const { data: existing } = await supabase.from("exam_attempts").select("id, status, started_at, answers").eq("exam_id", id).eq("student_id", student.studentId).maybeSingle();
         if (existing && ["submitted", "terminated", "flagged"].includes(String(existing.status))) {
           toast.error("You have already completed this examination.");
           setDoneTerminated(String(existing.status) === "terminated");
@@ -383,6 +426,9 @@ export function CbtExamPage() {
           return;
         }
         if (existing?.id) attemptIdRef.current = existing.id as string;
+        if (existing && String(existing.status) === "in_progress" && existing.started_at) {
+          setResumeMeta({ attemptId: existing.id as string, startedAt: existing.started_at as string });
+        }
       }
       logEvent("SECURITY_CHECK_PASSED", "low", "Device capability snapshot", { ...capabilitiesSnapshot(opts.caps), screen_share_mode: shareMode });
       if (security.requireCamera) {
@@ -399,13 +445,29 @@ export function CbtExamPage() {
           return;
         }
       }
-      await ensureAttemptRow();
+      let startedAt = resumeMeta?.startedAt;
+      if (resumeMeta?.attemptId) attemptIdRef.current = resumeMeta.attemptId;
+      const row = await ensureAttemptRow(startedAt);
+      if (row && "started_at" in row && row.started_at) startedAt = row.started_at as string;
+      if (!startedAt) startedAt = new Date().toISOString();
+      if (row && "answers" in row) {
+        const restored = restoreAnswers(row.answers);
+        if (Object.keys(restored).length) setAnswers(restored);
+      }
       if (security.fullscreen) {
         try { await document.documentElement.requestFullscreen?.(); } catch { toast.message("Please allow fullscreen"); }
       }
-      setSeconds((examQ.data?.duration_minutes ?? 60) * 60);
+      const remaining = remainingSecondsFromStart(startedAt, examQ.data?.duration_minutes ?? 60);
+      if (remaining <= 0) {
+        toast.error("Time is up for this examination.");
+        setSeconds(0);
+        setStarted(true);
+        void finishAttempt(true);
+        return;
+      }
+      setSeconds(remaining);
       setStarted(true);
-      setIndex(0);
+      if (!resumeMeta) setIndex(0);
     } finally {
       setMediaBusy(false);
     }
@@ -439,11 +501,23 @@ export function CbtExamPage() {
       </div>
     );
   }
-  if (!canStartExam(exam.status, exam.scheduled_start) && !done) {
+  const avail = examAvailability(exam.status, exam.scheduled_start, exam.scheduled_end);
+  if (avail !== "available" && !done && !resumeMeta) {
+    const msg =
+      avail === "missed"
+        ? "You missed this examination. The scheduled window has ended. Contact your examination officer if you need a reschedule."
+        : avail === "upcoming"
+          ? `This examination opens at ${exam.scheduled_start ? new Date(exam.scheduled_start).toLocaleString() : "the scheduled time"}.`
+          : "This examination is not available.";
     return (
-      <div className="grid min-h-dvh place-items-center p-6 text-center">
-        <div><p className="font-bold text-slate-900">This examination is not available to start yet</p>
-          <Button className="mt-4" asChild><Link to="/student/examinations">Back to exams</Link></Button></div>
+      <div className="grid min-h-dvh place-items-center p-4 sm:p-6 text-center">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-lg font-extrabold text-slate-900">{avail === "missed" ? "Exam missed" : "Not available yet"}</p>
+          <p className="mt-2 text-sm text-slate-600">{msg}</p>
+          <p className="mt-3 text-xs text-slate-500">{formatExamWindow(exam.scheduled_start, exam.scheduled_end)}</p>
+          <p className="mt-1 text-xs text-slate-500">Duration: {exam.duration_minutes} minutes · {TOTAL} questions</p>
+          <Button className="mt-6" asChild><Link to="/student/examinations">Back to exams</Link></Button>
+        </div>
       </div>
     );
   }
@@ -464,9 +538,20 @@ export function CbtExamPage() {
   }
   if (!started) {
     return (
-      <ExamSecurityGate examTitle={exam.title} courseLine={`${exam.courses?.code ?? ""} · ${exam.courses?.name ?? ""}`}
-        durationMinutes={exam.duration_minutes} totalQuestions={TOTAL} security={security} busy={mediaBusy}
-        onStart={(opts) => void beginWithMedia(opts)} />
+      <div>
+        {resumeMeta && <ResumeBanner />}
+        <ExamSecurityGate
+          examTitle={exam.title}
+          courseLine={`${exam.courses?.code ?? ""} · ${exam.courses?.name ?? ""}`}
+          durationMinutes={exam.duration_minutes}
+          totalQuestions={TOTAL}
+          security={security}
+          busy={mediaBusy}
+          continueMode={Boolean(resumeMeta)}
+          windowLabel={formatExamWindow(exam.scheduled_start, exam.scheduled_end)}
+          onStart={(opts) => void beginWithMedia(opts)}
+        />
+      </div>
     );
   }
   if (TOTAL === 0) {
@@ -494,7 +579,7 @@ export function CbtExamPage() {
               {faceDot && <span className="inline-flex items-center gap-1 rounded bg-white/10 px-2 py-1"><span className={cn("h-2 w-2 rounded-full", faceDot)} /> Face</span>}
             </div>
             <div className="rounded-lg bg-white/10 px-3 py-1.5 font-mono text-sm font-bold tabular-nums">{mm}:{ss}</div>
-            <Button size="sm" variant="secondary" className="font-semibold" onClick={() => void finishAttempt(false)}>Submit</Button>
+            <Button size="sm" variant="secondary" className="font-semibold" onClick={() => setConfirmSubmit(true)}>Submit</Button>
           </div>
         </div>
       </header>
@@ -567,6 +652,14 @@ export function CbtExamPage() {
           </div>
         </section>
       </div>
+
+      <SubmitConfirmDialog
+        open={confirmSubmit}
+        answered={answeredCount}
+        total={TOTAL}
+        onCancel={() => setConfirmSubmit(false)}
+        onConfirm={() => { setConfirmSubmit(false); void finishAttempt(false); }}
+      />
 
       {camReady && (
         <div className="fixed z-50 w-[132px] touch-none overflow-hidden rounded-xl border-2 border-primary bg-black shadow-2xl sm:w-[168px]"
