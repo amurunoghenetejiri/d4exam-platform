@@ -7,7 +7,6 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   blockCopyPaste: true,
   randomizeQuestions: true,
   randomizeOptions: true,
-  // Camera on by default so face monitoring works in CBT
   requireCamera: true,
   requireMicrophone: false,
   requireScreenShare: false,
@@ -25,7 +24,6 @@ export const META_MARKER = "[[D4_EXAM_META]]";
 
 const storageKey = (teacherId: string) => `d4exam.teacher.security.${teacherId}`;
 
-/** Resolve screen-share policy from new or legacy fields */
 export function resolveScreenShareMode(s: Partial<ExamSecuritySettings> | null | undefined): ScreenShareMode {
   if (!s) return "disabled";
   if (s.screenShareMode === "optional" || s.screenShareMode === "required" || s.screenShareMode === "disabled") {
@@ -42,7 +40,6 @@ export function normalizeSecuritySettings(
   const mode = resolveScreenShareMode(merged);
   merged.screenShareMode = mode;
   merged.requireScreenShare = mode === "required";
-  // Face detection requires a live camera
   if (merged.faceDetection) merged.requireCamera = true;
   return merged;
 }
@@ -71,6 +68,7 @@ export function toExamSettingsRow(
   questionsToAnswer: number | null = null,
 ) {
   const n = normalizeSecuritySettings(s);
+  // Only columns known to exist on exam_settings (face/screen fields live in description JSON)
   return {
     exam_id: examId,
     fullscreen: n.fullscreen,
@@ -79,13 +77,8 @@ export function toExamSettingsRow(
     block_copy_paste: n.blockCopyPaste,
     randomize_questions: n.randomizeQuestions,
     randomize_options: n.randomizeOptions,
-    require_camera: n.requireCamera,
+    require_camera: n.requireCamera || n.faceDetection,
     require_microphone: n.requireMicrophone,
-    require_screen_share: n.requireScreenShare,
-    screen_share_mode: n.screenShareMode,
-    face_detection: n.faceDetection,
-    max_face_warnings: n.maxFaceWarnings,
-    face_violation_action: n.faceViolationAction,
     threshold_action: n.thresholdAction,
     result_visibility: n.resultVisibility,
     total_marks: totalMarks,
@@ -119,37 +112,61 @@ export function fromExamSettingsRow(
   row: ExamSettingsRow | null | undefined,
   description?: string | null,
 ): ExamSecuritySettings {
-  if (row) {
-    return normalizeSecuritySettings({
-      fullscreen: row.fullscreen ?? undefined,
-      tabMonitoring: row.tab_monitoring ?? undefined,
-      maxTabSwitches: row.max_tab_switches ?? undefined,
-      blockCopyPaste: row.block_copy_paste ?? undefined,
-      randomizeQuestions: row.randomize_questions ?? undefined,
-      randomizeOptions: row.randomize_options ?? undefined,
-      requireCamera: row.require_camera ?? undefined,
-      requireMicrophone: row.require_microphone ?? undefined,
-      requireScreenShare: row.require_screen_share ?? undefined,
-      screenShareMode: (row.screen_share_mode as ScreenShareMode) ?? undefined,
-      faceDetection: row.face_detection ?? undefined,
-      maxFaceWarnings: row.max_face_warnings ?? undefined,
-      faceViolationAction: row.face_violation_action as ExamSecuritySettings["faceViolationAction"],
-      thresholdAction: row.threshold_action as ExamSecuritySettings["thresholdAction"],
-      resultVisibility: row.result_visibility as ExamSecuritySettings["resultVisibility"],
-      questionsToAnswer: row.questions_to_answer ?? undefined,
-    });
-  }
-
+  // Description JSON is the source of truth for face/screen fields (may not exist as columns)
+  let fromDesc: Partial<ExamSecuritySettings> = {};
   if (description && description.includes(SECURITY_MARKER)) {
     try {
       const raw = description.split(SECURITY_MARKER)[1]?.split(META_MARKER)[0] ?? "";
-      const parsed = JSON.parse(raw.trim()) as Partial<ExamSecuritySettings>;
-      return normalizeSecuritySettings(parsed);
+      let depth = 0;
+      let end = -1;
+      const start = raw.indexOf("{");
+      if (start >= 0) {
+        for (let i = start; i < raw.length; i++) {
+          if (raw[i] === "{") depth++;
+          if (raw[i] === "}") {
+            depth--;
+            if (depth === 0) {
+              end = i;
+              break;
+            }
+          }
+        }
+        if (end >= 0) {
+          fromDesc = JSON.parse(raw.slice(start, end + 1)) as Partial<ExamSecuritySettings>;
+        }
+      }
     } catch {
-      /* fall through */
+      /* ignore */
     }
   }
 
+  if (row) {
+    return normalizeSecuritySettings({
+      ...fromDesc,
+      fullscreen: row.fullscreen ?? fromDesc.fullscreen,
+      tabMonitoring: row.tab_monitoring ?? fromDesc.tabMonitoring,
+      maxTabSwitches: row.max_tab_switches ?? fromDesc.maxTabSwitches,
+      blockCopyPaste: row.block_copy_paste ?? fromDesc.blockCopyPaste,
+      randomizeQuestions: row.randomize_questions ?? fromDesc.randomizeQuestions,
+      randomizeOptions: row.randomize_options ?? fromDesc.randomizeOptions,
+      requireCamera: row.require_camera ?? fromDesc.requireCamera,
+      requireMicrophone: row.require_microphone ?? fromDesc.requireMicrophone,
+      requireScreenShare: row.require_screen_share ?? fromDesc.requireScreenShare,
+      screenShareMode: (row.screen_share_mode as ScreenShareMode) ?? fromDesc.screenShareMode,
+      faceDetection: row.face_detection ?? fromDesc.faceDetection,
+      maxFaceWarnings: row.max_face_warnings ?? fromDesc.maxFaceWarnings,
+      faceViolationAction:
+        (row.face_violation_action as ExamSecuritySettings["faceViolationAction"]) ??
+        fromDesc.faceViolationAction,
+      thresholdAction:
+        (row.threshold_action as ExamSecuritySettings["thresholdAction"]) ?? fromDesc.thresholdAction,
+      resultVisibility:
+        (row.result_visibility as ExamSecuritySettings["resultVisibility"]) ?? fromDesc.resultVisibility,
+      questionsToAnswer: row.questions_to_answer ?? fromDesc.questionsToAnswer,
+    });
+  }
+
+  if (Object.keys(fromDesc).length) return normalizeSecuritySettings(fromDesc);
   return { ...DEFAULT_EXAM_SECURITY };
 }
 
