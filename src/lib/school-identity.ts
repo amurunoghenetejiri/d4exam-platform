@@ -61,7 +61,8 @@ export function useSchoolIdentity(schoolId?: string | null) {
   });
 }
 
-function validateLogoFile(file: File): string | null {
+/** Validate logo file type and size. Returns an error message or null if OK. */
+export function validateLogoFile(file: File): string | null {
   const ok = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
   if (!ok.includes(file.type) && !/\.(png|jpe?g|webp)$/i.test(file.name)) {
     return "Use a PNG, JPG, or WebP image.";
