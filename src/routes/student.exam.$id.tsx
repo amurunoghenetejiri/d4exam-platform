@@ -20,6 +20,7 @@ import {
   type ExamSettingsRow,
 } from "@/lib/exam-security";
 import { scoreObjectiveAnswers, logSecurityEvent } from "@/lib/cbt-security";
+import { createFaceEngine, type FaceEngine } from "@/lib/face-detector";
 import { parseExamMeta, pickExamQuestions, seededShuffle } from "@/lib/exam-meta";
 import {
   capabilitiesSnapshot,
