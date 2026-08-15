@@ -11,9 +11,8 @@ export function Logo({
   showTagline?: boolean;
   wordmark?: boolean;
 }) {
-  // Larger mark so the logo is always readable and stands out in headers/sidebars
-  const dims = { sm: "h-12", md: "h-14", lg: "h-16", xl: "h-20" }[size];
-  const text = { sm: "text-xl", md: "text-2xl", lg: "text-3xl", xl: "text-4xl" }[size];
+  const dims = { sm: "h-8", md: "h-11", lg: "h-14", xl: "h-16" }[size];
+  const text = { sm: "text-base", md: "text-xl", lg: "text-2xl", xl: "text-3xl" }[size];
 
   return (
     <span className={cn("inline-flex items-center gap-3", className)}>

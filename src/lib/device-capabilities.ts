@@ -18,24 +18,19 @@ export type DeviceCapabilities = {
   deviceType: DeviceType;
   browserName: BrowserName;
   userAgent: string;
-  /** MediaDevices API present */
   mediaDevices: boolean;
   camera: boolean;
   microphone: boolean;
-  /** FaceDetector API present */
   faceDetection: boolean;
-  /** getDisplayMedia present (screen share) */
   screenShare: boolean;
   secureContext: boolean;
 };
 
 function detectDeviceType(ua: string): DeviceType {
   const u = ua.toLowerCase();
-  // Tablets first (iPad may report as Mac in some cases)
   if (/ipad|tablet|playbook|silk|(android(?!.*mobile))/i.test(ua)) return "tablet";
   if (/mobi|iphone|ipod|android.*mobile|windows phone|opera mini/i.test(ua)) return "mobile";
   if (/macintosh|windows nt|linux|cros|x11/i.test(u) && !/mobi/i.test(u)) return "desktop";
-  // Touch + coarse pointer heuristic
   if (typeof window !== "undefined") {
     const coarse =
       typeof window.matchMedia === "function" &&
@@ -48,7 +43,6 @@ function detectDeviceType(ua: string): DeviceType {
 }
 
 function detectBrowserName(ua: string): BrowserName {
-  // Order matters — Edge includes Chrome token; Opera includes Chrome
   if (/Edg\//i.test(ua)) return "Edge";
   if (/OPR\/|Opera/i.test(ua)) return "Opera";
   if (/SamsungBrowser/i.test(ua)) return "Samsung Internet";
@@ -85,10 +79,13 @@ export function detectDeviceCapabilities(): DeviceCapabilities {
     secureContext &&
     typeof navigator.mediaDevices.getUserMedia === "function";
 
-  const microphone = camera; // same API surface; permission is separate
+  const microphone = camera;
 
+  // Native FaceDetector OR MediaPipe WASM fallback (used in CBT).
+  // Mobile Chrome often lacks FaceDetector but MediaPipe works with camera.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const faceDetection = typeof (window as any).FaceDetector === "function";
+  const nativeFace = typeof (window as any).FaceDetector === "function";
+  const faceDetection = nativeFace || camera;
 
   const screenShare =
     mediaDevices &&
@@ -109,7 +106,6 @@ export function detectDeviceCapabilities(): DeviceCapabilities {
   };
 }
 
-/** Snapshot suitable for integrity_events.metadata */
 export function capabilitiesSnapshot(
   caps: DeviceCapabilities,
   live?: {
