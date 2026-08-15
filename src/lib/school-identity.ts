@@ -20,13 +20,15 @@ export function useSchoolIdentity(schoolId?: string | null) {
   useEffect(() => {
     if (!id) return;
     const channel = supabase
-      .channel(`school-identity-${id}-${Math.random().toString(36).slice(2)}`)
+      .channel(`school-identity-${id}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "schools", filter: `id=eq.${id}` },
         () => {
-          void qc.invalidateQueries({ queryKey: ["school-identity", id] });
-          void qc.invalidateQueries({ queryKey: ["session-user"] });
+          window.clearTimeout((window as unknown as { __siT?: number }).__siT);
+          (window as unknown as { __siT?: number }).__siT = window.setTimeout(() => {
+            void qc.invalidateQueries({ queryKey: ["school-identity", id] });
+          }, 1500);
         },
       )
       .subscribe();
@@ -38,7 +40,7 @@ export function useSchoolIdentity(schoolId?: string | null) {
   return useQuery({
     queryKey: ["school-identity", id],
     enabled: Boolean(id),
-    staleTime: 15_000,
+    staleTime: 10 * 60_000,
     queryFn: async (): Promise<SchoolIdentity | null> => {
       if (!id) return null;
       const { data, error } = await supabase
@@ -50,36 +52,28 @@ export function useSchoolIdentity(schoolId?: string | null) {
       if (!data) return null;
       return {
         id: data.id as string,
-        name: data.name as string,
-        schoolCode: data.school_code as string,
-        logoUrl: (data.logo_url as string | null) || null,
-        status: data.status as string,
+        name: (data.name as string) || "School",
+        schoolCode: (data.school_code as string) || "",
+        logoUrl: (data.logo_url as string | null) ?? null,
+        status: (data.status as string) || "active",
       };
     },
   });
 }
 
-const ALLOWED = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
-const MAX_BYTES = 2 * 1024 * 1024; // 2MB
-
-export function validateLogoFile(file: File): string | null {
-  const type = (file.type || "").toLowerCase();
-  const name = file.name.toLowerCase();
-  const okType =
-    ALLOWED.includes(type) ||
-    name.endsWith(".png") ||
-    name.endsWith(".jpg") ||
-    name.endsWith(".jpeg") ||
-    name.endsWith(".webp");
-  if (!okType) return "Logo must be PNG, JPG or WebP.";
-  if (file.size > MAX_BYTES) return "Logo must be 2MB or smaller.";
+function validateLogoFile(file: File): string | null {
+  const ok = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+  if (!ok.includes(file.type) && !/\.(png|jpe?g|webp)$/i.test(file.name)) {
+    return "Use a PNG, JPG, or WebP image.";
+  }
+  if (file.size > 2_500_000) return "Logo must be under 2.5 MB.";
   return null;
 }
 
-/** Compress image to a data URL (max ~512px) — always PNG to keep transparency. */
-export async function fileToCompressedDataUrl(file: File, maxSide = 512): Promise<string> {
+async function fileToCompressedDataUrl(file: File): Promise<string> {
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const max = 512;
+  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
   const w = Math.max(1, Math.round(bitmap.width * scale));
   const h = Math.max(1, Math.round(bitmap.height * scale));
   const canvas = document.createElement("canvas");
@@ -89,7 +83,6 @@ export async function fileToCompressedDataUrl(file: File, maxSide = 512): Promis
   if (!ctx) throw new Error("Could not process image");
   ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
-  // Always export PNG so transparent backgrounds stay transparent
   return canvas.toDataURL("image/png");
 }
 
@@ -128,7 +121,6 @@ export async function uploadSchoolLogo(opts: {
     }
   }
 
-  // Fallback: store compressed data URL in schools.logo_url (no storage required)
   const dataUrl = await fileToCompressedDataUrl(opts.file);
   if (dataUrl.length > 900_000) {
     throw new Error("Logo is still too large after compression. Use a smaller image.");
