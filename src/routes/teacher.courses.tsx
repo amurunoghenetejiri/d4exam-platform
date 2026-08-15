@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, FileText, Layers } from "lucide-react";
-import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
+import { PageHeader, SectionCard, EmptyState, NavCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { useTeacherContext } from "@/lib/teacher";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,25 +25,28 @@ function Page() {
   const statsQ = useQuery({
     queryKey: ["teacher-course-stats", teacher?.teacherId, teacher?.courseIds],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
+    staleTime: 3 * 60_000,
     queryFn: async () => {
       if (!teacher) return {} as Record<string, { exams: number; questions: number }>;
       const map: Record<string, { exams: number; questions: number }> = {};
       for (const id of teacher.courseIds) {
         map[id] = { exams: 0, questions: 0 };
       }
-      const { data: exams } = await supabase
-        .from("examinations")
-        .select("course_id")
-        .eq("school_id", teacher.schoolId)
-        .in("course_id", teacher.courseIds);
+      const [{ data: exams }, { data: qs }] = await Promise.all([
+        supabase
+          .from("examinations")
+          .select("course_id")
+          .eq("school_id", teacher.schoolId)
+          .in("course_id", teacher.courseIds),
+        supabase
+          .from("questions")
+          .select("course_id")
+          .eq("school_id", teacher.schoolId)
+          .in("course_id", teacher.courseIds),
+      ]);
       for (const e of exams ?? []) {
         if (e.course_id && map[e.course_id]) map[e.course_id].exams += 1;
       }
-      const { data: qs } = await supabase
-        .from("questions")
-        .select("course_id")
-        .eq("school_id", teacher.schoolId)
-        .in("course_id", teacher.courseIds);
       for (const q of qs ?? []) {
         if (q.course_id && map[q.course_id]) map[q.course_id].questions += 1;
       }
@@ -81,9 +84,12 @@ function Page() {
           {teacher.courses.map((c) => {
             const s = stats[c.id] ?? { exams: 0, questions: 0 };
             return (
-              <article
+              <NavCard
                 key={c.id}
-                className="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm"
+                to="/teacher/question-bank"
+                search={{ course: c.id }}
+                ariaLabel={`Open ${c.code} questions`}
+                className="p-5"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -108,20 +114,31 @@ function Page() {
                 </dl>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <Button size="sm" variant="outline" className="font-semibold" asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="font-semibold"
+                    asChild
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Link to="/teacher/question-bank" search={{ course: c.id }}>
                       <Layers className="mr-1.5 h-3.5 w-3.5" />
                       Questions
                     </Link>
                   </Button>
-                  <Button size="sm" className="font-semibold" asChild>
+                  <Button
+                    size="sm"
+                    className="font-semibold"
+                    asChild
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Link to="/teacher/examinations" search={{ course: c.id }}>
                       <FileText className="mr-1.5 h-3.5 w-3.5" />
                       Exams
                     </Link>
                   </Button>
                 </div>
-              </article>
+              </NavCard>
             );
           })}
         </div>
@@ -129,9 +146,8 @@ function Page() {
 
       <SectionCard className="mt-6" title="Assignment rule">
         <p className="text-sm text-slate-600">
-          Open <strong>Questions</strong> on a course card to see and upload questions for that
-          course only (e.g. MTH 101 questions only under MTH 101). Other courses’ questions stay
-          separate.
+          Tap a course card (or <strong>Questions</strong>) to open that course’s question bank only.
+          Use <strong>Exams</strong> to manage examinations for the same course.
         </p>
       </SectionCard>
     </>
