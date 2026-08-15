@@ -99,7 +99,6 @@
     font-family: var(--font-display);
   }
 
-  /* Responsive helpers */
   .page-pad {
     @apply px-3 py-4 sm:px-6 sm:py-6;
   }
@@ -107,6 +106,41 @@
   .safe-bottom {
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
+
+  /* Press / click feedback for interactive controls */
+  .pressable {
+    transition:
+      transform 0.12s ease,
+      box-shadow 0.12s ease,
+      border-color 0.15s ease,
+      background-color 0.15s ease,
+      opacity 0.12s ease;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .pressable:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: scale(0.97);
+  }
+
+  .pressable-soft:active:not(:disabled):not([aria-disabled="true"]) {
+    transform: scale(0.985);
+  }
+}
+
+/* Global click feel on native interactive elements */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+a[href] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  transform: scale(0.97);
 }
 
 /* Tables scroll on small screens */
@@ -118,21 +152,15 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  input, select, textarea, button {
+  input,
+  select,
+  textarea,
+  button {
     max-width: 100%;
   }
 }
 
-/* Prevent iOS double-tap / focus zoom jank on interactive controls */
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-}
-button,
-a,
-[role="button"],
-input,
-select,
-textarea {
-  touch-action: manipulation;
 }
