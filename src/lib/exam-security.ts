@@ -7,7 +7,8 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   blockCopyPaste: true,
   randomizeQuestions: true,
   randomizeOptions: true,
-  requireCamera: false,
+  // Camera on by default so face monitoring works in CBT
+  requireCamera: true,
   requireMicrophone: false,
   requireScreenShare: false,
   screenShareMode: "disabled",
@@ -41,6 +42,8 @@ export function normalizeSecuritySettings(
   const mode = resolveScreenShareMode(merged);
   merged.screenShareMode = mode;
   merged.requireScreenShare = mode === "required";
+  // Face detection requires a live camera
+  if (merged.faceDetection) merged.requireCamera = true;
   return merged;
 }
 
@@ -78,145 +81,74 @@ export function toExamSettingsRow(
     randomize_options: n.randomizeOptions,
     require_camera: n.requireCamera,
     require_microphone: n.requireMicrophone,
+    require_screen_share: n.requireScreenShare,
+    screen_share_mode: n.screenShareMode,
+    face_detection: n.faceDetection,
+    max_face_warnings: n.maxFaceWarnings,
+    face_violation_action: n.faceViolationAction,
     threshold_action: n.thresholdAction,
     result_visibility: n.resultVisibility,
     total_marks: totalMarks,
-    questions_to_answer: questionsToAnswer,
+    questions_to_answer: questionsToAnswer ?? n.questionsToAnswer,
   };
 }
 
 export type ExamSettingsRow = {
   exam_id: string;
-  fullscreen: boolean;
-  tab_monitoring: boolean;
-  max_tab_switches: number;
-  block_copy_paste: boolean;
-  randomize_questions: boolean;
-  randomize_options: boolean;
-  require_camera: boolean;
-  require_microphone: boolean;
-  threshold_action: string;
-  total_marks: number;
-  instructions: string | null;
-  result_visibility: string;
+  fullscreen?: boolean | null;
+  tab_monitoring?: boolean | null;
+  max_tab_switches?: number | null;
+  block_copy_paste?: boolean | null;
+  randomize_questions?: boolean | null;
+  randomize_options?: boolean | null;
+  require_camera?: boolean | null;
+  require_microphone?: boolean | null;
+  require_screen_share?: boolean | null;
+  screen_share_mode?: string | null;
+  face_detection?: boolean | null;
+  max_face_warnings?: number | null;
+  face_violation_action?: string | null;
+  threshold_action?: string | null;
+  result_visibility?: string | null;
+  total_marks?: number | null;
+  instructions?: string | null;
   questions_to_answer?: number | null;
 };
 
 export function fromExamSettingsRow(
   row: ExamSettingsRow | null | undefined,
-  descriptionFallback?: string | null,
+  description?: string | null,
 ): ExamSecuritySettings {
-  const fromDesc = descriptionFallback ? parseSecurityFromDescription(descriptionFallback) : null;
-  if (!row && !fromDesc) return { ...DEFAULT_EXAM_SECURITY };
-  const base = fromDesc ?? { ...DEFAULT_EXAM_SECURITY };
-  if (!row) return normalizeSecuritySettings(base);
-  return normalizeSecuritySettings({
-    ...base,
-    fullscreen: row.fullscreen,
-    tabMonitoring: row.tab_monitoring,
-    maxTabSwitches: row.max_tab_switches,
-    blockCopyPaste: row.block_copy_paste,
-    randomizeQuestions: row.randomize_questions,
-    randomizeOptions: row.randomize_options,
-    requireCamera: row.require_camera,
-    requireMicrophone: row.require_microphone,
-    thresholdAction: (row.threshold_action as ExamSecuritySettings["thresholdAction"]) || base.thresholdAction,
-    resultVisibility:
-      (row.result_visibility as ExamSecuritySettings["resultVisibility"]) ||
-      base.resultVisibility ||
-      "after_officer_release",
-    questionsToAnswer:
-      typeof row.questions_to_answer === "number" && row.questions_to_answer > 0
-        ? row.questions_to_answer
-        : base.questionsToAnswer ?? null,
-  });
-}
-
-export function stripInternalMarkers(description: string | null | undefined): string {
-  if (!description) return "";
-  let s = description;
-  const secIdx = s.indexOf(SECURITY_MARKER);
-  if (secIdx >= 0) s = s.slice(0, secIdx);
-  const metaIdx = s.indexOf(META_MARKER);
-  if (metaIdx >= 0) {
-    const before = s.slice(0, metaIdx);
-    const after = s.slice(metaIdx + META_MARKER.length);
-    const rest = after.replace(/^\s*\{[^\n]*\}/, "");
-    s = before + rest;
+  if (row) {
+    return normalizeSecuritySettings({
+      fullscreen: row.fullscreen ?? undefined,
+      tabMonitoring: row.tab_monitoring ?? undefined,
+      maxTabSwitches: row.max_tab_switches ?? undefined,
+      blockCopyPaste: row.block_copy_paste ?? undefined,
+      randomizeQuestions: row.randomize_questions ?? undefined,
+      randomizeOptions: row.randomize_options ?? undefined,
+      requireCamera: row.require_camera ?? undefined,
+      requireMicrophone: row.require_microphone ?? undefined,
+      requireScreenShare: row.require_screen_share ?? undefined,
+      screenShareMode: (row.screen_share_mode as ScreenShareMode) ?? undefined,
+      faceDetection: row.face_detection ?? undefined,
+      maxFaceWarnings: row.max_face_warnings ?? undefined,
+      faceViolationAction: row.face_violation_action as ExamSecuritySettings["faceViolationAction"],
+      thresholdAction: row.threshold_action as ExamSecuritySettings["thresholdAction"],
+      resultVisibility: row.result_visibility as ExamSecuritySettings["resultVisibility"],
+      questionsToAnswer: row.questions_to_answer ?? undefined,
+    });
   }
-  s = s
-    .split("\n")
-    .filter((line) => {
-      const t = line.trim();
-      return !t.startsWith(SECURITY_MARKER) && !t.startsWith(META_MARKER);
-    })
-    .join("\n")
-    .trim();
-  return s;
-}
 
-export function embedSecurityInDescription(
-  description: string | null | undefined,
-  settings: ExamSecuritySettings,
-): string {
-  const clean = stripInternalMarkers(description);
-  const blob = `${SECURITY_MARKER}${JSON.stringify(normalizeSecuritySettings(settings))}`;
-  return clean ? `${clean}\n${blob}` : blob;
-}
-
-export function parseSecurityFromDescription(
-  description: string | null | undefined,
-): ExamSecuritySettings | null {
-  if (!description) return null;
-  const idx = description.indexOf(SECURITY_MARKER);
-  if (idx < 0) return null;
-  try {
-    let raw = description.slice(idx + SECURITY_MARKER.length).trim();
-    const start = raw.indexOf("{");
-    if (start < 0) return null;
-    let depth = 0;
-    let end = -1;
-    for (let i = start; i < raw.length; i++) {
-      if (raw[i] === "{") depth++;
-      if (raw[i] === "}") {
-        depth--;
-        if (depth === 0) {
-          end = i;
-          break;
-        }
-      }
+  if (description && description.includes(SECURITY_MARKER)) {
+    try {
+      const raw = description.split(SECURITY_MARKER)[1]?.split(META_MARKER)[0] ?? "";
+      const parsed = JSON.parse(raw.trim()) as Partial<ExamSecuritySettings>;
+      return normalizeSecuritySettings(parsed);
+    } catch {
+      /* fall through */
     }
-    if (end < 0) return null;
-    const parsed = JSON.parse(raw.slice(start, end + 1)) as Partial<ExamSecuritySettings>;
-    return normalizeSecuritySettings(parsed);
-  } catch {
-    return null;
   }
-}
 
-export function stripSecurityMarker(description: string | null | undefined): string {
-  return stripInternalMarkers(description);
-}
-
-export function securitySummaryLines(s: ExamSecuritySettings): string[] {
-  const n = normalizeSecuritySettings(s);
-  const shareLabel =
-    n.screenShareMode === "required"
-      ? "Required"
-      : n.screenShareMode === "optional"
-        ? "Optional"
-        : "Disabled";
-  return [
-    `Fullscreen lockdown: ${n.fullscreen ? "On" : "Off"}`,
-    `Tab monitoring: ${n.tabMonitoring ? `On (max ${n.maxTabSwitches})` : "Off"}`,
-    `On threshold: ${n.thresholdAction}`,
-    `Block copy/paste: ${n.blockCopyPaste ? "On" : "Off"}`,
-    `Randomise questions: ${n.randomizeQuestions ? "On" : "Off"}`,
-    `Randomise options: ${n.randomizeOptions ? "On" : "Off"}`,
-    `Camera monitoring: ${n.requireCamera ? "Required" : "Off"}`,
-    `Face detection: ${n.faceDetection && n.requireCamera ? `On (max ${n.maxFaceWarnings} → ${n.faceViolationAction})` : "Off"}`,
-    `Screen sharing: ${shareLabel}`,
-    `Microphone: ${n.requireMicrophone ? "Required" : "Not required"}`,
-    `Result release: ${n.resultVisibility}`,
-  ];
+  return { ...DEFAULT_EXAM_SECURITY };
 }
