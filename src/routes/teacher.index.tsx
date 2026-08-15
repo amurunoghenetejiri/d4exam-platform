@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, FileText, Layers, Clock } from "lucide-react";
-import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
+import { PageHeader, SectionCard, StatusBadge, EmptyState, NavCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { useTeacherContext } from "@/lib/teacher";
 import { supabase } from "@/integrations/supabase/client";
@@ -23,11 +23,12 @@ type ExamRow = {
 };
 
 function Page() {
-  const { data: teacher, isLoading } = useTeacherContext();
+  const { data: teacher, isLoading, isFetching } = useTeacherContext();
 
   const examsQ = useQuery({
     queryKey: ["teacher-exams-dash", teacher?.teacherId, teacher?.courseIds],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
+    staleTime: 3 * 60_000,
     queryFn: async () => {
       if (!teacher) return [] as ExamRow[];
       const { data, error } = await supabase
@@ -45,6 +46,7 @@ function Page() {
   const questionsQ = useQuery({
     queryKey: ["teacher-q-count", teacher?.schoolId, teacher?.courseIds],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
+    staleTime: 3 * 60_000,
     queryFn: async () => {
       if (!teacher) return 0;
       const { count, error } = await supabase
@@ -57,7 +59,7 @@ function Page() {
     },
   });
 
-  if (isLoading) {
+  if (isLoading && !teacher) {
     return <p className="text-sm text-slate-500">Loading your dashboard…</p>;
   }
 
@@ -79,7 +81,7 @@ function Page() {
     <>
       <PageHeader
         title={`Welcome back, ${teacher.fullName}`}
-        description={`${teacher.schoolName ?? "School"} · Staff ID ${teacher.staffId} · ${teacher.email}`}
+        description={`${teacher.schoolName ?? "School"} · Staff ID ${teacher.staffId} · ${teacher.email}${isFetching ? " ·" : ""}`}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" className="font-semibold" asChild>
@@ -117,15 +119,19 @@ function Page() {
           ) : (
             <ul className="space-y-2">
               {teacher.courses.map((c) => (
-                <li
-                  key={c.id}
-                  className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2.5"
-                >
-                  <div>
-                    <p className="text-sm font-bold text-slate-900">{c.code}</p>
-                    <p className="text-xs text-slate-500">{c.name}</p>
-                  </div>
-                  <span className="text-xs font-semibold text-primary">{c.credit_units} units</span>
+                <li key={c.id}>
+                  <NavCard
+                    to="/teacher/question-bank"
+                    search={{ course: c.id }}
+                    ariaLabel={`Open questions for ${c.code}`}
+                    className="flex items-center justify-between rounded-xl border-slate-100 px-3 py-2.5"
+                  >
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">{c.code}</p>
+                      <p className="text-xs text-slate-500">{c.name}</p>
+                    </div>
+                    <span className="text-xs font-semibold text-primary">{c.credit_units} units</span>
+                  </NavCard>
                 </li>
               ))}
             </ul>
@@ -147,26 +153,30 @@ function Page() {
               description="Create an exam for an assigned course."
               actionLabel="Create examination"
               onAction={() => {
-                window.location.href = "/teacher/examinations";
+                window.location.assign("/teacher/examinations");
               }}
             />
           ) : (
             <ul className="space-y-3">
               {exams.map((e) => (
-                <li
-                  key={e.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
-                    <p className="text-xs text-slate-500">
-                      {e.courses?.code ?? "—"} ·{" "}
-                      {e.scheduled_start
-                        ? new Date(e.scheduled_start).toLocaleString()
-                        : "Not scheduled"}
-                    </p>
-                  </div>
-                  <StatusBadge status={String(e.status).replaceAll("_", " ")} />
+                <li key={e.id}>
+                  <NavCard
+                    to="/teacher/examinations"
+                    search={e.course_id ? { course: e.course_id } : undefined}
+                    ariaLabel={`Open examinations for ${e.title}`}
+                    className="flex items-center justify-between gap-3 rounded-xl border-slate-100 p-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {e.courses?.code ?? "—"} ·{" "}
+                        {e.scheduled_start
+                          ? new Date(e.scheduled_start).toLocaleString()
+                          : "Not scheduled"}
+                      </p>
+                    </div>
+                    <StatusBadge status={String(e.status).replaceAll("_", " ")} />
+                  </NavCard>
                 </li>
               ))}
             </ul>
@@ -189,10 +199,7 @@ function Stat({
   icon: typeof BookOpen;
 }) {
   return (
-    <Link
-      to={to}
-      className="block rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm transition hover:border-primary/40 hover:shadow-md"
-    >
+    <NavCard to={to} ariaLabel={label}>
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs font-semibold text-slate-500">{label}</p>
@@ -202,6 +209,6 @@ function Stat({
           <Icon className="h-4 w-4" />
         </span>
       </div>
-    </Link>
+    </NavCard>
   );
 }
