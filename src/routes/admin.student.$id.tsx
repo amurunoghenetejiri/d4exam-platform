@@ -79,6 +79,20 @@ function Page() {
           null;
         if (activeSem) semester = { id: activeSem.id as string, name: activeSem.name as string };
       }
+      // Fallback: any active semester for the school
+      if (!semester) {
+        const { data: anySem } = await supabase
+          .from("semesters")
+          .select("id, name, status")
+          .eq("school_id", schoolId!)
+          .order("created_at", { ascending: false })
+          .limit(10);
+        const activeSem =
+          (anySem ?? []).find((s) => String(s.status).toLowerCase() === "active") ??
+          (anySem ?? [])[0] ??
+          null;
+        if (activeSem) semester = { id: activeSem.id as string, name: activeSem.name as string };
+      }
       return {
         sessionName: (activeSession?.name as string | null) ?? null,
         semester,
@@ -119,8 +133,13 @@ function Page() {
         .eq("status", "active")
         .order("code")
         .limit(150);
-      if (studentQ.data?.department_id) q = q.eq("department_id", studentQ.data.department_id);
-      if (studentQ.data?.level_id) q = q.eq("level_id", studentQ.data.level_id);
+      // Own department + All departments (null)
+      if (studentQ.data?.department_id) {
+        q = q.or(`department_id.eq.${studentQ.data.department_id},department_id.is.null`);
+      }
+      if (studentQ.data?.level_id) {
+        q = q.or(`level_id.eq.${studentQ.data.level_id},level_id.is.null`);
+      }
       if (semesterId) q = q.or(`semester_id.eq.${semesterId},semester_id.is.null`);
       const { data, error } = await q;
       if (error) {
@@ -131,8 +150,12 @@ function Page() {
           .eq("status", "active")
           .order("code")
           .limit(150);
-        if (studentQ.data?.department_id) q2 = q2.eq("department_id", studentQ.data.department_id);
-        if (studentQ.data?.level_id) q2 = q2.eq("level_id", studentQ.data.level_id);
+        if (studentQ.data?.department_id) {
+          q2 = q2.or(`department_id.eq.${studentQ.data.department_id},department_id.is.null`);
+        }
+        if (studentQ.data?.level_id) {
+          q2 = q2.or(`level_id.eq.${studentQ.data.level_id},level_id.is.null`);
+        }
         const { data: d2, error: e2 } = await q2;
         if (e2) throw e2;
         return d2 ?? [];
