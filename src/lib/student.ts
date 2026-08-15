@@ -216,8 +216,11 @@ export function useStudentContext() {
         departmentName: departments?.name ?? null,
         facultyName: faculties?.name ?? null,
         levelName: levels?.name ?? null,
+        status,
+        isActive: status.toLowerCase() === "active",
         sessionName,
         semesterName,
+        semesterId,
         courses,
         courseIds: courses.map((c) => c.id),
       };
