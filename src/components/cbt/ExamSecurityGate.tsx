@@ -71,11 +71,52 @@ export function ExamSecurityGate({
 }: Props) {
   const caps = useMemo(() => detectDeviceCapabilities(), []);
   const [acknowledgedUnsupported, setAcknowledgedUnsupported] = useState(false);
+  const [acknowledgedNotice, setAcknowledgedNotice] = useState(false);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const previewStreamRef = useRef<MediaStream | null>(null);
+  const [previewState, setPreviewState] = useState<"idle" | "starting" | "live" | "error">("idle");
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const shareMode = resolveScreenShareMode(security);
   const needCam = security.requireCamera;
   const needMic = security.requireMicrophone;
   const needFace = needCam && security.faceDetection;
+
+  const stopPreview = () => {
+    previewStreamRef.current?.getTracks().forEach((t) => t.stop());
+    previewStreamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+  };
+
+  const startPreview = async () => {
+    setPreviewState("starting");
+    setPreviewError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+      previewStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+      setPreviewState("live");
+    } catch {
+      setPreviewState("error");
+      setPreviewError(
+        "Camera unavailable. Allow camera access in your browser settings, close other apps using the camera, then try again.",
+      );
+    }
+  };
+
+  // Auto-start the preview when the exam requires a camera.
+  useEffect(() => {
+    if (needCam && caps.camera && previewState === "idle") void startPreview();
+    return () => stopPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needCam, caps.camera]);
 
   const screenSupported = caps.screenShare;
   const blockedByRequired =
@@ -87,14 +128,19 @@ export function ExamSecurityGate({
   const willRequestScreen =
     screenSupported && (shareMode === "required" || shareMode === "optional");
 
+  const cameraBlocked = needCam && previewState !== "live";
+
   const buttonLabel = (() => {
     if (busy) return null;
     if (hardBlock) return "Cannot start on this device";
+    if (cameraBlocked) return "Camera preview required";
+    if (!acknowledgedNotice) return "Accept the monitoring notice to continue";
     if (willRequestScreen && shareMode === "required") return "Share Screen & Continue";
     if (willRequestScreen && shareMode === "optional") return "Continue (screen optional)";
-    if (needCam) return "Allow camera & start exam";
+    if (needCam) return "Start examination";
     return "Begin examination";
   })();
+
 
   return (
     <div className="grid min-h-dvh place-items-center bg-slate-50 p-6">
