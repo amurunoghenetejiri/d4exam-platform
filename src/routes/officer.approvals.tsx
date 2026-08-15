@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -212,7 +212,6 @@ function Page() {
 
   function resolveSecurity(item: ExamRow) {
     const row = settingsMap[item.id];
-    // ALWAYS pass description so face/screen settings never drop when table lacks columns
     if (row) {
       return {
         security: fromExamSettingsRow(row, item.description),
@@ -234,7 +233,7 @@ function Page() {
       item.scheduled_end
         ? toLocalInput(new Date(item.scheduled_end))
         : start
-          ? endFromStartLocal(start, item.duration_minutes)
+          ? endFromStartLocal(start, 4 * 60)
           : "";
     setScheduleEnd(end);
   }
@@ -242,7 +241,7 @@ function Page() {
   function onOfficerStartChange(v: string) {
     setScheduleStart(v);
     if (v && selected) {
-      setScheduleEnd(endFromStartLocal(v, selected.duration_minutes));
+      setScheduleEnd(endFromStartLocal(v, 4 * 60));
     }
   }
 
@@ -266,7 +265,7 @@ function Page() {
 
     let endLocal = scheduleEnd;
     if (action === "approve" && scheduleStart) {
-      if (!endLocal) endLocal = endFromStartLocal(scheduleStart, selected.duration_minutes);
+      if (!endLocal) endLocal = endFromStartLocal(scheduleStart, 4 * 60);
       if (new Date(endLocal) <= new Date(scheduleStart)) {
         toast.error("End time must be after start time.");
         return;
@@ -474,6 +473,16 @@ function Page() {
                                 <li key={line}>• {line}</li>
                               ))}
                             </ul>
+                            <div className="mt-3">
+                              <Button size="sm" variant="secondary" className="font-semibold" asChild>
+                                <Link to="/officer/exam-preview/$id" params={{ id: item.id }}>
+                                  Preview as student
+                                </Link>
+                              </Button>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                Same security gate students will see (no real attempt).
+                              </p>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -552,8 +561,8 @@ function Page() {
             {action === "approve" && (
               <>
                 <p className="text-sm text-slate-600">
-                  Set start time. End is filled automatically as start + {selected?.duration_minutes}{" "}
-                  minutes (you can still edit it).
+                  Set the <strong>availability window</strong> (when students may start).
+                  Exam duration is still <strong>{selected?.duration_minutes} minutes</strong> once they begin — independent of this window.
                 </p>
                 <div className="space-y-2">
                   <Label className="font-semibold">Start</Label>
