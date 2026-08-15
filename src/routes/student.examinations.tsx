@@ -8,6 +8,8 @@ import {
   useStudentContext,
   STUDENT_VISIBLE_EXAM_STATUSES,
   canStartExam,
+  examAvailability,
+  formatExamWindow,
 } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -85,7 +87,7 @@ function StartOrCountdownButton({
     return (
       <Button size="sm" className="font-semibold" asChild>
         <Link to="/student/exam/$id" params={{ id: examId }}>
-          Start Exam
+          Open exam
         </Link>
       </Button>
     );
@@ -214,8 +216,11 @@ function Page() {
         continue;
       }
 
-      if (canStartExam(e.status, e.scheduled_start)) {
+      const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
+      if (avail === "available") {
         liveList.push(e);
+      } else if (avail === "missed") {
+        doneList.push(e);
       } else {
         upList.push(e);
       }
@@ -283,7 +288,7 @@ function Page() {
               />
             )}
           </SectionCard>
-          <SectionCard title="Completed">
+          <SectionCard title="Completed / missed">
             {done.length === 0 ? (
               <p className="text-sm text-slate-500">No completed examinations yet.</p>
             ) : (
@@ -328,11 +333,14 @@ function ExamList({
         const attempt = attemptByExam.get(e.id);
         const studentFinished =
           attempt && DONE_ATTEMPT_STATUSES.includes((attempt.status || "").toLowerCase());
+        const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
         const badge = studentFinished
           ? attempt!.status === "terminated"
             ? "terminated"
             : "completed"
-          : String(e.status).replaceAll("_", " ");
+          : avail === "missed"
+            ? "missed"
+            : String(e.status).replaceAll("_", " ");
         const resultId = resultIdByExam[e.id];
 
         return (
@@ -348,8 +356,8 @@ function ExamList({
               <p className="text-xs text-slate-400">
                 {[sessionName, semesterName].filter(Boolean).join(" · ")}
                 {sessionName || semesterName ? " · " : ""}
-                {e.scheduled_start
-                  ? `Starts ${new Date(e.scheduled_start).toLocaleString()}`
+                {e.scheduled_start || e.scheduled_end
+                  ? formatExamWindow(e.scheduled_start, e.scheduled_end)
                   : "Schedule TBC"}
                 {attempt?.submitted_at
                   ? ` · Submitted ${new Date(attempt.submitted_at).toLocaleString()}`
@@ -374,10 +382,7 @@ function ExamList({
               )}
               {completed && studentFinished && (
                 <Button size="sm" variant="outline" className="font-semibold" asChild>
-                  <Link
-                    to="/student/results"
-                    search={{ id: resultId || e.id }}
-                  >
+                  <Link to="/student/results" search={{ id: resultId || e.id }}>
                     View Result
                   </Link>
                 </Button>
