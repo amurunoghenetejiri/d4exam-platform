@@ -31,6 +31,8 @@ type Props = {
   busy: boolean;
   schoolLogoUrl?: string | null;
   schoolName?: string | null;
+  continueMode?: boolean;
+  windowLabel?: string | null;
   onStart: (opts: {
     skipScreenShare: boolean;
     caps: DeviceCapabilities;
@@ -72,6 +74,8 @@ export function ExamSecurityGate({
   busy,
   schoolLogoUrl,
   schoolName,
+  continueMode = false,
+  windowLabel,
   onStart,
 }: Props) {
   const caps = useMemo(() => detectDeviceCapabilities(), []);
@@ -135,6 +139,7 @@ export function ExamSecurityGate({
     if (!acknowledgedNotice) return "Accept the monitoring notice to continue";
     if (willRequestScreen && shareMode === "required") return "Share Screen & Continue";
     if (willRequestScreen && shareMode === "optional") return "Continue (screen optional)";
+    if (continueMode) return "Continue examination";
     if (needCam) return "Start examination";
     return "Begin examination";
   })();
@@ -176,6 +181,15 @@ export function ExamSecurityGate({
         {schoolName && <p className="mt-2 text-xs font-semibold text-slate-500">{schoolName}</p>}
         <h1 className="mt-3 text-lg font-extrabold text-primary sm:text-xl">{examTitle}</h1>
         <p className="mt-1 text-sm font-semibold text-primary/80">{courseLine}</p>
+        {windowLabel && (
+          <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <span className="font-semibold text-slate-800">Available:</span> {windowLabel}
+            <span className="mx-1">·</span>
+            <span className="font-semibold text-slate-800">Duration:</span> {durationMinutes} min
+            <span className="mx-1">·</span>
+            <span className="font-semibold text-slate-800">Questions:</span> {totalQuestions}
+          </p>
+        )}
 
         <p className="mt-3 text-xs text-slate-500">
           Detected: <strong className="text-slate-700">{caps.deviceType}</strong> ·{" "}
@@ -207,7 +221,11 @@ export function ExamSecurityGate({
           </p>
           <ul className="mt-3 space-y-2">
             <CheckRow ok={!needCam ? "na" : caps.camera} label="Camera" detail={!needCam ? "Not required" : undefined} />
-            <CheckRow ok={!needFace ? "na" : caps.faceDetection} label="Face detection" detail={!needFace ? "Off" : undefined} />
+            <CheckRow
+              ok={!needFace ? "na" : caps.faceDetection || caps.camera}
+              label="Face detection"
+              detail={!needFace ? "Off" : undefined}
+            />
             <CheckRow
               ok={shareMode === "disabled" ? "na" : screenSupported ? true : false}
               label={`Screen sharing (${shareMode})`}
