@@ -6,12 +6,14 @@ export const getRouter = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
-        // Cache aggressively — pages felt multi-minute slow from refetch-everything
-        staleTime: 60_000,
-        gcTime: 10 * 60_000,
+        // Instant navigation from cache; network only when data is older than 5 min
+        staleTime: 5 * 60_000,
+        gcTime: 30 * 60_000,
         refetchOnWindowFocus: false,
-        refetchOnReconnect: true,
+        refetchOnReconnect: false,
+        refetchOnMount: true, // refetch only if stale (combined with long staleTime)
         retry: 1,
+        retryDelay: 400,
         networkMode: "online",
       },
       mutations: {
@@ -25,8 +27,7 @@ export const getRouter = () => {
     routeTree,
     context: { queryClient },
     scrollRestoration: true,
-    // Was 0 → every navigation treated cache as stale and re-fetched everything
-    defaultPreloadStaleTime: 30_000,
+    defaultPreloadStaleTime: 5 * 60_000,
     defaultPreload: "intent",
   });
 

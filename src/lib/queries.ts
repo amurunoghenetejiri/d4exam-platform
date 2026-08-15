@@ -24,6 +24,7 @@ export function useRows<T = Record<string, unknown>>({
   return useQuery({
     queryKey: ["rows", table, select, filters, order, limit],
     enabled,
+    staleTime: 5 * 60_000,
     queryFn: async (): Promise<T[]> => {
       let q = supabase.from(table as never).select(select).limit(limit);
       for (const f of filters) {
@@ -38,11 +39,12 @@ export function useRows<T = Record<string, unknown>>({
   });
 }
 
-/** Row count for dashboard statistics. */
+/** Row count for dashboard statistics. Cached hard to avoid shell lag. */
 export function useCount(table: string, filters: Filter[] = [], enabled = true) {
   return useQuery({
     queryKey: ["count", table, filters],
     enabled,
+    staleTime: 5 * 60_000,
     queryFn: async () => {
       let q = supabase.from(table as never).select("*", { count: "exact", head: true });
       for (const f of filters) {
