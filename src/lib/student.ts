@@ -59,16 +59,21 @@ async function loadProgrammeCourses(
   schoolId: string,
   departmentId: string | null,
   levelId: string | null,
+  semesterId: string | null,
 ): Promise<StudentCourse[]> {
   const byId = new Map<string, StudentCourse>();
+  // Courses carrying no semester tag stay visible all year round.
+  const semesterFilter = semesterId ? `semester_id.eq.${semesterId},semester_id.is.null` : null;
 
   if (departmentId && levelId) {
-    const { data: offerings } = await supabase
+    let oq = supabase
       .from("course_offerings")
-      .select("course_id, courses(id, code, name)")
+      .select("course_id, semester_id, courses(id, code, name)")
       .eq("school_id", schoolId)
       .eq("department_id", departmentId)
       .eq("level_id", levelId);
+    if (semesterFilter) oq = oq.or(semesterFilter);
+    const { data: offerings } = await oq;
 
     for (const row of offerings ?? []) {
       const c = row.courses as { id: string; code: string; name: string } | null;
@@ -79,11 +84,12 @@ async function loadProgrammeCourses(
   if (departmentId) {
     let q = supabase
       .from("courses")
-      .select("id, code, name")
+      .select("id, code, name, semester_id")
       .eq("school_id", schoolId)
       .eq("department_id", departmentId)
       .eq("status", "active");
     if (levelId) q = q.eq("level_id", levelId);
+    if (semesterFilter) q = q.or(semesterFilter);
     const { data: tagged } = await q;
     for (const c of tagged ?? []) {
       if (c?.id) byId.set(c.id as string, { id: c.id as string, code: c.code as string, name: c.name as string });
@@ -94,6 +100,7 @@ async function loadProgrammeCourses(
   list.sort((a, b) => a.code.localeCompare(b.code));
   return list;
 }
+
 
 async function loadActiveSessionSemester(schoolId: string): Promise<{
   sessionName: string | null;
