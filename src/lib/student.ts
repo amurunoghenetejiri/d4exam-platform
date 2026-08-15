@@ -105,6 +105,7 @@ async function loadProgrammeCourses(
 async function loadActiveSessionSemester(schoolId: string): Promise<{
   sessionName: string | null;
   semesterName: string | null;
+  semesterId: string | null;
 }> {
   const { data: sessions } = await supabase
     .from("academic_sessions")
@@ -119,6 +120,7 @@ async function loadActiveSessionSemester(schoolId: string): Promise<{
     null;
 
   let semesterName: string | null = null;
+  let semesterId: string | null = null;
   if (activeSession?.id) {
     const { data: semesters } = await supabase
       .from("semesters")
@@ -132,13 +134,16 @@ async function loadActiveSessionSemester(schoolId: string): Promise<{
       (semesters ?? [])[0] ??
       null;
     semesterName = (activeSem?.name as string | null) ?? null;
+    semesterId = (activeSem?.id as string | null) ?? null;
   }
 
   return {
     sessionName: (activeSession?.name as string | null) ?? null,
     semesterName,
+    semesterId,
   };
 }
+
 
 export function useStudentContext() {
   const { data: session } = useSessionUser();
