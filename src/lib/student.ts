@@ -22,13 +22,20 @@ export type StudentContext = {
   departmentName: string | null;
   facultyName: string | null;
   levelName: string | null;
+  /** Live account status from the students table (active / suspended / …) */
+  status: string;
+  /** True only when the student record is active and may sit examinations */
+  isActive: boolean;
   /** Active academic session name set by school admin */
   sessionName: string | null;
   /** Active semester name set by school admin */
   semesterName: string | null;
+  /** Active semester id used to filter eligible courses */
+  semesterId: string | null;
   courses: StudentCourse[];
   courseIds: string[];
 };
+
 
 /** Statuses a student is allowed to see (officer must have approved). */
 export const STUDENT_VISIBLE_EXAM_STATUSES = [
