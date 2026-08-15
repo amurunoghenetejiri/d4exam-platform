@@ -18,7 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Logo } from "@/components/brand/Logo";
+import { SchoolResultHeader } from "@/components/brand/SchoolResultHeader";
 import { useStudentContext } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -223,7 +223,7 @@ function ResultDetailPage() {
   if (!r) {
     return (
       <div className="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <Logo size="md" className="mx-auto justify-center" />
+        <SchoolResultHeader schoolId={student.schoolId} centered className="justify-center" />
         <p className="mt-4 font-bold text-slate-900">Result not found</p>
         <p className="mt-2 text-sm text-slate-500">
           This result does not exist for your account, or it has not been saved yet.
@@ -255,7 +255,6 @@ function ResultDetailPage() {
   const wrong = r.wrong_count ?? metaScore?.wrong ?? 0;
   const unanswered = r.unanswered_count ?? metaScore?.unanswered ?? 0;
 
-  // Keep ?? and || on separate lines — Babel forbids mixing them without parens
   const answeredSum = correct + wrong + unanswered;
   const metaTotal = attemptQ.data?.metadata?.total ?? 0;
   const totalQ = answeredSum > 0 ? answeredSum : Number(metaTotal);
@@ -281,7 +280,7 @@ function ResultDetailPage() {
     <div className="mx-auto max-w-5xl space-y-5 pb-10">
       <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="min-w-0 flex-1">
-          <Logo size="md" />
+          <SchoolResultHeader schoolId={student.schoolId} size="lg" />
           <p className="mt-3 text-xs font-semibold text-slate-400">
             <Link to="/student" className="hover:text-primary">
               Dashboard
@@ -401,7 +400,7 @@ function ResultDetailPage() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <StatCard icon={FileText} label="Total Questions" value={String(totalQ || "—")} tone="blue" />
             <StatCard icon={CheckCircle2} label="Correct Answers" value={String(correct)} tone="green" />
-            <StatCard icon={XCircle} label="Wrong Answers" value={String(wrong)} tone="red" />
+            <StatCard icon={XCircle} label="Wrong Answers" value={String(wrong)} />
             <StatCard icon={MinusCircle} label="Unanswered" value={String(unanswered)} tone="amber" />
             <StatCard
               icon={Percent}
@@ -450,7 +449,7 @@ function ResultDetailPage() {
               </div>
               <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Integrity monitored · D4EXAM secure CBT
+                Integrity monitored · {student.schoolName || "School"} · D4EXAM
               </div>
             </div>
           </div>
