@@ -176,6 +176,90 @@ function Page() {
     await qc.invalidateQueries({ queryKey: ["officer-results-exams"] });
   }
 
+  async function rescheduleExam(examId: string) {
+    if (!schoolId || !user) return;
+    const startStr = window.prompt("New start time (YYYY-MM-DDTHH:MM local)", "");
+    if (!startStr) return;
+    const endStr = window.prompt("New end time (YYYY-MM-DDTHH:MM local)", "");
+    if (!endStr) return;
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+      toast.error("Invalid schedule. Use format like 2026-08-16T09:00");
+      return;
+    }
+    const { error } = await supabase
+      .from("examinations")
+      .update({
+        scheduled_start: start.toISOString(),
+        scheduled_end: end.toISOString(),
+        status: "scheduled",
+      } as never)
+      .eq("id", examId)
+      .eq("school_id", schoolId);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    await supabase.from("audit_logs").insert({
+      school_id: schoolId,
+      actor_user_id: user.userId,
+      actor_role: "examination_officer",
+      action: "exam_rescheduled",
+      entity_type: "examination",
+      entity_id: examId,
+      description: `Rescheduled to ${start.toISOString()} – ${end.toISOString()}`,
+    } as never);
+    toast.success("Exam rescheduled");
+    await qc.invalidateQueries({ queryKey: ["officer-results-exams"] });
+    await examsQ.refetch();
+  }
+
+  async function holdAllResults(examId: string) {
+    if (!schoolId || !user) return;
+    if (!confirm("Hold all results for officer review? Students will not see scores until you release them.")) return;
+    const { error } = await supabase
+      .from("results")
+      .update({ status: "pending", released_at: null } as never)
+      .eq("exam_id", examId)
+      .eq("school_id", schoolId);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success("Results held for review");
+  }
+
+  async function allowRewrite(examId: string) {
+    if (!schoolId || !user) return;
+    const matric = window.prompt("Enter student matric number to allow rewrite (clears their attempt):");
+    if (!matric?.trim()) return;
+    const { data: st } = await supabase
+      .from("students")
+      .select("id")
+      .eq("school_id", schoolId)
+      .ilike("matric_number", matric.trim())
+      .maybeSingle();
+    if (!st?.id) {
+      toast.error("Student not found");
+      return;
+    }
+    if (!confirm(`Clear attempt for ${matric.trim()} so they can rewrite?`)) return;
+    await supabase.from("exam_attempts").delete().eq("exam_id", examId).eq("student_id", st.id as string);
+    await supabase.from("results").delete().eq("exam_id", examId).eq("student_id", st.id as string);
+    await supabase.from("audit_logs").insert({
+      school_id: schoolId,
+      actor_user_id: user.userId,
+      actor_role: "examination_officer",
+      action: "allow_rewrite",
+      entity_type: "examination",
+      entity_id: examId,
+      description: `Allowed rewrite for matric ${matric.trim()}`,
+    } as never);
+    toast.success("Attempt cleared — student can rewrite when the window is open");
+    await qc.invalidateQueries({ queryKey: ["officer-exam-attempts"] });
+  }
+
   const rows = examsQ.data ?? [];
   const attempts = attemptsQ.data ?? {};
   const qCounts = qCountQ.data ?? {};
@@ -184,7 +268,7 @@ function Page() {
     <>
       <PageHeader
         title="Results Release"
-        description="Mark exams completed when attempts finish. Release results so students and teachers can see official scores. Flagged attempts stay under review."
+        description="Mark exams completed when attempts finish. Release, hold, reschedule, or allow rewrite. Flagged attempts stay under review until cleared."
       />
 
       <SectionCard title="Examinations">
@@ -240,12 +324,17 @@ function Page() {
                         Mark completed
                       </Button>
                     )}
-                    <Button
-                      size="sm"
-                      className="font-semibold"
-                      onClick={() => void releaseResults(e.id)}
-                    >
+                    <Button size="sm" className="font-semibold" onClick={() => void releaseResults(e.id)}>
                       Release results
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void holdAllResults(e.id)}>
+                      Hold results
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void rescheduleExam(e.id)}>
+                      Reschedule
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => void allowRewrite(e.id)}>
+                      Allow rewrite
                     </Button>
                   </div>
                 </li>
