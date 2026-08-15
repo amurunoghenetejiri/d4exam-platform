@@ -242,6 +242,65 @@ export function ExamSecurityGate({
           </div>
         )}
 
+        {needCam && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+            <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
+              <Camera className="h-4 w-4 text-primary" />
+              Camera check
+            </p>
+            <div className="mt-3 overflow-hidden rounded-xl bg-slate-900">
+              <video
+                ref={videoRef}
+                muted
+                playsInline
+                autoPlay
+                className={cn(
+                  "aspect-video w-full scale-x-[-1] object-cover",
+                  previewState !== "live" && "hidden",
+                )}
+              />
+              {previewState !== "live" && (
+                <div className="grid aspect-video w-full place-items-center text-center text-xs text-slate-300">
+                  {previewState === "starting" ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Starting camera…
+                    </span>
+                  ) : (
+                    <span className="inline-flex flex-col items-center gap-2 px-4">
+                      <CameraOff className="h-5 w-5" />
+                      {previewError ?? "Camera preview not started"}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p
+                className={cn(
+                  "text-xs font-semibold",
+                  previewState === "live" ? "text-emerald-600" : "text-amber-700",
+                )}
+              >
+                {previewState === "live"
+                  ? "✓ Camera verified — you are visible"
+                  : "Camera not verified yet"}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  stopPreview();
+                  void startPreview();
+                }}
+                disabled={previewState === "starting"}
+              >
+                {previewState === "live" ? "Restart camera" : "Enable camera"}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <ul className="mt-4 space-y-1 text-sm text-slate-600">
           <li>
             Duration: <strong>{durationMinutes} minutes</strong>
@@ -250,6 +309,33 @@ export function ExamSecurityGate({
             Questions to answer: <strong>{totalQuestions}</strong>
           </li>
         </ul>
+
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-extrabold text-slate-900">Monitoring notice</p>
+          <ul className="mt-2 space-y-1 text-xs leading-relaxed text-slate-600">
+            {needCam && (
+              <li>
+                • Your camera stays on for the whole examination. Face checks run locally on this
+                device — <strong>no video is uploaded or recorded</strong>.
+              </li>
+            )}
+            {needFace && <li>• Warnings are shown if no face or multiple faces are detected.</li>}
+            {needMic && <li>• Your microphone is active for the duration of the examination.</li>}
+            {shareMode !== "disabled" && <li>• Screen activity may be monitored while you write.</li>}
+            {security.tabMonitoring && <li>• Leaving this tab is counted and recorded.</li>}
+            <li>• Security events (with time, question and device details) are stored for review.</li>
+          </ul>
+          <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-xs text-slate-700">
+            <Checkbox
+              checked={acknowledgedNotice}
+              onCheckedChange={(v) => setAcknowledgedNotice(v === true)}
+              className="mt-0.5"
+            />
+            <span>
+              I have read and accept the monitoring notice and the examination rules.
+            </span>
+          </label>
+        </div>
 
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           Monitoring helps maintain exam integrity. It does not guarantee absolute prevention of
@@ -261,13 +347,14 @@ export function ExamSecurityGate({
         ) : (
           <Button
             className="mt-6 w-full font-semibold"
-            disabled={busy || hardBlock}
-            onClick={() =>
+            disabled={busy || hardBlock || cameraBlocked || !acknowledgedNotice}
+            onClick={() => {
+              stopPreview();
               void onStart({
                 skipScreenShare: !willRequestScreen || (shareMode === "optional" && !screenSupported),
                 caps,
-              })
-            }
+              });
+            }}
           >
             {busy ? (
               <>
@@ -278,6 +365,7 @@ export function ExamSecurityGate({
             )}
           </Button>
         )}
+
         <Button variant="ghost" className="mt-2 w-full" asChild>
           <Link to="/student/examinations">Cancel</Link>
         </Button>
