@@ -158,7 +158,7 @@ export function useStudentContext() {
       const { data: student, error: sErr } = await supabase
         .from("students")
         .select(
-          "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, full_name, departments(name), faculties(name), levels(name)",
+          "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, full_name, status, departments(name), faculties(name), levels(name)",
         )
         .eq("profile_id", session.profileId)
         .eq("school_id", session.schoolId)
@@ -167,14 +167,20 @@ export function useStudentContext() {
       if (sErr) throw sErr;
       if (!student) return null;
 
+      const { sessionName, semesterName, semesterId } = await loadActiveSessionSemester(
+        session.schoolId,
+      );
+
       const { data: links } = await supabase
         .from("student_courses")
-        .select("course_id, courses(id, code, name)")
+        .select("course_id, semester_id, courses(id, code, name)")
         .eq("student_id", student.id)
         .eq("school_id", session.schoolId);
 
       const byId = new Map<string, StudentCourse>();
       for (const row of links ?? []) {
+        const rowSemester = (row as { semester_id?: string | null }).semester_id ?? null;
+        if (semesterId && rowSemester && rowSemester !== semesterId) continue;
         const c = row.courses as { id: string; code: string; name: string } | null | undefined;
         if (c?.id) byId.set(c.id, { id: c.id, code: c.code, name: c.name });
       }
@@ -183,6 +189,7 @@ export function useStudentContext() {
         session.schoolId,
         (student.department_id as string | null) ?? null,
         (student.level_id as string | null) ?? null,
+        semesterId,
       );
       for (const c of programme) byId.set(c.id, c);
 
@@ -192,7 +199,8 @@ export function useStudentContext() {
       const faculties = student.faculties as { name: string } | null;
       const levels = student.levels as { name: string } | null;
 
-      const { sessionName, semesterName } = await loadActiveSessionSemester(session.schoolId);
+      const status = String((student as { status?: string | null }).status ?? "active");
+
 
       return {
         studentId: student.id as string,
