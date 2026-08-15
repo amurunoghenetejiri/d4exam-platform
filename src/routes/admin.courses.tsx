@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2, BookOpen } from "lucide-react";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
@@ -43,6 +43,101 @@ type Dept = { id: string; name: string; code: string | null; faculty_id?: string
 type Faculty = { id: string; name: string };
 type Level = { id: string; name: string };
 type Semester = { id: string; name: string; status: string };
+type Offering = { id: string; course_id: string; department_id: string };
+
+/** Compact multi-select for departments */
+function DeptPicker({
+  depts,
+  selected,
+  allDepartments,
+  onChange,
+  onAllChange,
+}: {
+  depts: Dept[];
+  selected: Set<string>;
+  allDepartments: boolean;
+  onChange: (next: Set<string>) => void;
+  onAllChange: (all: boolean) => void;
+}) {
+  function toggle(id: string) {
+    onAllChange(false);
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange(next);
+  }
+
+  function selectAllListed() {
+    onAllChange(false);
+    onChange(new Set(depts.map((d) => d.id)));
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <label
+          className={cn(
+            "inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold",
+            allDepartments ? "border-primary bg-primary/10 text-primary" : "border-slate-200 text-slate-700",
+          )}
+        >
+          <Checkbox
+            checked={allDepartments}
+            onCheckedChange={(v) => {
+              onAllChange(v === true);
+              if (v === true) onChange(new Set());
+            }}
+          />
+          All departments
+        </label>
+        {!allDepartments && depts.length > 0 && (
+          <button
+            type="button"
+            className="text-xs font-semibold text-primary underline-offset-2 hover:underline"
+            onClick={selectAllListed}
+          >
+            Select all listed
+          </button>
+        )}
+      </div>
+
+      {!allDepartments && (
+        <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2">
+          {depts.length === 0 ? (
+            <p className="px-1 py-2 text-xs text-slate-500">No departments yet.</p>
+          ) : (
+            depts.map((d) => {
+              const checked = selected.has(d.id);
+              return (
+                <label
+                  key={d.id}
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm",
+                    checked ? "bg-primary/5" : "hover:bg-slate-50",
+                  )}
+                >
+                  <Checkbox checked={checked} onCheckedChange={() => toggle(d.id)} />
+                  <span className="min-w-0 truncate">
+                    {d.code ? `${d.code} — ` : ""}
+                    {d.name}
+                  </span>
+                </label>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      <p className="text-[11px] text-slate-500">
+        {allDepartments
+          ? "Visible to students in every department."
+          : selected.size === 0
+            ? "Pick one or more departments."
+            : `${selected.size} department${selected.size === 1 ? "" : "s"} selected.`}
+      </p>
+    </div>
+  );
+}
 
 function Page() {
   const { data: user } = useSessionUser();
@@ -79,6 +174,20 @@ function Page() {
         }));
       }
       return (data ?? []) as Course[];
+    },
+  });
+
+  const offeringsQ = useQuery({
+    queryKey: ["admin-course-offerings", schoolId],
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("course_offerings")
+        .select("id, course_id, department_id")
+        .eq("school_id", schoolId!)
+        .limit(2000);
+      if (error) return [] as Offering[];
+      return (data ?? []) as Offering[];
     },
   });
 
@@ -164,6 +273,7 @@ function Page() {
   });
 
   const courses = coursesQ.data ?? [];
+  const offerings = offeringsQ.data ?? [];
   const teachers = teachersQ.data ?? [];
   const links = linksQ.data ?? [];
   const depts = deptsQ.data ?? [];
@@ -171,19 +281,41 @@ function Page() {
   const levels = levelsQ.data ?? [];
   const semesters = semestersQ.data ?? [];
   const activeSemester = semesters.find((s) => String(s.status).toLowerCase() === "active");
+  const deptName = useMemo(() => new Map(depts.map((d) => [d.id, d.name])), [depts]);
 
-  // Filters for the list (simple)
-  const [filterSem, setFilterSem] = useState<string>("all");
-  const [filterDept, setFilterDept] = useState<string>("all");
+  function deptIdsForCourse(c: Course): string[] {
+    const ids = new Set<string>();
+    if (c.department_id) ids.add(c.department_id);
+    for (const o of offerings) {
+      if (o.course_id === c.id) ids.add(o.department_id);
+    }
+    return [...ids];
+  }
+
+  function deptLabel(c: Course): string {
+    if (!c.department_id && deptIdsForCourse(c).length === 0) return "All departments";
+    const ids = deptIdsForCourse(c);
+    if (ids.length === 0) return "All departments";
+    if (ids.length === 1) return deptName.get(ids[0]) ?? c.departments?.name ?? "Department";
+    return `${ids.length} departments`;
+  }
+
+  const [filterSem, setFilterSem] = useState("all");
+  const [filterDept, setFilterDept] = useState("all");
 
   const filtered = useMemo(() => {
     return courses.filter((c) => {
       if (filterSem === "active" && activeSemester && c.semester_id !== activeSemester.id) return false;
       if (filterSem !== "all" && filterSem !== "active" && c.semester_id !== filterSem) return false;
-      if (filterDept !== "all" && c.department_id !== filterDept) return false;
+      if (filterDept !== "all") {
+        const ids = deptIdsForCourse(c);
+        // "All departments" courses match every filter
+        if (ids.length === 0) return true;
+        if (!ids.includes(filterDept)) return false;
+      }
       return true;
     });
-  }, [courses, filterSem, filterDept, activeSemester]);
+  }, [courses, filterSem, filterDept, activeSemester, offerings]);
 
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const selectedCourse = courses.find((c) => c.id === selectedCourseId) ?? null;
@@ -196,22 +328,68 @@ function Page() {
   const [pendingTeachers, setPendingTeachers] = useState<Set<string> | null>(null);
   const effectiveAssigned = pendingTeachers ?? assignedTeacherIds;
 
-  // Create form — only the essentials
+  // Create form
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [units, setUnits] = useState("3");
-  const [collegeId, setCollegeId] = useState(""); // filters departments only
-  const [departmentId, setDepartmentId] = useState("");
+  const [collegeId, setCollegeId] = useState("");
+  const [deptSelected, setDeptSelected] = useState<Set<string>>(new Set());
+  const [allDepts, setAllDepts] = useState(false);
   const [levelId, setLevelId] = useState("");
   const [semesterId, setSemesterId] = useState("");
   const [busy, setBusy] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
 
+  // Edit panel dept multi-select
+  const [editDeptSelected, setEditDeptSelected] = useState<Set<string>>(new Set());
+  const [editAllDepts, setEditAllDepts] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+
+  useEffect(() => {
+    if (!selectedCourse) return;
+    const ids = deptIdsForCourse(selectedCourse);
+    if (ids.length === 0) {
+      setEditAllDepts(true);
+      setEditDeptSelected(new Set());
+    } else {
+      setEditAllDepts(false);
+      setEditDeptSelected(new Set(ids));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCourse?.id, offerings]);
+
   const deptsForForm = useMemo(() => {
     if (!collegeId) return depts;
     return depts.filter((d) => d.faculty_id === collegeId);
   }, [depts, collegeId]);
+
+  async function syncOfferings(
+    courseId: string,
+    departmentIds: string[],
+    levelIdForOffer: string | null,
+    semesterIdForOffer: string | null,
+  ) {
+    if (!schoolId) return;
+    // Replace offerings for this course
+    await supabase.from("course_offerings").delete().eq("course_id", courseId).eq("school_id", schoolId);
+
+    const level =
+      levelIdForOffer || levels[0]?.id || null;
+    // course_offerings.level_id is required — skip multi-offer if no level available
+    if (!level || departmentIds.length <= 1) return;
+
+    const rows = departmentIds.map((department_id) => ({
+      school_id: schoolId,
+      course_id: courseId,
+      department_id,
+      level_id: level,
+      semester_id: semesterIdForOffer,
+      status: "active",
+    }));
+    const { error } = await supabase.from("course_offerings").insert(rows as never);
+    if (error) console.warn("course_offerings", error);
+  }
 
   async function createCourse(e: React.FormEvent) {
     e.preventDefault();
@@ -223,18 +401,24 @@ function Page() {
       toast.error("Course code and title are required");
       return;
     }
+    if (!allDepts && deptSelected.size === 0) {
+      toast.error("Select All departments or at least one department");
+      return;
+    }
     setBusy(true);
     try {
+      const ids = allDepts ? [] : [...deptSelected];
+      const primary = ids[0] ?? null;
+      const sem = semesterId || activeSemester?.id || null;
       const payload: Record<string, unknown> = {
         school_id: schoolId,
         code: code.trim().toUpperCase(),
         name: name.trim(),
         credit_units: Number(units) || 0,
-        department_id: departmentId || null,
+        department_id: primary,
         status: "active",
       };
       if (levelId) payload.level_id = levelId;
-      const sem = semesterId || activeSemester?.id || null;
       if (sem) payload.semester_id = sem;
 
       const { data, error } = await supabase
@@ -243,16 +427,21 @@ function Page() {
         .select("id")
         .single();
       if (error) throw error;
+      const courseId = String((data as { id: string }).id);
+      if (ids.length > 1) {
+        await syncOfferings(courseId, ids, levelId || null, sem);
+      }
       toast.success(`${code.trim().toUpperCase()} created`);
       setCode("");
       setName("");
       setUnits("3");
+      setDeptSelected(new Set());
+      setAllDepts(false);
       await coursesQ.refetch();
+      await offeringsQ.refetch();
       await qc.invalidateQueries({ queryKey: ["student-context"] });
-      if (data && typeof data === "object" && "id" in data) {
-        setSelectedCourseId(String((data as { id: string }).id));
-        setPendingTeachers(new Set());
-      }
+      setSelectedCourseId(courseId);
+      setPendingTeachers(new Set());
     } catch (err) {
       toast.error((err as Error).message || "Could not create course");
     } finally {
@@ -260,23 +449,64 @@ function Page() {
     }
   }
 
-  async function patchCourse(
-    courseId: string,
-    patch: { semester_id?: string | null; department_id?: string | null; level_id?: string | null },
-  ) {
+  async function saveCourseDepts() {
+    if (!schoolId || !selectedCourse) return;
+    if (!editAllDepts && editDeptSelected.size === 0) {
+      toast.error("Select All departments or at least one department");
+      return;
+    }
+    setEditBusy(true);
+    try {
+      const ids = editAllDepts ? [] : [...editDeptSelected];
+      const primary = ids[0] ?? null;
+      const { error } = await supabase
+        .from("courses")
+        .update({
+          department_id: primary,
+          updated_at: new Date().toISOString(),
+        } as never)
+        .eq("id", selectedCourse.id)
+        .eq("school_id", schoolId);
+      if (error) throw error;
+      await syncOfferings(
+        selectedCourse.id,
+        ids,
+        selectedCourse.level_id,
+        selectedCourse.semester_id,
+      );
+      // Clear offerings when "all departments" or single primary only
+      if (ids.length <= 1) {
+        await supabase
+          .from("course_offerings")
+          .delete()
+          .eq("course_id", selectedCourse.id)
+          .eq("school_id", schoolId);
+      }
+      toast.success("Departments saved");
+      await coursesQ.refetch();
+      await offeringsQ.refetch();
+      await qc.invalidateQueries({ queryKey: ["student-context"] });
+    } catch (err) {
+      toast.error((err as Error).message || "Could not update departments");
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  async function patchSemester(courseId: string, semester_id: string | null) {
     if (!schoolId) return;
     try {
       const { error } = await supabase
         .from("courses")
-        .update({ ...patch, updated_at: new Date().toISOString() } as never)
+        .update({ semester_id, updated_at: new Date().toISOString() } as never)
         .eq("id", courseId)
         .eq("school_id", schoolId);
       if (error) throw error;
-      toast.success("Course updated");
+      toast.success("Semester updated");
       await coursesQ.refetch();
       await qc.invalidateQueries({ queryKey: ["student-context"] });
     } catch (err) {
-      toast.error((err as Error).message || "Could not update");
+      toast.error((err as Error).message || "Could not update semester");
     }
   }
 
@@ -346,7 +576,7 @@ function Page() {
     <>
       <PageHeader
         title="Courses"
-        description="Add a course, pick department and semester. Students see matching courses for their department in the active term."
+        description="Add a course, assign one or more departments (or all), and a semester."
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link to="/admin/semesters">Semesters</Link>
@@ -354,7 +584,6 @@ function Page() {
         }
       />
 
-      {/* Create — only essentials visible */}
       <SectionCard title="Add course">
         <form className="space-y-3" onSubmit={(e) => void createCourse(e)}>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -368,57 +597,50 @@ function Page() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>Department</Label>
-              <select
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value)}
-              >
-                <option value="">Select department</option>
-                {deptsForForm.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.code ? `${d.code} — ` : ""}
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Semester</Label>
-              <select
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={semesterId || (activeSemester ? "auto" : "")}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSemesterId(v === "auto" ? "" : v);
-                }}
-              >
-                <option value="auto">
-                  {activeSemester ? `Current: ${activeSemester.name}` : "All year"}
+          <div className="space-y-1.5">
+            <Label>Departments</Label>
+            <DeptPicker
+              depts={deptsForForm}
+              selected={deptSelected}
+              allDepartments={allDepts}
+              onChange={setDeptSelected}
+              onAllChange={setAllDepts}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Semester</Label>
+            <select
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={semesterId || (activeSemester ? "auto" : "")}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSemesterId(v === "auto" ? "" : v);
+              }}
+            >
+              <option value="auto">
+                {activeSemester ? `Current: ${activeSemester.name}` : "All year"}
+              </option>
+              <option value="">All year</option>
+              {semesters.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
                 </option>
-                <option value="">All year</option>
-                {semesters.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+              ))}
+            </select>
           </div>
 
           {showMore && (
             <div className="grid gap-3 sm:grid-cols-3">
               {faculties.length > 0 && (
                 <div className="space-y-1.5">
-                  <Label>College (optional)</Label>
+                  <Label>College filter</Label>
                   <select
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                     value={collegeId}
                     onChange={(e) => {
                       setCollegeId(e.target.value);
-                      setDepartmentId("");
+                      setDeptSelected(new Set());
                     }}
                   >
                     <option value="">All colleges</option>
@@ -431,7 +653,7 @@ function Page() {
                 </div>
               )}
               <div className="space-y-1.5">
-                <Label>Level (optional)</Label>
+                <Label>Level</Label>
                 <select
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                   value={levelId}
@@ -462,17 +684,16 @@ function Page() {
               className="text-xs font-semibold text-primary underline-offset-2 hover:underline"
               onClick={() => setShowMore((v) => !v)}
             >
-              {showMore ? "Hide options" : "More options (college, level, units)"}
+              {showMore ? "Hide options" : "More options"}
             </button>
           </div>
         </form>
       </SectionCard>
 
-      {/* List + filters */}
       <SectionCard
         className="mt-6"
         title={`Courses (${filtered.length})`}
-        description="Tap a course to change semester/department or assign teachers"
+        description="Tap a course to edit departments, semester, or teachers"
       >
         <div className="mb-3 flex flex-wrap gap-2">
           <select
@@ -481,7 +702,7 @@ function Page() {
             onChange={(e) => setFilterSem(e.target.value)}
           >
             <option value="all">All semesters</option>
-            <option value="active">Active semester only</option>
+            <option value="active">Active semester</option>
             {semesters.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -525,18 +746,10 @@ function Page() {
                         {c.code} — {c.name}
                       </p>
                       <p className="mt-0.5 text-xs text-slate-500">
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5">
-                          {c.departments?.name ?? "No dept"}
-                        </span>{" "}
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5">{deptLabel(c)}</span>{" "}
                         <span className="rounded bg-slate-100 px-1.5 py-0.5">
                           {c.semesters?.name ?? "All year"}
                         </span>
-                        {c.levels?.name ? (
-                          <>
-                            {" "}
-                            <span className="rounded bg-slate-100 px-1.5 py-0.5">{c.levels.name}</span>
-                          </>
-                        ) : null}
                       </p>
                       <p className="mt-0.5 text-[11px] text-slate-400">
                         {teacherNames(c.id) || "No teachers yet"}
@@ -550,43 +763,38 @@ function Page() {
         )}
       </SectionCard>
 
-      {/* Detail panel — only when a course is selected */}
       {selectedCourse && (
         <SectionCard
           className="mt-6"
           title={`${selectedCourse.code} — assign`}
-          description="Change where this course belongs, then pick teachers"
+          description="Update departments and teachers for this course"
         >
-          <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          <div className="mb-4 space-y-3">
             <div className="space-y-1.5">
-              <Label className="text-xs">Department</Label>
-              <select
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={selectedCourse.department_id || ""}
-                onChange={(e) =>
-                  void patchCourse(selectedCourse.id, {
-                    department_id: e.target.value || null,
-                  })
-                }
+              <Label className="text-xs">Departments</Label>
+              <DeptPicker
+                depts={depts}
+                selected={editDeptSelected}
+                allDepartments={editAllDepts}
+                onChange={setEditDeptSelected}
+                onAllChange={setEditAllDepts}
+              />
+              <Button
+                size="sm"
+                className="mt-1 font-semibold"
+                disabled={editBusy}
+                onClick={() => void saveCourseDepts()}
               >
-                <option value="">No department</option>
-                {depts.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
+                {editBusy && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+                Save departments
+              </Button>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Semester</Label>
               <select
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
                 value={selectedCourse.semester_id || ""}
-                onChange={(e) =>
-                  void patchCourse(selectedCourse.id, {
-                    semester_id: e.target.value || null,
-                  })
-                }
+                onChange={(e) => void patchSemester(selectedCourse.id, e.target.value || null)}
               >
                 <option value="">All year</option>
                 {semesters.map((s) => (
@@ -604,7 +812,7 @@ function Page() {
           </p>
 
           {teachers.length === 0 ? (
-            <p className="text-sm text-slate-500">No teachers yet. Add them under Teachers.</p>
+            <p className="text-sm text-slate-500">No teachers yet.</p>
           ) : (
             <>
               <div className="grid max-h-56 gap-2 overflow-y-auto sm:grid-cols-2">
@@ -627,11 +835,7 @@ function Page() {
                   );
                 })}
               </div>
-              <Button
-                className="mt-3 font-semibold"
-                disabled={assignBusy}
-                onClick={() => void saveTeachers()}
-              >
+              <Button className="mt-3 font-semibold" disabled={assignBusy} onClick={() => void saveTeachers()}>
                 {assignBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Save teachers
               </Button>
