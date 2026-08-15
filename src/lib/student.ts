@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useSessionUser } from "@/lib/session";
+import { useRealtimeInvalidate } from "@/lib/realtime";
 
 export type StudentCourse = {
   id: string;
