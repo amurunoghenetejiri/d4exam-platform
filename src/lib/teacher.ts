@@ -32,9 +32,10 @@ export function useTeacherContext() {
   return useQuery({
     queryKey: ["teacher-context", session?.profileId, session?.schoolId],
     enabled: Boolean(session?.profileId && session?.schoolId && session.role === "teacher"),
-    staleTime: 2 * 60_000,
-    gcTime: 10 * 60_000,
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
+    refetchOnMount: false,
     queryFn: async (): Promise<TeacherContext | null> => {
       if (!session?.profileId || !session.schoolId) return null;
 
