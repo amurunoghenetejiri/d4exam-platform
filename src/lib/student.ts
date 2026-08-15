@@ -228,6 +228,30 @@ export function useStudentContext() {
   });
 }
 
+/**
+ * Keep the student context fresh in realtime: account status changes
+ * (suspension/restore) and academic-structure changes (courses, offerings,
+ * semesters, enrolments) immediately refresh what the student sees.
+ */
+export function useStudentRealtimeSync(enabled = true) {
+  useRealtimeInvalidate(
+    "student-context-sync",
+    [
+      { table: "students" },
+      { table: "student_courses" },
+      { table: "courses" },
+      { table: "course_offerings" },
+      { table: "semesters" },
+      { table: "academic_sessions" },
+      { table: "profiles" },
+    ],
+    [["student-context"]],
+    enabled,
+  );
+}
+
+
+
 export function canStartExam(status: string, scheduledStart: string | null): boolean {
   const s = status.toLowerCase();
   if (s === "ongoing") return true;
