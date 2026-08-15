@@ -32,7 +32,11 @@ type Course = {
   credit_units: number | null;
   status: string;
   department_id: string | null;
+  level_id: string | null;
+  semester_id: string | null;
   departments: { name: string; code: string | null } | null;
+  levels: { name: string } | null;
+  semesters: { name: string } | null;
 };
 
 type Teacher = {
@@ -49,6 +53,8 @@ type TeacherCourse = {
 };
 
 type Dept = { id: string; name: string; code: string | null };
+type Level = { id: string; name: string };
+type Semester = { id: string; name: string; status: string };
 
 function Page() {
   const { data: user } = useSessionUser();
@@ -62,11 +68,29 @@ function Page() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("courses")
-        .select("id, code, name, credit_units, status, department_id, departments(name, code)")
+        .select(
+          "id, code, name, credit_units, status, department_id, level_id, semester_id, departments(name, code), levels(name), semesters(name)",
+        )
         .eq("school_id", schoolId!)
         .order("created_at", { ascending: false })
         .limit(300);
-      if (error) throw error;
+      if (error) {
+        // Fallback without joins if columns/relations missing
+        const { data: d2, error: e2 } = await supabase
+          .from("courses")
+          .select("id, code, name, credit_units, status, department_id, departments(name, code)")
+          .eq("school_id", schoolId!)
+          .order("created_at", { ascending: false })
+          .limit(300);
+        if (e2) throw e2;
+        return ((d2 ?? []) as Course[]).map((c) => ({
+          ...c,
+          level_id: null,
+          semester_id: null,
+          levels: null,
+          semesters: null,
+        }));
+      }
       return (data ?? []) as Course[];
     },
   });
@@ -82,6 +106,34 @@ function Page() {
         .order("name");
       if (error) throw error;
       return (data ?? []) as Dept[];
+    },
+  });
+
+  const levelsQ = useQuery({
+    queryKey: ["admin-courses-levels", schoolId],
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("levels")
+        .select("id, name")
+        .eq("school_id", schoolId!)
+        .order("name");
+      if (error) throw error;
+      return (data ?? []) as Level[];
+    },
+  });
+
+  const semestersQ = useQuery({
+    queryKey: ["admin-courses-semesters", schoolId],
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("semesters")
+        .select("id, name, status")
+        .eq("school_id", schoolId!)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Semester[];
     },
   });
 
@@ -106,6 +158,9 @@ function Page() {
   const teachers = teachersQ.data ?? [];
   const links = linksQ.data ?? [];
   const depts = deptsQ.data ?? [];
+  const levels = levelsQ.data ?? [];
+  const semesters = semestersQ.data ?? [];
+  const activeSemester = semesters.find((s) => String(s.status).toLowerCase() === "active");
 
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const selectedCourse = courses.find((c) => c.id === selectedCourseId) ?? courses[0] ?? null;
@@ -127,6 +182,8 @@ function Page() {
   const [name, setName] = useState("");
   const [units, setUnits] = useState("3");
   const [departmentId, setDepartmentId] = useState("");
+  const [levelId, setLevelId] = useState("");
+  const [semesterId, setSemesterId] = useState("");
   const [busy, setBusy] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
 
@@ -142,16 +199,22 @@ function Page() {
     }
     setBusy(true);
     try {
+      const payload: Record<string, unknown> = {
+        school_id: schoolId,
+        code: code.trim().toUpperCase(),
+        name: name.trim(),
+        credit_units: Number(units) || 0,
+        department_id: departmentId || null,
+        status: "active",
+      };
+      if (levelId) payload.level_id = levelId;
+      // Prefer explicit semester; else active semester; else leave null (all year)
+      const sem = semesterId || activeSemester?.id || null;
+      if (sem) payload.semester_id = sem;
+
       const { data, error } = await supabase
         .from("courses")
-        .insert({
-          school_id: schoolId,
-          code: code.trim().toUpperCase(),
-          name: name.trim(),
-          credit_units: Number(units) || 0,
-          department_id: departmentId || null,
-          status: "active",
-        } as never)
+        .insert(payload as never)
         .select("id")
         .single();
       if (error) throw error;
@@ -160,6 +223,7 @@ function Page() {
       setName("");
       setUnits("3");
       await qc.invalidateQueries({ queryKey: ["rows"] });
+      await qc.invalidateQueries({ queryKey: ["student-context"] });
       await coursesQ.refetch();
       if (data && typeof data === "object" && "id" in data) {
         setSelectedCourseId(String((data as { id: string }).id));
@@ -169,6 +233,26 @@ function Page() {
       toast.error((err as Error).message || "Could not create course");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function updateCourseSemester(courseId: string, nextSemesterId: string) {
+    if (!schoolId) return;
+    try {
+      const { error } = await supabase
+        .from("courses")
+        .update({
+          semester_id: nextSemesterId === "none" ? null : nextSemesterId,
+          updated_at: new Date().toISOString(),
+        } as never)
+        .eq("id", courseId)
+        .eq("school_id", schoolId);
+      if (error) throw error;
+      toast.success("Course semester updated");
+      await coursesQ.refetch();
+      await qc.invalidateQueries({ queryKey: ["student-context"] });
+    } catch (err) {
+      toast.error((err as Error).message || "Could not update semester");
     }
   }
 
@@ -234,13 +318,24 @@ function Page() {
     <>
       <PageHeader
         title="Courses"
-        description="Create courses under a department, then assign teachers. Teachers only manage courses you assign."
+        description="Create courses under department, level and semester. Students only see courses for their department/level and the active semester (or untagged courses)."
         actions={
-          <Button variant="outline" asChild>
-            <Link to="/admin/structure">Academic Structure</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" asChild>
+              <Link to="/admin/semesters">Semesters</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to="/admin/structure">Academic Structure</Link>
+            </Button>
+          </div>
         }
       />
+
+      {activeSemester && (
+        <p className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          Active semester: <strong>{activeSemester.name}</strong> — new courses default to this term unless you pick another.
+        </p>
+      )}
 
       {!schoolId && (
         <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -250,7 +345,7 @@ function Page() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <SectionCard title="Create course">
-          <form className="space-y-3" onSubmit={createCourse}>
+          <form className="space-y-3" onSubmit={(e) => void createCourse(e)}>
             <div className="space-y-1.5">
               <Label>Department</Label>
               <Select value={departmentId || "none"} onValueChange={(v) => setDepartmentId(v === "none" ? "" : v)}>
@@ -267,18 +362,49 @@ function Page() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Level</Label>
+              <Select value={levelId || "none"} onValueChange={(v) => setLevelId(v === "none" ? "" : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select level" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">All levels</SelectItem>
+                  {levels.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {l.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Semester / term</Label>
+              <Select value={semesterId || "auto"} onValueChange={(v) => setSemesterId(v === "auto" ? "" : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select semester" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">
+                    {activeSemester ? `Active: ${activeSemester.name}` : "No semester (all year)"}
+                  </SelectItem>
+                  <SelectItem value="none">No semester (visible all year)</SelectItem>
+                  {semesters.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                      {String(s.status).toLowerCase() === "active" ? " (active)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <p className="text-[11px] text-slate-500">
-                Create departments under Academic Structure first.
+                Students in this department/level see the course in the matching active semester.
               </p>
             </div>
             <div className="space-y-1.5">
               <Label>Course code</Label>
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="e.g. CPE101"
-                required
-              />
+              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. CPE101" required />
             </div>
             <div className="space-y-1.5">
               <Label>Course title</Label>
@@ -291,13 +417,7 @@ function Page() {
             </div>
             <div className="space-y-1.5">
               <Label>Credit units</Label>
-              <Input
-                type="number"
-                min={0}
-                value={units}
-                onChange={(e) => setUnits(e.target.value)}
-                placeholder="3"
-              />
+              <Input type="number" min={0} value={units} onChange={(e) => setUnits(e.target.value)} placeholder="3" />
             </div>
             <Button type="submit" disabled={busy || !schoolId} className="font-semibold">
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -310,12 +430,9 @@ function Page() {
           {coursesQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading courses…</p>
           ) : courses.length === 0 ? (
-            <EmptyState
-              title="No courses yet"
-              description="Create a course with the form. Then assign teachers below."
-            />
+            <EmptyState title="No courses yet" description="Create a course with the form. Then assign teachers." />
           ) : (
-            <ul className="max-h-[320px] space-y-2 overflow-y-auto">
+            <ul className="max-h-[420px] space-y-2 overflow-y-auto">
               {courses.map((c) => {
                 const assigned = teachersForCourse(c.id);
                 const active = (selectedCourse?.id ?? selectedCourseId) === c.id;
@@ -337,7 +454,13 @@ function Page() {
                             {c.code} — {c.name}
                           </p>
                           <p className="text-xs text-slate-500">
-                            {c.departments?.name ?? "No department"} · {c.credit_units ?? 0} units ·{" "}
+                            {c.departments?.name ?? "No department"}
+                            {c.levels?.name ? ` · ${c.levels.name}` : ""}
+                            {c.semesters?.name ? ` · ${c.semesters.name}` : " · All year"}
+                            {" · "}
+                            {c.credit_units ?? 0} units
+                          </p>
+                          <p className="text-xs text-slate-500">
                             {assigned.length === 0
                               ? "No teachers"
                               : assigned.map((t) => t.profiles?.full_name ?? t.staff_id).join(", ")}
@@ -346,6 +469,22 @@ function Page() {
                         <StatusBadge status={c.status || "active"} />
                       </div>
                     </button>
+                    {active && semesters.length > 0 && (
+                      <div className="mt-1 px-1" onClick={(e) => e.stopPropagation()}>
+                        <select
+                          className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-xs"
+                          value={c.semester_id || "none"}
+                          onChange={(e) => void updateCourseSemester(c.id, e.target.value)}
+                        >
+                          <option value="none">All year (no semester)</option>
+                          {semesters.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -362,10 +501,7 @@ function Page() {
         {!selectedCourse ? (
           <EmptyState title="Select or create a course first" description="Pick a course to assign teachers." />
         ) : teachers.length === 0 ? (
-          <EmptyState
-            title="No teachers yet"
-            description="Create teachers under Teachers & Courses, then return."
-          />
+          <EmptyState title="No teachers yet" description="Create teachers under Teachers, then return." />
         ) : (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
@@ -389,11 +525,7 @@ function Page() {
                         : "border-slate-200 bg-white hover:bg-slate-50",
                     )}
                   >
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={() => toggleTeacher(t.id)}
-                      className="mt-0.5"
-                    />
+                    <Checkbox checked={checked} onCheckedChange={() => toggleTeacher(t.id)} className="mt-0.5" />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-bold text-slate-900">
                         {t.profiles?.full_name ?? "Teacher"}
