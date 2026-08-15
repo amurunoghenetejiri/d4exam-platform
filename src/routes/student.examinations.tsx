@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Clock } from "lucide-react";
@@ -72,6 +72,24 @@ function useCountdown(targetIso: string | null | undefined) {
   return { remainingMs, ready: remainingMs <= 0 };
 }
 
+function OpenExamButton({ examId }: { examId: string }) {
+  const navigate = useNavigate();
+  return (
+    <Button
+      type="button"
+      size="sm"
+      className="font-semibold text-base"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void navigate({ to: "/student/exam/$id", params: { id: examId } });
+      }}
+    >
+      Open exam
+    </Button>
+  );
+}
+
 function StartOrCountdownButton({
   examId,
   scheduledStart,
@@ -84,13 +102,7 @@ function StartOrCountdownButton({
   const { remainingMs, ready } = useCountdown(scheduledStart);
 
   if (canStartNow || ready) {
-    return (
-      <Button size="sm" className="font-semibold" asChild>
-        <Link to="/student/exam/$id" params={{ id: examId }}>
-          Open exam
-        </Link>
-      </Button>
-    );
+    return <OpenExamButton examId={examId} />;
   }
 
   if (remainingMs == null) {
