@@ -23,21 +23,15 @@ export type StudentContext = {
   departmentName: string | null;
   facultyName: string | null;
   levelName: string | null;
-  /** Live account status from the students table (active / suspended / …) */
   status: string;
-  /** True only when the student record is active and may sit examinations */
   isActive: boolean;
-  /** Active academic session name set by school admin */
   sessionName: string | null;
-  /** Active semester name set by school admin */
   semesterName: string | null;
-  /** Active semester id used to filter eligible courses */
   semesterId: string | null;
   courses: StudentCourse[];
   courseIds: string[];
 };
 
-/** Statuses a student is allowed to see (officer must have approved). */
 export const STUDENT_VISIBLE_EXAM_STATUSES = [
   "approved",
   "scheduled",
@@ -47,7 +41,6 @@ export const STUDENT_VISIBLE_EXAM_STATUSES = [
   "completed",
 ] as const;
 
-/** Statuses where student may attempt / start the CBT. */
 export const STUDENT_STARTABLE_STATUSES = [
   "approved",
   "scheduled",
@@ -62,14 +55,12 @@ async function loadProgrammeCourses(
   semesterId: string | null,
 ): Promise<StudentCourse[]> {
   const byId = new Map<string, StudentCourse>();
-  // Courses with no semester stay visible all year.
   const semesterFilter = semesterId ? `semester_id.eq.${semesterId},semester_id.is.null` : null;
 
   function addCourse(c: { id?: string; code?: string; name?: string } | null | undefined) {
     if (c?.id) byId.set(c.id, { id: c.id, code: c.code ?? "", name: c.name ?? "" });
   }
 
-  // 1) Offerings for this student's department (and level when set)
   if (departmentId) {
     let oq = supabase
       .from("course_offerings")
@@ -84,7 +75,6 @@ async function loadProgrammeCourses(
     }
   }
 
-  // 2) Courses tagged to this department
   if (departmentId) {
     let q = supabase
       .from("courses")
@@ -92,7 +82,6 @@ async function loadProgrammeCourses(
       .eq("school_id", schoolId)
       .eq("department_id", departmentId)
       .eq("status", "active");
-    // Level: match student's level OR courses with no level (any level)
     if (levelId) {
       q = q.or(`level_id.eq.${levelId},level_id.is.null`);
     }
@@ -101,7 +90,6 @@ async function loadProgrammeCourses(
     for (const c of tagged ?? []) addCourse(c);
   }
 
-  // 3) "All departments" courses (department_id is null) — visible to every student
   {
     let q = supabase
       .from("courses")
@@ -127,7 +115,6 @@ async function loadActiveSessionSemester(schoolId: string): Promise<{
   semesterName: string | null;
   semesterId: string | null;
 }> {
-  // Prefer explicitly active session; else fall back to school-wide active semester
   const { data: sessions } = await supabase
     .from("academic_sessions")
     .select("id, name, status")
@@ -159,7 +146,6 @@ async function loadActiveSessionSemester(schoolId: string): Promise<{
     semesterId = (activeSem?.id as string | null) ?? null;
   }
 
-  // Fallback: any active semester for the school (not linked to session)
   if (!semesterId) {
     const { data: anySem } = await supabase
       .from("semesters")
@@ -192,7 +178,6 @@ export function useStudentContext() {
     queryFn: async (): Promise<StudentContext | null> => {
       if (!session?.profileId || !session.schoolId) return null;
 
-      // Prefer profile link; fall back to matric match if import cleared profile_id
       let student: Record<string, unknown> | null = null;
 
       const { data: byProfile, error: sErr } = await supabase
@@ -283,11 +268,6 @@ export function useStudentContext() {
   });
 }
 
-/**
- * Keep the student context fresh in realtime: account status changes
- * (suspension/restore) and academic-structure changes (courses, offerings,
- * semesters, enrolments) immediately refresh what the student sees.
- */
 export function useStudentRealtimeSync(enabled = true) {
   useRealtimeInvalidate(
     "student-context-sync",
@@ -305,11 +285,48 @@ export function useStudentRealtimeSync(enabled = true) {
   );
 }
 
-export function canStartExam(status: string, scheduledStart: string | null): boolean {
+export function canStartExam(
+  status: string,
+  scheduledStart: string | null,
+  scheduledEnd?: string | null,
+): boolean {
   const s = status.toLowerCase();
   if (s === "ongoing") return true;
-  if (s === "closed" || s === "completed") return false;
+  if (s === "closed" || s === "completed" || s === "cancelled") return false;
   if (!["approved", "scheduled", "published"].includes(s)) return false;
+  const now = Date.now();
+  if (scheduledEnd && new Date(scheduledEnd).getTime() < now) return false;
   if (!scheduledStart) return s === "approved" || s === "published";
-  return new Date(scheduledStart).getTime() <= Date.now();
+  return new Date(scheduledStart).getTime() <= now;
+}
+
+export function examAvailability(
+  status: string,
+  scheduledStart: string | null,
+  scheduledEnd: string | null,
+): "available" | "upcoming" | "missed" | "closed" {
+  const s = status.toLowerCase();
+  if (s === "closed" || s === "completed" || s === "cancelled") return "closed";
+  const now = Date.now();
+  if (scheduledEnd && new Date(scheduledEnd).getTime() < now) return "missed";
+  if (scheduledStart && new Date(scheduledStart).getTime() > now) return "upcoming";
+  if (canStartExam(status, scheduledStart, scheduledEnd)) return "available";
+  return "closed";
+}
+
+export function formatExamWindow(start: string | null, end: string | null): string {
+  if (!start && !end) return "Open when approved";
+  const fmt = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+    } catch {
+      return iso;
+    }
+  };
+  if (start && end) return `${fmt(start)} – ${fmt(end)}`;
+  if (start) return `From ${fmt(start)}`;
+  return `Until ${fmt(end!)}`;
 }
