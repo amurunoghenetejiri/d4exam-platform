@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useSessionUser } from "@/lib/session";
+import { useRealtimeInvalidate } from "@/lib/realtime";
 
 export type StudentCourse = {
   id: string;
@@ -22,13 +23,20 @@ export type StudentContext = {
   departmentName: string | null;
   facultyName: string | null;
   levelName: string | null;
+  /** Live account status from the students table (active / suspended / …) */
+  status: string;
+  /** True only when the student record is active and may sit examinations */
+  isActive: boolean;
   /** Active academic session name set by school admin */
   sessionName: string | null;
   /** Active semester name set by school admin */
   semesterName: string | null;
+  /** Active semester id used to filter eligible courses */
+  semesterId: string | null;
   courses: StudentCourse[];
   courseIds: string[];
 };
+
 
 /** Statuses a student is allowed to see (officer must have approved). */
 export const STUDENT_VISIBLE_EXAM_STATUSES = [
@@ -52,16 +60,21 @@ async function loadProgrammeCourses(
   schoolId: string,
   departmentId: string | null,
   levelId: string | null,
+  semesterId: string | null,
 ): Promise<StudentCourse[]> {
   const byId = new Map<string, StudentCourse>();
+  // Courses carrying no semester tag stay visible all year round.
+  const semesterFilter = semesterId ? `semester_id.eq.${semesterId},semester_id.is.null` : null;
 
   if (departmentId && levelId) {
-    const { data: offerings } = await supabase
+    let oq = supabase
       .from("course_offerings")
-      .select("course_id, courses(id, code, name)")
+      .select("course_id, semester_id, courses(id, code, name)")
       .eq("school_id", schoolId)
       .eq("department_id", departmentId)
       .eq("level_id", levelId);
+    if (semesterFilter) oq = oq.or(semesterFilter);
+    const { data: offerings } = await oq;
 
     for (const row of offerings ?? []) {
       const c = row.courses as { id: string; code: string; name: string } | null;
@@ -72,11 +85,12 @@ async function loadProgrammeCourses(
   if (departmentId) {
     let q = supabase
       .from("courses")
-      .select("id, code, name")
+      .select("id, code, name, semester_id")
       .eq("school_id", schoolId)
       .eq("department_id", departmentId)
       .eq("status", "active");
     if (levelId) q = q.eq("level_id", levelId);
+    if (semesterFilter) q = q.or(semesterFilter);
     const { data: tagged } = await q;
     for (const c of tagged ?? []) {
       if (c?.id) byId.set(c.id as string, { id: c.id as string, code: c.code as string, name: c.name as string });
@@ -88,9 +102,11 @@ async function loadProgrammeCourses(
   return list;
 }
 
+
 async function loadActiveSessionSemester(schoolId: string): Promise<{
   sessionName: string | null;
   semesterName: string | null;
+  semesterId: string | null;
 }> {
   const { data: sessions } = await supabase
     .from("academic_sessions")
@@ -105,6 +121,7 @@ async function loadActiveSessionSemester(schoolId: string): Promise<{
     null;
 
   let semesterName: string | null = null;
+  let semesterId: string | null = null;
   if (activeSession?.id) {
     const { data: semesters } = await supabase
       .from("semesters")
@@ -118,13 +135,16 @@ async function loadActiveSessionSemester(schoolId: string): Promise<{
       (semesters ?? [])[0] ??
       null;
     semesterName = (activeSem?.name as string | null) ?? null;
+    semesterId = (activeSem?.id as string | null) ?? null;
   }
 
   return {
     sessionName: (activeSession?.name as string | null) ?? null,
     semesterName,
+    semesterId,
   };
 }
+
 
 export function useStudentContext() {
   const { data: session } = useSessionUser();
@@ -139,7 +159,7 @@ export function useStudentContext() {
       const { data: student, error: sErr } = await supabase
         .from("students")
         .select(
-          "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, full_name, departments(name), faculties(name), levels(name)",
+          "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, full_name, status, departments(name), faculties(name), levels(name)",
         )
         .eq("profile_id", session.profileId)
         .eq("school_id", session.schoolId)
@@ -148,14 +168,20 @@ export function useStudentContext() {
       if (sErr) throw sErr;
       if (!student) return null;
 
+      const { sessionName, semesterName, semesterId } = await loadActiveSessionSemester(
+        session.schoolId,
+      );
+
       const { data: links } = await supabase
         .from("student_courses")
-        .select("course_id, courses(id, code, name)")
+        .select("course_id, semester_id, courses(id, code, name)")
         .eq("student_id", student.id)
         .eq("school_id", session.schoolId);
 
       const byId = new Map<string, StudentCourse>();
       for (const row of links ?? []) {
+        const rowSemester = (row as { semester_id?: string | null }).semester_id ?? null;
+        if (semesterId && rowSemester && rowSemester !== semesterId) continue;
         const c = row.courses as { id: string; code: string; name: string } | null | undefined;
         if (c?.id) byId.set(c.id, { id: c.id, code: c.code, name: c.name });
       }
@@ -164,6 +190,7 @@ export function useStudentContext() {
         session.schoolId,
         (student.department_id as string | null) ?? null,
         (student.level_id as string | null) ?? null,
+        semesterId,
       );
       for (const c of programme) byId.set(c.id, c);
 
@@ -173,7 +200,8 @@ export function useStudentContext() {
       const faculties = student.faculties as { name: string } | null;
       const levels = student.levels as { name: string } | null;
 
-      const { sessionName, semesterName } = await loadActiveSessionSemester(session.schoolId);
+      const status = String((student as { status?: string | null }).status ?? "active");
+
 
       return {
         studentId: student.id as string,
@@ -189,14 +217,41 @@ export function useStudentContext() {
         departmentName: departments?.name ?? null,
         facultyName: faculties?.name ?? null,
         levelName: levels?.name ?? null,
+        status,
+        isActive: status.toLowerCase() === "active",
         sessionName,
         semesterName,
+        semesterId,
         courses,
         courseIds: courses.map((c) => c.id),
       };
     },
   });
 }
+
+/**
+ * Keep the student context fresh in realtime: account status changes
+ * (suspension/restore) and academic-structure changes (courses, offerings,
+ * semesters, enrolments) immediately refresh what the student sees.
+ */
+export function useStudentRealtimeSync(enabled = true) {
+  useRealtimeInvalidate(
+    "student-context-sync",
+    [
+      { table: "students" },
+      { table: "student_courses" },
+      { table: "courses" },
+      { table: "course_offerings" },
+      { table: "semesters" },
+      { table: "academic_sessions" },
+      { table: "profiles" },
+    ],
+    [["student-context"]],
+    enabled,
+  );
+}
+
+
 
 export function canStartExam(status: string, scheduledStart: string | null): boolean {
   const s = status.toLowerCase();
