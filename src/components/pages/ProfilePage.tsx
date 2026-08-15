@@ -9,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { useSchoolIdentity } from "@/lib/school-identity";
-import { useQueryClient } from "@/tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 
 const roleLabel: Record<string, string> = {
   student: "Student",
