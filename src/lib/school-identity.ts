@@ -64,7 +64,6 @@ const MAX_BYTES = 2 * 1024 * 1024; // 2MB
 
 export function validateLogoFile(file: File): string | null {
   const type = (file.type || "").toLowerCase();
-  // Some browsers omit type — fall back to extension
   const name = file.name.toLowerCase();
   const okType =
     ALLOWED.includes(type) ||
@@ -77,7 +76,7 @@ export function validateLogoFile(file: File): string | null {
   return null;
 }
 
-/** Compress image to a data URL (max ~512px, JPEG ~0.82) for DB storage fallback. */
+/** Compress image to a data URL (max ~512px) — always PNG to keep transparency. */
 export async function fileToCompressedDataUrl(file: File, maxSide = 512): Promise<string> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
@@ -90,9 +89,8 @@ export async function fileToCompressedDataUrl(file: File, maxSide = 512): Promis
   if (!ctx) throw new Error("Could not process image");
   ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
-  // Prefer PNG for logos with transparency; JPEG for photos
-  const isPng = file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
-  return isPng ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85);
+  // Always export PNG so transparent backgrounds stay transparent
+  return canvas.toDataURL("image/png");
 }
 
 /**
