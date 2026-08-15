@@ -47,9 +47,11 @@ function NavLinks({ config, onNavigate }: { config: RoleConfig; onNavigate?: () 
                 <li key={item.to}>
                   <Link
                     to={item.to}
+                    preload="intent"
                     onClick={onNavigate}
                     className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors",
+                      "pressable flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors",
+                      "active:scale-[0.98] active:bg-white/10",
                       active
                         ? "bg-blue-500/20 text-white"
                         : "text-slate-300 hover:bg-white/5 hover:text-white",
@@ -83,7 +85,12 @@ function PortalBrand({
 }) {
   if (isSchoolPortal) {
     return (
-      <Link to={homeTo} className="flex min-w-0 items-center gap-2.5" aria-label={schoolName || "School home"}>
+      <Link
+        to={homeTo}
+        preload="intent"
+        className="pressable flex min-w-0 items-center gap-2.5 active:scale-[0.98]"
+        aria-label={schoolName || "School home"}
+      >
         <SchoolLogo
           logoUrl={logoUrl}
           schoolName={schoolName}
@@ -103,7 +110,7 @@ function PortalBrand({
     );
   }
   return (
-    <Link to="/" aria-label="D4EXAM home" className="min-w-0">
+    <Link to="/" preload="intent" aria-label="D4EXAM home" className="pressable min-w-0 active:scale-[0.98]">
       <Logo size="md" />
     </Link>
   );
@@ -158,7 +165,7 @@ export function AppShell({
           <button
             type="button"
             onClick={() => void signOut()}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
+            className="pressable flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-300 transition-colors hover:bg-white/5 hover:text-white active:scale-[0.98]"
           >
             <LogOut className="h-4 w-4" aria-hidden />
             Logout
@@ -207,7 +214,8 @@ export function AppShell({
 
               <Link
                 to={config.home}
-                className="flex min-w-0 items-center gap-2 lg:hidden"
+                preload="intent"
+                className="pressable flex min-w-0 items-center gap-2 active:scale-[0.98] lg:hidden"
                 aria-label={isSchoolPortal ? schoolName || "Home" : "D4EXAM home"}
               >
                 {isSchoolPortal ? (
@@ -218,7 +226,7 @@ export function AppShell({
                       size="sm"
                       className="bg-transparent"
                     />
-                    <span className="truncate text-sm font-bold text-slate-900 max-w-[42vw] sm:max-w-[200px]">
+                    <span className="max-w-[42vw] truncate text-sm font-bold text-slate-900 sm:max-w-[200px]">
                       {schoolName || config.label}
                     </span>
                   </>
@@ -245,7 +253,7 @@ export function AppShell({
 
             <div className="flex items-center gap-0.5 justify-self-end sm:gap-1">
               <Button variant="ghost" size="icon" className="relative shrink-0" aria-label="Notifications" asChild>
-                <Link to={notifPath as string}>
+                <Link to={notifPath as string} preload="intent">
                   <Bell className="h-5 w-5 text-slate-600" />
                   {showDot && (
                     <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
@@ -255,7 +263,7 @@ export function AppShell({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
-                    className="flex items-center gap-2 rounded-full p-1 pr-1.5 transition-colors hover:bg-slate-100 sm:pr-2"
+                    className="pressable flex items-center gap-2 rounded-full p-1 pr-1.5 transition-colors hover:bg-slate-100 active:scale-[0.98] sm:pr-2"
                     aria-label="Account menu"
                   >
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-blue-100 text-xs font-bold text-primary">
@@ -273,13 +281,19 @@ export function AppShell({
                   <DropdownMenuLabel className="text-slate-900">{user.name}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
-                    <Link to={`${config.home}/profile` as string}>Profile</Link>
+                    <Link to={`${config.home}/profile` as string} preload="intent">
+                      Profile
+                    </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link to={`${config.home}/settings` as string}>Settings</Link>
+                    <Link to={`${config.home}/settings` as string} preload="intent">
+                      Settings
+                    </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link to={notifPath as string}>Notifications</Link>
+                    <Link to={notifPath as string} preload="intent">
+                      Notifications
+                    </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => void signOut()}>Logout</DropdownMenuItem>
@@ -309,9 +323,11 @@ export function AppShell({
                 <li key={item.to}>
                   <Link
                     to={item.to}
+                    preload="intent"
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "relative flex min-h-[56px] flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] font-semibold transition-all",
+                      "pressable relative flex min-h-[56px] flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] font-semibold transition-all",
+                      "active:scale-[0.96]",
                       active ? "text-primary" : "text-slate-500",
                     )}
                   >
