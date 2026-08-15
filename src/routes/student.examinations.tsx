@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import {
   useStudentContext,
   STUDENT_VISIBLE_EXAM_STATUSES,
-  canStartExam,
   examAvailability,
   formatExamWindow,
 } from "@/lib/student";
@@ -137,8 +136,7 @@ function Page() {
   const examsQ = useQuery({
     queryKey: ["student-exams", schoolId, student?.courseIds?.join(",")],
     enabled: Boolean(schoolId),
-    staleTime: 15_000,
-    refetchInterval: 45_000,
+    staleTime: 60_000,
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
       let q = supabase
@@ -164,8 +162,7 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["student-attempts", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 15_000,
-    refetchInterval: 45_000,
+    staleTime: 60_000,
     queryFn: async () => {
       if (!student?.studentId) return [] as AttemptRow[];
       const { data, error } = await supabase
@@ -180,7 +177,7 @@ function Page() {
   const resultsQ = useQuery({
     queryKey: ["student-result-ids", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 20_000,
+    staleTime: 60_000,
     queryFn: async () => {
       if (!student?.studentId) return {} as Record<string, string>;
       const { data, error } = await supabase
@@ -208,7 +205,7 @@ function Page() {
 
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    const t = setInterval(() => setTick((n) => n + 1), 15_000);
     return () => clearInterval(t);
   }, []);
 
@@ -339,6 +336,7 @@ function ExamList({
   sessionName?: string | null;
   semesterName?: string | null;
 }) {
+  const navigate = useNavigate();
   return (
     <ul className="space-y-3">
       {items.map((e) => {
@@ -393,10 +391,20 @@ function ExamList({
                 />
               )}
               {completed && studentFinished && (
-                <Button size="sm" variant="outline" className="font-semibold" asChild>
-                  <Link to="/student/results" search={{ id: resultId || e.id }}>
-                    View Result
-                  </Link>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="font-semibold text-base"
+                  type="button"
+                  onClick={() => {
+                    if (resultId) {
+                      void navigate({ to: "/student/results/$id", params: { id: resultId } });
+                    } else {
+                      void navigate({ to: "/student/results", search: { id: e.id } });
+                    }
+                  }}
+                >
+                  View Result
                 </Button>
               )}
             </div>
