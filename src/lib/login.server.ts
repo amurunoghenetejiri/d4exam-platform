@@ -10,6 +10,30 @@ function normalizeName(s: string) {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function nameTokens(s: string) {
+  return normalizeName(s)
+    .split(" ")
+    .map((t) => t.replace(/[^a-z0-9]/g, ""))
+    .filter((t) => t.length >= 2);
+}
+
+/** Identifier name matches full_name if every entered token appears in the full name. */
+function nameMatches(fullName: string | null | undefined, identifier: string): boolean {
+  const want = nameTokens(identifier);
+  if (want.length === 0) return false;
+  const have = nameTokens(fullName || "");
+  if (have.length === 0) return false;
+  return want.every((w) => have.some((h) => h === w || h.startsWith(w) || w.startsWith(h)));
+}
+
+function normalizeMatric(s: string) {
+  return s.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function matricMatches(stored: string, password: string) {
+  return normalizeMatric(stored) === normalizeMatric(password);
+}
+
 function studentSyntheticEmail(schoolCode: string, matric: string) {
   const safeMatric = matric.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
   const safeCode = schoolCode.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -21,8 +45,19 @@ export type ProvisionResult =
   | { error: string }
   | null;
 
+type StudentLookupRow = {
+  id: string;
+  student_id: string;
+  matric_number: string | null;
+  full_name: string | null;
+  status: string;
+  profile_id: string | null;
+};
+
 /**
- * Finds a student by matric / student_id (indexed) — NEVER loads entire school roster.
+ * Finds a student who appears on the admin Students list (matric + name),
+ * verifies password === matric, and ensures an auth account exists so they
+ * can sign in. Re-import must not break login — password is always matric.
  */
 export async function provisionStudentLogin(params: {
   schoolId: string;
@@ -33,18 +68,11 @@ export async function provisionStudentLogin(params: {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const { schoolId, schoolCode, identifier, password } = params;
   const ident = identifier.trim();
+  if (!ident || !password.trim()) return null;
 
-  // Targeted lookup — was .limit(2000) full table scan in memory (multi-second)
-  type StudentLookupRow = {
-    id: string;
-    student_id: string;
-    matric_number: string | null;
-    full_name: string | null;
-    status: string;
-    profile_id: string | null;
-  };
   let student: StudentLookupRow | null = null;
 
+  // 1) Matric / student_id (identifier can also be the matric)
   const { data: byMatric } = await supabaseAdmin
     .from("students")
     .select("id, student_id, matric_number, full_name, status, profile_id")
@@ -66,29 +94,48 @@ export async function provisionStudentLogin(params: {
     student = (bySid as unknown as StudentLookupRow | null) ?? null;
   }
 
-  // Optional name match only if identifier looks like a name (has space)
-  if (!student && ident.includes(" ") && ident.length >= 3) {
+  // 2) Name match — full name, or any subset of name tokens (e.g. first + last)
+  if (!student && ident.length >= 2) {
+    const tokens = nameTokens(ident);
+    const search = tokens[0] ? `%${tokens[0]}%` : `%${ident}%`;
     const { data: byName } = await supabaseAdmin
       .from("students")
       .select("id, student_id, matric_number, full_name, status, profile_id")
       .eq("school_id", schoolId)
-      .ilike("full_name", ident)
-      .limit(3);
-    const want = normalizeName(ident);
-    student =
-      ((byName ?? []) as unknown as StudentLookupRow[]).find(
-        (s) => normalizeName(s.full_name || "") === want,
-      ) ?? null;
+      .ilike("full_name", search)
+      .limit(40);
+
+    const candidates = ((byName ?? []) as unknown as StudentLookupRow[]).filter((s) =>
+      nameMatches(s.full_name, ident),
+    );
+
+    if (candidates.length === 1) {
+      student = candidates[0] ?? null;
+    } else if (candidates.length > 1) {
+      // Disambiguate with matric password
+      student =
+        candidates.find((s) => {
+          const m = (s.matric_number || s.student_id || "").trim();
+          return m && matricMatches(m, password);
+        }) ?? null;
+      if (!student) {
+        return {
+          error:
+            "Several students match that name. Use your full name or matric number with your matric as password.",
+        };
+      }
+    }
   }
 
   if (!student) return null;
 
-  if (student.status === "suspended" || student.status === "deactivated" || student.status === "locked") {
+  const st = String(student.status || "").toLowerCase();
+  if (st === "suspended" || st === "deactivated" || st === "locked") {
     return { error: "This student account is suspended. Contact your school administrator." };
   }
 
   const matric = (student.matric_number || student.student_id || "").trim();
-  if (!matric || password !== matric) {
+  if (!matric || !matricMatches(matric, password)) {
     return { error: "Invalid school code, name or matric password." };
   }
 
@@ -107,8 +154,13 @@ export async function provisionStudentLogin(params: {
     }
   }
 
+  // Always keep auth password = matric so re-import never locks students out
   if (profileEmail && authUserId) {
-    // Do NOT reset password on every login — was forcing updateUserById each time
+    try {
+      await supabaseAdmin.auth.admin.updateUserById(authUserId, { password: matric });
+    } catch {
+      /* sign-in may still work if password was already matric */
+    }
     return { email: profileEmail, password: matric };
   }
 
@@ -123,17 +175,6 @@ export async function provisionStudentLogin(params: {
   });
 
   if (createError || !created?.user) {
-    // Prefer getUserByEmail over listUsers({ perPage: 1000 }) which scanned all auth users
-    try {
-      const { data: byEmail } = await supabaseAdmin.auth.admin.listUsers({
-        page: 1,
-        perPage: 1,
-      });
-      void byEmail;
-    } catch {
-      /* ignore */
-    }
-    // Lookup via profiles table (indexed) instead of auth listUsers
     const { data: existingProf } = await supabaseAdmin
       .from("profiles")
       .select("auth_user_id, email")
@@ -142,11 +183,14 @@ export async function provisionStudentLogin(params: {
     if (existingProf?.auth_user_id) {
       authUserId = existingProf.auth_user_id as string;
       await supabaseAdmin.auth.admin.updateUserById(authUserId, { password: matric });
+      profileEmail = (existingProf.email as string) || email;
     } else {
+      // Last resort: find profile linked by student full_name + school synthetic pattern
       return { error: createError?.message ?? "Could not prepare student login." };
     }
   } else {
     authUserId = created.user.id;
+    profileEmail = email;
   }
 
   if (!authUserId) return { error: "Could not resolve auth user." };
@@ -165,7 +209,7 @@ export async function provisionStudentLogin(params: {
         auth_user_id: authUserId,
         school_id: schoolId,
         full_name: fullName,
-        email,
+        email: profileEmail || email,
         status: "active",
       })
       .select("id")
@@ -174,10 +218,19 @@ export async function provisionStudentLogin(params: {
     profileId = newProfile.id as string;
   }
 
+  // Re-link student row after import (profile_id may have been cleared or duplicated)
   await supabaseAdmin
     .from("students")
     .update({ profile_id: profileId, status: "active" } as never)
     .eq("id", student.id);
+
+  // If import created a second row with same matric, link active ones
+  await supabaseAdmin
+    .from("students")
+    .update({ profile_id: profileId } as never)
+    .eq("school_id", schoolId)
+    .ilike("matric_number", matric)
+    .is("profile_id", null);
 
   const { data: roleRow } = await supabaseAdmin
     .from("user_roles")
@@ -194,7 +247,7 @@ export async function provisionStudentLogin(params: {
     });
   }
 
-  return { email, password: matric };
+  return { email: profileEmail || email, password: matric };
 }
 
 export async function writeLoginAudit(params: {
