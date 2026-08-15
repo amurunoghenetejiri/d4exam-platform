@@ -7,7 +7,9 @@ import { toast } from "sonner";
 import { initials, useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { SchoolLogo } from "@/components/brand/SchoolLogo";
+import { useSchoolIdentity } from "@/lib/school-identity";
+import { useQueryClient } from "@/tanstack/react-query";
 
 const roleLabel: Record<string, string> = {
   student: "Student",
@@ -19,6 +21,7 @@ const roleLabel: Record<string, string> = {
 
 export function ProfilePage() {
   const { data: user, isLoading } = useSessionUser();
+  const { data: school } = useSchoolIdentity(user?.schoolId);
   const qc = useQueryClient();
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
@@ -77,12 +80,21 @@ export function ProfilePage() {
       <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <SectionCard>
           <div className="flex flex-col items-center text-center">
-            <span className="grid h-20 w-20 place-items-center rounded-full bg-primary/15 font-display text-2xl font-bold text-primary">
-              {avatar}
-            </span>
+            {school?.logoUrl || user.schoolId ? (
+              <SchoolLogo
+                logoUrl={school?.logoUrl ?? user.schoolLogoUrl}
+                schoolName={school?.name ?? user.schoolName}
+                size="xl"
+                className="ring-1 ring-slate-200"
+              />
+            ) : (
+              <span className="grid h-20 w-20 place-items-center rounded-full bg-primary/15 font-display text-2xl font-bold text-primary">
+                {avatar}
+              </span>
+            )}
             <h2 className="mt-4 text-lg font-bold">{user.fullName || "—"}</h2>
             <p className="text-sm text-muted-foreground">{role}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{user.schoolName || "Platform"}</p>
+            <p className="mt-1 text-xs font-semibold text-slate-600">{school?.name || user.schoolName || "Platform"}</p>
           </div>
           <div className="mt-6">
             <InfoRow label={user.identifierLabel} value={user.identifier || "—"} />
