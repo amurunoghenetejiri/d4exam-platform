@@ -205,7 +205,14 @@ function Page() {
       <PageHeader
         title={`Welcome back${user?.fullName ? `, ${user.fullName}` : ""}`}
         description={
-          [student?.matric ?? user?.identifier, user?.schoolName]
+          [
+            student?.matric ?? user?.identifier,
+            user?.schoolName,
+            student?.sessionName,
+            student?.semesterName,
+            student?.departmentName,
+            student?.levelName,
+          ]
             .filter(Boolean)
             .join(" · ") || "Student dashboard"
         }
