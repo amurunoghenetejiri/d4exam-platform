@@ -157,8 +157,8 @@ export function useSessionUser() {
   return useQuery({
     queryKey: ["session-user"],
     queryFn: fetchSessionUser,
-    staleTime: 5 * 60_000, // 5 minutes — was 30s, caused constant re-auth work
-    gcTime: 15 * 60_000,
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
   });
 }
