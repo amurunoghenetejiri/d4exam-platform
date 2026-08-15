@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,18 +33,54 @@ export function PageHeader({
   );
 }
 
+/**
+ * Clickable dashboard / list card. Uses a real anchor so navigation always works
+ * (including open-in-new-tab) and is keyboard accessible.
+ */
+export function NavCard({
+  to,
+  search,
+  children,
+  className,
+  ariaLabel,
+}: {
+  to: string;
+  search?: Record<string, string | undefined>;
+  children: ReactNode;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  return (
+    <Link
+      to={to as never}
+      search={search as never}
+      aria-label={ariaLabel}
+      className={cn(
+        "block cursor-pointer rounded-2xl border border-slate-200 bg-white/90 p-4 text-left shadow-sm transition",
+        "hover:border-primary/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+        className,
+      )}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export function StatCard({
   label,
   value,
   icon: Icon,
   tone = "primary",
   hint,
+  to,
 }: {
   label: string;
   value: string | number;
   icon?: LucideIcon;
   tone?: "primary" | "aqua" | "warning" | "info" | "destructive";
   hint?: string;
+  /** When set, the whole card navigates here */
+  to?: string;
 }) {
   const tones: Record<string, string> = {
     primary: "bg-primary/12 text-primary",
@@ -53,24 +90,32 @@ export function StatCard({
     destructive: "bg-destructive/12 text-destructive",
   };
 
-  return (
-    <div className="surface-panel p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {label}
-          </p>
-          <p className="mt-2 font-display text-2xl font-bold sm:text-3xl">{value}</p>
-          {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
-        </div>
-        {Icon && (
-          <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-lg", tones[tone])}>
-            <Icon className="h-5 w-5" aria-hidden />
-          </span>
-        )}
+  const body = (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <p className="truncate text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {label}
+        </p>
+        <p className="mt-2 font-display text-2xl font-bold sm:text-3xl">{value}</p>
+        {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </div>
+      {Icon && (
+        <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-lg", tones[tone])}>
+          <Icon className="h-5 w-5" aria-hidden />
+        </span>
+      )}
     </div>
   );
+
+  if (to) {
+    return (
+      <NavCard to={to} ariaLabel={label} className="surface-panel p-4 sm:p-5">
+        {body}
+      </NavCard>
+    );
+  }
+
+  return <div className="surface-panel p-4 sm:p-5">{body}</div>;
 }
 
 export function SectionCard({
@@ -136,7 +181,6 @@ const statusTones: Record<string, string> = {
   low: "border-info/30 bg-info/12 text-info",
 };
 
-/** Map generic "active" to a clearer label — never show bare Active badges. */
 function displayStatus(status: string): string {
   const key = status.toLowerCase().trim();
   if (key === "active") return "Available";
