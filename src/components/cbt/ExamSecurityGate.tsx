@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Logo } from "@/components/brand/Logo";
+import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import {
   capabilitiesSnapshot,
   detectDeviceCapabilities,
@@ -28,6 +29,8 @@ type Props = {
   totalQuestions: number;
   security: ExamSecuritySettings;
   busy: boolean;
+  schoolLogoUrl?: string | null;
+  schoolName?: string | null;
   onStart: (opts: {
     skipScreenShare: boolean;
     caps: DeviceCapabilities;
@@ -67,6 +70,8 @@ export function ExamSecurityGate({
   totalQuestions,
   security,
   busy,
+  schoolLogoUrl,
+  schoolName,
   onStart,
 }: Props) {
   const caps = useMemo(() => detectDeviceCapabilities(), []);
@@ -111,7 +116,6 @@ export function ExamSecurityGate({
     }
   };
 
-  // Auto-start the preview when the exam requires a camera.
   useEffect(() => {
     if (needCam && caps.camera && previewState === "idle") void startPreview();
     return () => stopPreview();
@@ -119,15 +123,9 @@ export function ExamSecurityGate({
   }, [needCam, caps.camera]);
 
   const screenSupported = caps.screenShare;
-  const blockedByRequired =
-    shareMode === "required" && !screenSupported && !acknowledgedUnsupported;
-
-  // Required + unsupported → hard block (no acknowledge path that bypasses required)
   const hardBlock = shareMode === "required" && !screenSupported;
-
   const willRequestScreen =
     screenSupported && (shareMode === "required" || shareMode === "optional");
-
   const cameraBlocked = needCam && previewState !== "live";
 
   const buttonLabel = (() => {
@@ -141,12 +139,42 @@ export function ExamSecurityGate({
     return "Begin examination";
   })();
 
+  const secRows: { label: string; enabled: boolean; detail?: string }[] = [
+    { label: "Camera monitoring", enabled: Boolean(security.requireCamera) },
+    {
+      label: "Face detection",
+      enabled: Boolean(security.faceDetection),
+      detail: security.faceDetection ? `max ${security.maxFaceWarnings}` : undefined,
+    },
+    { label: "Microphone", enabled: Boolean(security.requireMicrophone) },
+    { label: "Fullscreen", enabled: Boolean(security.fullscreen) },
+    {
+      label: "Tab monitoring",
+      enabled: Boolean(security.tabMonitoring),
+      detail: security.tabMonitoring ? `max ${security.maxTabSwitches}` : undefined,
+    },
+    { label: "Copy/paste block", enabled: Boolean(security.blockCopyPaste) },
+    {
+      label: "Screen sharing",
+      enabled: shareMode !== "disabled",
+      detail: shareMode === "disabled" ? undefined : shareMode,
+    },
+  ];
 
   return (
-    <div className="grid min-h-dvh place-items-center bg-slate-50 p-6">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <Logo size="lg" />
-        <h1 className="mt-4 text-xl font-extrabold text-primary">{examTitle}</h1>
+    <div className="grid min-h-dvh place-items-center bg-slate-50 p-3 sm:p-6">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <Logo size="lg" />
+          {schoolLogoUrl && (
+            <>
+              <span className="h-8 w-px bg-slate-200" aria-hidden />
+              <SchoolLogo logoUrl={schoolLogoUrl} schoolName={schoolName} size="md" className="ring-1 ring-slate-200" />
+            </>
+          )}
+        </div>
+        {schoolName && <p className="mt-2 text-xs font-semibold text-slate-500">{schoolName}</p>}
+        <h1 className="mt-3 text-lg font-extrabold text-primary sm:text-xl">{examTitle}</h1>
         <p className="mt-1 text-sm font-semibold text-primary/80">{courseLine}</p>
 
         <p className="mt-3 text-xs text-slate-500">
@@ -157,42 +185,38 @@ export function ExamSecurityGate({
           )}
         </p>
 
-        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
-            <ShieldCheck className="h-4 w-4 text-primary" />
-            SECURITY CHECK
-          </p>
-          <ul className="mt-3 space-y-2">
-            <CheckRow
-              ok={!needCam ? "na" : caps.camera}
-              label="Camera"
-              detail={!needCam ? "Not required" : undefined}
-            />
-            <CheckRow
-              ok={!needFace ? "na" : caps.faceDetection}
-              label="Face detection"
-              detail={!needFace ? "Off" : undefined}
-            />
-            <CheckRow
-              ok={
-                shareMode === "disabled"
-                  ? "na"
-                  : screenSupported
-                    ? true
-                    : false
-              }
-              label={`Screen sharing (${shareMode})`}
-              detail={shareMode === "disabled" ? "Disabled" : undefined}
-            />
-            <CheckRow
-              ok={!needMic ? "na" : caps.microphone}
-              label="Microphone"
-              detail={!needMic ? "Not required" : undefined}
-            />
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
+          <p className="text-sm font-extrabold text-slate-900">Exam security configuration</p>
+          <p className="mt-0.5 text-[11px] text-slate-500">Loaded from the approved exam record (not defaults)</p>
+          <ul className="mt-3 space-y-1.5">
+            {secRows.map((r) => (
+              <li key={r.label} className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-slate-700">{r.label}</span>
+                <span className={cn("text-xs font-bold", r.enabled ? "text-emerald-600" : "text-slate-400")}>
+                  {r.enabled ? (r.detail ? `Enabled (${r.detail})` : "Enabled") : "Off"}
+                </span>
+              </li>
+            ))}
           </ul>
         </div>
 
-        {/* Unsupported screen share — professional message */}
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
+          <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
+            <ShieldCheck className="h-4 w-4 text-primary" />
+            DEVICE CHECK
+          </p>
+          <ul className="mt-3 space-y-2">
+            <CheckRow ok={!needCam ? "na" : caps.camera} label="Camera" detail={!needCam ? "Not required" : undefined} />
+            <CheckRow ok={!needFace ? "na" : caps.faceDetection} label="Face detection" detail={!needFace ? "Off" : undefined} />
+            <CheckRow
+              ok={shareMode === "disabled" ? "na" : screenSupported ? true : false}
+              label={`Screen sharing (${shareMode})`}
+              detail={shareMode === "disabled" ? "Disabled" : undefined}
+            />
+            <CheckRow ok={!needMic ? "na" : caps.microphone} label="Microphone" detail={!needMic ? "Not required" : undefined} />
+          </ul>
+        </div>
+
         {(shareMode === "required" || shareMode === "optional") && !screenSupported && (
           <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
             <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
@@ -204,34 +228,11 @@ export function ExamSecurityGate({
             </p>
             {shareMode === "required" ? (
               <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                This examination <strong>requires</strong> a desktop or laptop browser with
-                screen-sharing support. Please switch to a supported browser on a computer.
+                This examination <strong>requires</strong> a desktop or laptop browser with screen-sharing support.
               </p>
             ) : (
-              <p className="mt-3 text-xs text-slate-500">
-                You can continue with the other available security features.
-              </p>
+              <p className="mt-3 text-xs text-slate-500">You can continue with the other available security features.</p>
             )}
-            <p className="mt-3 text-xs font-semibold text-slate-700">For high-security examinations, use:</p>
-            <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
-              <li>• Google Chrome (Desktop)</li>
-              <li>• Microsoft Edge (Desktop)</li>
-              <li>• Firefox (Desktop)</li>
-            </ul>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-              <div className="rounded-lg bg-emerald-50 px-2 py-2 text-emerald-800">
-                <p className="font-bold">Available</p>
-                <p>✓ Camera Monitoring</p>
-                <p>✓ Face Detection</p>
-                <p>✓ Tab Monitoring</p>
-                <p>✓ Fullscreen Mode</p>
-                <p>✓ Copy/Paste Protection</p>
-              </div>
-              <div className="rounded-lg bg-slate-100 px-2 py-2 text-slate-600">
-                <p className="font-bold">Screen Sharing</p>
-                <p>✗ Not Available</p>
-              </div>
-            </div>
           </div>
         )}
 
@@ -254,10 +255,7 @@ export function ExamSecurityGate({
                 muted
                 playsInline
                 autoPlay
-                className={cn(
-                  "aspect-video w-full scale-x-[-1] object-cover",
-                  previewState !== "live" && "hidden",
-                )}
+                className={cn("aspect-video w-full scale-x-[-1] object-cover", previewState !== "live" && "hidden")}
               />
               {previewState !== "live" && (
                 <div className="grid aspect-video w-full place-items-center text-center text-xs text-slate-300">
@@ -275,15 +273,8 @@ export function ExamSecurityGate({
               )}
             </div>
             <div className="mt-3 flex items-center justify-between gap-3">
-              <p
-                className={cn(
-                  "text-xs font-semibold",
-                  previewState === "live" ? "text-emerald-600" : "text-amber-700",
-                )}
-              >
-                {previewState === "live"
-                  ? "✓ Camera verified — you are visible"
-                  : "Camera not verified yet"}
+              <p className={cn("text-xs font-semibold", previewState === "live" ? "text-emerald-600" : "text-amber-700")}>
+                {previewState === "live" ? "✓ Camera verified — you are visible" : "Camera not verified yet"}
               </p>
               <Button
                 type="button"
@@ -315,15 +306,15 @@ export function ExamSecurityGate({
           <ul className="mt-2 space-y-1 text-xs leading-relaxed text-slate-600">
             {needCam && (
               <li>
-                • Your camera stays on for the whole examination. Face checks run locally on this
-                device — <strong>no video is uploaded or recorded</strong>.
+                • Your camera stays on for the whole examination. Face checks run locally —{" "}
+                <strong>no video is uploaded or recorded</strong>.
               </li>
             )}
             {needFace && <li>• Warnings are shown if no face or multiple faces are detected.</li>}
             {needMic && <li>• Your microphone is active for the duration of the examination.</li>}
             {shareMode !== "disabled" && <li>• Screen activity may be monitored while you write.</li>}
             {security.tabMonitoring && <li>• Leaving this tab is counted and recorded.</li>}
-            <li>• Security events (with time, question and device details) are stored for review.</li>
+            <li>• Security events are stored for review.</li>
           </ul>
           <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-xs text-slate-700">
             <Checkbox
@@ -331,15 +322,12 @@ export function ExamSecurityGate({
               onCheckedChange={(v) => setAcknowledgedNotice(v === true)}
               className="mt-0.5"
             />
-            <span>
-              I have read and accept the monitoring notice and the examination rules.
-            </span>
+            <span>I have read and accept the monitoring notice and the examination rules.</span>
           </label>
         </div>
 
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          Monitoring helps maintain exam integrity. It does not guarantee absolute prevention of
-          misconduct. Device and browser details are logged for authorised review.
+          Monitoring helps maintain exam integrity. Device and browser details are logged for authorised review.
         </p>
 
         {totalQuestions === 0 ? (
@@ -370,7 +358,6 @@ export function ExamSecurityGate({
           <Link to="/student/examinations">Cancel</Link>
         </Button>
 
-        {/* keep snapshot available for callers via data attribute for debugging */}
         <span className="sr-only" data-caps={JSON.stringify(capabilitiesSnapshot(caps))} />
       </div>
     </div>
