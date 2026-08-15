@@ -1,15 +1,11 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   CalendarClock,
-  CheckCircle2,
   BookOpen,
   Bell,
   Play,
-  History,
-  Percent,
-  Clock,
   Trophy,
 } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
@@ -65,6 +61,24 @@ type Notif = {
 
 const DONE = ["submitted", "terminated", "flagged"];
 
+function OpenExamLink({ examId }: { examId: string }) {
+  const navigate = useNavigate();
+  return (
+    <Button
+      type="button"
+      size="sm"
+      className="font-semibold text-base"
+      onClick={(ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        void navigate({ to: "/student/exam/$id", params: { id: examId } });
+      }}
+    >
+      Open exam
+    </Button>
+  );
+}
+
 function Page() {
   const { data: user } = useSessionUser();
   const { data: student, isLoading: sLoading } = useStudentContext();
@@ -93,7 +107,7 @@ function Page() {
     refetchInterval: 30_000,
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
-      let q = supabase
+      const q = supabase
         .from("examinations")
         .select(
           "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
@@ -227,11 +241,7 @@ function Page() {
                       {formatExamWindow(e.scheduled_start, e.scheduled_end)}
                     </p>
                   </div>
-                  <Button size="sm" className="font-semibold" asChild>
-                    <Link to="/student/exam/$id" params={{ id: e.id }}>
-                      Open exam
-                    </Link>
-                  </Button>
+                  <OpenExamLink examId={e.id} />
                 </li>
               ))}
             </ul>
