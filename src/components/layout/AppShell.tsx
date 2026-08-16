@@ -1,6 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
-import { Bell, LogOut, Menu, Search, X } from "lucide-react";
+import { Bell, LogOut, Menu, Search, Settings, UserRound, X } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { Watermark } from "@/components/brand/Watermark";
@@ -11,7 +11,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -122,8 +121,7 @@ function PortalBrand({
 
 function NotificationBell({ to, unread }: { to: string; unread: number }) {
   const hasUnread = unread > 0;
-  const label =
-    unread > 99 ? "99+" : unread > 0 ? String(unread) : undefined;
+  const label = unread > 99 ? "99+" : unread > 0 ? String(unread) : undefined;
 
   return (
     <Button
@@ -308,46 +306,137 @@ export function AppShell({
 
           <div className="flex items-center gap-0.5 justify-self-end sm:gap-1">
             <NotificationBell to={notifPath} unread={unreadCount} />
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className="pressable flex items-center gap-2 rounded-full p-1 pr-1.5 transition-colors hover:bg-slate-100 active:scale-[0.98] sm:pr-2"
+                  type="button"
+                  className="pressable flex items-center gap-1.5 rounded-full border border-transparent p-0.5 transition-colors hover:border-slate-200 hover:bg-slate-50 active:scale-[0.98] sm:gap-2 sm:pr-2"
                   aria-label="Account menu"
                 >
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-blue-100 text-xs font-bold text-primary">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-[11px] font-bold text-primary ring-2 ring-white sm:h-9 sm:w-9 sm:text-xs">
                     {user.avatar}
                   </span>
-                  <span className="hidden text-left sm:block">
-                    <span className="block max-w-[140px] truncate text-xs font-bold leading-tight text-slate-900">
+                  <span className="hidden min-w-0 text-left sm:block">
+                    <span className="block max-w-[120px] truncate text-xs font-bold leading-tight text-slate-900 md:max-w-[140px]">
                       {user.name}
                     </span>
-                    <span className="block max-w-[120px] truncate text-[11px] leading-tight text-slate-500 md:max-w-[160px]">
-                      {user.subtitle}
+                    <span className="block max-w-[120px] truncate text-[10px] leading-tight text-slate-500 md:max-w-[140px]">
+                      {user.subtitle || config.label}
                     </span>
                   </span>
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="z-[60] w-56 border-slate-200 bg-white">
-                <DropdownMenuLabel className="text-slate-900">{user.name}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link to={`${config.home}/profile` as string} preload="intent">
-                    Profile
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to={`${config.home}/settings` as string} preload="intent">
-                    Settings
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to={notifPath as string} preload="intent">
-                    Notifications
-                    {unreadCount > 0 ? ` (${unreadCount})` : ""}
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => void signOut()}>Logout</DropdownMenuItem>
+
+              <DropdownMenuContent
+                align="end"
+                sideOffset={8}
+                className={cn(
+                  "z-[70] w-[min(18rem,calc(100vw-1.25rem))] overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0",
+                  "shadow-[0_8px_30px_rgba(15,23,42,0.12)]",
+                )}
+              >
+                {/* Profile header */}
+                <div className="border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white px-3.5 py-3">
+                  <div className="flex items-start gap-2.5">
+                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/80 text-sm font-bold text-white shadow-sm">
+                      {user.avatar}
+                    </span>
+                    <div className="min-w-0 flex-1 pt-0.5">
+                      <p className="break-words text-sm font-bold leading-snug text-slate-900 [overflow-wrap:anywhere]">
+                        {user.name}
+                      </p>
+                      <p className="mt-0.5 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                        {config.label}
+                      </p>
+                      {user.subtitle ? (
+                        <p className="mt-1 truncate text-[11px] text-slate-500">{user.subtitle}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="p-1.5">
+                  <DropdownMenuItem
+                    asChild
+                    className="cursor-pointer rounded-xl px-2.5 py-2.5 focus:bg-slate-50"
+                  >
+                    <Link
+                      to={`${config.home}/profile` as string}
+                      preload="intent"
+                      className="flex w-full items-center gap-2.5"
+                    >
+                      <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-600">
+                        <UserRound className="h-4 w-4" aria-hidden />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-slate-900">Profile</span>
+                        <span className="block text-[11px] text-slate-500">View account details</span>
+                      </span>
+                    </Link>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    asChild
+                    className="cursor-pointer rounded-xl px-2.5 py-2.5 focus:bg-slate-50"
+                  >
+                    <Link
+                      to={`${config.home}/settings` as string}
+                      preload="intent"
+                      className="flex w-full items-center gap-2.5"
+                    >
+                      <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-600">
+                        <Settings className="h-4 w-4" aria-hidden />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-slate-900">Settings</span>
+                        <span className="block text-[11px] text-slate-500">Preferences & security</span>
+                      </span>
+                    </Link>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    asChild
+                    className="cursor-pointer rounded-xl px-2.5 py-2.5 focus:bg-slate-50"
+                  >
+                    <Link to={notifPath as string} preload="intent" className="flex w-full items-center gap-2.5">
+                      <span className="relative grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-600">
+                        <Bell className="h-4 w-4" aria-hidden />
+                        {unreadCount > 0 ? (
+                          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+                        ) : null}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                          Notifications
+                          {unreadCount > 0 ? (
+                            <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                              {unreadCount > 99 ? "99+" : unreadCount}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="block text-[11px] text-slate-500">
+                          {unreadCount > 0 ? `${unreadCount} unread` : "You're all caught up"}
+                        </span>
+                      </span>
+                    </Link>
+                  </DropdownMenuItem>
+                </div>
+
+                <DropdownMenuSeparator className="my-0 bg-slate-100" />
+
+                <div className="p-1.5">
+                  <DropdownMenuItem
+                    onSelect={() => void signOut()}
+                    className="cursor-pointer rounded-xl px-2.5 py-2.5 text-red-600 focus:bg-red-50 focus:text-red-700"
+                  >
+                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-red-50 text-red-600">
+                      <LogOut className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className="text-sm font-semibold">Logout</span>
+                  </DropdownMenuItem>
+                </div>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
