@@ -100,7 +100,7 @@
   }
 
   .page-pad {
-    @apply px-3 py-4 sm:px-6 sm:py-6;
+    @apply px-3 py-3 sm:px-6 sm:py-6;
   }
 
   .safe-bottom {
@@ -155,6 +155,13 @@ button:not(:disabled):active,
   button {
     max-width: 100%;
   }
+
+  /* Prevent dialogs/modals from exceeding viewport */
+  [role="dialog"],
+  [data-radix-dialog-content] {
+    max-width: calc(100vw - 1.5rem) !important;
+    max-height: min(90dvh, 100%) !important;
+  }
 }
 
 html {
@@ -162,7 +169,6 @@ html {
   text-size-adjust: 100%;
 }
 
-/* Solid frosted cards over watermark — content stays readable */
 .surface-panel {
   background-color: rgb(255 255 255 / 0.92);
   backdrop-filter: blur(14px) saturate(1.2);
@@ -172,7 +178,6 @@ html {
   box-shadow: 0 1px 3px rgb(15 23 42 / 0.06), 0 8px 24px rgb(15 23 42 / 0.04);
 }
 
-/* Common translucent utilities → solid enough cards */
 .bg-white\/90,
 .bg-white\/80,
 .bg-white\/95 {
@@ -181,11 +186,59 @@ html {
   -webkit-backdrop-filter: blur(12px);
 }
 
-[data-sonner-toast] {
-  cursor: pointer;
+/* —— Compact Sonner toasts (swipe to dismiss; no X button) —— */
+[data-sonner-toaster] {
+  --width: min(22rem, calc(100vw - 1.5rem));
+  width: var(--width) !important;
+  max-width: var(--width) !important;
+  z-index: 9999;
 }
 
-/* Compact action buttons for dense mobile toolbars */
+[data-sonner-toast] {
+  cursor: grab;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 0 !important;
+  padding: 0.65rem 0.85rem !important;
+  gap: 0.5rem !important;
+  border-radius: 0.75rem !important;
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.06),
+    0 8px 20px rgb(15 23 42 / 0.08) !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.35 !important;
+  align-items: flex-start !important;
+}
+
+[data-sonner-toast][data-swiped="true"] {
+  cursor: grabbing;
+}
+
+[data-sonner-toast] [data-icon] {
+  margin-top: 0.1rem;
+  width: 1rem;
+  height: 1rem;
+}
+
+[data-sonner-toast] [data-content] {
+  gap: 0.15rem !important;
+}
+
+[data-sonner-toast] [data-title] {
+  font-weight: 600 !important;
+  font-size: 0.8125rem !important;
+}
+
+[data-sonner-toast] [data-description] {
+  font-size: 0.75rem !important;
+  opacity: 0.9;
+}
+
+/* Hide close button if any theme forces it */
+[data-sonner-toast] [data-close-button] {
+  display: none !important;
+}
+
 .btn-compact {
   height: 2rem !important;
   min-height: 2rem !important;
@@ -194,4 +247,17 @@ html {
   font-size: 0.75rem !important;
   line-height: 1rem !important;
   border-radius: 0.5rem !important;
+}
+
+/* Notification swipe dismiss animation */
+@keyframes notif-out {
+  to {
+    opacity: 0;
+    transform: translateX(var(--swipe-x, 100%));
+  }
+}
+
+.notif-swipe-out {
+  animation: notif-out 0.22s ease forwards;
+  pointer-events: none;
 }
