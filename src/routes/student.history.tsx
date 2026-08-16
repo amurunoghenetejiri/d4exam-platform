@@ -20,6 +20,7 @@ type ResultRow = {
   grade: string | null;
   pass_fail: string | null;
   status: string;
+  released_at: string | null;
   created_at: string | null;
   examinations: {
     title: string;
@@ -46,7 +47,7 @@ function Page() {
       const { data, error } = await supabase
         .from("results")
         .select(
-          "id, exam_id, percentage, grade, pass_fail, status, created_at, examinations(title, duration_minutes, courses(code, name))",
+          "id, exam_id, percentage, grade, pass_fail, status, released_at, created_at, examinations(title, duration_minutes, courses(code, name))",
         )
         .eq("student_id", student!.studentId)
         .order("created_at", { ascending: false });
@@ -110,7 +111,9 @@ function Page() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((r) => {
-                  const published = (r.status || "").toLowerCase() === "published";
+                  const published =
+                    (r.status || "").toLowerCase() === "published" ||
+                    Boolean(r.released_at);
                   return (
                     <tr key={r.id}>
                       <td className="py-2.5 pr-3 font-semibold text-slate-900">
@@ -130,7 +133,7 @@ function Page() {
                       <td className="py-2.5">
                         <Button size="sm" variant="outline" className="font-semibold" asChild>
                           <Link to="/student/results/$id" params={{ id: r.id }}>
-                            View
+                            {published ? "View Result" : "View Status"}
                           </Link>
                         </Button>
                       </td>
