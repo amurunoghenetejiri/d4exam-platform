@@ -196,6 +196,7 @@ export const officerNav: RoleConfig = {
       label: "Account",
       items: [
         { label: "Notifications", to: "/officer/notifications", icon: Bell },
+        { label: "Profile", to: "/officer/profile", icon: User },
         { label: "Settings", to: "/officer/settings", icon: Settings },
       ],
     },
