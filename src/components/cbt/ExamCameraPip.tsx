@@ -4,17 +4,62 @@ import { cn } from "@/lib/utils";
 import { createFaceEngine, type FaceEngine } from "@/lib/face-detector";
 import { toast } from "sonner";
 
-type FaceState = "ok" | "none" | "multi" | "unknown" | "unavailable";
+type FaceState = "ok" | "none" | "multi" | "unclear" | "unavailable";
 
-function vibrate(pattern: number | number[] = 200) {
+type SecurityAlertKind = "none" | "multi" | "unclear" | "camera_blocked";
+
+/** Browser Vibration API — no-op when unsupported (desktop Safari, some desktops). */
+function canVibrate(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    typeof navigator.vibrate === "function"
+  );
+}
+
+/** Distinct short patterns per security warning (ms on/off). */
+const VIBRATE_PATTERNS: Record<SecurityAlertKind, number | number[]> = {
+  none: [100, 50, 100],
+  unclear: [80, 40, 80],
+  multi: [180, 70, 180, 70, 180],
+  camera_blocked: [250, 100, 250],
+};
+
+function haptic(kind: SecurityAlertKind) {
+  if (!canVibrate()) return;
   try {
-    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
-      navigator.vibrate(pattern);
-    }
+    navigator.vibrate(VIBRATE_PATTERNS[kind]);
   } catch {
-    /* ignore */
+    /* permission / policy blocked — visual toast still works */
   }
 }
+
+const ALERT_COOLDOWN_MS = 4000;
+
+const ALERT_COPY: Record<
+  SecurityAlertKind,
+  { message: string; toastId: string; level: "warning" | "error" }
+> = {
+  none: {
+    message: "Face not detected. Please position your face in the camera.",
+    toastId: "cbt-face-none",
+    level: "warning",
+  },
+  multi: {
+    message: "Multiple faces detected. Only the candidate should be visible.",
+    toastId: "cbt-face-multi",
+    level: "error",
+  },
+  unclear: {
+    message: "Please face the camera clearly.",
+    toastId: "cbt-face-unclear",
+    level: "warning",
+  },
+  camera_blocked: {
+    message: "Camera view blocked. Please check your camera.",
+    toastId: "cbt-cam-blocked",
+    level: "error",
+  },
+};
 
 function stopStream(stream: MediaStream | null | undefined) {
   if (!stream) return;
@@ -27,21 +72,31 @@ function stopStream(stream: MediaStream | null | undefined) {
   });
 }
 
+export type FaceSecurityEvent = {
+  kind: SecurityAlertKind | "ok";
+  faceCount: number | null;
+  at: string;
+};
+
 export function ExamCameraPip({
   enabled = true,
   faceDetection = false,
   maxFaceWarnings = 3,
   stream: externalStream,
+  onSecurityEvent,
 }: {
   enabled?: boolean;
   faceDetection?: boolean;
   maxFaceWarnings?: number;
   stream?: MediaStream | null;
+  /** Optional hook for exam monitoring / audit (parent may persist). */
+  onSecurityEvent?: (event: FaceSecurityEvent) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const faceEngineRef = useRef<FaceEngine | null>(null);
   const faceWarnRef = useRef(0);
   const lastAlertRef = useRef(0);
+  const lastStateRef = useRef<FaceState>("unavailable");
   const ownStreamRef = useRef<MediaStream | null>(null);
   const dragState = useRef<{
     pointerId: number;
@@ -50,11 +105,35 @@ export function ExamCameraPip({
     originLeft: number;
     originTop: number;
   } | null>(null);
+  const onSecRef = useRef(onSecurityEvent);
+  onSecRef.current = onSecurityEvent;
+
   const [pos, setPos] = useState({ left: 16, top: 16 });
-  const [faceStatus, setFaceStatus] = useState<FaceState>("unknown");
+  const [faceStatus, setFaceStatus] = useState<FaceState>("unavailable");
   const [stream, setStream] = useState<MediaStream | null>(externalStream ?? null);
   const [dragging, setDragging] = useState(false);
 
+  const fireAlert = useCallback((kind: SecurityAlertKind, faceCount: number | null) => {
+    const now = Date.now();
+    // Cooldown: avoid continuous vibrate every poll tick
+    if (now - lastAlertRef.current < ALERT_COOLDOWN_MS) return;
+    lastAlertRef.current = now;
+
+    const copy = ALERT_COPY[kind];
+    if (copy.level === "error") {
+      toast.error(copy.message, { id: copy.toastId, duration: 4000 });
+    } else {
+      toast.warning(copy.message, { id: copy.toastId, duration: 4000 });
+    }
+    haptic(kind);
+    onSecRef.current?.({
+      kind,
+      faceCount,
+      at: new Date().toISOString(),
+    });
+  }, []);
+
+  // Camera acquire / release
   useEffect(() => {
     if (externalStream) {
       setStream(externalStream);
@@ -80,6 +159,7 @@ export function ExamCameraPip({
       } catch {
         setFaceStatus("unavailable");
         setStream(null);
+        fireAlert("camera_blocked", null);
       }
     })();
     return () => {
@@ -87,7 +167,31 @@ export function ExamCameraPip({
       stopStream(ownStreamRef.current);
       ownStreamRef.current = null;
     };
-  }, [enabled, externalStream]);
+  }, [enabled, externalStream, fireAlert]);
+
+  // Stream ended / track muted → camera blocked
+  useEffect(() => {
+    if (!stream || !enabled) return;
+    const tracks = stream.getVideoTracks();
+    const onEnded = () => {
+      setFaceStatus("unavailable");
+      fireAlert("camera_blocked", null);
+    };
+    const onMute = () => {
+      setFaceStatus("unavailable");
+      fireAlert("camera_blocked", null);
+    };
+    for (const t of tracks) {
+      t.addEventListener("ended", onEnded);
+      t.addEventListener("mute", onMute);
+    }
+    return () => {
+      for (const t of tracks) {
+        t.removeEventListener("ended", onEnded);
+        t.removeEventListener("mute", onMute);
+      }
+    };
+  }, [stream, enabled, fireAlert]);
 
   const setVideoNode = useCallback(
     (node: HTMLVideoElement | null) => {
@@ -112,31 +216,33 @@ export function ExamCameraPip({
     }
   }, [stream]);
 
+  // Real face-detection loop → status → toast + haptic
   useEffect(() => {
     if (!stream || !faceDetection || !enabled) {
-      setFaceStatus(stream && enabled ? "unknown" : "unavailable");
+      setFaceStatus(stream && enabled ? "unclear" : "unavailable");
       return;
     }
     let cancelled = false;
     let timer: number | undefined;
 
-    const alertFace = (kind: "none" | "multi") => {
-      const now = Date.now();
-      if (now - lastAlertRef.current < 4000) return;
-      lastAlertRef.current = now;
-      if (kind === "none") {
-        toast.warning("Face not detected — centre your face in the camera", {
-          id: "face-none",
-          duration: 3500,
-        });
-        vibrate([120, 60, 120]);
-      } else {
-        toast.error("Multiple faces detected — only one person should be visible", {
-          id: "face-multi",
-          duration: 3500,
-        });
-        vibrate([200, 80, 200, 80, 200]);
+    const applyState = (next: FaceState, faceCount: number | null) => {
+      const prev = lastStateRef.current;
+      setFaceStatus(next);
+      lastStateRef.current = next;
+
+      if (next === "ok") {
+        faceWarnRef.current = Math.max(0, faceWarnRef.current - 1);
+        if (prev !== "ok") {
+          onSecRef.current?.({ kind: "ok", faceCount, at: new Date().toISOString() });
+        }
+        return;
       }
+
+      faceWarnRef.current += 1;
+      if (next === "none") fireAlert("none", faceCount);
+      else if (next === "multi") fireAlert("multi", faceCount);
+      else if (next === "unclear") fireAlert("unclear", faceCount);
+      else if (next === "unavailable") fireAlert("camera_blocked", faceCount);
     };
 
     const tick = async () => {
@@ -144,30 +250,39 @@ export function ExamCameraPip({
       try {
         const n = await faceEngineRef.current.count(videoRef.current);
         if (cancelled) return;
-        if (n <= 0) {
-          setFaceStatus("none");
-          faceWarnRef.current += 1;
-          alertFace("none");
+        // null = video not ready / detection failed → treat as unclear (out of frame)
+        if (n == null) {
+          applyState("unclear", null);
+        } else if (n <= 0) {
+          applyState("none", 0);
         } else if (n > 1) {
-          setFaceStatus("multi");
-          faceWarnRef.current += 1;
-          alertFace("multi");
+          applyState("multi", n);
         } else {
-          setFaceStatus("ok");
-          faceWarnRef.current = Math.max(0, faceWarnRef.current - 1);
+          applyState("ok", 1);
         }
       } catch {
-        setFaceStatus("unknown");
+        if (!cancelled) applyState("unclear", null);
       }
       if (!cancelled) timer = window.setTimeout(() => void tick(), 1800);
     };
 
     void (async () => {
       try {
-        faceEngineRef.current = await createFaceEngine();
+        const engine = await createFaceEngine();
+        if (cancelled) {
+          engine?.close();
+          return;
+        }
+        if (!engine) {
+          setFaceStatus("unavailable");
+          fireAlert("camera_blocked", null);
+          return;
+        }
+        faceEngineRef.current = engine;
         void tick();
       } catch {
         setFaceStatus("unavailable");
+        fireAlert("camera_blocked", null);
       }
     })();
 
@@ -177,8 +292,9 @@ export function ExamCameraPip({
       faceEngineRef.current?.close?.();
       faceEngineRef.current = null;
     };
-  }, [stream, faceDetection, maxFaceWarnings, enabled]);
+  }, [stream, faceDetection, maxFaceWarnings, enabled, fireAlert]);
 
+  // Drag across screen
   useEffect(() => {
     if (!dragging) return;
 
@@ -225,8 +341,8 @@ export function ExamCameraPip({
         : faceStatus === "ok"
           ? "Monitoring · 1 face"
           : faceStatus === "unavailable"
-            ? "Camera off"
-            : "Live camera";
+            ? "Camera blocked"
+            : "Face unclear";
 
   return (
     <div
@@ -262,8 +378,9 @@ export function ExamCameraPip({
           "px-2 py-1 text-center text-[10px] font-bold text-white",
           faceStatus === "multi" && "bg-red-600",
           faceStatus === "none" && "bg-amber-600",
+          faceStatus === "unclear" && "bg-amber-500",
           faceStatus === "ok" && "bg-emerald-600",
-          (faceStatus === "unknown" || faceStatus === "unavailable") && "bg-primary",
+          faceStatus === "unavailable" && "bg-red-700",
         )}
       >
         {faceLabel}
