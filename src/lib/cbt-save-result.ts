@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { scoreObjectiveAnswers } from "@/lib/cbt-security";
 import { friendlyError } from "@/lib/friendly-error";
+import type { ResultVisibility } from "@/types";
 
 /** Score answers and upsert into public.results (correct table for student/officer UI). */
 export async function saveCbtResult(input: {
@@ -18,6 +19,8 @@ export async function saveCbtResult(input: {
   answers: Record<string, number>;
   terminated?: boolean;
   faceWarned?: boolean;
+  /** Teacher setting: immediate → publish now; otherwise pending for officer */
+  resultVisibility?: ResultVisibility | string | null;
 }) {
   const scored = scoreObjectiveAnswers(
     input.questions.map((q) => ({
@@ -32,6 +35,11 @@ export async function saveCbtResult(input: {
 
   const status = input.terminated ? "terminated" : "submitted";
   const secStatus = input.terminated || input.faceWarned ? "flagged" : "pending";
+
+  const vis = String(input.resultVisibility || "after_officer_release").toLowerCase();
+  const publishNow = vis === "immediate" && !input.terminated && secStatus !== "flagged";
+  const resultStatus = publishNow ? "published" : "pending";
+  const releasedAt = publishNow ? new Date().toISOString() : null;
 
   if (input.attemptId) {
     const { error: attErr } = await supabase
@@ -62,8 +70,9 @@ export async function saveCbtResult(input: {
     correct_count: scored.correct,
     wrong_count: scored.wrong,
     unanswered_count: scored.unanswered,
-    status: "pending",
+    status: resultStatus,
     security_review_status: secStatus,
+    released_at: releasedAt,
   };
 
   let resultId: string | undefined;
@@ -96,8 +105,9 @@ export async function saveCbtResult(input: {
           correct_count: scored.correct,
           wrong_count: scored.wrong,
           unanswered_count: scored.unanswered,
-          status: "pending",
+          status: resultStatus,
           security_review_status: secStatus,
+          released_at: releasedAt,
         } as never)
         .eq("id", existing.data.id)
         .select("id")
@@ -122,5 +132,6 @@ export async function saveCbtResult(input: {
     error: error ? { message: friendlyError(error, "Could not save your result. Please try again.") } : null,
     resultId,
     status,
+    published: publishNow,
   };
 }
