@@ -1,5 +1,5 @@
-import type { ComponentType, ReactNode, MouseEvent } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import type { ComponentType, ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import { AlertCircle, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,11 @@ export function PageHeader({
   );
 }
 
+/**
+ * Clickable card that uses the router Link only.
+ * Do NOT call preventDefault + navigate() — that fights TanStack Router and
+ * causes client-side navigations that only complete after a hard refresh.
+ */
 export function NavCard({
   to,
   search,
@@ -50,26 +55,13 @@ export function NavCard({
   className?: string;
   ariaLabel?: string;
 }) {
-  const navigate = useNavigate();
-
-  function go(e: MouseEvent) {
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-    e.preventDefault();
-    void navigate({
-      to: to as never,
-      params: (params ?? {}) as never,
-      search: (search ?? {}) as never,
-    });
-  }
-
   return (
     <Link
       to={to as never}
-      params={params as never}
-      search={search as never}
+      {...(params ? { params: params as never } : {})}
+      {...(search ? { search: search as never } : {})}
       aria-label={ariaLabel}
       preload="intent"
-      onClick={go}
       className={cn(
         "pressable pressable-soft block cursor-pointer rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm sm:rounded-2xl sm:p-4",
         "hover:border-primary/40 hover:shadow-md",
@@ -137,17 +129,21 @@ export function SectionCard({
   description,
   children,
   actions,
+  action,
   className,
 }: {
   title?: string;
   description?: string;
   children: ReactNode;
   actions?: ReactNode;
+  /** @deprecated use actions */
+  action?: ReactNode;
   className?: string;
 }) {
+  const right = actions ?? action;
   return (
     <Card className={cn("overflow-hidden rounded-xl border-slate-200 shadow-sm sm:rounded-2xl", className)}>
-      {(title || description || actions) && (
+      {(title || description || right) && (
         <CardHeader className="flex flex-col gap-2 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
           <div className="min-w-0">
             {title ? <CardTitle className="text-sm font-bold text-slate-900 sm:text-base">{title}</CardTitle> : null}
@@ -155,7 +151,7 @@ export function SectionCard({
               <CardDescription className="mt-0.5 text-xs text-slate-500">{description}</CardDescription>
             ) : null}
           </div>
-          {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
+          {right ? <div className="flex shrink-0 flex-wrap gap-2">{right}</div> : null}
         </CardHeader>
       )}
       <CardContent className="px-3 py-3 sm:px-5 sm:py-4">{children}</CardContent>
