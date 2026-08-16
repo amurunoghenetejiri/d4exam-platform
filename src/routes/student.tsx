@@ -5,7 +5,7 @@ import { useStudentContext, useStudentRealtimeSync } from "@/lib/student";
 
 export const Route = createFileRoute("/student")({
   ssr: false,
-  beforeLoad: () => requireRole("student"),
+  beforeLoad: ({ context }) => requireRole("student", context.queryClient),
   component: Layout,
 });
 
