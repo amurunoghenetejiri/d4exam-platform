@@ -328,97 +328,83 @@ export function AppShell({
                 </button>
               </DropdownMenuTrigger>
 
+              {/* Compact profile menu — fits content, not oversized */}
               <DropdownMenuContent
                 align="end"
-                sideOffset={8}
+                sideOffset={6}
                 className={cn(
-                  "z-[70] w-[min(18rem,calc(100vw-1.25rem))] overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0",
-                  "shadow-[0_8px_30px_rgba(15,23,42,0.12)]",
+                  "z-[70] w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-0",
+                  "shadow-lg",
                 )}
               >
-                {/* Profile header */}
-                <div className="border-b border-slate-100 bg-gradient-to-br from-slate-50 to-white px-3.5 py-3">
-                  <div className="flex items-start gap-2.5">
-                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/80 text-sm font-bold text-white shadow-sm">
+                <div className="border-b border-slate-100 px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-bold text-white">
                       {user.avatar}
                     </span>
-                    <div className="min-w-0 flex-1 pt-0.5">
-                      <p className="break-words text-sm font-bold leading-snug text-slate-900 [overflow-wrap:anywhere]">
-                        {user.name}
-                      </p>
-                      <p className="mt-0.5 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-bold text-slate-900">{user.name}</p>
+                      <p className="mt-0.5 inline-flex rounded-full bg-primary/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-primary">
                         {config.label}
                       </p>
                       {user.subtitle ? (
-                        <p className="mt-1 truncate text-[11px] text-slate-500">{user.subtitle}</p>
+                        <p className="mt-0.5 truncate text-[10px] text-slate-500">{user.subtitle}</p>
                       ) : null}
                     </div>
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div className="p-1.5">
+                <div className="p-1">
                   <DropdownMenuItem
                     asChild
-                    className="cursor-pointer rounded-xl px-2.5 py-2.5 focus:bg-slate-50"
+                    className="cursor-pointer rounded-lg px-2 py-1.5 focus:bg-slate-50"
                   >
                     <Link
                       to={`${config.home}/profile` as string}
                       preload="intent"
-                      className="flex w-full items-center gap-2.5"
+                      className="flex w-full items-center gap-2"
                     >
-                      <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-600">
-                        <UserRound className="h-4 w-4" aria-hidden />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold text-slate-900">Profile</span>
-                        <span className="block text-[11px] text-slate-500">View account details</span>
-                      </span>
+                      <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
+                      <span className="text-xs font-semibold text-slate-900">Profile</span>
                     </Link>
                   </DropdownMenuItem>
 
                   <DropdownMenuItem
                     asChild
-                    className="cursor-pointer rounded-xl px-2.5 py-2.5 focus:bg-slate-50"
+                    className="cursor-pointer rounded-lg px-2 py-1.5 focus:bg-slate-50"
                   >
                     <Link
                       to={`${config.home}/settings` as string}
                       preload="intent"
-                      className="flex w-full items-center gap-2.5"
+                      className="flex w-full items-center gap-2"
                     >
-                      <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-600">
-                        <Settings className="h-4 w-4" aria-hidden />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold text-slate-900">Settings</span>
-                        <span className="block text-[11px] text-slate-500">Preferences & security</span>
-                      </span>
+                      <Settings className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
+                      <span className="text-xs font-semibold text-slate-900">Settings</span>
                     </Link>
                   </DropdownMenuItem>
 
                   <DropdownMenuItem
                     asChild
-                    className="cursor-pointer rounded-xl px-2.5 py-2.5 focus:bg-slate-50"
+                    className="cursor-pointer rounded-lg px-2 py-1.5 focus:bg-slate-50"
                   >
-                    <Link to={notifPath as string} preload="intent" className="flex w-full items-center gap-2.5">
-                      <span className="relative grid h-8 w-8 place-items-center rounded-lg bg-slate-100 text-slate-600">
-                        <Bell className="h-4 w-4" aria-hidden />
+                    <Link
+                      to={notifPath as string}
+                      preload="intent"
+                      className="flex w-full items-center gap-2"
+                    >
+                      <span className="relative">
+                        <Bell className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
                         {unreadCount > 0 ? (
-                          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white" />
+                          <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-red-500" />
                         ) : null}
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-                          Notifications
-                          {unreadCount > 0 ? (
-                            <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
-                              {unreadCount > 99 ? "99+" : unreadCount}
-                            </span>
-                          ) : null}
-                        </span>
-                        <span className="block text-[11px] text-slate-500">
-                          {unreadCount > 0 ? `${unreadCount} unread` : "You're all caught up"}
-                        </span>
+                      <span className="flex flex-1 items-center justify-between gap-2 text-xs font-semibold text-slate-900">
+                        Notifications
+                        {unreadCount > 0 ? (
+                          <span className="rounded-full bg-red-500 px-1.5 py-px text-[9px] font-bold text-white">
+                            {unreadCount > 99 ? "99+" : unreadCount}
+                          </span>
+                        ) : null}
                       </span>
                     </Link>
                   </DropdownMenuItem>
@@ -426,15 +412,13 @@ export function AppShell({
 
                 <DropdownMenuSeparator className="my-0 bg-slate-100" />
 
-                <div className="p-1.5">
+                <div className="p-1">
                   <DropdownMenuItem
                     onSelect={() => void signOut()}
-                    className="cursor-pointer rounded-xl px-2.5 py-2.5 text-red-600 focus:bg-red-50 focus:text-red-700"
+                    className="cursor-pointer rounded-lg px-2 py-1.5 text-red-600 focus:bg-red-50 focus:text-red-700"
                   >
-                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-red-50 text-red-600">
-                      <LogOut className="h-4 w-4" aria-hidden />
-                    </span>
-                    <span className="text-sm font-semibold">Logout</span>
+                    <LogOut className="mr-2 h-3.5 w-3.5" aria-hidden />
+                    <span className="text-xs font-semibold">Logout</span>
                   </DropdownMenuItem>
                 </div>
               </DropdownMenuContent>
@@ -451,38 +435,38 @@ export function AppShell({
 
       {config.bottomNav && (
         <nav
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_12px_rgba(15,23,42,0.04)] backdrop-blur lg:hidden"
+          className={cn(
+            "fixed inset-x-0 bottom-0 z-40 lg:hidden",
+            "border-t border-slate-200 bg-white",
+            "pb-[env(safe-area-inset-bottom,0px)]",
+            "shadow-[0_-2px_10px_rgba(15,23,42,0.06)]",
+          )}
           aria-label="Primary"
         >
-          <ul className="grid grid-cols-4">
+          <ul className="grid h-14 grid-cols-4">
             {config.bottomNav.map((item) => {
               const active =
                 item.to === config.home
                   ? pathname === item.to || pathname === `${item.to}/`
                   : pathname === item.to || pathname.startsWith(`${item.to}/`);
               return (
-                <li key={item.to}>
+                <li key={item.to} className="min-w-0">
                   <Link
                     to={item.to}
                     preload="intent"
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "pressable relative flex min-h-[56px] flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] font-semibold transition-all",
-                      "active:scale-[0.96]",
+                      "flex h-full min-h-[3.5rem] w-full flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-semibold",
                       active ? "text-primary" : "text-slate-500",
                     )}
                   >
-                    <span
-                      className={cn(
-                        "grid h-9 w-9 place-items-center rounded-2xl transition-all",
-                        active
-                          ? "-translate-y-1 bg-primary/15 text-primary shadow-sm ring-1 ring-primary/20"
-                          : "text-slate-500",
-                      )}
-                    >
-                      <item.icon className={cn("h-5 w-5", active && "stroke-[2.25]")} aria-hidden />
+                    <item.icon
+                      className={cn("h-5 w-5 shrink-0", active && "stroke-[2.25]")}
+                      aria-hidden
+                    />
+                    <span className={cn("truncate max-w-full", active && "font-bold")}>
+                      {item.label}
                     </span>
-                    <span className={cn("truncate px-0.5", active && "font-bold")}>{item.label}</span>
                   </Link>
                 </li>
               );
