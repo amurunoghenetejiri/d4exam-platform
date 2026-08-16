@@ -5,7 +5,6 @@ import { Flag, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { useSchoolIdentity } from "@/lib/school-identity";
-import { ExamSecurityGate } from "@/components/cbt/ExamSecurityGate";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useStudentContext } from "@/lib/student";
@@ -183,7 +182,7 @@ export function CbtExamPage() {
   }
 
   return (
-    <ExamSecurityGate examId={examId} onForceSubmit={() => void finish(false)}>
+    <>
       <div className="mx-auto max-w-3xl space-y-3 p-3 sm:p-4">
         <header className="flex items-center justify-between gap-3 rounded-xl bg-slate-900 px-3 py-2 text-white">
           <div className="flex items-center gap-2 min-w-0">
@@ -256,6 +255,6 @@ export function CbtExamPage() {
           <p className="mt-2 text-xs text-slate-500">Answered {Object.keys(answers).length} / {total}</p>
         </div>
       </div>
-    </ExamSecurityGate>
+    </>
   );
 }

@@ -166,7 +166,7 @@ function Page() {
       const { data, error } = await supabase
         .from("notifications")
         .select("id, title, created_at, read_at")
-        .eq("user_id", user!.userId)
+        .eq("recipient_user_id", user!.userId)
         .order("created_at", { ascending: false })
         .limit(20);
       if (error) throw error;

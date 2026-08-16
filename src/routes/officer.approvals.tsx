@@ -156,7 +156,7 @@ function Page() {
         for (const cols of [FULL_COLS, MID_COLS, BASIC_COLS]) {
           const res = await supabase.from("exam_settings").select(cols).in("exam_id", examIds);
           if (!res.error) {
-            data = (res.data ?? []) as ExamSettingsRow[];
+            data = (res.data ?? []) as unknown as ExamSettingsRow[];
             error = null;
             break;
           }

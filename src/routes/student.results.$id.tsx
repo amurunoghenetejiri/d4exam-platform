@@ -400,7 +400,7 @@ function ResultDetailPage() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <StatCard icon={FileText} label="Total Questions" value={String(totalQ || "—")} tone="blue" />
             <StatCard icon={CheckCircle2} label="Correct Answers" value={String(correct)} tone="green" />
-            <StatCard icon={XCircle} label="Wrong Answers" value={String(wrong)} />
+            <StatCard icon={XCircle} label="Wrong Answers" value={String(wrong)} tone="red" />
             <StatCard icon={MinusCircle} label="Unanswered" value={String(unanswered)} tone="amber" />
             <StatCard
               icon={Percent}
