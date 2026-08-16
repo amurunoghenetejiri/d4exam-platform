@@ -107,7 +107,6 @@
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
 
-  /* Press / click feedback for interactive controls */
   .pressable {
     transition:
       transform 0.12s ease,
@@ -130,7 +129,6 @@
   }
 }
 
-/* Global click feel on native interactive elements */
 button:not(:disabled),
 [role="button"]:not([aria-disabled="true"]),
 a[href] {
@@ -143,7 +141,6 @@ button:not(:disabled):active,
   transform: scale(0.97);
 }
 
-/* Tables scroll on small screens */
 @media (max-width: 640px) {
   .table-scroll {
     width: 100%;
@@ -163,4 +160,23 @@ button:not(:disabled):active,
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+/* Solid cards over watermark */
+.surface-panel {
+  background-color: rgb(255 255 255 / 0.97);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgb(226 232 240);
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.bg-white\/90 {
+  background-color: rgb(255 255 255 / 0.97) !important;
+  backdrop-filter: blur(8px);
+}
+
+[data-sonner-toast] {
+  cursor: pointer;
 }
