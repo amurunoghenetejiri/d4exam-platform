@@ -8,7 +8,13 @@ import {
   ExternalLink,
   Trash2,
 } from "lucide-react";
-import { EmptyState, PageHeader, SectionCard, PageLoading } from "@/components/dashboard/kit";
+import {
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  PageLoading,
+  ErrorState,
+} from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -69,14 +75,24 @@ export function NotificationsPage({ scope }: { scope: string }) {
 
   useRealtimeInvalidate(
     `notifs-${user?.userId ?? "anon"}`,
-    [{ table: "notifications", filter: user?.userId ? `recipient_user_id=eq.${user.userId}` : undefined }],
-    [["rows", "notifications"], ["count", "notifications"], ["student-dashboard-notifs"]],
+    [
+      {
+        table: "notifications",
+        filter: user?.userId ? `recipient_user_id=eq.${user.userId}` : undefined,
+      },
+    ],
+    [
+      ["rows", "notifications"],
+      ["count", "notifications"],
+      ["count", "notifications", "unread", user?.userId],
+      ["student-dashboard-notifs"],
+    ],
     Boolean(user?.userId),
   );
 
-  const { data, isLoading, refetch } = useRows<Notif>({
+  const { data, isLoading, isError, error, refetch } = useRows<Notif>({
     table: "notifications",
-    select: "id, title, message, type, created_at, read_at",
+    select: "id, title, message, type, created_at, read_at, link, action_url",
     filters: user?.userId ? [{ column: "recipient_user_id", value: user.userId }] : [],
     order: { column: "created_at", ascending: false },
     limit: 150,
@@ -88,19 +104,26 @@ export function NotificationsPage({ scope }: { scope: string }) {
   const historyItems = items.filter((i) => i.read_at);
   const unread = unreadItems.length;
 
+  async function invalidateAll() {
+    await qc.invalidateQueries({ queryKey: ["rows", "notifications"] });
+    await qc.invalidateQueries({ queryKey: ["count", "notifications"] });
+    await qc.invalidateQueries({
+      queryKey: ["count", "notifications", "unread", user?.userId],
+    });
+    await refetch();
+  }
+
   async function markAllRead() {
     if (!user?.userId) return;
     setBusy(true);
     try {
-      const { error } = await supabase
+      const { error: upErr } = await supabase
         .from("notifications")
         .update({ read_at: new Date().toISOString() })
         .eq("recipient_user_id", user.userId)
         .is("read_at", null);
-      if (error) throw error;
-      await qc.invalidateQueries({ queryKey: ["rows", "notifications"] });
-      await qc.invalidateQueries({ queryKey: ["count", "notifications"] });
-      await refetch();
+      if (upErr) throw upErr;
+      await invalidateAll();
       toast.success("All notifications marked as read");
     } catch (e) {
       toast.error((e as Error).message || "Could not update");
@@ -110,27 +133,27 @@ export function NotificationsPage({ scope }: { scope: string }) {
   }
 
   async function markOne(id: string) {
-    const { error } = await supabase
+    const { error: upErr } = await supabase
       .from("notifications")
       .update({ read_at: new Date().toISOString() })
-      .eq("id", id);
-    if (!error) {
-      await qc.invalidateQueries({ queryKey: ["rows", "notifications"] });
-      await refetch();
-    }
+      .eq("id", id)
+      .eq("recipient_user_id", user?.userId ?? "");
+    if (!upErr) await invalidateAll();
   }
 
   async function dismissOne(id: string, e?: MouseEvent) {
     e?.stopPropagation();
     e?.preventDefault();
-    const { error } = await supabase.from("notifications").delete().eq("id", id);
-    if (error) {
-      toast.error(error.message || "Could not dismiss");
+    const { error: delErr } = await supabase
+      .from("notifications")
+      .delete()
+      .eq("id", id)
+      .eq("recipient_user_id", user?.userId ?? "");
+    if (delErr) {
+      toast.error(delErr.message || "Could not dismiss");
       return;
     }
-    await qc.invalidateQueries({ queryKey: ["rows", "notifications"] });
-    await qc.invalidateQueries({ queryKey: ["count", "notifications"] });
-    await refetch();
+    await invalidateAll();
     toast.success("Notification dismissed");
   }
 
@@ -149,7 +172,6 @@ export function NotificationsPage({ scope }: { scope: string }) {
             exam_scheduled: "/teacher/examinations",
             exam_available: "/student/examinations",
             result_published: "/student/results",
-            success: scope === "student" ? "/student/results" : `/${scope}`,
           };
           const href = n.link || n.action_url || hrefFromType[t] || null;
           return (
@@ -212,6 +234,15 @@ export function NotificationsPage({ scope }: { scope: string }) {
     );
   }
 
+  if (!user?.userId && !isLoading) {
+    return (
+      <>
+        <PageHeader title="Notifications" description={`Alerts for your ${scope} account.`} />
+        <EmptyState title="Sign in required" description="Sign in to see your notifications." />
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -230,29 +261,45 @@ export function NotificationsPage({ scope }: { scope: string }) {
         }
       />
 
-      <SectionCard title="Unread" description={isLoading ? "Loading…" : `${unread} unread`}>
-        {isLoading ? (
-          <PageLoading label="Loading notifications…" />
-        ) : unreadItems.length === 0 ? (
-          <EmptyState
-            icon={Bell}
-            title="No unread notifications"
-            description="You are all caught up. New alerts appear here in realtime."
-          />
-        ) : (
-          renderList(unreadItems)
-        )}
-      </SectionCard>
+      {isError ? (
+        <ErrorState
+          title="Could not load notifications"
+          description={
+            (error as Error)?.message ||
+            "Check that the notifications table and RLS policies are applied in Supabase."
+          }
+          onRetry={() => void refetch()}
+        />
+      ) : (
+        <>
+          <SectionCard title="Unread" description={isLoading ? "Loading…" : `${unread} unread`}>
+            {isLoading ? (
+              <PageLoading label="Loading notifications…" />
+            ) : unreadItems.length === 0 ? (
+              <EmptyState
+                icon={Bell}
+                title="No unread notifications"
+                description="You are all caught up. New alerts appear here in realtime."
+              />
+            ) : (
+              renderList(unreadItems)
+            )}
+          </SectionCard>
 
-      <div className="mt-6">
-        <SectionCard title="History" description={`${historyItems.length} older notifications`}>
-          {historyItems.length === 0 ? (
-            <EmptyState title="No history yet" description="Read notifications are kept here." />
-          ) : (
-            renderList(historyItems)
-          )}
-        </SectionCard>
-      </div>
+          <div className="mt-6">
+            <SectionCard title="History" description={`${historyItems.length} older notifications`}>
+              {historyItems.length === 0 ? (
+                <EmptyState
+                  title="No history yet"
+                  description="Read notifications are kept here."
+                />
+              ) : (
+                renderList(historyItems)
+              )}
+            </SectionCard>
+          </div>
+        </>
+      )}
     </>
   );
 }
