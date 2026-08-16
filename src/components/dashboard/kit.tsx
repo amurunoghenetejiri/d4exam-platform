@@ -1,4 +1,4 @@
-import type { ReactNode, MouseEvent } from "react";
+import type { ComponentType, ReactNode, MouseEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { AlertCircle, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -88,42 +88,46 @@ export function StatCard({
   value,
   hint,
   icon,
-  trend,
+  to,
+  search,
+  className,
 }: {
   label: string;
-  value: string | number;
+  value: ReactNode;
   hint?: string;
   icon?: ReactNode;
-  trend?: { value: string; positive?: boolean };
+  to?: string;
+  search?: Record<string, string | undefined>;
+  className?: string;
 }) {
-  return (
-    <Card className="border-slate-100 shadow-sm">
-      <CardContent className="flex items-start gap-2.5 p-3 sm:gap-3 sm:p-5">
+  const body = (
+    <>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:text-xs">{label}</p>
+          <p className="mt-1 text-xl font-extrabold tabular-nums text-slate-900 sm:text-2xl">{value}</p>
+          {hint ? <p className="mt-0.5 text-[11px] text-slate-500 sm:text-xs">{hint}</p> : null}
+        </div>
         {icon ? (
-          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary sm:h-10 sm:w-10 sm:rounded-xl">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary sm:h-10 sm:w-10">
             {icon}
           </div>
         ) : null}
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-xs">
-            {label}
-          </p>
-          <p className="mt-0.5 text-xl font-extrabold tabular-nums text-slate-900 sm:text-2xl">
-            {value}
-          </p>
-          {hint ? <p className="mt-0.5 text-[11px] text-slate-500 sm:text-xs">{hint}</p> : null}
-          {trend ? (
-            <p
-              className={cn(
-                "mt-1 text-xs font-semibold",
-                trend.positive ? "text-emerald-600" : "text-red-600",
-              )}
-            >
-              {trend.value}
-            </p>
-          ) : null}
-        </div>
-      </CardContent>
+      </div>
+    </>
+  );
+
+  if (to) {
+    return (
+      <NavCard to={to} search={search} className={className} ariaLabel={label}>
+        {body}
+      </NavCard>
+    );
+  }
+
+  return (
+    <Card className={cn("rounded-xl border-slate-200 shadow-sm sm:rounded-2xl", className)}>
+      <CardContent className="p-3 sm:p-4">{body}</CardContent>
     </Card>
   );
 }
@@ -131,86 +135,59 @@ export function StatCard({
 export function SectionCard({
   title,
   description,
-  action,
   children,
+  actions,
   className,
 }: {
   title?: string;
   description?: string;
-  action?: ReactNode;
   children: ReactNode;
+  actions?: ReactNode;
   className?: string;
 }) {
   return (
-    <Card className={cn("border-slate-100 shadow-sm overflow-hidden", className)}>
-      {(title || action) && (
-        <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 px-3 pb-2 pt-3 sm:gap-3 sm:px-6 sm:pb-3 sm:pt-6">
+    <Card className={cn("overflow-hidden rounded-xl border-slate-200 shadow-sm sm:rounded-2xl", className)}>
+      {(title || description || actions) && (
+        <CardHeader className="flex flex-col gap-2 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-4">
           <div className="min-w-0">
-            {title ? <CardTitle className="text-sm font-bold sm:text-base">{title}</CardTitle> : null}
+            {title ? <CardTitle className="text-sm font-bold text-slate-900 sm:text-base">{title}</CardTitle> : null}
             {description ? (
-              <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>
+              <CardDescription className="mt-0.5 text-xs text-slate-500">{description}</CardDescription>
             ) : null}
           </div>
-          {action ? <div className="shrink-0">{action}</div> : null}
+          {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
         </CardHeader>
       )}
-      <CardContent className={cn("px-3 pb-3 sm:px-6 sm:pb-6", !(title || action) && "pt-3 sm:pt-6")}>
-        {children}
-      </CardContent>
+      <CardContent className="px-3 py-3 sm:px-5 sm:py-4">{children}</CardContent>
     </Card>
   );
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  active: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  published: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  released: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  pending: "bg-amber-50 text-amber-700 border-amber-200",
+  "pending approval": "bg-amber-50 text-amber-700 border-amber-200",
+  "changes requested": "bg-amber-50 text-amber-700 border-amber-200",
   approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
   completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  success: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  pass: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  passed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-
-  pending: "bg-amber-50 text-amber-800 border-amber-200",
-  held: "bg-amber-50 text-amber-800 border-amber-200",
-  "result held": "bg-amber-50 text-amber-800 border-amber-200",
-  "pending officer review": "bg-amber-50 text-amber-800 border-amber-200",
-  processing: "bg-amber-50 text-amber-800 border-amber-200",
-  waiting: "bg-amber-50 text-amber-800 border-amber-200",
-  upcoming: "bg-amber-50 text-amber-800 border-amber-200",
-
-  rejected: "bg-red-50 text-red-700 border-red-200",
-  terminated: "bg-red-50 text-red-700 border-red-200",
-  flagged: "bg-red-50 text-red-700 border-red-200",
-  suspended: "bg-red-50 text-red-700 border-red-200",
-  cancelled: "bg-red-50 text-red-700 border-red-200",
-  canceled: "bg-red-50 text-red-700 border-red-200",
-  failed: "bg-red-50 text-red-700 border-red-200",
-  error: "bg-red-50 text-red-700 border-red-200",
-  missed: "bg-red-50 text-red-700 border-red-200",
-  fail: "bg-red-50 text-red-700 border-red-200",
-
+  published: "bg-emerald-50 text-emerald-700 border-emerald-200",
   scheduled: "bg-blue-50 text-blue-700 border-blue-200",
-  info: "bg-blue-50 text-blue-700 border-blue-200",
-  submitted: "bg-blue-50 text-blue-700 border-blue-200",
-
-  ongoing: "bg-cyan-50 text-cyan-800 border-cyan-200",
-  live: "bg-cyan-50 text-cyan-800 border-cyan-200",
-  available: "bg-cyan-50 text-cyan-800 border-cyan-200",
-
+  ongoing: "bg-blue-50 text-blue-700 border-blue-200",
+  live: "bg-blue-50 text-blue-700 border-blue-200",
+  active: "bg-blue-50 text-blue-700 border-blue-200",
   draft: "bg-slate-100 text-slate-600 border-slate-200",
+  rejected: "bg-red-50 text-red-700 border-red-200",
+  failed: "bg-red-50 text-red-700 border-red-200",
+  terminated: "bg-red-50 text-red-700 border-red-200",
   closed: "bg-slate-100 text-slate-600 border-slate-200",
-  neutral: "bg-slate-100 text-slate-600 border-slate-200",
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
   const key = status.toLowerCase().replaceAll("_", " ");
-  const style =
-    STATUS_STYLES[key] ?? STATUS_STYLES[status.toLowerCase()] ?? "bg-slate-100 text-slate-600 border-slate-200";
+  const style = STATUS_STYLES[key] ?? "bg-slate-100 text-slate-600 border-slate-200";
   return (
     <span
       className={cn(
-        "inline-flex max-w-full items-center truncate rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide sm:px-2.5 sm:text-[11px]",
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide sm:text-[11px]",
         style,
         className,
       )}
@@ -223,35 +200,35 @@ export function StatusBadge({ status, className }: { status: string; className?:
 export function DataTable<T extends { id: string }>({
   columns,
   rows,
-  emptyTitle = "No data",
+  emptyTitle = "No records",
   emptyDescription,
 }: {
-  columns: { key: string; header: string; render?: (row: T) => ReactNode; className?: string }[];
+  columns: { key: string; header: string; render: (row: T) => ReactNode }[];
   rows: T[];
   emptyTitle?: string;
   emptyDescription?: string;
 }) {
-  if (rows.length === 0) {
+  if (!rows.length) {
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
   }
   return (
-    <div className="table-scroll overflow-x-auto rounded-xl border border-slate-100">
-      <table className="w-full min-w-[560px] text-left text-sm">
-        <thead className="border-b bg-slate-50/80 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          <tr>
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[480px] text-left text-sm">
+        <thead>
+          <tr className="border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-500">
             {columns.map((c) => (
-              <th key={c.key} className={cn("px-2.5 py-2 sm:px-3 sm:py-2.5", c.className)}>
+              <th key={c.key} className="px-2 py-2 sm:px-3">
                 {c.header}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody>
           {rows.map((row) => (
-            <tr key={row.id} className="bg-white hover:bg-slate-50/60">
+            <tr key={row.id} className="border-b border-slate-50 last:border-0">
               {columns.map((c) => (
-                <td key={c.key} className={cn("px-2.5 py-2 text-slate-800 sm:px-3 sm:py-2.5", c.className)}>
-                  {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? "—")}
+                <td key={c.key} className="px-2 py-2.5 align-top sm:px-3">
+                  {c.render(row)}
                 </td>
               ))}
             </tr>
@@ -266,19 +243,30 @@ export function EmptyState({
   title,
   description,
   action,
+  icon: Icon = Inbox,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  icon?: ComponentType<{ className?: string }>;
 }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center sm:rounded-2xl sm:px-6 sm:py-12">
       <div className="mb-2 grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-slate-400 sm:mb-3 sm:h-12 sm:w-12">
-        <Inbox className="h-5 w-5 sm:h-6 sm:w-6" />
+        <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
       </div>
       <p className="text-sm font-bold text-slate-800">{title}</p>
       {description ? <p className="mt-1 max-w-sm text-xs text-slate-500">{description}</p> : null}
       {action ? <div className="mt-3 sm:mt-4">{action}</div> : null}
+    </div>
+  );
+}
+
+export function PageLoading({ label = "Loading…" }: { label?: string }) {
+  return (
+    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <p className="text-sm text-slate-500">{label}</p>
     </div>
   );
 }
