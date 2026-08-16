@@ -1,4 +1,12 @@
-import { Bell, CheckCheck, Info, AlertTriangle, CircleCheck, CircleX, ExternalLink } from "lucide-react";
+import {
+  Bell,
+  CheckCheck,
+  Info,
+  AlertTriangle,
+  CircleCheck,
+  CircleX,
+  ExternalLink,
+} from "lucide-react";
 import { EmptyState, PageHeader, SectionCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -40,9 +48,13 @@ export function NotificationsPage({ scope }: { scope: string }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
 
+  const notifFilter = user?.userId
+    ? "recipient_user_id=eq." + user.userId
+    : undefined;
+
   useRealtimeInvalidate(
-    `notifs-${user?.userId ?? "anon"}`,
-    [{ table: "notifications", filter: user?.userId ? `recipient_user_id=eq.${user.userId}` : undefined }],
+    "notifs-" + (user?.userId ?? "anon"),
+    [{ table: "notifications", filter: notifFilter }],
     [["rows", "notifications"], ["count", "notifications"], ["student-dashboard-notifs"]],
     Boolean(user?.userId),
   );
@@ -54,7 +66,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
     order: { column: "created_at", ascending: false },
     limit: 150,
     enabled: Boolean(user?.userId),
-  );
+  });
 
   const items = data ?? [];
   const unreadItems = items.filter((i) => !i.read_at);
@@ -110,24 +122,31 @@ export function NotificationsPage({ scope }: { scope: string }) {
                 if (href) window.location.href = href;
               }}
             >
-              <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", tones[t] ?? tones.info)}>
+              <span
+                className={cn(
+                  "grid h-9 w-9 shrink-0 place-items-center rounded-lg",
+                  tones[t] ?? tones.info,
+                )}
+              >
                 <Icon className="h-4 w-4" aria-hidden />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                  <p className={cn("text-sm", unreadItem ? "font-semibold" : "font-medium")}>{n.title}</p>
+                  <p className={cn("text-sm", unreadItem ? "font-semibold" : "font-medium")}>
+                    {n.title}
+                  </p>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {new Date(n.created_at).toLocaleString()}
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{n.message}</p>
-                {href && (
+                {href ? (
                   <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-primary">
                     Open <ExternalLink className="h-3 w-3" />
                   </p>
-                )}
+                ) : null}
               </div>
-              {unreadItem && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
+              {unreadItem ? <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" /> : null}
             </li>
           );
         })}
@@ -158,7 +177,6 @@ export function NotificationsPage({ scope }: { scope: string }) {
           <p className="text-sm text-slate-500">Loading notifications…</p>
         ) : unreadItems.length === 0 ? (
           <EmptyState
-            icon={Bell}
             title="No unread notifications"
             description="You are all caught up. New alerts appear here in realtime."
           />
