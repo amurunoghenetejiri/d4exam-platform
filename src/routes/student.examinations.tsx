@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Clock } from "lucide-react";
+import { Clock, CalendarDays } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import {
@@ -78,14 +78,14 @@ function StartExamButton({ examId }: { examId: string }) {
     <Button
       type="button"
       size="sm"
-      className="h-8 bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90 sm:text-sm"
+      className="h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
         void navigate({ to: "/student/exam/$id", params: { id: examId } });
       }}
     >
-      Start
+      Start exam
     </Button>
   );
 }
@@ -107,7 +107,7 @@ function StartOrCountdownButton({
 
   if (remainingMs == null) {
     return (
-      <Button size="sm" variant="outline" className="h-8 font-semibold" disabled>
+      <Button size="sm" variant="outline" className="h-9 w-full font-semibold sm:h-8 sm:w-auto" disabled>
         Schedule TBC
       </Button>
     );
@@ -119,12 +119,12 @@ function StartOrCountdownButton({
       variant="outline"
       disabled
       className={cn(
-        "h-8 min-w-[9rem] font-mono text-[11px] font-bold tabular-nums sm:min-w-[9.5rem] sm:text-xs",
+        "h-9 w-full font-mono text-[11px] font-bold tabular-nums sm:h-8 sm:w-auto sm:min-w-[9.5rem] sm:text-xs",
         remainingMs < 5 * 60_000 && "border-amber-300 text-amber-800",
         remainingMs < 60_000 && "border-red-300 text-red-700",
       )}
     >
-      <Clock className="mr-1 h-3 w-3 shrink-0 sm:mr-1.5 sm:h-3.5 sm:w-3.5" />
+      <Clock className="mr-1.5 h-3.5 w-3.5 shrink-0" />
       Starts in {formatCountdown(remainingMs)}
     </Button>
   );
@@ -245,7 +245,6 @@ function Page() {
       const hasResult = Boolean(resultIdByExam[e.id]);
       const attemptDone =
         attempt && DONE_ATTEMPT_STATUSES.includes((attempt.status || "").toLowerCase());
-      // Submitted attempt OR saved result → never show under Available / Upcoming
       const studentFinished = Boolean(attemptDone || hasResult);
 
       if (studentFinished || ["completed", "closed"].includes(String(e.status).toLowerCase())) {
@@ -301,8 +300,10 @@ function Page() {
         />
       ) : (
         <div className="space-y-4 sm:space-y-6">
-          {live.length > 0 && (
-            <SectionCard title="Available now">
+          <SectionCard title="Available now">
+            {live.length === 0 ? (
+              <p className="text-sm text-slate-500">No exams available to start right now.</p>
+            ) : (
               <ExamList
                 items={live}
                 canStart
@@ -311,13 +312,8 @@ function Page() {
                 sessionName={student.sessionName}
                 semesterName={student.semesterName}
               />
-            </SectionCard>
-          )}
-          {live.length === 0 && (
-            <SectionCard title="Available now">
-              <p className="text-sm text-slate-500">No exams available to start right now.</p>
-            </SectionCard>
-          )}
+            )}
+          </SectionCard>
           <SectionCard title="Upcoming">
             {upcoming.length === 0 ? (
               <p className="text-sm text-slate-500">No upcoming examinations.</p>
@@ -373,7 +369,7 @@ function ExamList({
 }) {
   const navigate = useNavigate();
   return (
-    <ul className="space-y-2 sm:space-y-3">
+    <ul className="space-y-3">
       {items.map((e) => {
         const attempt = attemptByExam.get(e.id);
         const resultId = resultIdByExam[e.id];
@@ -389,29 +385,55 @@ function ExamList({
             ? "missed"
             : String(e.status).replaceAll("_", " ");
 
+        const windowText =
+          e.scheduled_start || e.scheduled_end
+            ? formatExamWindow(e.scheduled_start, e.scheduled_end)
+            : "Schedule TBC";
+        const term =
+          [sessionName, semesterName].filter(Boolean).join(" · ") || null;
+
         return (
           <li
             key={e.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 p-2.5 sm:gap-3 sm:p-3"
+            className="rounded-2xl border border-slate-100 bg-white p-3.5 shadow-sm sm:p-4"
           >
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
-              <p className="text-[11px] text-slate-500 sm:text-xs">
-                {e.courses?.code ?? "—"} · {e.courses?.name ?? ""} · {e.duration_minutes} min
-              </p>
-              <p className="text-[11px] text-slate-400 sm:text-xs">
-                {[sessionName, semesterName].filter(Boolean).join(" · ")}
-                {sessionName || semesterName ? " · " : ""}
-                {e.scheduled_start || e.scheduled_end
-                  ? formatExamWindow(e.scheduled_start, e.scheduled_end)
-                  : "Schedule TBC"}
-                {attempt?.submitted_at
-                  ? ` · Submitted ${new Date(attempt.submitted_at).toLocaleString()}`
-                  : ""}
-              </p>
+            {/* Title row */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-base font-bold leading-snug text-slate-900">{e.title}</p>
+                <p className="mt-1 text-xs font-medium text-slate-600 sm:text-sm">
+                  <span className="font-semibold text-primary">{e.courses?.code ?? "—"}</span>
+                  {e.courses?.name ? ` · ${e.courses.name}` : ""}
+                </p>
+              </div>
+              <StatusBadge status={badge} className="shrink-0" />
             </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <StatusBadge status={badge} />
+
+            {/* Meta chips */}
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              <span className="inline-flex items-center rounded-md bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-100">
+                {e.duration_minutes} min
+              </span>
+              {term ? (
+                <span className="inline-flex items-center rounded-md bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-slate-100">
+                  {term}
+                </span>
+              ) : null}
+            </div>
+
+            {/* Schedule */}
+            <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-slate-500 sm:text-xs">
+              <CalendarDays className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <span>{windowText}</span>
+            </p>
+            {attempt?.submitted_at ? (
+              <p className="mt-1 text-[11px] font-medium text-emerald-700 sm:text-xs">
+                Submitted {new Date(attempt.submitted_at).toLocaleString()}
+              </p>
+            ) : null}
+
+            {/* Actions — full width on mobile, right-aligned on desktop */}
+            <div className="mt-3 flex flex-col gap-2 border-t border-slate-50 pt-3 sm:flex-row sm:items-center sm:justify-end">
               {canStart && !studentFinished && (
                 <StartOrCountdownButton
                   examId={e.id}
@@ -430,17 +452,16 @@ function ExamList({
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-8 font-semibold text-xs sm:text-sm"
+                  className="h-9 w-full font-semibold sm:h-8 sm:w-auto"
                   type="button"
                   onClick={() => {
-                    // Prefer result row id so the exact exam result page loads
                     void navigate({
                       to: "/student/results/$id",
                       params: { id: resultId || e.id },
                     });
                   }}
                 >
-                  View Result
+                  View result
                 </Button>
               )}
             </div>
