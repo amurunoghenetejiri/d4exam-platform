@@ -162,21 +162,36 @@ html {
   text-size-adjust: 100%;
 }
 
-/* Solid cards over watermark */
+/* Solid frosted cards over watermark — content stays readable */
 .surface-panel {
-  background-color: rgb(255 255 255 / 0.97);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgb(226 232 240);
+  background-color: rgb(255 255 255 / 0.92);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid rgb(226 232 240 / 0.95);
   border-radius: 1rem;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.06), 0 8px 24px rgb(15 23 42 / 0.04);
 }
 
-.bg-white\/90 {
-  background-color: rgb(255 255 255 / 0.97) !important;
-  backdrop-filter: blur(8px);
+/* Common translucent utilities → solid enough cards */
+.bg-white\/90,
+.bg-white\/80,
+.bg-white\/95 {
+  background-color: rgb(255 255 255 / 0.94) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 [data-sonner-toast] {
   cursor: pointer;
+}
+
+/* Compact action buttons for dense mobile toolbars */
+.btn-compact {
+  height: 2rem !important;
+  min-height: 2rem !important;
+  padding-left: 0.625rem !important;
+  padding-right: 0.625rem !important;
+  font-size: 0.75rem !important;
+  line-height: 1rem !important;
+  border-radius: 0.5rem !important;
 }
