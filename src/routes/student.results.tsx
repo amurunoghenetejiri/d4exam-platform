@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { SchoolResultHeader } from "@/components/brand/SchoolResultHeader";
 import { useStudentContext } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
+import { useRealtimeInvalidate } from "@/lib/realtime";
 
 export const Route = createFileRoute("/student/results")({
   head: () => ({ meta: [{ title: "My Results — D4EXAM" }] }),
@@ -45,6 +46,15 @@ function Page() {
     },
   });
 
+  useRealtimeInvalidate(
+    `student-results-${student?.studentId ?? "x"}`,
+    student?.studentId
+      ? [{ table: "results", filter: `student_id=eq.${student.studentId}` }]
+      : [],
+    [["student-results", student?.studentId]],
+    Boolean(student?.studentId),
+  );
+
   if (isLoading || resultsQ.isLoading) {
     return (
       <div className="flex min-h-[30vh] items-center justify-center gap-2 text-sm text-slate-500">
@@ -64,8 +74,18 @@ function Page() {
       ) : (
         <ul className="space-y-3">
           {rows.map((r) => {
-            const held = r.status === "pending" || !r.released_at;
-            const published = r.status === "published" || Boolean(r.released_at);
+            const st = (r.status || "").toLowerCase();
+            const published = st === "published" || Boolean(r.released_at);
+            const flagged = (r.security_review_status || "").toLowerCase() === "flagged";
+            const statusLabel = published
+              ? "Released"
+              : flagged
+                ? "Pending officer review"
+                : st === "pending"
+                  ? "Result held"
+                  : st === "processing"
+                    ? "Processing"
+                    : String(r.status || "Pending");
             return (
               <li key={r.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -74,27 +94,25 @@ function Page() {
                     <p className="text-xs text-slate-500">
                       {r.examinations?.courses?.code} — {r.examinations?.courses?.name}
                     </p>
-                    {held ? (
-                      <p className="mt-1 text-xs font-semibold text-amber-700">
-                        Result is being held by the examination officer. You will see your score when it is released.
-                      </p>
-                    ) : (
+                    {published ? (
                       <p className="mt-1 text-sm font-semibold text-slate-800">
                         {r.percentage != null ? `${Math.round(Number(r.percentage))}%` : "—"}
                         {r.grade ? ` · Grade ${r.grade}` : ""}
                         {r.pass_fail ? ` · ${r.pass_fail}` : ""}
                       </p>
+                    ) : (
+                      <p className="mt-1 text-xs font-semibold text-amber-700">
+                        Result is held pending officer release. Open status for details — scores stay hidden until released.
+                      </p>
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge status={held ? "Held" : published ? "Released" : String(r.status)} />
-                    {published && (
-                      <Button asChild size="sm" className="h-8 px-2.5 text-xs font-semibold">
-                        <Link to="/student/results/$id" params={{ id: r.id }}>
-                          View result <ChevronRight className="ml-1 h-3.5 w-3.5" />
-                        </Link>
-                      </Button>
-                    )}
+                    <StatusBadge status={statusLabel} />
+                    <Button asChild size="sm" className="h-8 px-2.5 text-xs font-semibold" variant={published ? "default" : "outline"}>
+                      <Link to="/student/results/$id" params={{ id: r.id }}>
+                        {published ? "View result" : "View status"} <ChevronRight className="ml-1 h-3.5 w-3.5" />
+                      </Link>
+                    </Button>
                   </div>
                 </div>
               </li>
