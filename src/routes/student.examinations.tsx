@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Clock } from "lucide-react";
@@ -71,20 +71,20 @@ function useCountdown(targetIso: string | null | undefined) {
   return { remainingMs, ready: remainingMs <= 0 };
 }
 
-function OpenExamButton({ examId }: { examId: string }) {
+function StartExamButton({ examId }: { examId: string }) {
   const navigate = useNavigate();
   return (
     <Button
       type="button"
       size="sm"
-      className="font-semibold text-base"
+      className="h-8 bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90 sm:text-sm"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
         void navigate({ to: "/student/exam/$id", params: { id: examId } });
       }}
     >
-      Open exam
+      Start
     </Button>
   );
 }
@@ -101,12 +101,12 @@ function StartOrCountdownButton({
   const { remainingMs, ready } = useCountdown(scheduledStart);
 
   if (canStartNow || ready) {
-    return <OpenExamButton examId={examId} />;
+    return <StartExamButton examId={examId} />;
   }
 
   if (remainingMs == null) {
     return (
-      <Button size="sm" variant="outline" className="font-semibold" disabled>
+      <Button size="sm" variant="outline" className="h-8 font-semibold" disabled>
         Schedule TBC
       </Button>
     );
@@ -118,12 +118,12 @@ function StartOrCountdownButton({
       variant="outline"
       disabled
       className={cn(
-        "min-w-[9.5rem] font-mono text-xs font-bold tabular-nums",
+        "h-8 min-w-[9rem] font-mono text-[11px] font-bold tabular-nums sm:min-w-[9.5rem] sm:text-xs",
         remainingMs < 5 * 60_000 && "border-amber-300 text-amber-800",
         remainingMs < 60_000 && "border-red-300 text-red-700",
       )}
     >
-      <Clock className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+      <Clock className="mr-1 h-3 w-3 shrink-0 sm:mr-1.5 sm:h-3.5 sm:w-3.5" />
       Starts in {formatCountdown(remainingMs)}
     </Button>
   );
@@ -270,7 +270,7 @@ function Page() {
           description="When your lecturers submit exams and the officer approves them, they will appear here."
         />
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           {live.length > 0 && (
             <SectionCard title="Available now">
               <ExamList
@@ -338,7 +338,7 @@ function ExamList({
 }) {
   const navigate = useNavigate();
   return (
-    <ul className="space-y-3">
+    <ul className="space-y-2 sm:space-y-3">
       {items.map((e) => {
         const attempt = attemptByExam.get(e.id);
         const studentFinished =
@@ -356,14 +356,14 @@ function ExamList({
         return (
           <li
             key={e.id}
-            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 p-2.5 sm:gap-3 sm:p-3"
           >
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
-              <p className="text-xs text-slate-500">
+              <p className="text-[11px] text-slate-500 sm:text-xs">
                 {e.courses?.code ?? "—"} · {e.courses?.name ?? ""} · {e.duration_minutes} min
               </p>
-              <p className="text-xs text-slate-400">
+              <p className="text-[11px] text-slate-400 sm:text-xs">
                 {[sessionName, semesterName].filter(Boolean).join(" · ")}
                 {sessionName || semesterName ? " · " : ""}
                 {e.scheduled_start || e.scheduled_end
@@ -374,7 +374,7 @@ function ExamList({
                   : ""}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <StatusBadge status={badge} />
               {canStart && !studentFinished && (
                 <StartOrCountdownButton
@@ -394,7 +394,7 @@ function ExamList({
                 <Button
                   size="sm"
                   variant="outline"
-                  className="font-semibold text-base"
+                  className="h-8 font-semibold text-xs sm:text-sm"
                   type="button"
                   onClick={() => {
                     void navigate({
