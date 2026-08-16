@@ -26,9 +26,8 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline active:scale-100",
       },
       size: {
-        default: "h-9 px-4 py-2",
-        // text-base (16px) prevents iOS Safari auto-zoom on focus/tap
-        sm: "h-9 min-h-9 rounded-md px-3 text-base leading-none",
+        default: "h-9 min-h-9 px-3.5 py-2 text-sm",
+        sm: "h-8 min-h-8 rounded-md px-2.5 text-xs leading-none sm:text-sm",
         lg: "h-10 rounded-md px-8",
         icon: "h-9 w-9",
       },
