@@ -2,16 +2,24 @@ import { QueryClient } from "@tanstack/react-query";
 import { createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 
+function DefaultPending() {
+  return (
+    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <p className="text-sm text-slate-500">Loading page…</p>
+    </div>
+  );
+}
+
 export const getRouter = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
-        // Instant navigation from cache; network only when data is older than 5 min
         staleTime: 5 * 60_000,
         gcTime: 30 * 60_000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchOnMount: true, // refetch only if stale (combined with long staleTime)
+        refetchOnMount: true,
         retry: 1,
         retryDelay: 400,
         networkMode: "online",
@@ -29,6 +37,10 @@ export const getRouter = () => {
     scrollRestoration: true,
     defaultPreloadStaleTime: 5 * 60_000,
     defaultPreload: "intent",
+    // Show feedback as soon as a navigation starts so the UI never looks "stuck"
+    defaultPendingMs: 0,
+    defaultPendingMinMs: 120,
+    defaultPendingComponent: DefaultPending,
   });
 
   return router;
