@@ -1,1 +1,1 @@
-PLACEHOLDER_WILL_REPLACE
+export { CbtExamPage as CbtExamSession, CbtExamPage } from "./CbtExamSession.impl";
