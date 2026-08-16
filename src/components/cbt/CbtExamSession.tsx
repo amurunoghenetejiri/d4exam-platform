@@ -3,12 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Flag, ChevronLeft, ChevronRight, Loader2, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Logo } from "@/components/brand/Logo";
+import { SchoolLogo } from "@/components/brand/SchoolLogo";
+import { useSchoolIdentity } from "@/lib/school-identity";
 import { ExamSecurityGate } from "@/components/cbt/ExamSecurityGate";
 import { SubmitConfirmDialog, ResumeBanner } from "@/components/cbt/CbtExamExtras";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { useStudentContext, canStartExam, examAvailability, formatExamWindow } from "@/lib/student";
+import { useStudentContext, examAvailability, formatExamWindow } from "@/lib/student";
 import { remainingSecondsFromStart, restoreAnswers } from "@/lib/cbt-resume";
 import { fromExamSettingsRow, resolveScreenShareMode, type ExamSettingsRow } from "@/lib/exam-security";
 import { scoreObjectiveAnswers, logSecurityEvent } from "@/lib/cbt-security";
@@ -51,6 +52,7 @@ function resolveCorrectOptionText(correctAnswer: string | null, originalOptions:
 export function CbtExamPage() {
   const { id } = useParams({ from: "/student/exam/$id" });
   const { data: student } = useStudentContext();
+  const { data: schoolBrand } = useSchoolIdentity(student?.schoolId);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const camStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -131,7 +133,6 @@ export function CbtExamPage() {
   const shareMode = resolveScreenShareMode(security);
   const screenRequired = shareMode === "required";
 
-  // Detect in-progress attempt for Continue Exam
   useEffect(() => {
     if (!student?.studentId || !id) return;
     void (async () => {
@@ -206,7 +207,6 @@ export function CbtExamPage() {
     });
   }, [examQ.data, student, questions, camReady, screenReady, faceStatus]);
 
-  // Persist answers while in progress so resume works
   useEffect(() => {
     if (!started || !attemptIdRef.current) return;
     const payload = answers;
@@ -390,18 +390,63 @@ export function CbtExamPage() {
     const status = auto && (security.thresholdAction === "terminate" || security.faceViolationAction === "terminate") ? "terminated" : "submitted";
     try {
       const scored = scoreObjectiveAnswers(
-        questions.map((q) => ({ id: q.id, marks: q.marks, correctOptionText: q.correctOptionText, chosenIndex: answers[q.id] ?? null, options: q.options })),
+        questions.map((q) => ({
+          id: q.id,
+          marks: q.marks,
+          correct_answer: q.correct_answer,
+          correctOptionText: q.correctOptionText,
+          options: q.options,
+        })),
+        answers,
       );
       if (attemptIdRef.current) {
         await supabase.from("exam_attempts").update({
-          status, submitted_at: new Date().toISOString(), score: scored.score, max_score: scored.maxScore, answers,
+          status,
+          submitted_at: new Date().toISOString(),
+          score: scored.totalScore,
+          max_score: scored.maxMarks,
+          answers,
         } as never).eq("id", attemptIdRef.current);
+      } else {
+        const ensured = await ensureAttemptRow();
+        if (ensured?.id) {
+          attemptIdRef.current = ensured.id;
+          await supabase.from("exam_attempts").update({
+            status,
+            submitted_at: new Date().toISOString(),
+            score: scored.totalScore,
+            max_score: scored.maxMarks,
+            answers,
+          } as never).eq("id", ensured.id);
+        }
       }
-      await supabase.from("exam_results").upsert({
-        exam_id: id, student_id: student?.studentId, school_id: examQ.data?.school_id,
-        score: scored.score, max_score: scored.maxScore, status: "pending",
-        security_review_status: status === "terminated" || faceWarnCountRef.current >= (security.maxFaceWarnings || 5) ? "flagged" : "pending",
-      } as never, { onConflict: "exam_id,student_id" });
+      const secStatus =
+        status === "terminated" || faceWarnCountRef.current >= (security.maxFaceWarnings || 5)
+          ? "flagged"
+          : "pending";
+      const { error: resultErr } = await supabase.from("results").upsert(
+        {
+          exam_id: id,
+          student_id: student?.studentId,
+          school_id: examQ.data?.school_id ?? student?.schoolId,
+          attempt_id: attemptIdRef.current,
+          total_score: scored.totalScore,
+          max_score: scored.maxMarks,
+          percentage: scored.percentage,
+          grade: scored.grade,
+          pass_fail: scored.passFail,
+          correct_count: scored.correct,
+          wrong_count: scored.wrong,
+          unanswered_count: scored.unanswered,
+          status: "pending",
+          security_review_status: secStatus,
+        } as never,
+        { onConflict: "exam_id,student_id" },
+      );
+      if (resultErr) {
+        console.error("results upsert failed", resultErr);
+        toast.error("Could not save result: " + resultErr.message);
+      }
     } catch (e) { console.warn("finishAttempt", e); }
     camStreamRef.current?.getTracks().forEach((t) => t.stop());
     screenStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -525,7 +570,8 @@ export function CbtExamPage() {
     return (
       <div className="grid min-h-dvh place-items-center bg-slate-50 p-4 sm:p-6">
         <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-          <Logo size="md" className="mx-auto justify-center" />
+          <SchoolLogo logoUrl={schoolBrand?.logoUrl} schoolName={schoolBrand?.name ?? student?.schoolName} size="lg" className="mx-auto" />
+          <p className="mt-2 text-sm font-extrabold text-slate-900">{schoolBrand?.name ?? student?.schoolName ?? "School"}</p>
           <h1 className="mt-4 text-2xl font-extrabold text-slate-900">Examination completed</h1>
           <p className="mt-2 text-sm text-slate-600">{doneTerminated ? "Your attempt was closed by the security system." : "Your answers were submitted successfully. You cannot rewrite this examination."}</p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
@@ -570,7 +616,12 @@ export function CbtExamPage() {
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-[#0b1b3a] text-white">
         <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-3 px-3 sm:h-[4.5rem] sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <Logo size="md" wordmark={false} />
+            <SchoolLogo
+              logoUrl={schoolBrand?.logoUrl}
+              schoolName={schoolBrand?.name ?? student?.schoolName}
+              size="md"
+              className="bg-transparent"
+            />
             <p className="hidden truncate text-sm font-bold text-primary sm:block sm:text-base">{exam.courses?.code ?? "EXAM"} — {exam.title}</p>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
