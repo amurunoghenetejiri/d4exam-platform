@@ -6,20 +6,58 @@ import { createFaceEngine, type FaceEngine } from "@/lib/face-detector";
 type FaceState = "ok" | "none" | "multi" | "unknown" | "unavailable";
 
 export function ExamCameraPip({
-  stream,
-  faceDetection,
-  maxFaceWarnings,
+  enabled = true,
+  faceDetection = false,
+  maxFaceWarnings = 3,
+  stream: externalStream,
 }: {
-  stream: MediaStream | null;
-  faceDetection: boolean;
-  maxFaceWarnings: number;
+  enabled?: boolean;
+  faceDetection?: boolean;
+  maxFaceWarnings?: number;
+  stream?: MediaStream | null;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const faceEngineRef = useRef<FaceEngine | null>(null);
   const faceWarnRef = useRef(0);
+  const ownStreamRef = useRef<MediaStream | null>(null);
   const dragState = useRef<{ ox: number; oy: number; px: number; py: number } | null>(null);
   const [pip, setPip] = useState({ x: 16, y: 16 });
   const [faceStatus, setFaceStatus] = useState<FaceState>("unknown");
+  const [stream, setStream] = useState<MediaStream | null>(externalStream ?? null);
+
+  // Acquire own camera if no external stream and enabled
+  useEffect(() => {
+    if (externalStream) {
+      setStream(externalStream);
+      return;
+    }
+    if (!enabled) {
+      setStream(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        if (cancelled) {
+          s.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        ownStreamRef.current = s;
+        setStream(s);
+      } catch {
+        setFaceStatus("unavailable");
+        setStream(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (ownStreamRef.current) {
+        ownStreamRef.current.getTracks().forEach((t) => t.stop());
+        ownStreamRef.current = null;
+      }
+    };
+  }, [enabled, externalStream]);
 
   const setVideoNode = useCallback(
     (node: HTMLVideoElement | null) => {
@@ -84,7 +122,7 @@ export function ExamCameraPip({
     };
   }, [stream, faceDetection, maxFaceWarnings]);
 
-  if (!stream) return null;
+  if (!enabled || !stream) return null;
 
   const faceLabel =
     faceStatus === "multi"
