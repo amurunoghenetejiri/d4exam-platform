@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode, MouseEvent } from "react";
+import type { ReactNode, MouseEvent } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { AlertCircle, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -147,38 +147,20 @@ const STATUS_STYLES: Record<string, string> = {
   published: "bg-emerald-50 text-emerald-700 border-emerald-200",
   released: "bg-emerald-50 text-emerald-700 border-emerald-200",
   approved: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  pass: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  ready: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  submitted: "bg-emerald-50 text-emerald-700 border-emerald-200",
   completed: "bg-slate-100 text-slate-700 border-slate-200",
   closed: "bg-slate-100 text-slate-700 border-slate-200",
-  archived: "bg-slate-100 text-slate-600 border-slate-200",
   pending: "bg-amber-50 text-amber-800 border-amber-200",
   held: "bg-amber-50 text-amber-800 border-amber-200",
   "result held": "bg-amber-50 text-amber-800 border-amber-200",
-  "under review": "bg-amber-50 text-amber-800 border-amber-200",
-  "pending review": "bg-amber-50 text-amber-800 border-amber-200",
   "pending officer review": "bg-amber-50 text-amber-800 border-amber-200",
-  "pending approval": "bg-amber-50 text-amber-800 border-amber-200",
-  "changes requested": "bg-amber-50 text-amber-800 border-amber-200",
-  invited: "bg-amber-50 text-amber-800 border-amber-200",
   processing: "bg-blue-50 text-blue-700 border-blue-200",
-  ongoing: "bg-blue-50 text-blue-700 border-blue-200",
-  live: "bg-blue-50 text-blue-700 border-blue-200",
-  scheduled: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  in_progress: "bg-blue-50 text-blue-700 border-blue-200",
-  "in progress": "bg-blue-50 text-blue-700 border-blue-200",
   draft: "bg-slate-50 text-slate-600 border-slate-200",
-  inactive: "bg-slate-50 text-slate-500 border-slate-200",
   rejected: "bg-red-50 text-red-700 border-red-200",
   terminated: "bg-red-50 text-red-700 border-red-200",
   flagged: "bg-red-50 text-red-700 border-red-200",
   suspended: "bg-red-50 text-red-700 border-red-200",
-  failed: "bg-red-50 text-red-700 border-red-200",
-  fail: "bg-red-50 text-red-700 border-red-200",
-  missed: "bg-red-50 text-red-700 border-red-200",
-  deactivated: "bg-red-50 text-red-700 border-red-200",
-  locked: "bg-red-50 text-red-700 border-red-200",
+  ongoing: "bg-blue-50 text-blue-700 border-blue-200",
+  scheduled: "bg-indigo-50 text-indigo-700 border-indigo-200",
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
@@ -243,30 +225,19 @@ export function EmptyState({
   title,
   description,
   action,
-  icon: Icon = Inbox,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
-  icon?: ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-10 text-center sm:px-6 sm:py-12">
-      <div className="mb-3 grid h-11 w-11 place-items-center rounded-full bg-slate-100 text-slate-400 sm:h-12 sm:w-12">
-        <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 px-6 py-12 text-center">
+      <div className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-400">
+        <Inbox className="h-6 w-6" />
       </div>
       <p className="text-sm font-bold text-slate-800">{title}</p>
       {description ? <p className="mt-1 max-w-sm text-xs text-slate-500">{description}</p> : null}
       {action ? <div className="mt-4">{action}</div> : null}
-    </div>
-  );
-}
-
-export function PageLoading({ label = "Loading…" }: { label?: string }) {
-  return (
-    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      <p className="text-sm text-slate-500">{label}</p>
     </div>
   );
 }
