@@ -1,37 +1,29 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-type Filter = { column: string; value: string | number | null };
+type Filter = { column: string; value: string | number | boolean | null | undefined };
 
-export interface TableQuery {
+export function useRows<T = Record<string, unknown>>(opts: {
   table: string;
   select?: string;
   filters?: Filter[];
   order?: { column: string; ascending?: boolean };
   limit?: number;
   enabled?: boolean;
-}
-
-/** Database-backed list query. Returns [] when there is nothing to show. */
-export function useRows<T = Record<string, unknown>>({
-  table,
-  select = "*",
-  filters = [],
-  order,
-  limit = 200,
-  enabled = true,
-}: TableQuery) {
+}) {
+  const { table, select = "*", filters = [], order, limit = 100, enabled = true } = opts;
   return useQuery({
     queryKey: ["rows", table, select, filters, order, limit],
     enabled,
-    staleTime: 5 * 60_000,
-    queryFn: async (): Promise<T[]> => {
-      let q = supabase.from(table as never).select(select).limit(limit);
+    staleTime: 15_000,
+    queryFn: async () => {
+      let q = supabase.from(table as never).select(select);
       for (const f of filters) {
         if (f.value === null || f.value === undefined) continue;
         q = q.eq(f.column, f.value as never);
       }
-      if (order) q = q.order(order.column, { ascending: order.ascending ?? false });
+      if (order) q = q.order(order.column, { ascending: order.ascending ?? true });
+      if (limit) q = q.limit(limit);
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as T[];
@@ -52,6 +44,26 @@ export function useCount(table: string, filters: Filter[] = [], enabled = true) 
         q = q.eq(f.column, f.value as never);
       }
       const { count, error } = await q;
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+}
+
+/** Unread notifications for the signed-in user (read_at IS NULL). */
+export function useUnreadNotificationCount(userId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["count", "notifications", "unread", userId],
+    enabled: Boolean(userId),
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      if (!userId) return 0;
+      const { count, error } = await supabase
+        .from("notifications")
+        .select("*", { count: "exact", head: true })
+        .eq("recipient_user_id", userId)
+        .is("read_at", null);
       if (error) throw error;
       return count ?? 0;
     },
