@@ -1,7 +1,6 @@
 /**
  * D4EXAM notification helpers — DB-backed inserts with light dedupe.
- * Columns used: recipient_user_id, school_id, title, message, type, read_at,
- * optional link / action_url / entity_type / entity_id when present in schema.
+ * recipient_user_id MUST be auth.users id (auth.uid()), never profiles.id.
  */
 import { supabase } from "@/integrations/supabase/client";
 
@@ -34,24 +33,7 @@ export type NotifyPayload = {
   dedupeMinutes?: number;
 };
 
-function baseRow(p: NotifyPayload) {
-  const row: Record<string, unknown> = {
-    recipient_user_id: p.recipientUserId,
-    title: p.title,
-    message: p.message,
-    type: p.type || "info",
-  };
-  if (p.schoolId) row.school_id = p.schoolId;
-  if (p.link) {
-    row.link = p.link;
-    row.action_url = p.link;
-  }
-  if (p.entityType) row.entity_type = p.entityType;
-  if (p.entityId) row.entity_id = p.entityId;
-  return row;
-}
-
-/** Insert one notification. Never throws to callers — logs and returns null on failure. */
+/** Insert one notification. Prefer SECURITY DEFINER RPC so RLS never blocks cross-role alerts. */
 export async function notifyUser(p: NotifyPayload): Promise<string | null> {
   if (!p.recipientUserId) return null;
   try {
@@ -69,7 +51,30 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
       if (existing?.id) return existing.id as string;
     }
 
-    const row = baseRow(p);
+    const { data: rpcId, error: rpcErr } = await supabase.rpc("insert_notification" as never, {
+      _recipient: p.recipientUserId,
+      _title: p.title,
+      _message: p.message,
+      _type: p.type || "info",
+      _school_id: p.schoolId ?? null,
+      _link: p.link ?? null,
+      _entity_type: p.entityType ?? null,
+      _entity_id: p.entityId ?? null,
+    } as never);
+
+    if (!rpcErr && rpcId) return String(rpcId);
+
+    const row: Record<string, unknown> = {
+      recipient_user_id: p.recipientUserId,
+      title: p.title,
+      message: p.message,
+      type: p.type || "info",
+    };
+    if (p.schoolId) row.school_id = p.schoolId;
+    if (p.link) row.link = p.link;
+    if (p.entityType) row.entity_type = p.entityType;
+    if (p.entityId) row.entity_id = p.entityId;
+
     const { data, error } = await supabase.from("notifications").insert(row as never).select("id").maybeSingle();
     if (error) {
       const minimal = {
@@ -85,7 +90,7 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
         .select("id")
         .maybeSingle();
       if (e2) {
-        console.warn("[notify] insert failed:", error.message, e2.message);
+        console.warn("[notify] insert failed:", rpcErr?.message, error.message, e2.message);
         return null;
       }
       return (d2?.id as string) ?? null;
@@ -123,8 +128,28 @@ export async function listAdminUserIds(schoolId: string): Promise<string[]> {
       .from("user_roles")
       .select("user_id")
       .eq("school_id", schoolId)
-      .in("role", ["school_admin", "admin"]);
+      .eq("role", "school_admin");
     return [...new Set((roles ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+/** Resolve students.id list → auth user ids via profiles.auth_user_id */
+export async function studentIdsToAuthUserIds(studentIds: string[]): Promise<string[]> {
+  if (!studentIds.length) return [];
+  try {
+    const { data: students } = await supabase
+      .from("students")
+      .select("id, profile_id")
+      .in("id", studentIds);
+    const profileIds = [...new Set((students ?? []).map((s) => s.profile_id).filter(Boolean))] as string[];
+    if (!profileIds.length) return [];
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, auth_user_id")
+      .in("id", profileIds);
+    return [...new Set((profiles ?? []).map((p) => p.auth_user_id).filter(Boolean))] as string[];
   } catch {
     return [];
   }
@@ -139,6 +164,9 @@ export async function notifyOfficersExamSubmitted(opts: {
   courseLabel?: string;
 }) {
   const officers = await listOfficerUserIds(opts.schoolId);
+  if (!officers.length) {
+    console.warn("[notify] no examination officers found for school", opts.schoolId);
+  }
   const label = opts.courseLabel ? `${opts.courseLabel} — ${opts.examTitle}` : opts.examTitle;
   await notifyMany(
     officers.map((id) => ({
@@ -215,6 +243,28 @@ export async function notifyStudentResultPublished(opts: {
     entityId: opts.resultId ?? null,
     dedupeMinutes: 60,
   });
+}
+
+/** Notify many students that results for an exam were released. */
+export async function notifyStudentsResultsReleased(opts: {
+  schoolId: string;
+  studentIds: string[];
+  examTitle: string;
+  resultIdsByStudent?: Record<string, string>;
+}) {
+  const authIds = await studentIdsToAuthUserIds(opts.studentIds);
+  await notifyMany(
+    authIds.map((uid) => ({
+      recipientUserId: uid,
+      schoolId: opts.schoolId,
+      title: "Result published",
+      message: `Your result for ${opts.examTitle} is now available. Open My Results to view it.`,
+      type: "result_published",
+      link: "/student/results",
+      entityType: "examination",
+      dedupeMinutes: 60,
+    })),
+  );
 }
 
 /** Notify student exam was submitted successfully. */
