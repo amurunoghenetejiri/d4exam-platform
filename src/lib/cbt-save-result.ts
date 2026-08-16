@@ -36,8 +36,21 @@ export async function saveCbtResult(input: {
   const status = input.terminated ? "terminated" : "submitted";
   const secStatus = input.terminated || input.faceWarned ? "flagged" : "pending";
 
-  const vis = String(input.resultVisibility || "after_officer_release").toLowerCase();
-  const publishNow = vis === "immediate" && !input.terminated && secStatus !== "flagged";
+  // Teacher release rule — never ignore saved setting
+  const vis = String(input.resultVisibility || "after_officer_release")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  const immediateAliases = new Set([
+    "immediate",
+    "immediately",
+    "immediately_after_submit",
+    "release_immediately",
+    "release_immediately_after_exam",
+    "after_submit",
+  ]);
+  const publishNow =
+    immediateAliases.has(vis) && !input.terminated && secStatus !== "flagged";
+  // after_officer_release | after_marking | after_exam_closes | held → pending until officer
   const resultStatus = publishNow ? "published" : "pending";
   const releasedAt = publishNow ? new Date().toISOString() : null;
 
@@ -64,6 +77,7 @@ export async function saveCbtResult(input: {
     attempt_id: input.attemptId,
     total_score: scored.totalScore,
     max_score: scored.maxMarks,
+    objective_score: scored.totalScore,
     percentage: scored.percentage,
     grade: scored.grade,
     pass_fail: scored.passFail,
@@ -99,6 +113,7 @@ export async function saveCbtResult(input: {
           attempt_id: input.attemptId,
           total_score: scored.totalScore,
           max_score: scored.maxMarks,
+          objective_score: scored.totalScore,
           percentage: scored.percentage,
           grade: scored.grade,
           pass_fail: scored.passFail,
