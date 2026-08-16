@@ -173,7 +173,7 @@ export function CbtExamPage() {
     camStreamRef.current = null;
     screenStreamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
-    faceEngineRef.current?.dispose?.();
+    faceEngineRef.current?.close();
     faceEngineRef.current = null;
     if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
   }, []);
@@ -193,6 +193,7 @@ export function CbtExamPage() {
       if (security.faceDetection) {
         try {
           faceEngineRef.current = await createFaceEngine();
+          if (!faceEngineRef.current) setFaceStatus("unavailable");
         } catch {
           setFaceStatus("unavailable");
         }
@@ -228,11 +229,13 @@ export function CbtExamPage() {
       const engine = faceEngineRef.current;
       const video = videoRef.current;
       if (!engine || !video || video.readyState < 2) {
-        setFaceStatus("unknown");
+        setFaceStatus(engine ? "unknown" : "unavailable");
       } else {
         try {
-          const n = await engine.countFaces(video);
-          if (n === 0) {
+          const n = await engine.count(video);
+          if (n == null) {
+            setFaceStatus("unknown");
+          } else if (n === 0) {
             setFaceStatus("none");
             faceWarnCountRef.current += 1;
             if (faceWarnCountRef.current >= (security.maxFaceWarnings || 5)) {
