@@ -4,7 +4,7 @@ import { requireRole } from "@/lib/guard";
 
 export const Route = createFileRoute("/officer")({
   ssr: false,
-  beforeLoad: () => requireRole("examination_officer"),
+  beforeLoad: ({ context }) => requireRole("examination_officer", context.queryClient),
   component: Layout,
 });
 
