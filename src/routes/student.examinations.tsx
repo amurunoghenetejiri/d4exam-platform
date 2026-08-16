@@ -11,6 +11,7 @@ import {
   formatExamWindow,
 } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
+import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/student/examinations")({
@@ -133,10 +134,31 @@ function Page() {
   const { data: student, isLoading: sLoading } = useStudentContext();
   const schoolId = student?.schoolId ?? null;
 
+  useRealtimeInvalidate(
+    `student-exams-sync-${student?.studentId ?? "x"}`,
+    student?.studentId
+      ? [
+          { table: "exam_attempts", filter: `student_id=eq.${student.studentId}` },
+          { table: "results", filter: `student_id=eq.${student.studentId}` },
+          { table: "examinations" },
+        ]
+      : [],
+    [
+      ["student-exams"],
+      ["student-attempts", student?.studentId],
+      ["student-result-ids", student?.studentId],
+      ["student-dashboard-exams"],
+      ["student-dashboard-attempts"],
+    ],
+    Boolean(student?.studentId),
+    1500,
+  );
+
   const examsQ = useQuery({
     queryKey: ["student-exams", schoolId, student?.courseIds?.join(",")],
     enabled: Boolean(schoolId),
-    staleTime: 60_000,
+    staleTime: 10_000,
+    refetchOnMount: "always",
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
       let q = supabase
@@ -162,7 +184,8 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["student-attempts", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchOnMount: "always",
     queryFn: async () => {
       if (!student?.studentId) return [] as AttemptRow[];
       const { data, error } = await supabase
@@ -177,14 +200,16 @@ function Page() {
   const resultsQ = useQuery({
     queryKey: ["student-result-ids", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchOnMount: "always",
     queryFn: async () => {
       if (!student?.studentId) return {} as Record<string, string>;
-      const { data, error } = await supabase
+      let q = supabase
         .from("results")
         .select("id, exam_id")
-        .eq("student_id", student.studentId)
-        .eq("school_id", student.schoolId);
+        .eq("student_id", student.studentId);
+      if (student.schoolId) q = q.eq("school_id", student.schoolId);
+      const { data, error } = await q;
       if (error) throw error;
       const map: Record<string, string> = {};
       for (const r of data ?? []) {
@@ -217,10 +242,13 @@ function Page() {
 
     for (const e of exams) {
       const attempt = attemptByExam.get(e.id);
-      const studentFinished =
+      const hasResult = Boolean(resultIdByExam[e.id]);
+      const attemptDone =
         attempt && DONE_ATTEMPT_STATUSES.includes((attempt.status || "").toLowerCase());
+      // Submitted attempt OR saved result → never show under Available / Upcoming
+      const studentFinished = Boolean(attemptDone || hasResult);
 
-      if (studentFinished || ["completed", "closed"].includes(e.status)) {
+      if (studentFinished || ["completed", "closed"].includes(String(e.status).toLowerCase())) {
         doneList.push(e);
         continue;
       }
@@ -230,13 +258,15 @@ function Page() {
         liveList.push(e);
       } else if (avail === "missed") {
         doneList.push(e);
-      } else {
+      } else if (avail === "upcoming") {
         upList.push(e);
+      } else {
+        doneList.push(e);
       }
     }
 
     return { live: liveList, upcoming: upList, done: doneList };
-  }, [exams, attemptByExam, tick]);
+  }, [exams, attemptByExam, resultIdByExam, tick]);
 
   if (sLoading) return <p className="text-sm text-slate-500">Loading…</p>;
 
@@ -281,6 +311,11 @@ function Page() {
                 sessionName={student.sessionName}
                 semesterName={student.semesterName}
               />
+            </SectionCard>
+          )}
+          {live.length === 0 && (
+            <SectionCard title="Available now">
+              <p className="text-sm text-slate-500">No exams available to start right now.</p>
             </SectionCard>
           )}
           <SectionCard title="Upcoming">
@@ -341,17 +376,18 @@ function ExamList({
     <ul className="space-y-2 sm:space-y-3">
       {items.map((e) => {
         const attempt = attemptByExam.get(e.id);
-        const studentFinished =
+        const resultId = resultIdByExam[e.id];
+        const attemptDone =
           attempt && DONE_ATTEMPT_STATUSES.includes((attempt.status || "").toLowerCase());
+        const studentFinished = Boolean(attemptDone || resultId);
         const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
         const badge = studentFinished
-          ? attempt!.status === "terminated"
+          ? attempt?.status === "terminated"
             ? "terminated"
             : "completed"
           : avail === "missed"
             ? "missed"
             : String(e.status).replaceAll("_", " ");
-        const resultId = resultIdByExam[e.id];
 
         return (
           <li
@@ -397,6 +433,7 @@ function ExamList({
                   className="h-8 font-semibold text-xs sm:text-sm"
                   type="button"
                   onClick={() => {
+                    // Prefer result row id so the exact exam result page loads
                     void navigate({
                       to: "/student/results/$id",
                       params: { id: resultId || e.id },
