@@ -80,36 +80,6 @@
   --sidebar-ring: oklch(0.45 0.18 255);
 }
 
-.dark {
-  --background: oklch(0.16 0.02 255);
-  --foreground: oklch(0.96 0.01 250);
-  --card: oklch(0.2 0.025 255);
-  --card-foreground: oklch(0.96 0.01 250);
-  --popover: oklch(0.2 0.025 255);
-  --popover-foreground: oklch(0.96 0.01 250);
-  --primary: oklch(0.62 0.18 255);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.25 0.03 255);
-  --secondary-foreground: oklch(0.95 0.01 250);
-  --muted: oklch(0.25 0.03 255);
-  --muted-foreground: oklch(0.7 0.02 250);
-  --accent: oklch(0.28 0.04 255);
-  --accent-foreground: oklch(0.95 0.01 250);
-  --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.3 0.03 255);
-  --input: oklch(0.3 0.03 255);
-  --ring: oklch(0.62 0.18 255);
-  --sidebar: oklch(0.18 0.025 255);
-  --sidebar-foreground: oklch(0.96 0.01 250);
-  --sidebar-primary: oklch(0.62 0.18 255);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.25 0.03 255);
-  --sidebar-accent-foreground: oklch(0.95 0.01 250);
-  --sidebar-border: oklch(0.3 0.03 255);
-  --sidebar-ring: oklch(0.62 0.18 255);
-}
-
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -192,6 +162,7 @@ html {
   text-size-adjust: 100%;
 }
 
+/* Solid frosted cards over watermark — content stays readable */
 .surface-panel {
   background-color: rgb(255 255 255 / 0.92);
   backdrop-filter: blur(14px) saturate(1.2);
@@ -201,6 +172,7 @@ html {
   box-shadow: 0 1px 3px rgb(15 23 42 / 0.06), 0 8px 24px rgb(15 23 42 / 0.04);
 }
 
+/* Common translucent utilities → solid enough cards */
 .bg-white\/90,
 .bg-white\/80,
 .bg-white\/95 {
@@ -213,6 +185,7 @@ html {
   cursor: pointer;
 }
 
+/* Compact action buttons for dense mobile toolbars */
 .btn-compact {
   height: 2rem !important;
   min-height: 2rem !important;
@@ -221,32 +194,4 @@ html {
   font-size: 0.75rem !important;
   line-height: 1rem !important;
   border-radius: 0.5rem !important;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
-}
-
-html.reduced-motion *,
-html.reduced-motion *::before,
-html.reduced-motion *::after {
-  animation-duration: 0.01ms !important;
-  transition-duration: 0.01ms !important;
-}
-
-.dark .surface-panel {
-  background-color: rgb(30 41 59 / 0.92);
-  border-color: rgb(51 65 85 / 0.9);
-}
-
-.dark .bg-white\/90,
-.dark .bg-white\/80,
-.dark .bg-white\/95 {
-  background-color: rgb(30 41 59 / 0.94) !important;
 }
