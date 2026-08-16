@@ -1,5 +1,4 @@
 import {
-  Bell,
   CheckCheck,
   Info,
   AlertTriangle,
