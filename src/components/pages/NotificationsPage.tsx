@@ -14,7 +14,12 @@ import { useSessionUser } from "@/lib/session";
 import { useRows } from "@/lib/queries";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 
 type Notif = {
@@ -77,7 +82,6 @@ function SwipeableNotif({
     if (!dragging.current) return;
     const x = e.clientX - startX.current;
     const y = e.clientY - startY.current;
-    // Prefer vertical scroll if gesture is mostly vertical
     if (Math.abs(y) > Math.abs(x) && Math.abs(y) > 10) {
       dragging.current = false;
       setDx(0);
@@ -91,7 +95,6 @@ function SwipeableNotif({
     dragging.current = false;
     if (Math.abs(dx) >= SWIPE_THRESHOLD) {
       setLeaving(true);
-      // Keep history in DB — mark read rather than delete
       onDismiss(n.id);
       return;
     }
@@ -107,6 +110,10 @@ function SwipeableNotif({
     onOpen(n);
   }
 
+  const leaveStyle: CSSProperties | undefined = leaving
+    ? ({ "--swipe-x": dx >= 0 ? "110%" : "-110%" } as CSSProperties)
+    : undefined;
+
   return (
     <li
       className={cn(
@@ -114,13 +121,8 @@ function SwipeableNotif({
         unreadItem && "shadow-sm",
         leaving && "notif-swipe-out",
       )}
-      style={
-        leaving
-          ? ({ "--swipe-x": dx >= 0 ? "110%" : "-110%" } as React.CSSProperties)
-          : undefined
-      }
+      style={leaveStyle}
     >
-      {/* Dismiss hint track */}
       <div
         className={cn(
           "pointer-events-none absolute inset-y-0 flex w-16 items-center justify-center text-[10px] font-bold uppercase",
@@ -274,13 +276,13 @@ export function NotificationsPage({ scope }: { scope: string }) {
                 onClick={() => openNotif(n)}
               >
                 {(() => {
-                  const t = (n.type || "info").toLowerCase();
-                  const Icon = icons[t] ?? Info;
+                  const ty = (n.type || "info").toLowerCase();
+                  const Icon = icons[ty] ?? Info;
                   return (
                     <span
                       className={cn(
                         "grid h-8 w-8 shrink-0 place-items-center rounded-lg sm:h-9 sm:w-9",
-                        tones[t] ?? tones.info,
+                        tones[ty] ?? tones.info,
                       )}
                     >
                       <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
