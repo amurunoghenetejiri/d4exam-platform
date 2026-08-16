@@ -150,7 +150,6 @@ export function AppShell({
     <div className="relative min-h-dvh bg-slate-50">
       <Watermark opacity={0.08} size="xl" className="lg:left-64" />
 
-      {/* Desktop sidebar — fixed */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-[#0b1b3a] lg:flex">
         <div className="flex h-[4.5rem] items-center border-b border-white/10 px-4">
           <PortalBrand
@@ -175,10 +174,6 @@ export function AppShell({
         </div>
       </aside>
 
-      {/*
-        Main column: sticky top bar stays locked while page content scrolls.
-        sticky is more reliable than fixed on mobile Safari.
-      */}
       <div className="relative z-10 lg:pl-64">
         <header
           className={cn(
@@ -202,25 +197,27 @@ export function AppShell({
                 </SheetTrigger>
                 <SheetContent
                   side="left"
-                  className="w-[min(100vw-2rem,18rem)] border-r-0 bg-[#0b1b3a] p-0"
+                  hideClose
+                  className="w-[min(100vw-2rem,18rem)] border-r-0 bg-[#0b1b3a] p-0 text-white"
                 >
                   <SheetTitle className="sr-only">{config.label} navigation</SheetTitle>
-                  <div className="flex h-16 items-center justify-between gap-2 border-b border-white/10 px-4">
-                    <PortalBrand
-                      isSchoolPortal={isSchoolPortal}
-                      logoUrl={logoUrl}
-                      schoolName={schoolName}
-                      homeTo={config.home}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 text-white hover:bg-white/10 hover:text-white"
+                  <div className="flex h-16 items-center justify-between gap-2 border-b border-white/10 px-3 sm:px-4">
+                    <div className="min-w-0 flex-1">
+                      <PortalBrand
+                        isSchoolPortal={isSchoolPortal}
+                        logoUrl={logoUrl}
+                        schoolName={schoolName}
+                        homeTo={config.home}
+                      />
+                    </div>
+                    <button
+                      type="button"
                       onClick={() => setOpen(false)}
                       aria-label="Close menu"
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-white/90 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
                     >
-                      <X className="h-5 w-5" />
-                    </Button>
+                      <X className="h-5 w-5" strokeWidth={2.25} />
+                    </button>
                   </div>
                   <div className="h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain">
                     <NavLinks config={config} onNavigate={() => setOpen(false)} />
