@@ -156,7 +156,6 @@ button:not(:disabled):active,
     max-width: 100%;
   }
 
-  /* Prevent dialogs/modals from exceeding viewport */
   [role="dialog"],
   [data-radix-dialog-content] {
     max-width: calc(100vw - 1.5rem) !important;
@@ -186,7 +185,6 @@ html {
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* —— Compact Sonner toasts (swipe to dismiss; no X button) —— */
 [data-sonner-toaster] {
   --width: min(22rem, calc(100vw - 1.5rem));
   width: var(--width) !important;
@@ -234,7 +232,6 @@ html {
   opacity: 0.9;
 }
 
-/* Hide close button if any theme forces it */
 [data-sonner-toast] [data-close-button] {
   display: none !important;
 }
@@ -249,7 +246,6 @@ html {
   border-radius: 0.5rem !important;
 }
 
-/* Notification swipe dismiss animation */
 @keyframes notif-out {
   to {
     opacity: 0;
@@ -260,4 +256,45 @@ html {
 .notif-swipe-out {
   animation: notif-out 0.22s ease forwards;
   pointer-events: none;
+}
+
+/* Gentle continuous bell swing while unread notifications exist */
+@keyframes bell-swing {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  12% {
+    transform: rotate(12deg);
+  }
+  24% {
+    transform: rotate(-10deg);
+  }
+  36% {
+    transform: rotate(8deg);
+  }
+  48% {
+    transform: rotate(-6deg);
+  }
+  60% {
+    transform: rotate(3deg);
+  }
+  72% {
+    transform: rotate(-2deg);
+  }
+  84% {
+    transform: rotate(1deg);
+  }
+}
+
+.bell-ring {
+  display: inline-flex;
+  transform-origin: top center;
+  animation: bell-swing 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bell-ring {
+    animation: none;
+  }
 }
