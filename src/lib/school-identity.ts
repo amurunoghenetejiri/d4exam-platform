@@ -1,7 +1,67 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useSessionUser } from "@/lib/session";
+
+type SchoolSubscription = {
+  channel: ReturnType<typeof supabase.channel>;
+  listeners: Set<() => void>;
+  cleanupTimer: ReturnType<typeof setTimeout> | null;
+};
+
+const schoolSubscriptions = new Map<string, SchoolSubscription>();
+let schoolChannelSequence = 0;
+
+/**
+ * Share one fully-configured channel per school. A new hook only adds a local
+ * listener; it never adds a postgres callback to an already-subscribed channel.
+ */
+function subscribeToSchool(schoolId: string, listener: () => void) {
+  let entry = schoolSubscriptions.get(schoolId);
+
+  if (!entry) {
+    schoolChannelSequence += 1;
+    const listeners = new Set<() => void>();
+    const channel = supabase.channel(
+      `school-identity-${schoolId}-${Date.now()}-${schoolChannelSequence}`,
+    );
+
+    entry = { channel, listeners, cleanupTimer: null };
+    schoolSubscriptions.set(schoolId, entry);
+
+    channel
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "schools", filter: `id=eq.${schoolId}` },
+        () => {
+          for (const notify of listeners) notify();
+        },
+      )
+      .subscribe();
+  }
+
+  if (entry.cleanupTimer) {
+    clearTimeout(entry.cleanupTimer);
+    entry.cleanupTimer = null;
+  }
+  entry.listeners.add(listener);
+
+  return () => {
+    const current = schoolSubscriptions.get(schoolId);
+    if (!current) return;
+    current.listeners.delete(listener);
+    if (current.listeners.size > 0) return;
+
+    // Delay disposal by one task so React Strict Mode's effect replay can
+    // reacquire the existing subscription without racing removeChannel().
+    current.cleanupTimer = setTimeout(() => {
+      const latest = schoolSubscriptions.get(schoolId);
+      if (latest !== current || latest.listeners.size > 0) return;
+      schoolSubscriptions.delete(schoolId);
+      void supabase.removeChannel(latest.channel);
+    }, 0);
+  };
+}
 
 export type SchoolIdentity = {
   id: string;
@@ -16,24 +76,24 @@ export function useSchoolIdentity(schoolId?: string | null) {
   const { data: session } = useSessionUser();
   const qc = useQueryClient();
   const id = schoolId ?? session?.schoolId ?? null;
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    const channel = supabase
-      .channel(`school-identity-${id}-${Math.random().toString(36).slice(2)}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "schools", filter: `id=eq.${id}` },
-        () => {
-          window.clearTimeout((window as unknown as { __siT?: number }).__siT);
-          (window as unknown as { __siT?: number }).__siT = window.setTimeout(() => {
-            void qc.invalidateQueries({ queryKey: ["school-identity", id] });
-          }, 1500);
-        },
-      )
-      .subscribe();
+    const unsubscribe = subscribeToSchool(id, () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        void qc.invalidateQueries({ queryKey: ["school-identity", id] });
+      }, 1500);
+    });
+
     return () => {
-      void supabase.removeChannel(channel);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      unsubscribe();
     };
   }, [id, qc]);
 
