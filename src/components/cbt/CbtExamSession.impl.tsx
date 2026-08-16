@@ -1,7 +1,7 @@
 import { Link, useParams, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Flag, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { Flag, ChevronLeft, ChevronRight, Loader2, Maximize } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { useSchoolIdentity } from "@/lib/school-identity";
@@ -51,6 +51,21 @@ function stopMediaStream(stream: MediaStream | null | undefined) {
   }
 }
 
+async function requestExamFullscreen(): Promise<boolean> {
+  if (typeof document === "undefined") return false;
+  if (document.fullscreenElement) return true;
+  const el = document.documentElement;
+  try {
+    if (el.requestFullscreen) {
+      await el.requestFullscreen();
+      return Boolean(document.fullscreenElement);
+    }
+  } catch {
+    /* browser blocked without user gesture */
+  }
+  return Boolean(document.fullscreenElement);
+}
+
 export function CbtExamPage() {
   const params = useParams({ strict: false }) as { id?: string };
   const id = params.id ?? "";
@@ -70,9 +85,15 @@ export function CbtExamPage() {
   const [resultId, setResultId] = useState<string | null>(null);
   /** Reactive media stream so PIP unmounts cleanly when cleared. */
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
+  /** When browser blocks auto-fullscreen, show click-to-restore gate. */
+  const [fsGate, setFsGate] = useState(false);
   const attemptIdRef = useRef<string | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const finishingRef = useRef(false);
+  const startedRef = useRef(false);
+  const doneRef = useRef(false);
+  startedRef.current = started;
+  doneRef.current = done;
 
   const examQ = useQuery({
     queryKey: ["cbt-exam", id],
@@ -150,22 +171,72 @@ export function CbtExamPage() {
     };
   }, [started, done]);
 
+  // Fullscreen: keep active for whole exam; re-enter when student returns
   useEffect(() => {
-    if (!started || done || !security.fullscreen) return;
-    const ensureFs = () => {
-      if (!document.fullscreenElement) {
-        void document.documentElement.requestFullscreen?.().catch(() => {});
+    if (!started || done || !security.fullscreen) {
+      setFsGate(false);
+      return;
+    }
+
+    const ensureFullscreen = async (fromUserGesture: boolean) => {
+      if (doneRef.current || !startedRef.current) return;
+      if (document.fullscreenElement) {
+        setFsGate(false);
+        return;
+      }
+      const ok = await requestExamFullscreen();
+      if (ok) {
+        setFsGate(false);
+        return;
+      }
+      // Browsers often require a click after tab switch — show restore gate
+      setFsGate(true);
+      if (!fromUserGesture) {
+        toast.message("Fullscreen is required — tap to continue in fullscreen");
       }
     };
-    ensureFs();
+
+    void ensureFullscreen(false);
+
     const onFsChange = () => {
-      if (!document.fullscreenElement && started && !done) {
-        toast.message("Fullscreen is required for this examination");
-        void document.documentElement.requestFullscreen?.().catch(() => {});
+      if (doneRef.current || !startedRef.current) return;
+      if (document.fullscreenElement) {
+        setFsGate(false);
+        return;
       }
+      // Lost fullscreen (Esc, tab switch, mobile background)
+      setFsGate(true);
+      void ensureFullscreen(false);
     };
+
+    const onReturn = () => {
+      if (doneRef.current || !startedRef.current) return;
+      if (document.visibilityState !== "visible") return;
+      void ensureFullscreen(false);
+    };
+
     document.addEventListener("fullscreenchange", onFsChange);
-    return () => document.removeEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("visibilitychange", onReturn);
+    window.addEventListener("focus", onReturn);
+    window.addEventListener("pageshow", onReturn);
+
+    // Periodic check while exam is active
+    const tick = window.setInterval(() => {
+      if (doneRef.current || !startedRef.current) return;
+      if (document.visibilityState !== "visible") return;
+      if (!document.fullscreenElement) {
+        setFsGate(true);
+        void ensureFullscreen(false);
+      }
+    }, 2500);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("visibilitychange", onReturn);
+      window.removeEventListener("focus", onReturn);
+      window.removeEventListener("pageshow", onReturn);
+      window.clearInterval(tick);
+    };
   }, [started, done, security.fullscreen]);
 
   useEffect(() => {
@@ -180,6 +251,7 @@ export function CbtExamPage() {
   useEffect(() => {
     if (done) {
       shutdownMedia();
+      setFsGate(false);
       if (document.fullscreenElement) {
         void document.exitFullscreen?.().catch(() => {});
       }
@@ -225,6 +297,7 @@ export function CbtExamPage() {
 
     // Turn off camera + microphone immediately (before save / UI change)
     shutdownMedia();
+    setFsGate(false);
     if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
 
     if (previewMode) {
@@ -338,13 +411,10 @@ export function CbtExamPage() {
         }
       }
       if (security.fullscreen) {
-        try {
-          const el = document.documentElement;
-          if (!document.fullscreenElement && el.requestFullscreen) {
-            await el.requestFullscreen();
-          }
-        } catch {
+        const ok = await requestExamFullscreen();
+        if (!ok) {
           toast.message("Please allow fullscreen to continue the exam");
+          setFsGate(true);
         }
       }
       setSeconds((examQ.data?.duration_minutes ?? 60) * 60);
@@ -352,6 +422,16 @@ export function CbtExamPage() {
       setIndex(0);
     } finally {
       setMediaBusy(false);
+    }
+  }
+
+  async function restoreFullscreenFromUser() {
+    const ok = await requestExamFullscreen();
+    if (ok) {
+      setFsGate(false);
+      toast.success("Fullscreen restored");
+    } else {
+      toast.error("Could not enter fullscreen. Allow fullscreen for this site and try again.");
     }
   }
 
@@ -514,6 +594,29 @@ export function CbtExamPage() {
           maxFaceWarnings={security.maxFaceWarnings ?? 3}
           stream={liveStream}
         />
+      )}
+
+      {/* Fullscreen restore gate — required when browser exits FS on tab leave */}
+      {fsGate && security.fullscreen && started && !done && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-white p-6 text-center shadow-2xl">
+            <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-primary/10 text-primary">
+              <Maximize className="h-6 w-6" />
+            </div>
+            <h2 className="text-lg font-extrabold text-slate-900">Fullscreen required</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              This examination must stay in fullscreen. When you left the exam, fullscreen was closed.
+              Tap below to continue in fullscreen.
+            </p>
+            <Button
+              className="mt-5 w-full font-semibold"
+              onClick={() => void restoreFullscreenFromUser()}
+            >
+              <Maximize className="mr-2 h-4 w-4" />
+              Return to fullscreen
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );
