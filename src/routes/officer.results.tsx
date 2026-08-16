@@ -96,14 +96,51 @@ function Page() {
       .eq("exam_id", examId)
       .eq("school_id", schoolId)
       .neq("security_review_status", "flagged")
-      .select("id");
+      .select("id, student_id");
     if (error) {
       toast.error(friendlyError(error));
       return;
     }
-    toast.success(`Released ${data?.length ?? 0} result(s) — students can now view their scores`);
+    const released = data ?? [];
+
+    await supabase.from("audit_logs").insert({
+      school_id: schoolId,
+      actor_user_id: user.userId,
+      actor_role: "examination_officer",
+      action: "results_released",
+      entity_type: "examination",
+      entity_id: examId,
+      description: `Released ${released.length} result(s)`,
+      metadata: { result_ids: released.map((r) => r.id), count: released.length },
+    } as never);
+
+    const studentIds = [...new Set(released.map((r) => r.student_id).filter(Boolean))];
+    if (studentIds.length) {
+      const { data: students } = await supabase
+        .from("students")
+        .select("id, profile_id")
+        .in("id", studentIds)
+        .eq("school_id", schoolId);
+      const examTitle =
+        (examsQ.data ?? []).find((e) => e.id === examId)?.title ?? "your examination";
+      const notifs = (students ?? [])
+        .filter((s) => s.profile_id)
+        .map((s) => ({
+          recipient_user_id: s.profile_id as string,
+          school_id: schoolId,
+          title: "Result released",
+          message: `Your result for ${examTitle} is now available. Open My Results to view it.`,
+          type: "success",
+        }));
+      if (notifs.length) {
+        await supabase.from("notifications").insert(notifs as never);
+      }
+    }
+
+    toast.success(`Released ${released.length} result(s) — students can view their scores now`);
     await qc.invalidateQueries({ queryKey: ["officer-results-exams"] });
     await qc.invalidateQueries({ queryKey: ["student-results"] });
+    await qc.invalidateQueries({ queryKey: ["student-dashboard-results"] });
   }
 
   async function holdAllResults(examId: string) {
