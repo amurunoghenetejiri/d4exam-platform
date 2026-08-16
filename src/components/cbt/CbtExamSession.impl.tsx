@@ -1,4 +1,4 @@
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useParams, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Flag, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
@@ -35,9 +35,25 @@ function decodeOptions(explanation: string | null): string[] {
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
+function stopMediaStream(stream: MediaStream | null | undefined) {
+  if (!stream) return;
+  try {
+    stream.getTracks().forEach((t) => {
+      try {
+        t.stop();
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
 export function CbtExamPage() {
   const params = useParams({ strict: false }) as { id?: string };
   const id = params.id ?? "";
+  const navigate = useNavigate();
   const previewMode = isPreviewPath();
   const { data: student } = useStudentContext();
   const { data: session } = useSessionUser();
@@ -50,7 +66,9 @@ export function CbtExamPage() {
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
   const [seconds, setSeconds] = useState<number | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
+  const [resultId, setResultId] = useState<string | null>(null);
   const attemptIdRef = useRef<string | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
 
   const examQ = useQuery({
     queryKey: ["cbt-exam", id],
@@ -121,7 +139,6 @@ export function CbtExamPage() {
     };
   }, [started, done]);
 
-  // Keep fullscreen locked while exam is running (student + officer preview)
   useEffect(() => {
     if (!started || done || !security.fullscreen) return;
     const ensureFs = () => {
@@ -146,6 +163,13 @@ export function CbtExamPage() {
     const t = window.setInterval(() => setSeconds((s) => (s == null ? s : Math.max(0, s - 1))), 1000);
     return () => window.clearInterval(t);
   }, [started, done, seconds === 0]);
+
+  useEffect(() => {
+    return () => {
+      stopMediaStream(mediaStreamRef.current);
+      mediaStreamRef.current = null;
+    };
+  }, []);
 
   const questionsToAnswer = useMemo(() => {
     const row = (settingsQ.data as { questions_to_answer?: number } | null)?.questions_to_answer;
@@ -173,12 +197,19 @@ export function CbtExamPage() {
   const q = questions[index];
   const answeredCount = Object.keys(answers).length;
 
+  function shutdownMedia() {
+    stopMediaStream(mediaStreamRef.current);
+    mediaStreamRef.current = null;
+  }
+
   async function finishAttempt(auto = false) {
     if (done) return;
+    shutdownMedia();
+    if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+
     if (previewMode) {
       toast.message("Preview ended — nothing was saved");
       setDone(true);
-      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
       return;
     }
     try {
@@ -204,10 +235,11 @@ export function CbtExamPage() {
           attemptIdRef.current = attemptId;
         }
 
+        const schoolId = String(examQ.data.school_id ?? student.schoolId ?? "");
         const saved = await saveCbtResult({
           examId: id,
           studentId: student.studentId,
-          schoolId: String(examQ.data.school_id ?? student.schoolId ?? ""),
+          schoolId,
           attemptId,
           questions: questions.map((qq) => ({
             id: qq.id,
@@ -222,14 +254,17 @@ export function CbtExamPage() {
 
         if (saved.error) {
           toast.error(saved.error.message);
-        } else if (saved.published) {
-          toast.success("Examination submitted — result is available now");
         } else {
-          toast.success(
-            auto
-              ? "Examination closed"
-              : "Examination submitted successfully. Result will appear when released by the officer.",
-          );
+          if (saved.resultId) setResultId(saved.resultId);
+          if (saved.published) {
+            toast.success("Examination submitted — result is available now");
+          } else {
+            toast.success(
+              auto
+                ? "Examination closed"
+                : "Examination submitted successfully. Result will appear when released by the officer.",
+            );
+          }
         }
       } else {
         toast.success(auto ? "Examination closed" : "Examination submitted successfully");
@@ -237,7 +272,6 @@ export function CbtExamPage() {
     } catch (e) {
       toast.error(friendlyError(e, "Could not save result"));
     }
-    if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
     setDoneTerminated(auto);
     setDone(true);
   }
@@ -257,7 +291,12 @@ export function CbtExamPage() {
       }
       if (security.requireCamera) {
         try {
-          await navigator.mediaDevices.getUserMedia({ video: true, audio: Boolean(security.requireMicrophone) });
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: Boolean(security.requireMicrophone),
+          });
+          stopMediaStream(mediaStreamRef.current);
+          mediaStreamRef.current = stream;
           toast.success("Camera ready");
         } catch {
           toast.error("Camera is required for this examination.");
@@ -280,6 +319,11 @@ export function CbtExamPage() {
     } finally {
       setMediaBusy(false);
     }
+  }
+
+  function goToResult() {
+    const targetId = resultId || id;
+    void navigate({ to: "/student/results/$id", params: { id: targetId } });
   }
 
   if (examQ.isLoading || questionsQ.isLoading) {
@@ -308,7 +352,11 @@ export function CbtExamPage() {
             {previewMode ? "Officer preview finished — nothing was saved." : doneTerminated ? "Your attempt was closed by the security system. You cannot rewrite this examination." : "Your answers were submitted successfully. You cannot rewrite this examination."}
           </p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
-            {!previewMode && (<Button className="font-semibold" asChild><Link to="/student/results/$id" params={{ id: exam.id }}>View Results</Link></Button>)}
+            {!previewMode && (
+              <Button className="font-semibold" onClick={goToResult}>
+                View Results
+              </Button>
+            )}
             <Button variant="outline" className="font-semibold" asChild>
               <Link to={previewMode ? "/officer/approvals" : "/student/examinations"}>{previewMode ? "Back to approvals" : "Back to examinations"}</Link>
             </Button>
@@ -423,11 +471,12 @@ export function CbtExamPage() {
           </div>
         </section>
       </div>
-      {started && security.requireCamera && (
+      {started && !done && security.requireCamera && (
         <ExamCameraPip
           enabled={started && !done}
           faceDetection={Boolean(security.faceDetection)}
           maxFaceWarnings={security.maxFaceWarnings ?? 3}
+          stream={mediaStreamRef.current}
         />
       )}
     </div>
