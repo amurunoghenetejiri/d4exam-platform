@@ -1,1 +1,415 @@
-PLACEHOLDER
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Clock } from "lucide-react";
+import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
+import { Button } from "@/components/ui/button";
+import {
+  useStudentContext,
+  STUDENT_VISIBLE_EXAM_STATUSES,
+  examAvailability,
+  formatExamWindow,
+} from "@/lib/student";
+import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
+
+export const Route = createFileRoute("/student/examinations")({
+  head: () => ({
+    meta: [
+      { title: "My Examinations — D4EXAM" },
+      {
+        name: "description",
+        content: "Only examinations approved by the Examination Officer appear here.",
+      },
+    ],
+  }),
+  component: Page,
+});
+
+type ExamRow = {
+  id: string;
+  title: string;
+  status: string;
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  duration_minutes: number;
+  course_id: string | null;
+  courses: { code: string; name: string } | null;
+};
+
+type AttemptRow = {
+  exam_id: string;
+  status: string;
+  submitted_at: string | null;
+};
+
+const DONE_ATTEMPT_STATUSES = ["submitted", "terminated", "flagged"];
+
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "00:00:00";
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (days > 0) return `${days}d ${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+  return `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+}
+
+function useCountdown(targetIso: string | null | undefined) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!targetIso) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [targetIso]);
+  if (!targetIso) return { remainingMs: null as number | null, ready: false };
+  const target = new Date(targetIso).getTime();
+  if (Number.isNaN(target)) return { remainingMs: null, ready: false };
+  const remainingMs = Math.max(0, target - now);
+  return { remainingMs, ready: remainingMs <= 0 };
+}
+
+function OpenExamButton({ examId }: { examId: string }) {
+  const navigate = useNavigate();
+  return (
+    <Button
+      type="button"
+      size="sm"
+      className="font-semibold text-base"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void navigate({ to: "/student/exam/$id", params: { id: examId } });
+      }}
+    >
+      Open exam
+    </Button>
+  );
+}
+
+function StartOrCountdownButton({
+  examId,
+  scheduledStart,
+  canStartNow,
+}: {
+  examId: string;
+  scheduledStart: string | null;
+  canStartNow: boolean;
+}) {
+  const { remainingMs, ready } = useCountdown(scheduledStart);
+
+  if (canStartNow || ready) {
+    return <OpenExamButton examId={examId} />;
+  }
+
+  if (remainingMs == null) {
+    return (
+      <Button size="sm" variant="outline" className="font-semibold" disabled>
+        Schedule TBC
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled
+      className={cn(
+        "min-w-[9.5rem] font-mono text-xs font-bold tabular-nums",
+        remainingMs < 5 * 60_000 && "border-amber-300 text-amber-800",
+        remainingMs < 60_000 && "border-red-300 text-red-700",
+      )}
+    >
+      <Clock className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+      Starts in {formatCountdown(remainingMs)}
+    </Button>
+  );
+}
+
+function Page() {
+  const { data: student, isLoading: sLoading } = useStudentContext();
+  const schoolId = student?.schoolId ?? null;
+
+  const examsQ = useQuery({
+    queryKey: ["student-exams", schoolId, student?.courseIds?.join(",")],
+    enabled: Boolean(schoolId),
+    staleTime: 60_000,
+    queryFn: async () => {
+      if (!schoolId) return [] as ExamRow[];
+      let q = supabase
+        .from("examinations")
+        .select(
+          "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
+        )
+        .eq("school_id", schoolId)
+        .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
+        .order("scheduled_start", { ascending: true, nullsFirst: false })
+        .limit(100);
+
+      if (student?.courseIds?.length) {
+        q = q.in("course_id", student.courseIds);
+      }
+
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as ExamRow[];
+    },
+  });
+
+  const attemptsQ = useQuery({
+    queryKey: ["student-attempts", student?.studentId],
+    enabled: Boolean(student?.studentId),
+    staleTime: 60_000,
+    queryFn: async () => {
+      if (!student?.studentId) return [] as AttemptRow[];
+      const { data, error } = await supabase
+        .from("exam_attempts")
+        .select("exam_id, status, submitted_at")
+        .eq("student_id", student.studentId);
+      if (error) throw error;
+      return (data ?? []) as AttemptRow[];
+    },
+  });
+
+  const resultsQ = useQuery({
+    queryKey: ["student-result-ids", student?.studentId],
+    enabled: Boolean(student?.studentId),
+    staleTime: 60_000,
+    queryFn: async () => {
+      if (!student?.studentId) return {} as Record<string, string>;
+      const { data, error } = await supabase
+        .from("results")
+        .select("id, exam_id")
+        .eq("student_id", student.studentId)
+        .eq("school_id", student.schoolId);
+      if (error) throw error;
+      const map: Record<string, string> = {};
+      for (const r of data ?? []) {
+        map[(r as { exam_id: string }).exam_id] = (r as { id: string }).id;
+      }
+      return map;
+    },
+  });
+  const resultIdByExam = resultsQ.data ?? {};
+
+  const attemptByExam = useMemo(() => {
+    const map = new Map<string, AttemptRow>();
+    for (const a of attemptsQ.data ?? []) map.set(a.exam_id, a);
+    return map;
+  }, [attemptsQ.data]);
+
+  const exams = examsQ.data ?? [];
+
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 15_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const { live, upcoming, done } = useMemo(() => {
+    void tick;
+    const liveList: ExamRow[] = [];
+    const upList: ExamRow[] = [];
+    const doneList: ExamRow[] = [];
+
+    for (const e of exams) {
+      const attempt = attemptByExam.get(e.id);
+      const studentFinished =
+        attempt && DONE_ATTEMPT_STATUSES.includes((attempt.status || "").toLowerCase());
+
+      if (studentFinished || ["completed", "closed"].includes(e.status)) {
+        doneList.push(e);
+        continue;
+      }
+
+      const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
+      if (avail === "available") {
+        liveList.push(e);
+      } else if (avail === "missed") {
+        doneList.push(e);
+      } else {
+        upList.push(e);
+      }
+    }
+
+    return { live: liveList, upcoming: upList, done: doneList };
+  }, [exams, attemptByExam, tick]);
+
+  if (sLoading) return <p className="text-sm text-slate-500">Loading…</p>;
+
+  if (!student) {
+    return (
+      <EmptyState
+        title="Student profile not found"
+        description="Contact School Admin to link your account."
+      />
+    );
+  }
+
+  const termLine = [student.sessionName, student.semesterName].filter(Boolean).join(" · ");
+
+  return (
+    <>
+      <PageHeader
+        title="My Examinations"
+        description={
+          termLine
+            ? `${termLine} · Only officer-approved exams appear here.`
+            : "You only see exams after the Examination Officer has approved them."
+        }
+      />
+
+      {examsQ.isLoading ? (
+        <p className="text-sm text-slate-500">Loading examinations…</p>
+      ) : exams.length === 0 ? (
+        <EmptyState
+          title="No examinations available"
+          description="When your lecturers submit exams and the officer approves them, they will appear here."
+        />
+      ) : (
+        <div className="space-y-6">
+          {live.length > 0 && (
+            <SectionCard title="Available now">
+              <ExamList
+                items={live}
+                canStart
+                attemptByExam={attemptByExam}
+                resultIdByExam={resultIdByExam}
+                sessionName={student.sessionName}
+                semesterName={student.semesterName}
+              />
+            </SectionCard>
+          )}
+          <SectionCard title="Upcoming">
+            {upcoming.length === 0 ? (
+              <p className="text-sm text-slate-500">No upcoming examinations.</p>
+            ) : (
+              <ExamList
+                items={upcoming}
+                attemptByExam={attemptByExam}
+                resultIdByExam={resultIdByExam}
+                sessionName={student.sessionName}
+                semesterName={student.semesterName}
+                showCountdown
+              />
+            )}
+          </SectionCard>
+          <SectionCard title="Completed / missed">
+            {done.length === 0 ? (
+              <p className="text-sm text-slate-500">No completed examinations yet.</p>
+            ) : (
+              <ExamList
+                items={done}
+                attemptByExam={attemptByExam}
+                resultIdByExam={resultIdByExam}
+                completed
+                sessionName={student.sessionName}
+                semesterName={student.semesterName}
+              />
+            )}
+          </SectionCard>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ExamList({
+  items,
+  canStart,
+  completed,
+  showCountdown,
+  attemptByExam,
+  resultIdByExam,
+  sessionName,
+  semesterName,
+}: {
+  items: ExamRow[];
+  canStart?: boolean;
+  completed?: boolean;
+  showCountdown?: boolean;
+  attemptByExam: Map<string, AttemptRow>;
+  resultIdByExam: Record<string, string>;
+  sessionName?: string | null;
+  semesterName?: string | null;
+}) {
+  const navigate = useNavigate();
+  return (
+    <ul className="space-y-3">
+      {items.map((e) => {
+        const attempt = attemptByExam.get(e.id);
+        const studentFinished =
+          attempt && DONE_ATTEMPT_STATUSES.includes((attempt.status || "").toLowerCase());
+        const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
+        const badge = studentFinished
+          ? attempt!.status === "terminated"
+            ? "terminated"
+            : "completed"
+          : avail === "missed"
+            ? "missed"
+            : String(e.status).replaceAll("_", " ");
+        const resultId = resultIdByExam[e.id];
+
+        return (
+          <li
+            key={e.id}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-3"
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-900">{e.title}</p>
+              <p className="text-xs text-slate-500">
+                {e.courses?.code ?? "—"} · {e.courses?.name ?? ""} · {e.duration_minutes} min
+              </p>
+              <p className="text-xs text-slate-400">
+                {[sessionName, semesterName].filter(Boolean).join(" · ")}
+                {sessionName || semesterName ? " · " : ""}
+                {e.scheduled_start || e.scheduled_end
+                  ? formatExamWindow(e.scheduled_start, e.scheduled_end)
+                  : "Schedule TBC"}
+                {attempt?.submitted_at
+                  ? ` · Submitted ${new Date(attempt.submitted_at).toLocaleString()}`
+                  : ""}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusBadge status={badge} />
+              {canStart && !studentFinished && (
+                <StartOrCountdownButton
+                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow
+                />
+              )}
+              {showCountdown && !studentFinished && (
+                <StartOrCountdownButton
+                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow={false}
+                />
+              )}
+              {completed && studentFinished && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="font-semibold text-base"
+                  type="button"
+                  onClick={() => {
+                    void navigate({
+                      to: "/student/results/$id",
+                      params: { id: resultId || e.id },
+                    });
+                  }}
+                >
+                  View Result
+                </Button>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
