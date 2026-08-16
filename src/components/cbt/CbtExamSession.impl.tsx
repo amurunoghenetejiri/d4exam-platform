@@ -1,5 +1,5 @@
 import { Link, useParams, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Flag, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,16 +35,17 @@ function decodeOptions(explanation: string | null): string[] {
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
+/** Stop every track on a MediaStream (camera + microphone). */
 function stopMediaStream(stream: MediaStream | null | undefined) {
   if (!stream) return;
   try {
-    stream.getTracks().forEach((t) => {
+    for (const t of stream.getTracks()) {
       try {
         t.stop();
       } catch {
         /* ignore */
       }
-    });
+    }
   } catch {
     /* ignore */
   }
@@ -67,8 +68,11 @@ export function CbtExamPage() {
   const [seconds, setSeconds] = useState<number | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [resultId, setResultId] = useState<string | null>(null);
+  /** Reactive media stream so PIP unmounts cleanly when cleared. */
+  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const attemptIdRef = useRef<string | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const finishingRef = useRef(false);
 
   const examQ = useQuery({
     queryKey: ["cbt-exam", id],
@@ -110,17 +114,24 @@ export function CbtExamPage() {
 
   const security = useMemo(() => fromExamSettingsRow(settingsQ.data, examQ.data?.description), [settingsQ.data, examQ.data?.description]);
 
+  const shutdownMedia = useCallback(() => {
+    stopMediaStream(mediaStreamRef.current);
+    mediaStreamRef.current = null;
+    setLiveStream(null);
+  }, []);
+
   useEffect(() => {
     if (previewMode || !student?.studentId || !id) return;
     void (async () => {
       const { data } = await supabase.from("exam_attempts").select("id, status")
         .eq("exam_id", id).eq("student_id", student.studentId).maybeSingle();
       if (data && ["submitted", "terminated", "flagged"].includes(String(data.status))) {
+        shutdownMedia();
         setDoneTerminated(String(data.status) === "terminated");
         setDone(true);
       }
     })();
-  }, [previewMode, student?.studentId, id]);
+  }, [previewMode, student?.studentId, id, shutdownMedia]);
 
   useEffect(() => {
     if (!started || done) return;
@@ -162,7 +173,18 @@ export function CbtExamPage() {
     if (seconds <= 0) { void finishAttempt(true); return; }
     const t = window.setInterval(() => setSeconds((s) => (s == null ? s : Math.max(0, s - 1))), 1000);
     return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, done, seconds === 0]);
+
+  // Always release camera/mic when exam is done or component unmounts
+  useEffect(() => {
+    if (done) {
+      shutdownMedia();
+      if (document.fullscreenElement) {
+        void document.exitFullscreen?.().catch(() => {});
+      }
+    }
+  }, [done, shutdownMedia]);
 
   useEffect(() => {
     return () => {
@@ -197,19 +219,18 @@ export function CbtExamPage() {
   const q = questions[index];
   const answeredCount = Object.keys(answers).length;
 
-  function shutdownMedia() {
-    stopMediaStream(mediaStreamRef.current);
-    mediaStreamRef.current = null;
-  }
-
   async function finishAttempt(auto = false) {
-    if (done) return;
+    if (done || finishingRef.current) return;
+    finishingRef.current = true;
+
+    // Turn off camera + microphone immediately (before save / UI change)
     shutdownMedia();
     if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
 
     if (previewMode) {
       toast.message("Preview ended — nothing was saved");
       setDone(true);
+      finishingRef.current = false;
       return;
     }
     try {
@@ -274,6 +295,9 @@ export function CbtExamPage() {
     }
     setDoneTerminated(auto);
     setDone(true);
+    // Belt-and-suspenders: ensure media stays off after state settles
+    shutdownMedia();
+    finishingRef.current = false;
   }
 
   async function beginWithMedia(_opts: { skipScreenShare: boolean; caps: DeviceCapabilities }) {
@@ -284,22 +308,32 @@ export function CbtExamPage() {
           .eq("exam_id", id).eq("student_id", student.studentId).maybeSingle();
         if (existing && ["submitted", "terminated", "flagged"].includes(String(existing.status))) {
           toast.error("You have already completed this examination.");
+          shutdownMedia();
           setDone(true);
           return;
         }
         if (existing?.id) attemptIdRef.current = existing.id as string;
       }
-      if (security.requireCamera) {
+      const needCam = Boolean(security.requireCamera);
+      const needMic = Boolean(security.requireMicrophone);
+      if (needCam || needMic) {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: Boolean(security.requireMicrophone),
+            video: needCam,
+            audio: needMic,
           });
           stopMediaStream(mediaStreamRef.current);
           mediaStreamRef.current = stream;
-          toast.success("Camera ready");
+          setLiveStream(stream);
+          if (needCam && needMic) toast.success("Camera and microphone ready");
+          else if (needCam) toast.success("Camera ready");
+          else toast.success("Microphone ready");
         } catch {
-          toast.error("Camera is required for this examination.");
+          toast.error(
+            needCam
+              ? "Camera is required for this examination."
+              : "Microphone is required for this examination.",
+          );
           return;
         }
       }
@@ -322,6 +356,7 @@ export function CbtExamPage() {
   }
 
   function goToResult() {
+    shutdownMedia();
     const targetId = resultId || id;
     void navigate({ to: "/student/results/$id", params: { id: targetId } });
   }
@@ -351,6 +386,7 @@ export function CbtExamPage() {
           <p className="mt-2 text-sm text-slate-600">
             {previewMode ? "Officer preview finished — nothing was saved." : doneTerminated ? "Your attempt was closed by the security system. You cannot rewrite this examination." : "Your answers were submitted successfully. You cannot rewrite this examination."}
           </p>
+          <p className="mt-2 text-xs font-semibold text-emerald-700">Camera and microphone have been switched off.</p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             {!previewMode && (
               <Button className="font-semibold" onClick={goToResult}>
@@ -476,7 +512,7 @@ export function CbtExamPage() {
           enabled={started && !done}
           faceDetection={Boolean(security.faceDetection)}
           maxFaceWarnings={security.maxFaceWarnings ?? 3}
-          stream={mediaStreamRef.current}
+          stream={liveStream}
         />
       )}
     </div>
