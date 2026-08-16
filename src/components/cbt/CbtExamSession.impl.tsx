@@ -1,6 +1,6 @@
 import { Link, useParams, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Flag, ChevronLeft, ChevronRight, Loader2, Maximize } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
@@ -35,7 +35,6 @@ function decodeOptions(explanation: string | null): string[] {
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
-/** Stop every track on a MediaStream (camera + microphone). */
 function stopMediaStream(stream: MediaStream | null | undefined) {
   if (!stream) return;
   try {
@@ -70,6 +69,7 @@ export function CbtExamPage() {
   const params = useParams({ strict: false }) as { id?: string };
   const id = params.id ?? "";
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const previewMode = isPreviewPath();
   const { data: student } = useStudentContext();
   const { data: session } = useSessionUser();
@@ -83,17 +83,17 @@ export function CbtExamPage() {
   const [seconds, setSeconds] = useState<number | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [resultId, setResultId] = useState<string | null>(null);
-  /** Reactive media stream so PIP unmounts cleanly when cleared. */
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
-  /** When browser blocks auto-fullscreen, show click-to-restore gate. */
   const [fsGate, setFsGate] = useState(false);
   const attemptIdRef = useRef<string | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const finishingRef = useRef(false);
   const startedRef = useRef(false);
   const doneRef = useRef(false);
+  const resultIdRef = useRef<string | null>(null);
   startedRef.current = started;
   doneRef.current = done;
+  resultIdRef.current = resultId;
 
   const examQ = useQuery({
     queryKey: ["cbt-exam", id],
@@ -141,6 +141,20 @@ export function CbtExamPage() {
     setLiveStream(null);
   }, []);
 
+  const invalidateStudentExamCaches = useCallback(async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["student-attempts"] }),
+      qc.invalidateQueries({ queryKey: ["student-result-ids"] }),
+      qc.invalidateQueries({ queryKey: ["student-exams"] }),
+      qc.invalidateQueries({ queryKey: ["student-results"] }),
+      qc.invalidateQueries({ queryKey: ["student-dashboard-exams"] }),
+      qc.invalidateQueries({ queryKey: ["student-dashboard-attempts"] }),
+      qc.invalidateQueries({ queryKey: ["student-dashboard-results"] }),
+      qc.invalidateQueries({ queryKey: ["student-history-results"] }),
+      qc.invalidateQueries({ queryKey: ["student-history-attempts"] }),
+    ]);
+  }, [qc]);
+
   useEffect(() => {
     if (previewMode || !student?.studentId || !id) return;
     void (async () => {
@@ -150,6 +164,14 @@ export function CbtExamPage() {
         shutdownMedia();
         setDoneTerminated(String(data.status) === "terminated");
         setDone(true);
+        // Resolve result id for View Results button
+        const { data: res } = await supabase
+          .from("results")
+          .select("id")
+          .eq("exam_id", id)
+          .eq("student_id", student.studentId)
+          .maybeSingle();
+        if (res?.id) setResultId(res.id as string);
       }
     })();
   }, [previewMode, student?.studentId, id, shutdownMedia]);
@@ -171,7 +193,6 @@ export function CbtExamPage() {
     };
   }, [started, done]);
 
-  // Fullscreen: keep active for whole exam; re-enter when student returns
   useEffect(() => {
     if (!started || done || !security.fullscreen) {
       setFsGate(false);
@@ -189,7 +210,6 @@ export function CbtExamPage() {
         setFsGate(false);
         return;
       }
-      // Browsers often require a click after tab switch — show restore gate
       setFsGate(true);
       if (!fromUserGesture) {
         toast.message("Fullscreen is required — tap to continue in fullscreen");
@@ -204,7 +224,6 @@ export function CbtExamPage() {
         setFsGate(false);
         return;
       }
-      // Lost fullscreen (Esc, tab switch, mobile background)
       setFsGate(true);
       void ensureFullscreen(false);
     };
@@ -220,7 +239,6 @@ export function CbtExamPage() {
     window.addEventListener("focus", onReturn);
     window.addEventListener("pageshow", onReturn);
 
-    // Periodic check while exam is active
     const tick = window.setInterval(() => {
       if (doneRef.current || !startedRef.current) return;
       if (document.visibilityState !== "visible") return;
@@ -247,7 +265,6 @@ export function CbtExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, done, seconds === 0]);
 
-  // Always release camera/mic when exam is done or component unmounts
   useEffect(() => {
     if (done) {
       shutdownMedia();
@@ -295,7 +312,6 @@ export function CbtExamPage() {
     if (done || finishingRef.current) return;
     finishingRef.current = true;
 
-    // Turn off camera + microphone immediately (before save / UI change)
     shutdownMedia();
     setFsGate(false);
     if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
@@ -349,7 +365,20 @@ export function CbtExamPage() {
         if (saved.error) {
           toast.error(saved.error.message);
         } else {
-          if (saved.resultId) setResultId(saved.resultId);
+          let rid = saved.resultId ?? null;
+          if (!rid) {
+            const { data: res } = await supabase
+              .from("results")
+              .select("id")
+              .eq("exam_id", id)
+              .eq("student_id", student.studentId)
+              .maybeSingle();
+            rid = (res?.id as string) ?? null;
+          }
+          if (rid) {
+            setResultId(rid);
+            resultIdRef.current = rid;
+          }
           if (saved.published) {
             toast.success("Examination submitted — result is available now");
           } else {
@@ -360,6 +389,7 @@ export function CbtExamPage() {
             );
           }
         }
+        await invalidateStudentExamCaches();
       } else {
         toast.success(auto ? "Examination closed" : "Examination submitted successfully");
       }
@@ -368,7 +398,6 @@ export function CbtExamPage() {
     }
     setDoneTerminated(auto);
     setDone(true);
-    // Belt-and-suspenders: ensure media stays off after state settles
     shutdownMedia();
     finishingRef.current = false;
   }
@@ -435,10 +464,24 @@ export function CbtExamPage() {
     }
   }
 
-  function goToResult() {
+  async function goToResult() {
     shutdownMedia();
-    const targetId = resultId || id;
-    void navigate({ to: "/student/results/$id", params: { id: targetId } });
+    let targetId = resultIdRef.current || resultId;
+    if (!targetId && student?.studentId) {
+      const { data: res } = await supabase
+        .from("results")
+        .select("id")
+        .eq("exam_id", id)
+        .eq("student_id", student.studentId)
+        .maybeSingle();
+      targetId = (res?.id as string) ?? null;
+      if (targetId) setResultId(targetId);
+    }
+    // Prefer result row id; fall back to exam id (detail page resolves by exam_id)
+    void navigate({
+      to: "/student/results/$id",
+      params: { id: targetId || id },
+    });
   }
 
   if (examQ.isLoading || questionsQ.isLoading) {
@@ -469,7 +512,7 @@ export function CbtExamPage() {
           <p className="mt-2 text-xs font-semibold text-emerald-700">Camera and microphone have been switched off.</p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             {!previewMode && (
-              <Button className="font-semibold" onClick={goToResult}>
+              <Button className="font-semibold" onClick={() => void goToResult()}>
                 View Results
               </Button>
             )}
@@ -596,7 +639,6 @@ export function CbtExamPage() {
         />
       )}
 
-      {/* Fullscreen restore gate — required when browser exits FS on tab leave */}
       {fsGate && security.fullscreen && started && !done && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-white p-6 text-center shadow-2xl">
