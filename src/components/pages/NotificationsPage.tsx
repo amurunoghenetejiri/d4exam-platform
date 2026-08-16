@@ -1,5 +1,14 @@
-import { Bell, CheckCheck, Info, AlertTriangle, CircleCheck, CircleX, ExternalLink } from "lucide-react";
-import { EmptyState, PageHeader, SectionCard } from "@/components/dashboard/kit";
+import {
+  Bell,
+  CheckCheck,
+  Info,
+  AlertTriangle,
+  CircleCheck,
+  CircleX,
+  ExternalLink,
+  Trash2,
+} from "lucide-react";
+import { EmptyState, PageHeader, SectionCard, PageLoading } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -7,7 +16,7 @@ import { useSessionUser } from "@/lib/session";
 import { useRows } from "@/lib/queries";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 
 type Notif = {
@@ -93,6 +102,20 @@ export function NotificationsPage({ scope }: { scope: string }) {
     }
   }
 
+  async function dismissOne(id: string, e?: MouseEvent) {
+    e?.stopPropagation();
+    e?.preventDefault();
+    const { error } = await supabase.from("notifications").delete().eq("id", id);
+    if (error) {
+      toast.error(error.message || "Could not dismiss");
+      return;
+    }
+    await qc.invalidateQueries({ queryKey: ["rows", "notifications"] });
+    await qc.invalidateQueries({ queryKey: ["count", "notifications"] });
+    await refetch();
+    toast.success("Notification dismissed");
+  }
+
   function renderList(list: Notif[]) {
     return (
       <ul className="divide-y divide-border">
@@ -104,18 +127,32 @@ export function NotificationsPage({ scope }: { scope: string }) {
           return (
             <li
               key={n.id}
-              className="flex cursor-pointer gap-3 py-4 first:pt-0 last:pb-0"
+              className={cn(
+                "group flex gap-3 py-4 first:pt-0 last:pb-0",
+                href || unreadItem ? "cursor-pointer" : "",
+              )}
               onClick={() => {
                 if (unreadItem) void markOne(n.id);
-                if (href) window.location.href = href;
+                if (href && href.startsWith("/")) {
+                  window.location.assign(href);
+                } else if (href) {
+                  window.location.href = href;
+                }
               }}
             >
-              <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", tones[t] ?? tones.info)}>
+              <span
+                className={cn(
+                  "grid h-9 w-9 shrink-0 place-items-center rounded-lg",
+                  tones[t] ?? tones.info,
+                )}
+              >
                 <Icon className="h-4 w-4" aria-hidden />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                  <p className={cn("text-sm", unreadItem ? "font-semibold" : "font-medium")}>{n.title}</p>
+                  <p className={cn("text-sm", unreadItem ? "font-semibold" : "font-medium")}>
+                    {n.title}
+                  </p>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {new Date(n.created_at).toLocaleString()}
                   </span>
@@ -123,11 +160,23 @@ export function NotificationsPage({ scope }: { scope: string }) {
                 <p className="mt-1 text-sm text-muted-foreground">{n.message}</p>
                 {href && (
                   <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-primary">
-                    Open <ExternalLink className="h-3 w-3" />
+                    Open related page <ExternalLink className="h-3 w-3" />
                   </p>
                 )}
               </div>
-              {unreadItem && <span className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
+              <div className="flex shrink-0 flex-col items-end gap-2">
+                {unreadItem && <span className="mt-2 h-2 w-2 rounded-full bg-primary" />}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-slate-400 opacity-70 hover:text-red-600 group-hover:opacity-100"
+                  aria-label="Dismiss notification"
+                  onClick={(ev) => void dismissOne(n.id, ev)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             </li>
           );
         })}
@@ -155,7 +204,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
 
       <SectionCard title="Unread" description={isLoading ? "Loading…" : `${unread} unread`}>
         {isLoading ? (
-          <p className="text-sm text-slate-500">Loading notifications…</p>
+          <PageLoading label="Loading notifications…" />
         ) : unreadItems.length === 0 ? (
           <EmptyState
             icon={Bell}
