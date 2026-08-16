@@ -22,8 +22,8 @@ export function PageHeader({
   const right = actions ?? action;
   return (
     <div className="mb-4 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-      <div className="min-w-0">
-        <h1 className="text-xl font-extrabold tracking-tight text-slate-900 sm:text-2xl sm:text-[1.75rem]">
+      <div className="min-w-0 flex-1">
+        <h1 className="break-words text-xl font-extrabold leading-snug tracking-tight text-slate-900 sm:text-2xl sm:text-[1.75rem]">
           {title}
         </h1>
         {description ? (
@@ -161,9 +161,7 @@ export function SectionCard({
   );
 }
 
-/** Unified status palette — success / pending / error / info / neutral / live */
 const STATUS_STYLES: Record<string, string> = {
-  // Success / Completed / Approved → green
   active: "bg-emerald-50 text-emerald-700 border-emerald-200",
   published: "bg-emerald-50 text-emerald-700 border-emerald-200",
   released: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -173,7 +171,6 @@ const STATUS_STYLES: Record<string, string> = {
   pass: "bg-emerald-50 text-emerald-700 border-emerald-200",
   passed: "bg-emerald-50 text-emerald-700 border-emerald-200",
 
-  // Pending / Processing / Waiting → amber
   pending: "bg-amber-50 text-amber-800 border-amber-200",
   held: "bg-amber-50 text-amber-800 border-amber-200",
   "result held": "bg-amber-50 text-amber-800 border-amber-200",
@@ -182,7 +179,6 @@ const STATUS_STYLES: Record<string, string> = {
   waiting: "bg-amber-50 text-amber-800 border-amber-200",
   upcoming: "bg-amber-50 text-amber-800 border-amber-200",
 
-  // Error / Failed / Cancelled / Rejected → red
   rejected: "bg-red-50 text-red-700 border-red-200",
   terminated: "bg-red-50 text-red-700 border-red-200",
   flagged: "bg-red-50 text-red-700 border-red-200",
@@ -193,19 +189,15 @@ const STATUS_STYLES: Record<string, string> = {
   error: "bg-red-50 text-red-700 border-red-200",
   missed: "bg-red-50 text-red-700 border-red-200",
   fail: "bg-red-50 text-red-700 border-red-200",
-  failed: "bg-red-50 text-red-700 border-red-200",
 
-  // Info / Scheduled → blue
   scheduled: "bg-blue-50 text-blue-700 border-blue-200",
   info: "bg-blue-50 text-blue-700 border-blue-200",
   submitted: "bg-blue-50 text-blue-700 border-blue-200",
 
-  // Live / Active window → blue-green
   ongoing: "bg-cyan-50 text-cyan-800 border-cyan-200",
   live: "bg-cyan-50 text-cyan-800 border-cyan-200",
   available: "bg-cyan-50 text-cyan-800 border-cyan-200",
 
-  // Draft / Neutral → gray
   draft: "bg-slate-100 text-slate-600 border-slate-200",
   closed: "bg-slate-100 text-slate-600 border-slate-200",
   neutral: "bg-slate-100 text-slate-600 border-slate-200",
@@ -223,7 +215,7 @@ export function StatusBadge({ status, className }: { status: string; className?:
         className,
       )}
     >
-      {status.replaceAll("_", " " )}
+      {status.replaceAll("_", " ")}
     </span>
   );
 }
