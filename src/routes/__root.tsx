@@ -115,14 +115,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en">
       <head>
         <HeadContent />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('d4exam.theme')||'system';var d=t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.classList.add('dark');if(localStorage.getItem('d4exam.reduced-motion')==='1')document.documentElement.classList.add('reduced-motion');}catch(e){}})();`,
-          }}
-        />
       </head>
       <body className="min-h-dvh bg-background text-foreground antialiased">
         {children}
