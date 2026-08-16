@@ -169,7 +169,6 @@ function Page() {
     return m;
   }, [attemptsQ.data]);
 
-  /** Exam ids that already have a result — same rule as examinations page */
   const finishedByResult = useMemo(() => {
     const s = new Set<string>();
     for (const r of resultsQ.data ?? []) s.add(r.exam_id);
@@ -195,7 +194,6 @@ function Page() {
     return ids.size;
   }, [attemptsQ.data, finishedByResult]);
 
-  // Same buckets as My Examinations: Available now / Upcoming (never include finished)
   const { availableNow, upcoming } = useMemo(() => {
     const live: ExamRow[] = [];
     const up: ExamRow[] = [];
@@ -209,9 +207,7 @@ function Page() {
     return { availableNow: live, upcoming: up };
   }, [exams, attemptsByExam, finishedByResult]);
 
-  // Card + list: only exams you can start now (matches "Available now" on exam page)
   const readyNow = availableNow;
-  // List can also show upcoming so student sees what's coming
   const readyList = [...availableNow, ...upcoming];
 
   const unreadNotifs = notifs.filter((n) => !n.read_at).length;
@@ -230,10 +226,12 @@ function Page() {
     );
   }
 
+  const displayName = (student.fullName || "").trim();
+
   return (
     <>
       <PageHeader
-        title={student.fullName ? `Welcome, ${student.fullName.split(" ")[0]}` : "Student dashboard"}
+        title={displayName ? `Welcome, ${displayName}` : "Student dashboard"}
         description="Your examinations, results, courses and notifications."
       />
 
@@ -298,7 +296,7 @@ function Page() {
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         <SectionCard
           title="Ready to start"
-          description="Same as Available now on My Examinations — submitted exams are removed"
+          description="Exams you can write now or that are upcoming"
           action={
             <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
               <Link to="/student/examinations">View All</Link>
@@ -318,7 +316,7 @@ function Page() {
                 return (
                   <li
                     key={e.id}
-                    className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white px-2.5 py-2 sm:px-3"
+                    className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white px-2.5 py-2.5 sm:px-3"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-900">
@@ -428,7 +426,7 @@ function InfoCell({
         <Icon className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
         {label}
       </p>
-      <p className={cn("mt-0.5 truncate text-xs text-slate-900 sm:text-sm", bold && "font-bold")}>
+      <p className={cn("mt-0.5 break-words text-xs text-slate-900 sm:text-sm", bold && "font-bold")}>
         {value}
       </p>
     </div>
