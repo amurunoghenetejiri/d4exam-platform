@@ -36,6 +36,7 @@ import {
   type ExamSettingsRow,
 } from "@/lib/exam-security";
 import { parseExamMeta } from "@/lib/exam-meta";
+import { notifyTeacherExamDecision } from "@/lib/notify";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/officer/approvals")({
@@ -316,22 +317,19 @@ function Page() {
       } as never);
 
       if (selected.created_by) {
-        const titles = {
-          approve: "Examination approved",
-          reject: "Examination rejected",
-          changes: "Changes requested on your examination",
-        } as const;
         const when =
           action === "approve" && scheduleStart
-            ? ` Starts ${new Date(scheduleStart).toLocaleString()}.`
-            : "";
-        await supabase.from("notifications").insert({
-          recipient_user_id: selected.created_by,
-          school_id: schoolId,
-          title: titles[action],
-          message: `${selected.title}: ${comment.trim() || nextStatus}.${when}`,
-          type: action === "approve" ? "success" : action === "reject" ? "error" : "warning",
-        } as never);
+            ? `Starts ${new Date(scheduleStart).toLocaleString()}.`
+            : undefined;
+        await notifyTeacherExamDecision({
+          teacherUserId: selected.created_by,
+          schoolId,
+          examId: selected.id,
+          examTitle: selected.title,
+          decision: action,
+          scheduleNote: when,
+          comment: comment.trim() || undefined,
+        });
       }
 
       toast.success(
