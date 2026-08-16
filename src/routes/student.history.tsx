@@ -1,10 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { History, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { useStudentContext } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
+import { useRealtimeInvalidate } from "@/lib/realtime";
 
 export const Route = createFileRoute("/student/history")({
   head: () => ({
@@ -37,8 +39,29 @@ type AttemptRow = {
   started_at: string | null;
 };
 
+type ExamLite = {
+  id: string;
+  title: string;
+  courses: { code: string; name: string } | null;
+};
+
 function Page() {
   const { data: student, isLoading } = useStudentContext();
+
+  useRealtimeInvalidate(
+    `student-history-${student?.studentId ?? "x"}`,
+    student?.studentId
+      ? [
+          { table: "results", filter: `student_id=eq.${student.studentId}` },
+          { table: "exam_attempts", filter: `student_id=eq.${student.studentId}` },
+        ]
+      : [],
+    [
+      ["student-history-results", student?.studentId],
+      ["student-history-attempts", student?.studentId],
+    ],
+    Boolean(student?.studentId),
+  );
 
   const resultsQ = useQuery({
     queryKey: ["student-history-results", student?.studentId],
@@ -69,6 +92,38 @@ function Page() {
       return (data ?? []) as AttemptRow[];
     },
   });
+
+  const examIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const a of attemptsQ.data ?? []) ids.add(a.exam_id);
+    for (const r of resultsQ.data ?? []) ids.add(r.exam_id);
+    return [...ids];
+  }, [attemptsQ.data, resultsQ.data]);
+
+  const examsQ = useQuery({
+    queryKey: ["student-history-exams", examIds.join(",")],
+    enabled: examIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("examinations")
+        .select("id, title, courses(code, name)")
+        .in("id", examIds);
+      if (error) throw error;
+      return (data ?? []) as ExamLite[];
+    },
+  });
+
+  const examById = useMemo(() => {
+    const m = new Map<string, ExamLite>();
+    for (const e of examsQ.data ?? []) m.set(e.id, e);
+    return m;
+  }, [examsQ.data]);
+
+  const resultByExam = useMemo(() => {
+    const m = new Map<string, ResultRow>();
+    for (const r of resultsQ.data ?? []) m.set(r.exam_id, r);
+    return m;
+  }, [resultsQ.data]);
 
   if (isLoading || resultsQ.isLoading) {
     return <p className="text-sm text-slate-500">Loading history…</p>;
@@ -151,19 +206,50 @@ function Page() {
           <EmptyState title="No attempts recorded" />
         ) : (
           <ul className="space-y-2 text-sm">
-            {attempts.map((a) => (
-              <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
-                <span className="text-slate-700">Exam {a.exam_id.slice(0, 8)}…</span>
-                <StatusBadge status={a.status} />
-                <span className="text-xs text-slate-500">
-                  {a.submitted_at
-                    ? new Date(a.submitted_at).toLocaleString()
-                    : a.started_at
-                      ? new Date(a.started_at).toLocaleString()
-                      : "—"}
-                </span>
-              </li>
-            ))}
+            {attempts.map((a) => {
+              const exam = examById.get(a.exam_id);
+              const result = resultByExam.get(a.exam_id);
+              const done = ["submitted", "terminated", "flagged"].includes(
+                String(a.status).toLowerCase(),
+              );
+              return (
+                <li
+                  key={a.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-slate-800">
+                      {exam?.title ?? `Exam ${a.exam_id.slice(0, 8)}…`}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {exam?.courses?.code ? `${exam.courses.code} · ` : ""}
+                      {a.submitted_at
+                        ? new Date(a.submitted_at).toLocaleString()
+                        : a.started_at
+                          ? new Date(a.started_at).toLocaleString()
+                          : "—"}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={a.status} />
+                    {done && result && (
+                      <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" asChild>
+                        <Link to="/student/results/$id" params={{ id: result.id }}>
+                          View Result
+                        </Link>
+                      </Button>
+                    )}
+                    {done && !result && (
+                      <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" asChild>
+                        <Link to="/student/results/$id" params={{ id: a.exam_id }}>
+                          View Result
+                        </Link>
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </SectionCard>
