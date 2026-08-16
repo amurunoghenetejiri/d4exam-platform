@@ -18,7 +18,8 @@ import {
 import { cn } from "@/lib/utils";
 import { signOut, useSessionUser } from "@/lib/session";
 import { useSchoolIdentity } from "@/lib/school-identity";
-import { useCount } from "@/lib/queries";
+import { useUnreadNotificationCount } from "@/lib/queries";
+import { useRealtimeInvalidate } from "@/lib/realtime";
 import type { RoleConfig } from "@/components/navigation/navConfig";
 
 export interface AppUser {
@@ -119,6 +120,33 @@ function PortalBrand({
   );
 }
 
+function NotificationBell({ to, unread }: { to: string; unread: number }) {
+  const hasUnread = unread > 0;
+  const label =
+    unread > 99 ? "99+" : unread > 0 ? String(unread) : undefined;
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="relative shrink-0"
+      aria-label={hasUnread ? `${unread} unread notifications` : "Notifications"}
+      asChild
+    >
+      <Link to={to as string} preload="intent">
+        <span className={cn("inline-flex", hasUnread && "bell-ring")}>
+          <Bell className="h-5 w-5 text-slate-600" aria-hidden />
+        </span>
+        {hasUnread ? (
+          <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white shadow-sm">
+            {label}
+          </span>
+        ) : null}
+      </Link>
+    </Button>
+  );
+}
+
 export function AppShell({
   config,
   user,
@@ -132,16 +160,25 @@ export function AppShell({
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { data: session } = useSessionUser();
   const { data: school } = useSchoolIdentity(session?.schoolId);
-  const unread = useCount(
-    "notifications",
+
+  useRealtimeInvalidate(
+    `shell-notifs-${session?.userId ?? "x"}`,
     session?.userId
-      ? [{ column: "recipient_user_id", value: session.userId }]
+      ? [{ table: "notifications", filter: `recipient_user_id=eq.${session.userId}` }]
       : [],
+    [
+      ["count", "notifications", "unread", session?.userId],
+      ["rows", "notifications"],
+      ["student-dashboard-notifs"],
+    ],
     Boolean(session?.userId),
+    800,
   );
 
+  const unreadQ = useUnreadNotificationCount(session?.userId);
+  const unreadCount = unreadQ.data ?? 0;
+
   const notifPath = `${config.home}/notifications`;
-  const showDot = (unread.data ?? 0) > 0;
   const logoUrl = school?.logoUrl ?? session?.schoolLogoUrl ?? null;
   const schoolName = school?.name ?? session?.schoolName ?? null;
   const isSchoolPortal = Boolean(session?.schoolId) && session?.role !== "super_admin";
@@ -150,7 +187,6 @@ export function AppShell({
     <div className="relative min-h-dvh bg-slate-50">
       <Watermark opacity={0.08} size="xl" className="pointer-events-none lg:left-64" />
 
-      {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-[#0b1b3a] lg:flex">
         <div className="flex h-[4.5rem] items-center border-b border-white/10 px-4">
           <PortalBrand
@@ -175,7 +211,6 @@ export function AppShell({
         </div>
       </aside>
 
-      {/* FIXED top bar — stays on screen while content scrolls */}
       <header
         className={cn(
           "fixed top-0 right-0 z-50 border-b border-slate-200/90",
@@ -272,20 +307,7 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-0.5 justify-self-end sm:gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="relative shrink-0"
-              aria-label="Notifications"
-              asChild
-            >
-              <Link to={notifPath as string} preload="intent">
-                <Bell className="h-5 w-5 text-slate-600" />
-                {showDot && (
-                  <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
-                )}
-              </Link>
-            </Button>
+            <NotificationBell to={notifPath} unread={unreadCount} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -321,6 +343,7 @@ export function AppShell({
                 <DropdownMenuItem asChild>
                   <Link to={notifPath as string} preload="intent">
                     Notifications
+                    {unreadCount > 0 ? ` (${unreadCount})` : ""}
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -331,7 +354,6 @@ export function AppShell({
         </div>
       </header>
 
-      {/* Content offset for fixed header height (h-14 / sm:h-16) */}
       <div className="relative z-10 pt-14 sm:pt-16 lg:pl-64">
         <main className="mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:pb-10">
           <div className="min-w-0 w-full">{children}</div>
