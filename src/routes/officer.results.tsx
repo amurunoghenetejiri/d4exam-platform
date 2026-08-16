@@ -289,7 +289,7 @@ function Page() {
               return (
                 <li
                   key={e.id}
-                  className="flex flex-col gap-2 rounded-xl border border-slate-100 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-bold">{e.title}</p>
@@ -312,29 +312,49 @@ function Page() {
                       </p>
                     )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge status={String(e.status).replaceAll("_", " ")} />
                     {e.status !== "completed" && e.status !== "closed" && (
                       <Button
                         size="sm"
                         variant="outline"
+                        className="h-8 px-2.5 text-xs"
                         disabled={Boolean(blocked)}
                         onClick={() => void markCompleted(e.id)}
                       >
-                        Mark completed
+                        Complete
                       </Button>
                     )}
-                    <Button size="sm" className="font-semibold" onClick={() => void releaseResults(e.id)}>
-                      Release results
+                    <Button
+                      size="sm"
+                      className="h-8 px-2.5 text-xs font-semibold"
+                      onClick={() => void releaseResults(e.id)}
+                    >
+                      Release
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => void holdAllResults(e.id)}>
-                      Hold results
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-2.5 text-xs"
+                      onClick={() => void holdAllResults(e.id)}
+                    >
+                      Hold
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => void rescheduleExam(e.id)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-2.5 text-xs"
+                      onClick={() => void rescheduleExam(e.id)}
+                    >
                       Reschedule
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => void allowRewrite(e.id)}>
-                      Allow rewrite
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-2.5 text-xs"
+                      onClick={() => void allowRewrite(e.id)}
+                    >
+                      Rewrite
                     </Button>
                   </div>
                 </li>
