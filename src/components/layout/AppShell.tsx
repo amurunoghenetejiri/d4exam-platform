@@ -101,7 +101,11 @@ function PortalBrand({
             {schoolName || "School"}
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
-            <img src="/logo.png" alt="" className="h-3.5 w-auto object-contain bg-transparent opacity-80" />
+            <img
+              src="/logo.png"
+              alt=""
+              className="h-3.5 w-auto object-contain bg-transparent opacity-80"
+            />
             Powered by D4EXAM
           </span>
         </span>
@@ -131,9 +135,7 @@ export function AppShell({
   const unread = useCount(
     "notifications",
     session?.userId
-      ? [
-          { column: "recipient_user_id", value: session.userId },
-        ]
+      ? [{ column: "recipient_user_id", value: session.userId }]
       : [],
     Boolean(session?.userId),
   );
@@ -173,146 +175,162 @@ export function AppShell({
         </div>
       </aside>
 
-      {/* Fixed top bar — does not scroll with page content */}
-      <header
-        className={cn(
-          "fixed top-0 right-0 z-30 border-b border-slate-200/90",
-          "bg-white/95 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-white/90",
-          "left-0 lg:left-64",
-        )}
-      >
-        <div className="mx-auto grid h-14 max-w-[1400px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 sm:h-16 sm:gap-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-2">
-            <Sheet open={open} onOpenChange={setOpen}>
-              <SheetTrigger asChild>
-                <Button variant="outline" size="icon" className="shrink-0 lg:hidden" aria-label="Open menu">
-                  <Menu className="h-5 w-5" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-[min(100vw-2rem,18rem)] border-r-0 bg-[#0b1b3a] p-0">
-                <SheetTitle className="sr-only">{config.label} navigation</SheetTitle>
-                <div className="flex h-16 items-center justify-between gap-2 border-b border-white/10 px-4">
-                  <PortalBrand
-                    isSchoolPortal={isSchoolPortal}
-                    logoUrl={logoUrl}
-                    schoolName={schoolName}
-                    homeTo={config.home}
-                  />
+      {/*
+        Main column: sticky top bar stays locked while page content scrolls.
+        sticky is more reliable than fixed on mobile Safari.
+      */}
+      <div className="relative z-10 lg:pl-64">
+        <header
+          className={cn(
+            "sticky top-0 z-50 border-b border-slate-200/90",
+            "bg-white/95 shadow-[0_1px_0_rgba(15,23,42,0.04),0_4px_12px_rgba(15,23,42,0.04)]",
+            "backdrop-blur-md supports-[backdrop-filter]:bg-white/90",
+          )}
+        >
+          <div className="mx-auto grid h-14 max-w-[1400px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 sm:h-16 sm:gap-3 sm:px-6">
+            <div className="flex min-w-0 items-center gap-2">
+              <Sheet open={open} onOpenChange={setOpen}>
+                <SheetTrigger asChild>
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="icon"
-                    className="shrink-0 text-white hover:bg-white/10 hover:text-white"
-                    onClick={() => setOpen(false)}
-                    aria-label="Close menu"
+                    className="shrink-0 lg:hidden"
+                    aria-label="Open menu"
                   >
-                    <X className="h-5 w-5" />
+                    <Menu className="h-5 w-5" />
                   </Button>
-                </div>
-                <div className="h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain">
-                  <NavLinks config={config} onNavigate={() => setOpen(false)} />
-                </div>
-              </SheetContent>
-            </Sheet>
+                </SheetTrigger>
+                <SheetContent
+                  side="left"
+                  className="w-[min(100vw-2rem,18rem)] border-r-0 bg-[#0b1b3a] p-0"
+                >
+                  <SheetTitle className="sr-only">{config.label} navigation</SheetTitle>
+                  <div className="flex h-16 items-center justify-between gap-2 border-b border-white/10 px-4">
+                    <PortalBrand
+                      isSchoolPortal={isSchoolPortal}
+                      logoUrl={logoUrl}
+                      schoolName={schoolName}
+                      homeTo={config.home}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-white hover:bg-white/10 hover:text-white"
+                      onClick={() => setOpen(false)}
+                      aria-label="Close menu"
+                    >
+                      <X className="h-5 w-5" />
+                    </Button>
+                  </div>
+                  <div className="h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain">
+                    <NavLinks config={config} onNavigate={() => setOpen(false)} />
+                  </div>
+                </SheetContent>
+              </Sheet>
 
-            <span className="hidden text-sm font-bold text-primary lg:inline">
-              {config.label} Portal
-            </span>
+              <span className="hidden text-sm font-bold text-primary lg:inline">
+                {config.label} Portal
+              </span>
 
-            <Link
-              to={config.home}
-              preload="intent"
-              className="pressable flex min-w-0 items-center gap-2 active:scale-[0.98] lg:hidden"
-              aria-label={isSchoolPortal ? schoolName || "Home" : "D4EXAM home"}
-            >
-              {isSchoolPortal ? (
-                <>
-                  <SchoolLogo
-                    logoUrl={logoUrl}
-                    schoolName={schoolName}
-                    size="sm"
-                    className="bg-transparent"
-                  />
-                  <span className="max-w-[42vw] truncate text-sm font-bold text-slate-900 sm:max-w-[200px]">
-                    {schoolName || config.label}
-                  </span>
-                </>
-              ) : (
-                <Logo size="md" wordmark={false} />
-              )}
-            </Link>
-          </div>
-
-          <div className="hidden justify-center md:flex">
-            <div className="relative w-full max-w-sm">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                aria-hidden
-              />
-              <Input
-                type="search"
-                placeholder="Search exams, courses, students…"
-                aria-label="Search"
-                className="h-10 rounded-full border-slate-200 bg-slate-50/90 pl-9"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-0.5 justify-self-end sm:gap-1">
-            <Button variant="ghost" size="icon" className="relative shrink-0" aria-label="Notifications" asChild>
-              <Link to={notifPath as string} preload="intent">
-                <Bell className="h-5 w-5 text-slate-600" />
-                {showDot && (
-                  <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
+              <Link
+                to={config.home}
+                preload="intent"
+                className="pressable flex min-w-0 items-center gap-2 active:scale-[0.98] lg:hidden"
+                aria-label={isSchoolPortal ? schoolName || "Home" : "D4EXAM home"}
+              >
+                {isSchoolPortal ? (
+                  <>
+                    <SchoolLogo
+                      logoUrl={logoUrl}
+                      schoolName={schoolName}
+                      size="sm"
+                      className="bg-transparent"
+                    />
+                    <span className="max-w-[42vw] truncate text-sm font-bold text-slate-900 sm:max-w-[200px]">
+                      {schoolName || config.label}
+                    </span>
+                  </>
+                ) : (
+                  <Logo size="md" wordmark={false} />
                 )}
               </Link>
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  className="pressable flex items-center gap-2 rounded-full p-1 pr-1.5 transition-colors hover:bg-slate-100 active:scale-[0.98] sm:pr-2"
-                  aria-label="Account menu"
-                >
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-blue-100 text-xs font-bold text-primary">
-                    {user.avatar}
-                  </span>
-                  <span className="hidden text-left sm:block">
-                    <span className="block max-w-[140px] truncate text-xs font-bold leading-tight text-slate-900">
-                      {user.name}
-                    </span>
-                    <span className="block max-w-[120px] truncate text-[11px] leading-tight text-slate-500 md:max-w-[160px]">
-                      {user.subtitle}
-                    </span>
-                  </span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="z-50 w-56 border-slate-200 bg-white">
-                <DropdownMenuLabel className="text-slate-900">{user.name}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link to={`${config.home}/profile` as string} preload="intent">
-                    Profile
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to={`${config.home}/settings` as string} preload="intent">
-                    Settings
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to={notifPath as string} preload="intent">
-                    Notifications
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => void signOut()}>Logout</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </header>
+            </div>
 
-      {/* Content: offset for fixed header (h-14 / sm:h-16) + sidebar on lg */}
-      <div className="relative z-10 pt-14 sm:pt-16 lg:pl-64">
+            <div className="hidden justify-center md:flex">
+              <div className="relative w-full max-w-sm">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                  aria-hidden
+                />
+                <Input
+                  type="search"
+                  placeholder="Search exams, courses, students…"
+                  aria-label="Search"
+                  className="h-10 rounded-full border-slate-200 bg-slate-50/90 pl-9"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-0.5 justify-self-end sm:gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative shrink-0"
+                aria-label="Notifications"
+                asChild
+              >
+                <Link to={notifPath as string} preload="intent">
+                  <Bell className="h-5 w-5 text-slate-600" />
+                  {showDot && (
+                    <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-primary" />
+                  )}
+                </Link>
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="pressable flex items-center gap-2 rounded-full p-1 pr-1.5 transition-colors hover:bg-slate-100 active:scale-[0.98] sm:pr-2"
+                    aria-label="Account menu"
+                  >
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-blue-100 text-xs font-bold text-primary">
+                      {user.avatar}
+                    </span>
+                    <span className="hidden text-left sm:block">
+                      <span className="block max-w-[140px] truncate text-xs font-bold leading-tight text-slate-900">
+                        {user.name}
+                      </span>
+                      <span className="block max-w-[120px] truncate text-[11px] leading-tight text-slate-500 md:max-w-[160px]">
+                        {user.subtitle}
+                      </span>
+                    </span>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="z-[60] w-56 border-slate-200 bg-white">
+                  <DropdownMenuLabel className="text-slate-900">{user.name}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to={`${config.home}/profile` as string} preload="intent">
+                      Profile
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to={`${config.home}/settings` as string} preload="intent">
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to={notifPath as string} preload="intent">
+                      Notifications
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => void signOut()}>Logout</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </header>
+
         <main className="relative z-10 mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:pb-10">
           <div className="min-w-0 w-full overflow-x-hidden">{children}</div>
         </main>
