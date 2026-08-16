@@ -1,1 +1,1 @@
-RECOVER_FROM_ARTIFACT
+export { CbtExamPage } from "./CbtExamSession.full";
