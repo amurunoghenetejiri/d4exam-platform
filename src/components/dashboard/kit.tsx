@@ -142,7 +142,7 @@ export function SectionCard({
   className?: string;
 }) {
   return (
-    <Card className={cn("border-slate-100 shadow-sm", className)}>
+    <Card className={cn("border-slate-100 shadow-sm overflow-hidden", className)}>
       {(title || action) && (
         <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 px-3 pb-2 pt-3 sm:gap-3 sm:px-6 sm:pb-3 sm:pt-6">
           <div className="min-w-0">
@@ -322,9 +322,13 @@ export function StatSkeleton() {
 
 export function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-slate-50 py-2 text-sm last:border-0">
-      <span className="text-slate-500">{label}</span>
-      <span className="min-w-0 truncate text-right font-semibold text-slate-900">{value}</span>
+    <div className="border-b border-slate-50 py-2 last:border-0">
+      <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+        <span className="shrink-0 text-xs text-slate-500 sm:text-sm">{label}</span>
+        <span className="min-w-0 break-words text-sm font-semibold leading-snug text-slate-900 sm:text-right [overflow-wrap:anywhere]">
+          {value}
+        </span>
+      </div>
     </div>
   );
 }
