@@ -4,14 +4,12 @@ import {
   Camera,
   CameraOff,
   Loader2,
-  Mic,
   Monitor,
   ShieldCheck,
   Smartphone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Logo } from "@/components/brand/Logo";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import {
   capabilitiesSnapshot,
@@ -33,6 +31,7 @@ type Props = {
   schoolName?: string | null;
   continueMode?: boolean;
   windowLabel?: string | null;
+  cancelTo?: string;
   onStart: (opts: {
     skipScreenShare: boolean;
     caps: DeviceCapabilities;
@@ -76,10 +75,10 @@ export function ExamSecurityGate({
   schoolName,
   continueMode = false,
   windowLabel,
+  cancelTo = "/student/examinations",
   onStart,
 }: Props) {
   const caps = useMemo(() => detectDeviceCapabilities(), []);
-  const [acknowledgedUnsupported, setAcknowledgedUnsupported] = useState(false);
   const [acknowledgedNotice, setAcknowledgedNotice] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -169,20 +168,23 @@ export function ExamSecurityGate({
   return (
     <div className="grid min-h-dvh place-items-center bg-slate-50 p-3 sm:p-6">
       <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <Logo size="lg" />
-          {schoolLogoUrl && (
-            <>
-              <span className="h-8 w-px bg-slate-200" aria-hidden />
-              <SchoolLogo logoUrl={schoolLogoUrl} schoolName={schoolName} size="md" className="ring-1 ring-slate-200" />
-            </>
-          )}
+        {/* School identity only — no platform D4EXAM logo on exam gate */}
+        <div className="flex flex-col items-center text-center">
+          <SchoolLogo
+            logoUrl={schoolLogoUrl}
+            schoolName={schoolName}
+            size="xl"
+            className="ring-1 ring-slate-200"
+          />
+          <p className="mt-3 text-base font-extrabold leading-tight text-slate-900 sm:text-lg">
+            {schoolName || "School"}
+          </p>
         </div>
-        {schoolName && <p className="mt-2 text-xs font-semibold text-slate-500">{schoolName}</p>}
-        <h1 className="mt-3 text-lg font-extrabold text-primary sm:text-xl">{examTitle}</h1>
-        <p className="mt-1 text-sm font-semibold text-primary/80">{courseLine}</p>
+
+        <h1 className="mt-4 text-center text-lg font-extrabold text-primary sm:text-xl">{examTitle}</h1>
+        <p className="mt-1 text-center text-sm font-semibold text-primary/80">{courseLine}</p>
         {windowLabel && (
-          <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-center text-xs text-slate-600">
             <span className="font-semibold text-slate-800">Available:</span> {windowLabel}
             <span className="mx-1">·</span>
             <span className="font-semibold text-slate-800">Duration:</span> {durationMinutes} min
@@ -191,7 +193,7 @@ export function ExamSecurityGate({
           </p>
         )}
 
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-center text-xs text-slate-500">
           Detected: <strong className="text-slate-700">{caps.deviceType}</strong> ·{" "}
           <strong className="text-slate-700">{caps.browserName}</strong>
           {!caps.secureContext && (
@@ -373,7 +375,7 @@ export function ExamSecurityGate({
         )}
 
         <Button variant="ghost" className="mt-2 w-full" asChild>
-          <Link to="/student/examinations">Cancel</Link>
+          <Link to={cancelTo}>Cancel</Link>
         </Button>
 
         <span className="sr-only" data-caps={JSON.stringify(capabilitiesSnapshot(caps))} />
