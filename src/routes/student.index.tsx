@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -66,6 +66,7 @@ type Notif = { id: string; title: string; created_at: string; read_at: string | 
 function Page() {
   const { data: student, isLoading: sLoading } = useStudentContext();
   const { data: user } = useSessionUser();
+  const navigate = useNavigate();
 
   useRealtimeInvalidate(
     `student-dash-${student?.studentId ?? "anon"}`,
@@ -204,9 +205,9 @@ function Page() {
         description="Your examinations, results, courses and notifications."
       />
 
-      {/* Student information — real DB fields */}
-      <SectionCard title="Student information" className="mb-6">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      {/* Student information — compact on mobile */}
+      <SectionCard title="Student information" className="mb-4 sm:mb-6">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <InfoCell icon={User} label="Full name" value={student.fullName || "—"} bold />
           <InfoCell icon={Hash} label="Matric number" value={student.matric || "—"} />
           <InfoCell icon={Building2} label="College / Faculty" value={student.facultyName || "—"} />
@@ -222,13 +223,13 @@ function Page() {
         </div>
       </SectionCard>
 
-      {/* Five clickable cards with real counts */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      {/* Summary cards — tighter on mobile so all five fit */}
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:mb-6 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
         <DashCard
           to="/student/examinations"
           label="Ready exams"
           value={readyNow.length}
-          hint={readyExams.length > readyNow.length ? `${readyExams.length} total eligible` : undefined}
+          hint={readyExams.length > readyNow.length ? `${readyExams.length} total` : undefined}
           icon={ClipboardList}
           color="bg-blue-50 text-primary"
         />
@@ -260,13 +261,14 @@ function Page() {
           hint={unreadNotifs ? "unread" : undefined}
           icon={Bell}
           color="bg-rose-50 text-rose-600"
+          className="col-span-2 sm:col-span-1"
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         <SectionCard
           title="Ready to start"
-          description="Exams you are eligible to write now or soon"
+          description="Exams you can write now or soon"
           action={
             <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
               <Link to="/student/examinations">View All</Link>
@@ -282,29 +284,44 @@ function Page() {
             <ul className="space-y-2">
               {readyExams.slice(0, 5).map((e) => {
                 const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
+                const canStart = avail === "available";
                 return (
-                  <li key={e.id}>
-                    <NavCard
-                      to="/student/exam/$id"
-                      params={{ id: e.id }}
-                      ariaLabel={`Open ${e.title}`}
-                      className="flex items-center justify-between gap-2 rounded-lg border-slate-100 px-3 py-2"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">
-                          {e.courses?.code ? `${e.courses.code} · ` : ""}
-                          {e.title}
-                        </p>
-                        <p className="flex items-center gap-1 text-xs text-slate-500">
-                          <CalendarDays className="h-3 w-3" />
+                  <li
+                    key={e.id}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white px-2.5 py-2 sm:px-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-900">
+                        {e.courses?.code ? `${e.courses.code} · ` : ""}
+                        {e.title}
+                      </p>
+                      <p className="flex items-center gap-1 text-[11px] text-slate-500 sm:text-xs">
+                        <CalendarDays className="h-3 w-3 shrink-0" />
+                        <span className="truncate">
                           {e.scheduled_start
                             ? new Date(e.scheduled_start).toLocaleString()
                             : "Schedule TBC"}
                           {e.duration_minutes ? ` · ${e.duration_minutes} min` : ""}
-                        </p>
-                      </div>
-                      <StatusBadge status={avail === "available" ? "ready" : e.status} />
-                    </NavCard>
+                        </span>
+                      </p>
+                    </div>
+                    {canStart ? (
+                      <Button
+                        size="sm"
+                        className="h-8 shrink-0 bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90 sm:text-sm"
+                        type="button"
+                        onClick={() => {
+                          void navigate({
+                            to: "/student/exam/$id",
+                            params: { id: e.id },
+                          });
+                        }}
+                      >
+                        Start
+                      </Button>
+                    ) : (
+                      <StatusBadge status="upcoming" className="shrink-0" />
+                    )}
                   </li>
                 );
               })}
@@ -336,7 +353,7 @@ function Page() {
                       to="/student/results/$id"
                       params={{ id: r.id }}
                       ariaLabel={`Results for ${r.examinations?.title ?? "exam"}`}
-                      className="flex items-center justify-between gap-2 rounded-lg border-slate-100 px-3 py-2"
+                      className="flex items-center justify-between gap-2 rounded-xl border-slate-100 px-2.5 py-2 sm:px-3"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-slate-900">
@@ -345,7 +362,7 @@ function Page() {
                             : ""}
                           {r.examinations?.title ?? "Exam"}
                         </p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-[11px] text-slate-500 sm:text-xs">
                           {isPub
                             ? `${r.percentage != null ? `${Math.round(Number(r.percentage))}%` : "—"}${r.grade ? ` · ${r.grade}` : ""}`
                             : "Pending officer release"}
@@ -376,12 +393,14 @@ function InfoCell({
   bold?: boolean;
 }) {
   return (
-    <div className="min-w-0 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
-      <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-        <Icon className="h-3 w-3" />
+    <div className="min-w-0 rounded-lg border border-slate-100 bg-slate-50/60 px-2 py-2 sm:rounded-xl sm:px-3 sm:py-2.5">
+      <p className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400 sm:text-[10px]">
+        <Icon className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
         {label}
       </p>
-      <p className={cn("mt-0.5 truncate text-sm text-slate-900", bold && "font-bold")}>{value}</p>
+      <p className={cn("mt-0.5 truncate text-xs text-slate-900 sm:text-sm", bold && "font-bold")}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -393,6 +412,7 @@ function DashCard({
   hint,
   icon: Icon,
   color,
+  className,
 }: {
   to: string;
   label: string;
@@ -400,19 +420,29 @@ function DashCard({
   hint?: string;
   icon: typeof Trophy;
   color: string;
+  className?: string;
 }) {
   return (
-    <NavCard to={to} ariaLabel={label} className="h-full">
-      <div className="flex items-center gap-3">
-        <div className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", color)}>
-          <Icon className="h-5 w-5" />
+    <NavCard to={to} ariaLabel={label} className={cn("h-full !rounded-xl !p-2.5 sm:!rounded-2xl sm:!p-4", className)}>
+      <div className="flex items-center gap-2 sm:gap-3">
+        <div
+          className={cn(
+            "grid h-8 w-8 shrink-0 place-items-center rounded-lg sm:h-10 sm:w-10 sm:rounded-xl",
+            color,
+          )}
+        >
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
         </div>
-        <div className="min-w-0">
-          <p className="text-2xl font-extrabold tabular-nums text-slate-900">{value}</p>
-          <p className="text-xs font-semibold text-slate-500">{label}</p>
-          {hint ? <p className="text-[10px] text-slate-400">{hint}</p> : null}
+        <div className="min-w-0 flex-1">
+          <p className="text-lg font-extrabold tabular-nums leading-none text-slate-900 sm:text-2xl">
+            {value}
+          </p>
+          <p className="mt-0.5 text-[10px] font-semibold leading-tight text-slate-500 sm:text-xs">
+            {label}
+          </p>
+          {hint ? <p className="text-[9px] text-slate-400 sm:text-[10px]">{hint}</p> : null}
         </div>
-        <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-slate-300" />
+        <ChevronRight className="hidden h-4 w-4 shrink-0 text-slate-300 sm:block" />
       </div>
     </NavCard>
   );
