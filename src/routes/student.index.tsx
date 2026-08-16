@@ -63,6 +63,8 @@ type ResultRow = {
 
 type Notif = { id: string; title: string; created_at: string; read_at: string | null };
 
+const DONE_ATTEMPT = ["submitted", "terminated", "flagged"];
+
 function Page() {
   const { data: student, isLoading: sLoading } = useStudentContext();
   const { data: user } = useSessionUser();
@@ -81,15 +83,19 @@ function Page() {
       ["student-dashboard-attempts"],
       ["student-dashboard-results"],
       ["student-dashboard-notifs"],
+      ["student-exams"],
+      ["student-attempts"],
+      ["student-result-ids"],
     ],
     Boolean(student?.studentId),
-    2000,
+    1500,
   );
 
   const examsQ = useQuery({
     queryKey: ["student-dashboard-exams", student?.schoolId, student?.courseIds?.join(",")],
     enabled: Boolean(student?.schoolId),
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchOnMount: "always",
     queryFn: async () => {
       let q = supabase
         .from("examinations")
@@ -110,7 +116,8 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["student-dashboard-attempts", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchOnMount: "always",
     queryFn: async () => {
       const { data, error } = await supabase
         .from("exam_attempts")
@@ -124,7 +131,8 @@ function Page() {
   const resultsQ = useQuery({
     queryKey: ["student-dashboard-results", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 30_000,
+    staleTime: 5_000,
+    refetchOnMount: "always",
     queryFn: async () => {
       const { data, error } = await supabase
         .from("results")
@@ -133,7 +141,7 @@ function Page() {
         )
         .eq("student_id", student!.studentId)
         .order("created_at", { ascending: false })
-        .limit(20);
+        .limit(40);
       if (error) throw error;
       return (data ?? []) as ResultRow[];
     },
@@ -142,7 +150,7 @@ function Page() {
   const notifsQ = useQuery({
     queryKey: ["student-dashboard-notifs", user?.userId],
     enabled: Boolean(user?.userId),
-    staleTime: 30_000,
+    staleTime: 15_000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("notifications")
@@ -161,26 +169,50 @@ function Page() {
     return m;
   }, [attemptsQ.data]);
 
+  /** Exam ids that already have a result — same rule as examinations page */
+  const finishedByResult = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of resultsQ.data ?? []) s.add(r.exam_id);
+    return s;
+  }, [resultsQ.data]);
+
   const exams = examsQ.data ?? [];
   const results = resultsQ.data ?? [];
   const notifs = notifsQ.data ?? [];
 
-  const DONE = ["submitted", "terminated", "flagged"];
+  function isStudentFinished(examId: string): boolean {
+    if (finishedByResult.has(examId)) return true;
+    const st = String(attemptsByExam.get(examId) || "").toLowerCase();
+    return DONE_ATTEMPT.includes(st);
+  }
 
-  const written = (attemptsQ.data ?? []).filter((a) =>
-    DONE.includes(String(a.status).toLowerCase()),
-  ).length;
+  const written = useMemo(() => {
+    const ids = new Set<string>();
+    for (const a of attemptsQ.data ?? []) {
+      if (DONE_ATTEMPT.includes(String(a.status).toLowerCase())) ids.add(a.exam_id);
+    }
+    for (const id of finishedByResult) ids.add(id);
+    return ids.size;
+  }, [attemptsQ.data, finishedByResult]);
 
-  const readyExams = exams.filter((e) => {
-    const done = DONE.includes(String(attemptsByExam.get(e.id) || "").toLowerCase());
-    if (done) return false;
-    const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
-    return avail === "available" || avail === "upcoming";
-  });
+  // Same buckets as My Examinations: Available now / Upcoming (never include finished)
+  const { availableNow, upcoming } = useMemo(() => {
+    const live: ExamRow[] = [];
+    const up: ExamRow[] = [];
+    for (const e of exams) {
+      if (isStudentFinished(e.id)) continue;
+      if (["completed", "closed"].includes(String(e.status).toLowerCase())) continue;
+      const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
+      if (avail === "available") live.push(e);
+      else if (avail === "upcoming") up.push(e);
+    }
+    return { availableNow: live, upcoming: up };
+  }, [exams, attemptsByExam, finishedByResult]);
 
-  const readyNow = readyExams.filter(
-    (e) => examAvailability(e.status, e.scheduled_start, e.scheduled_end) === "available",
-  );
+  // Card + list: only exams you can start now (matches "Available now" on exam page)
+  const readyNow = availableNow;
+  // List can also show upcoming so student sees what's coming
+  const readyList = [...availableNow, ...upcoming];
 
   const unreadNotifs = notifs.filter((n) => !n.read_at).length;
   const courseCount = student?.courses?.length ?? 0;
@@ -205,7 +237,6 @@ function Page() {
         description="Your examinations, results, courses and notifications."
       />
 
-      {/* Student information — compact on mobile */}
       <SectionCard title="Student information" className="mb-4 sm:mb-6">
         <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <InfoCell icon={User} label="Full name" value={student.fullName || "—"} bold />
@@ -223,13 +254,12 @@ function Page() {
         </div>
       </SectionCard>
 
-      {/* Summary cards — tighter on mobile so all five fit */}
       <div className="mb-4 grid grid-cols-2 gap-2 sm:mb-6 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
         <DashCard
           to="/student/examinations"
           label="Ready exams"
           value={readyNow.length}
-          hint={readyExams.length > readyNow.length ? `${readyExams.length} total` : undefined}
+          hint={upcoming.length > 0 ? `${upcoming.length} upcoming` : undefined}
           icon={ClipboardList}
           color="bg-blue-50 text-primary"
         />
@@ -268,21 +298,21 @@ function Page() {
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         <SectionCard
           title="Ready to start"
-          description="Exams you can write now or soon"
+          description="Same as Available now on My Examinations — submitted exams are removed"
           action={
             <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
               <Link to="/student/examinations">View All</Link>
             </Button>
           }
         >
-          {readyExams.length === 0 ? (
+          {readyList.length === 0 ? (
             <EmptyState
               title="No ready exams"
-              description="When officer-approved exams match your courses, they appear here."
+              description="When officer-approved exams are in their time window and you have not written them, they appear here."
             />
           ) : (
             <ul className="space-y-2">
-              {readyExams.slice(0, 5).map((e) => {
+              {readyList.slice(0, 6).map((e) => {
                 const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
                 const canStart = avail === "available";
                 return (
