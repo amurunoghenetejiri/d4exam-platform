@@ -12,8 +12,19 @@ function vibrate(pattern: number | number[] = 200) {
       navigator.vibrate(pattern);
     }
   } catch {
-    /* ignore — not supported on all devices / browsers */
+    /* ignore */
   }
+}
+
+function stopStream(stream: MediaStream | null | undefined) {
+  if (!stream) return;
+  stream.getTracks().forEach((t) => {
+    try {
+      t.stop();
+    } catch {
+      /* ignore */
+    }
+  });
 }
 
 export function ExamCameraPip({
@@ -44,14 +55,16 @@ export function ExamCameraPip({
   const [stream, setStream] = useState<MediaStream | null>(externalStream ?? null);
   const [dragging, setDragging] = useState(false);
 
-  // Acquire own camera if no external stream and enabled
   useEffect(() => {
     if (externalStream) {
       setStream(externalStream);
       return;
     }
     if (!enabled) {
+      stopStream(ownStreamRef.current);
+      ownStreamRef.current = null;
       setStream(null);
+      setFaceStatus("unavailable");
       return;
     }
     let cancelled = false;
@@ -59,7 +72,7 @@ export function ExamCameraPip({
       try {
         const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         if (cancelled) {
-          s.getTracks().forEach((t) => t.stop());
+          stopStream(s);
           return;
         }
         ownStreamRef.current = s;
@@ -71,10 +84,8 @@ export function ExamCameraPip({
     })();
     return () => {
       cancelled = true;
-      if (ownStreamRef.current) {
-        ownStreamRef.current.getTracks().forEach((t) => t.stop());
-        ownStreamRef.current = null;
-      }
+      stopStream(ownStreamRef.current);
+      ownStreamRef.current = null;
     };
   }, [enabled, externalStream]);
 
@@ -96,12 +107,14 @@ export function ExamCameraPip({
       videoRef.current.muted = true;
       void videoRef.current.play().catch(() => {});
     }
+    if (!stream && videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
   }, [stream]);
 
-  // Face detection loop + alerts
   useEffect(() => {
-    if (!stream || !faceDetection) {
-      setFaceStatus(stream ? "unknown" : "unavailable");
+    if (!stream || !faceDetection || !enabled) {
+      setFaceStatus(stream && enabled ? "unknown" : "unavailable");
       return;
     }
     let cancelled = false;
@@ -109,7 +122,6 @@ export function ExamCameraPip({
 
     const alertFace = (kind: "none" | "multi") => {
       const now = Date.now();
-      // throttle alerts to once every 4s
       if (now - lastAlertRef.current < 4000) return;
       lastAlertRef.current = now;
       if (kind === "none") {
@@ -165,9 +177,8 @@ export function ExamCameraPip({
       faceEngineRef.current?.close?.();
       faceEngineRef.current = null;
     };
-  }, [stream, faceDetection, maxFaceWarnings]);
+  }, [stream, faceDetection, maxFaceWarnings, enabled]);
 
-  // Document-level pointer handlers while dragging (reliable across the screen)
   useEffect(() => {
     if (!dragging) return;
 
