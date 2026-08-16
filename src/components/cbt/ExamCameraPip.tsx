@@ -6,6 +6,8 @@ import { toast } from "sonner";
 
 type FaceState = "ok" | "none" | "multi" | "unclear" | "unavailable";
 
+type CamConnState = "active" | "reconnecting" | "unavailable";
+
 type SecurityAlertKind = "none" | "multi" | "unclear" | "camera_blocked";
 
 /** Browser Vibration API — no-op when unsupported (desktop Safari, some desktops). */
@@ -72,6 +74,13 @@ function stopStream(stream: MediaStream | null | undefined) {
   });
 }
 
+function streamIsLive(stream: MediaStream | null | undefined): boolean {
+  if (!stream) return false;
+  const tracks = stream.getVideoTracks();
+  if (tracks.length === 0) return false;
+  return tracks.some((t) => t.readyState === "live" && t.enabled !== false);
+}
+
 export type FaceSecurityEvent = {
   kind: SecurityAlertKind | "ok";
   faceCount: number | null;
@@ -98,6 +107,7 @@ export function ExamCameraPip({
   const lastAlertRef = useRef(0);
   const lastStateRef = useRef<FaceState>("unavailable");
   const ownStreamRef = useRef<MediaStream | null>(null);
+  const acquiringRef = useRef(false);
   const dragState = useRef<{
     pointerId: number;
     startX: number;
@@ -111,11 +121,13 @@ export function ExamCameraPip({
   const [pos, setPos] = useState({ left: 16, top: 16 });
   const [faceStatus, setFaceStatus] = useState<FaceState>("unavailable");
   const [stream, setStream] = useState<MediaStream | null>(externalStream ?? null);
+  const [camConn, setCamConn] = useState<CamConnState>(
+    externalStream ? "active" : enabled ? "reconnecting" : "unavailable",
+  );
   const [dragging, setDragging] = useState(false);
 
   const fireAlert = useCallback((kind: SecurityAlertKind, faceCount: number | null) => {
     const now = Date.now();
-    // Cooldown: avoid continuous vibrate every poll tick
     if (now - lastAlertRef.current < ALERT_COOLDOWN_MS) return;
     lastAlertRef.current = now;
 
@@ -133,49 +145,125 @@ export function ExamCameraPip({
     });
   }, []);
 
-  // Camera acquire / release
+  const acquireOwnCamera = useCallback(
+    async (reason: "mount" | "reconnect") => {
+      if (externalStream) return;
+      if (!enabled) return;
+      if (acquiringRef.current) return;
+      if (reason === "reconnect" && streamIsLive(ownStreamRef.current)) {
+        setStream(ownStreamRef.current);
+        setCamConn("active");
+        return;
+      }
+
+      acquiringRef.current = true;
+      setCamConn("reconnecting");
+      try {
+        // Stop any dead tracks before opening a new stream (no duplicates)
+        stopStream(ownStreamRef.current);
+        ownStreamRef.current = null;
+
+        const s = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false,
+        });
+        ownStreamRef.current = s;
+        setStream(s);
+        setCamConn("active");
+        setFaceStatus(faceDetection ? "unclear" : "ok");
+      } catch {
+        ownStreamRef.current = null;
+        setStream(null);
+        setCamConn("unavailable");
+        setFaceStatus("unavailable");
+        fireAlert("camera_blocked", null);
+        toast.error("Camera not available. Please allow camera access to continue the exam.", {
+          id: "cbt-cam-permission",
+          duration: 6000,
+        });
+      } finally {
+        acquiringRef.current = false;
+      }
+    },
+    [enabled, externalStream, faceDetection, fireAlert],
+  );
+
+  // Camera acquire / release (own stream only)
   useEffect(() => {
     if (externalStream) {
       setStream(externalStream);
+      setCamConn(streamIsLive(externalStream) ? "active" : "unavailable");
       return;
     }
     if (!enabled) {
       stopStream(ownStreamRef.current);
       ownStreamRef.current = null;
       setStream(null);
+      setCamConn("unavailable");
       setFaceStatus("unavailable");
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        if (cancelled) {
-          stopStream(s);
-          return;
-        }
-        ownStreamRef.current = s;
-        setStream(s);
-      } catch {
-        setFaceStatus("unavailable");
-        setStream(null);
-        fireAlert("camera_blocked", null);
-      }
-    })();
+
+    void acquireOwnCamera("mount");
+
     return () => {
-      cancelled = true;
       stopStream(ownStreamRef.current);
       ownStreamRef.current = null;
     };
-  }, [enabled, externalStream, fireAlert]);
+  }, [enabled, externalStream, acquireOwnCamera]);
 
-  // Stream ended / track muted → camera blocked
+  // Visibility / focus: re-init camera when student returns to the tab
   useEffect(() => {
-    if (!stream || !enabled) return;
+    if (!enabled || externalStream) return;
+
+    const tryReconnect = () => {
+      if (document.visibilityState !== "visible") return;
+      const live = streamIsLive(ownStreamRef.current) || streamIsLive(stream);
+      if (live) {
+        setCamConn("active");
+        // Ensure video element is playing again after backgrounding
+        const v = videoRef.current;
+        if (v && v.srcObject) {
+          void v.play().catch(() => {});
+        }
+        return;
+      }
+      void acquireOwnCamera("reconnect");
+    };
+
+    const onVis = () => tryReconnect();
+    const onFocus = () => tryReconnect();
+    const onPageShow = () => tryReconnect();
+
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("pageshow", onPageShow);
+
+    // Periodic health check while exam is open (catches silent track death)
+    const health = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (!streamIsLive(ownStreamRef.current) && !streamIsLive(stream)) {
+        void acquireOwnCamera("reconnect");
+      }
+    }, 8000);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
+      window.clearInterval(health);
+    };
+  }, [enabled, externalStream, stream, acquireOwnCamera]);
+
+  // Stream ended / track muted → reconnect
+  useEffect(() => {
+    if (!stream || !enabled || externalStream) return;
     const tracks = stream.getVideoTracks();
     const onEnded = () => {
       setFaceStatus("unavailable");
+      setCamConn("reconnecting");
       fireAlert("camera_blocked", null);
+      void acquireOwnCamera("reconnect");
     };
     const onMute = () => {
       setFaceStatus("unavailable");
@@ -191,7 +279,7 @@ export function ExamCameraPip({
         t.removeEventListener("mute", onMute);
       }
     };
-  }, [stream, enabled, fireAlert]);
+  }, [stream, enabled, externalStream, fireAlert, acquireOwnCamera]);
 
   const setVideoNode = useCallback(
     (node: HTMLVideoElement | null) => {
@@ -250,7 +338,6 @@ export function ExamCameraPip({
       try {
         const n = await faceEngineRef.current.count(videoRef.current);
         if (cancelled) return;
-        // null = video not ready / detection failed → treat as unclear (out of frame)
         if (n == null) {
           applyState("unclear", null);
         } else if (n <= 0) {
@@ -331,18 +418,29 @@ export function ExamCameraPip({
     };
   }, [dragging]);
 
-  if (!enabled || !stream) return null;
+  if (!enabled) return null;
 
   const faceLabel =
-    faceStatus === "multi"
-      ? "Multiple faces"
-      : faceStatus === "none"
-        ? "Face not seen"
-        : faceStatus === "ok"
-          ? "Monitoring · 1 face"
-          : faceStatus === "unavailable"
-            ? "Camera blocked"
-            : "Face unclear";
+    camConn === "reconnecting"
+      ? "Reconnecting camera…"
+      : camConn === "unavailable"
+        ? "Camera not available"
+        : faceStatus === "multi"
+          ? "Multiple faces"
+          : faceStatus === "none"
+            ? "Face not seen"
+            : faceStatus === "ok"
+              ? "Monitoring · 1 face"
+              : faceStatus === "unavailable"
+                ? "Camera blocked"
+                : "Face unclear";
+
+  const statusDot =
+    camConn === "active" && faceStatus !== "unavailable"
+      ? "bg-emerald-400"
+      : camConn === "reconnecting"
+        ? "bg-amber-400"
+        : "bg-red-500";
 
   return (
     <div
@@ -363,24 +461,41 @@ export function ExamCameraPip({
       }}
     >
       <div className="flex cursor-grab items-center gap-1 bg-black/80 px-2 py-1.5 active:cursor-grabbing">
+        <span className={cn("h-2 w-2 shrink-0 rounded-full", statusDot)} aria-hidden />
         <GripVertical className="h-3.5 w-3.5 text-white/80" />
-        <span className="text-[10px] font-semibold text-white/90">Drag to move</span>
+        <span className="text-[10px] font-semibold text-white/90">
+          {camConn === "active"
+            ? "Camera active"
+            : camConn === "reconnecting"
+              ? "Reconnecting…"
+              : "Camera off"}
+        </span>
       </div>
-      <video
-        ref={setVideoNode}
-        className="aspect-[4/3] w-full scale-x-[-1] bg-black object-cover pointer-events-none"
-        autoPlay
-        playsInline
-        muted
-      />
+      {stream ? (
+        <video
+          ref={setVideoNode}
+          className="aspect-[4/3] w-full scale-x-[-1] bg-black object-cover pointer-events-none"
+          autoPlay
+          playsInline
+          muted
+        />
+      ) : (
+        <div className="flex aspect-[4/3] w-full items-center justify-center bg-slate-900 px-2 text-center text-[10px] font-semibold text-white/80">
+          {camConn === "reconnecting"
+            ? "Reconnecting camera…"
+            : "Allow camera access"}
+        </div>
+      )}
       <div
         className={cn(
           "px-2 py-1 text-center text-[10px] font-bold text-white",
-          faceStatus === "multi" && "bg-red-600",
-          faceStatus === "none" && "bg-amber-600",
-          faceStatus === "unclear" && "bg-amber-500",
-          faceStatus === "ok" && "bg-emerald-600",
-          faceStatus === "unavailable" && "bg-red-700",
+          camConn === "reconnecting" && "bg-amber-600",
+          camConn === "unavailable" && "bg-red-700",
+          camConn === "active" && faceStatus === "multi" && "bg-red-600",
+          camConn === "active" && faceStatus === "none" && "bg-amber-600",
+          camConn === "active" && faceStatus === "unclear" && "bg-amber-500",
+          camConn === "active" && faceStatus === "ok" && "bg-emerald-600",
+          camConn === "active" && faceStatus === "unavailable" && "bg-red-700",
         )}
       >
         {faceLabel}
