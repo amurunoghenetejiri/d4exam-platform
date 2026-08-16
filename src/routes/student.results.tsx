@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useChildMatches, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Loader2 } from "lucide-react";
 import { PageHeader, EmptyState, StatusBadge } from "@/components/dashboard/kit";
@@ -29,7 +29,18 @@ type ResultRow = {
 };
 
 function Page() {
+  // /student/results/$id is a child of this route — must render Outlet or detail never shows
+  const childMatches = useChildMatches();
+  if (childMatches.length > 0) {
+    return <Outlet />;
+  }
+
+  return <ResultsList />;
+}
+
+function ResultsList() {
   const { data: student, isLoading } = useStudentContext();
+  const navigate = useNavigate();
 
   const resultsQ = useQuery({
     queryKey: ["student-results", student?.studentId],
@@ -38,7 +49,9 @@ function Page() {
       if (!student?.studentId) return [] as ResultRow[];
       const { data, error } = await supabase
         .from("results")
-        .select("id, exam_id, total_score, max_score, percentage, grade, pass_fail, status, security_review_status, released_at, created_at, examinations(title, courses(code, name))")
+        .select(
+          "id, exam_id, total_score, max_score, percentage, grade, pass_fail, status, security_review_status, released_at, created_at, examinations(title, courses(code, name))",
+        )
         .eq("student_id", student.studentId)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -67,10 +80,16 @@ function Page() {
 
   return (
     <>
-      <PageHeader title="My Results" description="Results of exams you have written. Held results stay hidden until the examination officer releases them." />
+      <PageHeader
+        title="My Results"
+        description="Results of exams you have written. Held results stay hidden until the examination officer releases them."
+      />
       <SchoolResultHeader />
       {rows.length === 0 ? (
-        <EmptyState title="No results yet" description="After you submit an exam, your result appears here once the officer releases it." />
+        <EmptyState
+          title="No results yet"
+          description="After you submit an exam, your result appears here once the officer releases it."
+        />
       ) : (
         <ul className="space-y-3">
           {rows.map((r) => {
@@ -86,11 +105,14 @@ function Page() {
                   : st === "processing"
                     ? "Processing"
                     : String(r.status || "Pending");
+            const targetId = r.id || r.exam_id;
             return (
               <li key={r.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
-                    <p className="text-sm font-bold text-slate-900">{r.examinations?.title ?? "Exam"}</p>
+                    <p className="text-sm font-bold text-slate-900">
+                      {r.examinations?.title ?? "Exam"}
+                    </p>
                     <p className="text-xs text-slate-500">
                       {r.examinations?.courses?.code} — {r.examinations?.courses?.name}
                     </p>
@@ -102,16 +124,27 @@ function Page() {
                       </p>
                     ) : (
                       <p className="mt-1 text-xs font-semibold text-amber-700">
-                        Result is held pending officer release. Open status for details — scores stay hidden until released.
+                        Result is held pending officer release. Open status for details — scores stay
+                        hidden until released.
                       </p>
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusBadge status={statusLabel} />
-                    <Button asChild size="sm" className="h-8 px-2.5 text-xs font-semibold" variant={published ? "default" : "outline"}>
-                      <Link to="/student/results/$id" params={{ id: r.id }}>
-                        {published ? "View result" : "View status"} <ChevronRight className="ml-1 h-3.5 w-3.5" />
-                      </Link>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-8 px-2.5 text-xs font-semibold"
+                      variant={published ? "default" : "outline"}
+                      onClick={() => {
+                        void navigate({
+                          to: "/student/results/$id",
+                          params: { id: targetId },
+                        });
+                      }}
+                    >
+                      {published ? "View result" : "View status"}{" "}
+                      <ChevronRight className="ml-1 h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
