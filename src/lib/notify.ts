@@ -64,7 +64,6 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
         .eq("type", p.type || "info")
         .gte("created_at", since)
         .limit(1);
-      // entity_id may not exist on older schemas — ignore filter errors by soft try
       if (p.entityId) q = q.eq("entity_id" as never, p.entityId as never);
       const { data: existing } = await q.maybeSingle();
       if (existing?.id) return existing.id as string;
@@ -73,7 +72,6 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
     const row = baseRow(p);
     const { data, error } = await supabase.from("notifications").insert(row as never).select("id").maybeSingle();
     if (error) {
-      // Retry without optional columns if schema is minimal
       const minimal = {
         recipient_user_id: p.recipientUserId,
         title: p.title,
@@ -203,7 +201,7 @@ export async function notifyTeacherExamDecision(opts: {
 export async function notifyStudentResultPublished(opts: {
   studentUserId: string;
   schoolId?: string | null;
-  resultId: string;
+  resultId?: string;
   examTitle: string;
 }) {
   await notifyUser({
@@ -212,9 +210,9 @@ export async function notifyStudentResultPublished(opts: {
     title: "Result published",
     message: `Your result for ${opts.examTitle} is now available.`,
     type: "result_published",
-    link: `/student/results/${opts.resultId}`,
+    link: "/student/results",
     entityType: "result",
-    entityId: opts.resultId,
+    entityId: opts.resultId ?? null,
     dedupeMinutes: 60,
   });
 }
