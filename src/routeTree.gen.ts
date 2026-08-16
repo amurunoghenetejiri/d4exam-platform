@@ -87,6 +87,7 @@ import { Route as TeacherResultsRouteImport } from './routes/teacher.results'
 import { Route as TeacherSettingsRouteImport } from './routes/teacher.settings'
 import { Route as TeacherSubmissionsRouteImport } from './routes/teacher.submissions'
 import { Route as AdminStudentIdRouteImport } from './routes/admin.student.$id'
+import { Route as OfficerExamPreviewIdRouteImport } from './routes/officer.exam-preview.$id'
 import { Route as StudentExamIdRouteImport } from './routes/student.exam.$id'
 import { Route as StudentResultsIdRouteImport } from './routes/student.results.$id'
 import { Route as SuperAdminSchoolsIndexRouteImport } from './routes/super-admin.schools.index'
@@ -483,6 +484,11 @@ const AdminStudentIdRoute = AdminStudentIdRouteImport.update({
   path: '/student/$id',
   getParentRoute: () => AdminRoute,
 } as any)
+const OfficerExamPreviewIdRoute = OfficerExamPreviewIdRouteImport.update({
+  id: '/exam-preview/$id',
+  path: '/exam-preview/$id',
+  getParentRoute: () => OfficerRoute,
+} as any)
 const StudentExamIdRoute = StudentExamIdRouteImport.update({
   id: '/exam/$id',
   path: '/exam/$id',
@@ -588,6 +594,7 @@ export interface FileRoutesByFullPath {
   '/super-admin/': typeof SuperAdminIndexRoute
   '/teacher/': typeof TeacherIndexRoute
   '/admin/student/$id': typeof AdminStudentIdRoute
+  '/officer/exam-preview/$id': typeof OfficerExamPreviewIdRoute
   '/student/exam/$id': typeof StudentExamIdRoute
   '/student/results/$id': typeof StudentResultsIdRoute
   '/super-admin/schools/$id': typeof SuperAdminSchoolsIdRoute
@@ -667,6 +674,7 @@ export interface FileRoutesByTo {
   '/super-admin': typeof SuperAdminIndexRoute
   '/teacher': typeof TeacherIndexRoute
   '/admin/student/$id': typeof AdminStudentIdRoute
+  '/officer/exam-preview/$id': typeof OfficerExamPreviewIdRoute
   '/student/exam/$id': typeof StudentExamIdRoute
   '/student/results/$id': typeof StudentResultsIdRoute
   '/super-admin/schools/$id': typeof SuperAdminSchoolsIdRoute
@@ -753,6 +761,7 @@ export interface FileRoutesById {
   '/super-admin/': typeof SuperAdminIndexRoute
   '/teacher/': typeof TeacherIndexRoute
   '/admin/student/$id': typeof AdminStudentIdRoute
+  '/officer/exam-preview/$id': typeof OfficerExamPreviewIdRoute
   '/student/exam/$id': typeof StudentExamIdRoute
   '/student/results/$id': typeof StudentResultsIdRoute
   '/super-admin/schools/$id': typeof SuperAdminSchoolsIdRoute
@@ -840,6 +849,7 @@ export interface FileRouteTypes {
     | '/super-admin/'
     | '/teacher/'
     | '/admin/student/$id'
+    | '/officer/exam-preview/$id'
     | '/student/exam/$id'
     | '/student/results/$id'
     | '/super-admin/schools/$id'
@@ -919,6 +929,7 @@ export interface FileRouteTypes {
     | '/super-admin'
     | '/teacher'
     | '/admin/student/$id'
+    | '/officer/exam-preview/$id'
     | '/student/exam/$id'
     | '/student/results/$id'
     | '/super-admin/schools/$id'
@@ -1004,6 +1015,7 @@ export interface FileRouteTypes {
     | '/super-admin/'
     | '/teacher/'
     | '/admin/student/$id'
+    | '/officer/exam-preview/$id'
     | '/student/exam/$id'
     | '/student/results/$id'
     | '/super-admin/schools/$id'
@@ -1579,6 +1591,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminStudentIdRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/officer/exam-preview/$id': {
+      id: '/officer/exam-preview/$id'
+      path: '/exam-preview/$id'
+      fullPath: '/officer/exam-preview/$id'
+      preLoaderRoute: typeof OfficerExamPreviewIdRouteImport
+      parentRoute: typeof OfficerRoute
+    }
     '/student/exam/$id': {
       id: '/student/exam/$id'
       path: '/exam/$id'
@@ -1675,6 +1694,7 @@ interface OfficerRouteChildren {
   OfficerResultsRoute: typeof OfficerResultsRoute
   OfficerSettingsRoute: typeof OfficerSettingsRoute
   OfficerIndexRoute: typeof OfficerIndexRoute
+  OfficerExamPreviewIdRoute: typeof OfficerExamPreviewIdRoute
 }
 
 const OfficerRouteChildren: OfficerRouteChildren = {
@@ -1687,6 +1707,7 @@ const OfficerRouteChildren: OfficerRouteChildren = {
   OfficerResultsRoute: OfficerResultsRoute,
   OfficerSettingsRoute: OfficerSettingsRoute,
   OfficerIndexRoute: OfficerIndexRoute,
+  OfficerExamPreviewIdRoute: OfficerExamPreviewIdRoute,
 }
 
 const OfficerRouteWithChildren =

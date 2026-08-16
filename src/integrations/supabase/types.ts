@@ -524,9 +524,12 @@ export type Database = {
           block_copy_paste: boolean
           created_at: string
           exam_id: string
+          face_detection: boolean
+          face_violation_action: string
           fullscreen: boolean
           id: string
           instructions: string | null
+          max_face_warnings: number
           max_fullscreen_exits: number
           max_tab_switches: number
           questions_to_answer: number | null
@@ -534,7 +537,9 @@ export type Database = {
           randomize_questions: boolean
           require_camera: boolean
           require_microphone: boolean
+          require_screen_share: boolean
           result_visibility: string
+          screen_share_mode: string
           tab_monitoring: boolean
           threshold_action: string
           total_marks: number
@@ -545,9 +550,12 @@ export type Database = {
           block_copy_paste?: boolean
           created_at?: string
           exam_id: string
+          face_detection?: boolean
+          face_violation_action?: string
           fullscreen?: boolean
           id?: string
           instructions?: string | null
+          max_face_warnings?: number
           max_fullscreen_exits?: number
           max_tab_switches?: number
           questions_to_answer?: number | null
@@ -555,7 +563,9 @@ export type Database = {
           randomize_questions?: boolean
           require_camera?: boolean
           require_microphone?: boolean
+          require_screen_share?: boolean
           result_visibility?: string
+          screen_share_mode?: string
           tab_monitoring?: boolean
           threshold_action?: string
           total_marks?: number
@@ -566,9 +576,12 @@ export type Database = {
           block_copy_paste?: boolean
           created_at?: string
           exam_id?: string
+          face_detection?: boolean
+          face_violation_action?: string
           fullscreen?: boolean
           id?: string
           instructions?: string | null
+          max_face_warnings?: number
           max_fullscreen_exits?: number
           max_tab_switches?: number
           questions_to_answer?: number | null
@@ -576,7 +589,9 @@ export type Database = {
           randomize_questions?: boolean
           require_camera?: boolean
           require_microphone?: boolean
+          require_screen_share?: boolean
           result_visibility?: string
+          screen_share_mode?: string
           tab_monitoring?: boolean
           threshold_action?: string
           total_marks?: number
@@ -1016,6 +1031,7 @@ export type Database = {
           exam_id: string
           grade: string | null
           id: string
+          max_score: number | null
           objective_score: number | null
           pass_fail: string | null
           percentage: number | null
@@ -1039,6 +1055,7 @@ export type Database = {
           exam_id: string
           grade?: string | null
           id?: string
+          max_score?: number | null
           objective_score?: number | null
           pass_fail?: string | null
           percentage?: number | null
@@ -1062,6 +1079,7 @@ export type Database = {
           exam_id?: string
           grade?: string | null
           id?: string
+          max_score?: number | null
           objective_score?: number | null
           pass_fail?: string | null
           percentage?: number | null
