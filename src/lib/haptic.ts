@@ -15,20 +15,28 @@ export type HapticKind =
   | "tab_switch"
   | "officer_warning";
 
-/** Patterns in ms (vibrate / pause / vibrate…). Officer warning is longer & stronger. */
+/**
+ * Patterns in ms (vibrate / pause / vibrate…).
+ * Loudness hierarchy (longest / strongest first):
+ *   officer_warning > multi ≈ camera_blocked > none > unclear > tab_switch
+ */
 const PATTERNS: Record<HapticKind, number | number[]> = {
-  none: [90, 40, 90],
-  unclear: [70, 35, 70],
-  multi: [160, 60, 160, 60, 160],
-  camera_blocked: [220, 80, 220],
-  tab_switch: [100, 50, 100],
-  // Louder / longer for officer-sent warnings during exam
-  officer_warning: [320, 100, 320, 100, 400, 120, 400],
+  // No face — strong but shorter than officer warning
+  none: [180, 70, 180, 70, 220],
+  unclear: [100, 50, 100, 50, 120],
+  // Multiple faces — louder than no-face
+  multi: [240, 80, 240, 80, 280, 90, 280],
+  camera_blocked: [200, 70, 200, 70, 240],
+  tab_switch: [120, 50, 120],
+  // Officer warning — longest and strongest
+  officer_warning: [400, 120, 400, 120, 500, 150, 500, 150, 600],
 };
 
 export function haptic(kind: HapticKind) {
   if (!canVibrate()) return;
   try {
+    // Cancel any ongoing pattern first so the new one is felt clearly
+    navigator.vibrate(0);
     navigator.vibrate(PATTERNS[kind]);
   } catch {
     /* permission / policy blocked */
@@ -37,4 +45,12 @@ export function haptic(kind: HapticKind) {
 
 export function hapticOfficerWarning() {
   haptic("officer_warning");
+}
+
+export function hapticFaceNone() {
+  haptic("none");
+}
+
+export function hapticFaceMulti() {
+  haptic("multi");
 }
