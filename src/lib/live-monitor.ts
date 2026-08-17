@@ -86,18 +86,19 @@ export function faceLabel(presence: MonitorPresence): string {
   return "Unknown";
 }
 
+/** Subtle glow — not over-glow. Green = clean, amber = minor, red = serious. */
 export function severityBorderClass(sev: MonitorSeverity): string {
   switch (sev) {
     case "normal":
-      return "border-emerald-400/80 ring-1 ring-emerald-400/30";
+      return "border-emerald-400/90 ring-1 ring-emerald-400/35 shadow-[0_0_10px_rgba(16,185,129,0.35)]";
     case "warning":
-      return "border-amber-400/90 ring-1 ring-amber-400/40";
+      return "border-amber-400/95 ring-1 ring-amber-400/45 shadow-[0_0_10px_rgba(245,158,11,0.4)]";
     case "violation":
-      return "border-red-500/90 ring-1 ring-red-500/40";
+      return "border-red-600 ring-2 ring-red-500/50 shadow-[0_0_12px_rgba(220,38,38,0.45)]";
     case "offline":
       return "border-slate-400/70 ring-1 ring-slate-400/20";
     case "completed":
-      return "border-slate-300 ring-1 ring-slate-200";
+      return "border-sky-400/80 ring-1 ring-sky-300/40 shadow-[0_0_8px_rgba(56,189,248,0.25)]";
     default:
       return "border-slate-200";
   }
@@ -114,7 +115,7 @@ export function severityBadgeClass(sev: MonitorSeverity): string {
     case "offline":
       return "bg-slate-500 text-white";
     case "completed":
-      return "bg-slate-400 text-white";
+      return "bg-sky-600 text-white";
     default:
       return "bg-slate-400 text-white";
   }

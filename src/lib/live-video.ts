@@ -2,6 +2,8 @@
  * Near-live exam camera streaming for officers.
  * Uses low-rate JPEG frames over Supabase Realtime Broadcast (no TURN server required).
  * Streaming stops when the student exam ends or the camera is closed.
+ *
+ * Performance: reuses one hidden <video> + canvas so frames do not lag/skip as badly.
  */
 
 import { supabase } from "@/integrations/supabase/client";
@@ -18,11 +20,46 @@ export type LiveCamFramePayload = {
 };
 
 export const LIVE_CAM_EVENT = "frame";
-export const LIVE_CAM_FRAME_INTERVAL_MS = 1200;
-export const LIVE_CAM_STALE_MS = 8_000;
+/** ~2 fps — stable on mobile without flooding Realtime */
+export const LIVE_CAM_FRAME_INTERVAL_MS = 900;
+export const LIVE_CAM_STALE_MS = 6_000;
 
 export function liveCamChannelName(schoolId: string): string {
   return `live-cam:${schoolId}`;
+}
+
+/** Persistent elements so we do not create/destroy video every frame (major lag source). */
+let sharedVideo: HTMLVideoElement | null = null;
+let sharedCanvas: HTMLCanvasElement | null = null;
+
+function getSharedVideo(): HTMLVideoElement | null {
+  if (typeof document === "undefined") return null;
+  if (!sharedVideo) {
+    sharedVideo = document.createElement("video");
+    sharedVideo.muted = true;
+    sharedVideo.playsInline = true;
+    sharedVideo.setAttribute("playsinline", "true");
+    sharedVideo.style.position = "fixed";
+    sharedVideo.style.left = "-9999px";
+    sharedVideo.style.width = "1px";
+    sharedVideo.style.height = "1px";
+    sharedVideo.style.opacity = "0";
+    sharedVideo.style.pointerEvents = "none";
+    try {
+      document.body.appendChild(sharedVideo);
+    } catch {
+      /* SSR / no body */
+    }
+  }
+  return sharedVideo;
+}
+
+function getSharedCanvas(): HTMLCanvasElement | null {
+  if (typeof document === "undefined") return null;
+  if (!sharedCanvas) {
+    sharedCanvas = document.createElement("canvas");
+  }
+  return sharedCanvas;
 }
 
 /** Capture a small JPEG data-URL from an active MediaStream (for broadcast). */
@@ -34,57 +71,58 @@ export async function captureJpegFromStream(
   const tracks = stream.getVideoTracks();
   if (!tracks.some((t) => t.readyState === "live" && t.enabled !== false)) return null;
 
-  const maxWidth = opts?.maxWidth ?? 320;
-  const quality = opts?.quality ?? 0.42;
+  const maxWidth = opts?.maxWidth ?? 240;
+  const quality = opts?.quality ?? 0.38;
 
-  const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  video.srcObject = stream;
+  const video = getSharedVideo();
+  const canvas = getSharedCanvas();
+  if (!video || !canvas) return null;
 
-  try {
-    await video.play();
-  } catch {
-    video.srcObject = null;
-    return null;
+  // Only re-bind when stream identity changes
+  if (video.srcObject !== stream) {
+    video.srcObject = stream;
+    try {
+      await video.play();
+    } catch {
+      return null;
+    }
+    if (!video.videoWidth) {
+      await new Promise<void>((resolve) => {
+        const onMeta = () => {
+          video.removeEventListener("loadedmetadata", onMeta);
+          resolve();
+        };
+        video.addEventListener("loadedmetadata", onMeta);
+        window.setTimeout(() => resolve(), 250);
+      });
+    }
   }
 
-  // Wait briefly for dimensions if needed
-  if (!video.videoWidth) {
-    await new Promise<void>((resolve) => {
-      const onMeta = () => {
-        video.removeEventListener("loadedmetadata", onMeta);
-        resolve();
-      };
-      video.addEventListener("loadedmetadata", onMeta);
-      window.setTimeout(() => resolve(), 400);
-    });
-  }
-
-  const vw = video.videoWidth || 320;
-  const vh = video.videoHeight || 240;
-  if (vw < 8 || vh < 8) {
-    video.srcObject = null;
-    return null;
-  }
+  const vw = video.videoWidth || 0;
+  const vh = video.videoHeight || 0;
+  if (vw < 8 || vh < 8) return null;
 
   const scale = Math.min(1, maxWidth / vw);
   const w = Math.max(8, Math.round(vw * scale));
   const h = Math.max(8, Math.round(vh * scale));
 
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    video.srcObject = null;
-    return null;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
   }
-  // Mirror like the student PIP
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) return null;
+
+  ctx.save();
   ctx.translate(w, 0);
   ctx.scale(-1, 1);
-  ctx.drawImage(video, 0, 0, w, h);
-  video.srcObject = null;
+  try {
+    ctx.drawImage(video, 0, 0, w, h);
+  } catch {
+    ctx.restore();
+    return null;
+  }
+  ctx.restore();
 
   try {
     return canvas.toDataURL("image/jpeg", quality);
@@ -115,6 +153,7 @@ export function startLiveCamPublisher(opts: {
   let channel: RealtimeChannel | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let publishing = false;
+  let consecutiveFails = 0;
 
   const channelName = liveCamChannelName(opts.schoolId);
   channel = supabase.channel(channelName, {
@@ -128,7 +167,11 @@ export function startLiveCamPublisher(opts: {
     publishing = true;
     try {
       const frame = await captureJpegFromStream(stream);
-      if (stopped || !frame || !channel) return;
+      if (stopped || !frame || !channel) {
+        consecutiveFails += 1;
+        return;
+      }
+      consecutiveFails = 0;
       const meta = opts.getFaceMeta?.() ?? {};
       const payload: LiveCamFramePayload = {
         attemptId: opts.attemptId,
@@ -139,13 +182,15 @@ export function startLiveCamPublisher(opts: {
         faceStatus: meta.faceStatus,
         cameraActive: meta.cameraActive !== false,
       };
-      await channel.send({
+      // fire-and-forget — do not await ack (keeps student timer smooth)
+      void channel.send({
         type: "broadcast",
         event: LIVE_CAM_EVENT,
         payload,
       });
     } catch (e) {
-      console.warn("[live-cam] publish failed", e);
+      consecutiveFails += 1;
+      if (consecutiveFails <= 2) console.warn("[live-cam] publish failed", e);
     } finally {
       publishing = false;
     }
@@ -169,6 +214,14 @@ export function startLiveCamPublisher(opts: {
         void supabase.removeChannel(channel);
         channel = null;
       }
+      // Detach stream from shared video so camera can fully stop
+      if (sharedVideo && sharedVideo.srcObject) {
+        try {
+          sharedVideo.srcObject = null;
+        } catch {
+          /* ignore */
+        }
+      }
     },
   };
 }
@@ -190,9 +243,15 @@ export function startLiveCamSubscriber(opts: {
     config: { broadcast: { self: false } },
   });
 
+  // Drop super-stale frames so UI does not jump backward in time
+  let lastTsByAttempt = new Map<string, number>();
+
   channel.on("broadcast", { event: LIVE_CAM_EVENT }, ({ payload }) => {
     const p = payload as LiveCamFramePayload;
     if (!p?.attemptId || !p?.frame) return;
+    const prev = lastTsByAttempt.get(p.attemptId) ?? 0;
+    if (p.ts && p.ts < prev - 500) return; // ignore out-of-order old frames
+    if (p.ts) lastTsByAttempt.set(p.attemptId, p.ts);
     opts.onFrame(p);
   });
 
@@ -200,6 +259,7 @@ export function startLiveCamSubscriber(opts: {
 
   return {
     stop: () => {
+      lastTsByAttempt.clear();
       void supabase.removeChannel(channel);
     },
   };

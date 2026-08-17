@@ -41,11 +41,14 @@ function Page() {
       ? [
           { table: "examinations", filter: `school_id=eq.${schoolId}` },
           { table: "exam_attempts", filter: `school_id=eq.${schoolId}` },
+          { table: "results", filter: `school_id=eq.${schoolId}` },
         ]
       : [],
     [
       ["count", "examinations"],
       ["officer-dash-live", schoolId],
+      ["officer-dash-integrity", schoolId],
+      ["officer-dash-pending-results", schoolId],
       ["rows", "examinations"],
     ],
     enabled,
@@ -63,32 +66,52 @@ function Page() {
     enabled,
   );
 
-  /** Live = exams marked ongoing, or any exam with students currently writing. */
+  /** Live examinations = distinct exams currently running (status ongoing OR students writing). */
   const liveQ = useQuery({
     queryKey: ["officer-dash-live", schoolId],
     enabled,
-    staleTime: 8_000,
-    refetchInterval: 15_000,
+    staleTime: 5_000,
+    refetchInterval: 10_000,
     queryFn: async () => {
       if (!schoolId) return 0;
+      const ids = new Set<string>();
+
       const { data: ongoing } = await supabase
         .from("examinations")
         .select("id")
         .eq("school_id", schoolId)
         .eq("status", "ongoing");
-      const ongoingIds = new Set((ongoing ?? []).map((e) => (e as { id: string }).id));
+      for (const e of ongoing ?? []) ids.add((e as { id: string }).id);
 
       const { data: attempts } = await supabase
         .from("exam_attempts")
         .select("exam_id")
         .eq("school_id", schoolId)
         .eq("status", "in_progress")
-        .limit(500);
+        .limit(800);
       for (const a of attempts ?? []) {
-        const eid = (a as { exam_id: string }).exam_id;
-        if (eid) ongoingIds.add(eid);
+        const eid = (a as { exam_id: string | null }).exam_id;
+        if (eid) ids.add(eid);
       }
-      return ongoingIds.size;
+      return ids.size;
+    },
+  });
+
+  /** Ongoing integrity = students currently writing (in_progress attempts). */
+  const integrityQ = useQuery({
+    queryKey: ["officer-dash-integrity", schoolId],
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+    queryFn: async () => {
+      if (!schoolId) return 0;
+      const { count, error } = await supabase
+        .from("exam_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("school_id", schoolId)
+        .eq("status", "in_progress");
+      if (error) return 0;
+      return count ?? 0;
     },
   });
 
@@ -117,6 +140,7 @@ function Page() {
   });
 
   const liveValue = liveQ.isLoading ? "…" : String(liveQ.data ?? 0);
+  const integrityValue = integrityQ.isLoading ? "…" : String(integrityQ.data ?? 0);
 
   return (
     <>
@@ -159,7 +183,7 @@ function Page() {
         <Stat
           to="/officer/integrity"
           label="Ongoing (integrity)"
-          value={liveValue}
+          value={integrityValue}
           icon={ShieldAlert}
           color="bg-red-50 text-red-600"
         />
