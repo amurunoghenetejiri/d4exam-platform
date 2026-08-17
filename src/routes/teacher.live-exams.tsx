@@ -4,6 +4,7 @@ import { Radio } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { useTeacherContext } from "@/lib/teacher";
 import { supabase } from "@/integrations/supabase/client";
+import { shortDisplayName } from "@/lib/utils";
 
 export const Route = createFileRoute("/teacher/live-exams")({
   head: () => ({
@@ -46,7 +47,7 @@ function Page() {
     <>
       <PageHeader
         title="Live Exams"
-        description={`Sessions on your assigned courses · ${teacher.fullName}`}
+        description={`Sessions on your assigned courses · ${shortDisplayName(teacher.fullName)}`}
       />
 
       <div className="mb-6 grid grid-cols-2 gap-3">
