@@ -18,26 +18,36 @@ export type HapticKind =
 /**
  * Patterns in ms (vibrate / pause / vibrate…).
  * Loudness hierarchy (longest / strongest first):
- *   officer_warning > multi ≈ camera_blocked > none > unclear > tab_switch
+ *   officer_warning >> multi ≈ camera_blocked > none > unclear > tab_switch
  */
 const PATTERNS: Record<HapticKind, number | number[]> = {
-  // No face — strong but shorter than officer warning
-  none: [180, 70, 180, 70, 220],
-  unclear: [100, 50, 100, 50, 120],
-  // Multiple faces — louder than no-face
-  multi: [240, 80, 240, 80, 280, 90, 280],
-  camera_blocked: [200, 70, 200, 70, 240],
-  tab_switch: [120, 50, 120],
-  // Officer warning — longest and strongest
-  officer_warning: [400, 120, 400, 120, 500, 150, 500, 150, 600],
+  // Face not detected — medium pulse
+  none: [200, 80, 200, 80, 250],
+  unclear: [120, 60, 120, 60, 140],
+  // Multiple faces — stronger than no-face
+  multi: [260, 90, 260, 90, 300, 100, 300],
+  camera_blocked: [220, 80, 220, 80, 260],
+  tab_switch: [140, 60, 140],
+  // Officer warning — longest and strongest (clearly above face alerts)
+  officer_warning: [
+    500, 120, 500, 120, 600, 150, 600, 150, 700, 180, 700, 180, 800,
+  ],
 };
 
 export function haptic(kind: HapticKind) {
   if (!canVibrate()) return;
   try {
-    // Cancel any ongoing pattern first so the new one is felt clearly
+    // Cancel any ongoing pattern so the new one is felt clearly
     navigator.vibrate(0);
-    navigator.vibrate(PATTERNS[kind]);
+    const pattern = PATTERNS[kind];
+    // Brief delay after cancel improves reliability on Android WebViews
+    window.setTimeout(() => {
+      try {
+        navigator.vibrate(pattern);
+      } catch {
+        /* permission / policy blocked */
+      }
+    }, 40);
   } catch {
     /* permission / policy blocked */
   }
