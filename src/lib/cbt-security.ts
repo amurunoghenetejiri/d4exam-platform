@@ -135,8 +135,10 @@ export function scoreObjectiveAnswers(
     id: string;
     correct_answer: string | null;
     correctOptionText?: string | null;
-    marks: number;
+    /** Options the student actually saw (may be shuffled). Used only to map answer index → text. */
     options: string[];
+    /** Original A–D option texts before any shuffle. Used to resolve letter keys. */
+    originalOptions?: string[];
   }[],
   answers: Record<string, number>,
 ) {
@@ -161,33 +163,49 @@ export function scoreObjectiveAnswers(
       continue;
     }
 
-    // 1) Preferred: resolved option text (survives shuffle)
+    const original = (q.originalOptions && q.originalOptions.length ? q.originalOptions : null) as string[] | null;
+    // Prefer explicit correctOptionText (set before shuffle). Else resolve letter/text
+    // against ORIGINAL options only — never against shuffled options.
     const textKey = (q.correctOptionText || "").trim();
-    // 2) Fallback: resolve from correct_answer + current options
-    const resolved =
-      textKey ||
-      resolveCorrectOptionText(q.correct_answer, q.options) ||
-      "";
-    const expected = normalizeAnswer(resolved);
+    const resolvedFromOriginal = original
+      ? resolveCorrectOptionText(q.correct_answer, original)
+      : null;
+    // Last resort: match correct_answer as free text against the options the student saw
+    const resolvedFromSeen = resolveCorrectOptionText(q.correct_answer, q.options);
+    const expected = normalizeAnswer(
+      textKey || resolvedFromOriginal || resolvedFromSeen || "",
+    );
 
     let ok = false;
     if (expected) {
       ok = chosen === expected;
     }
 
-    // 3) Extra fallbacks for letter / index storage
+    // Free-text / letter equality without relying on index (index is invalid after shuffle)
     if (!ok) {
       const raw = (q.correct_answer || "").trim();
-      if (/^[A-Da-d]$/.test(raw)) {
-        if (chosen === raw.toLowerCase()) ok = true;
-        if (!ok && !textKey) {
-          const letterIdx = raw.toUpperCase().charCodeAt(0) - 65;
-          if (Number(idx) === letterIdx) ok = true;
-        }
-      } else if (raw) {
+      if (raw) {
+        const normRaw = normalizeAnswer(raw);
+        if (chosen === normRaw) ok = true;
         const stripped = normalizeAnswer(raw.replace(/^[A-Da-d][).:\-\s]+/, ""));
-        if (stripped && chosen === stripped) ok = true;
-        if (!ok && String(idx) === raw) ok = true;
+        if (!ok && stripped && chosen === stripped) ok = true;
+        // True/False synonyms
+        if (!ok) {
+          const tfMap: Record<string, string[]> = {
+            true: ["true", "t", "yes"],
+            false: ["false", "f", "no"],
+          };
+          for (const [, aliases] of Object.entries(tfMap)) {
+            if (aliases.includes(normRaw) && aliases.includes(chosen)) {
+              ok = true;
+              break;
+            }
+            if (aliases.includes(expected) && aliases.includes(chosen)) {
+              ok = true;
+              break;
+            }
+          }
+        }
       }
     }
 
