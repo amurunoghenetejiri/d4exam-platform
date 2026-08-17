@@ -1,83 +1,104 @@
-/** CBT security vibration only — no sound. */
+/**
+ * CBT exam vibration (motor only — no sound).
+ *
+ * Android Chrome supports navigator.vibrate.
+ * iOS Safari generally does not — calls are no-ops there.
+ */
 
 export type HapticKind =
+  | "start"
   | "none"
   | "unclear"
   | "multi"
   | "camera_blocked"
   | "tab_switch"
-  | "officer_warning"
-  | "start";
+  | "officer_warning";
 
-/**
- * Standard alternating pattern: [vibrateMs, pauseMs, vibrateMs, …]
- * Keep individual on-segments under 1000ms for better Android support.
- */
+/** [on, off, on, off, …] milliseconds */
 const PATTERNS: Record<HapticKind, number[]> = {
-  // Exam start — clear short confirmation buzz
-  start: [120, 60, 180],
-  // Face not detected
-  none: [300, 100, 300, 100, 400],
-  unclear: [180, 80, 180, 80, 220],
-  multi: [350, 100, 350, 100, 400, 100, 400],
-  camera_blocked: [300, 90, 300, 90, 350],
-  tab_switch: [220, 80, 220],
-  // Officer — longest and strongest
+  start: [200, 80, 250],
+  none: [350, 120, 350, 120, 450],
+  unclear: [200, 90, 200, 90, 250],
+  multi: [400, 120, 400, 120, 450, 120, 500],
+  camera_blocked: [350, 100, 350, 100, 400],
+  tab_switch: [250, 90, 250],
+  // Longest — officer warning
   officer_warning: [
-    500, 120, 500, 120, 550, 140, 550, 140, 600, 160, 600, 160, 700, 180, 700,
+    500, 150, 500, 150, 600, 150, 600, 150, 700, 200, 700, 200, 800,
   ],
 };
 
 let primed = false;
-const pending: number[] = [];
+let timers: number[] = [];
 
 export function canVibrate(): boolean {
-  return typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
-}
-
-function clearPending() {
-  for (const id of pending) window.clearTimeout(id);
-  pending.length = 0;
-}
-
-function navVibrate(pattern: number | number[]): boolean {
-  if (!canVibrate()) return false;
   try {
-    // Chrome returns false when the call is ignored
-    return navigator.vibrate(pattern as never) !== false;
+    return (
+      typeof window !== "undefined" &&
+      typeof navigator !== "undefined" &&
+      typeof navigator.vibrate === "function"
+    );
   } catch {
     return false;
   }
 }
 
-/**
- * Some Android WebViews ignore long patterns but accept repeated single pulses.
- */
-function runSequentialPulses(pulses: number[], gapMs: number) {
-  clearPending();
+function clearTimers() {
+  for (const t of timers) {
+    try {
+      window.clearTimeout(t);
+    } catch {
+      /* ignore */
+    }
+  }
+  timers = [];
+}
+
+function vibrateRaw(arg: number | number[]): boolean {
+  if (!canVibrate()) return false;
+  try {
+    // Spec: returns false if the user agent ignored the call
+    const result = navigator.vibrate(arg);
+    return result !== false;
+  } catch {
+    return false;
+  }
+}
+
+/** Fire a list of single pulses with gaps (fallback when patterns are ignored). */
+function pulseTrain(ons: number[], gap: number) {
   let delay = 0;
-  for (const ms of pulses) {
+  for (const ms of ons) {
     const d = delay;
     const id = window.setTimeout(() => {
-      navVibrate(ms);
+      vibrateRaw(ms);
     }, d);
-    pending.push(id);
-    delay += ms + gapMs;
+    timers.push(id);
+    delay += ms + gap;
   }
 }
 
 /**
- * Must be called from a real user gesture (Start exam button).
- * Unlocks Vibration API and gives a clear start buzz.
+ * Call from a user gesture (Start exam / touch).
+ * Unlocks vibration on strict browsers and buzzes on start.
  */
 export function primeHaptics() {
   primed = true;
-  // Noticeable start vibration (user asked to feel it when exam starts)
-  const ok = navVibrate(PATTERNS.start);
+  // Cancel anything leftover, then start pattern
+  vibrateRaw(0);
+  const ok = vibrateRaw(PATTERNS.start);
   if (!ok) {
-    // Fallback: sequential singles
-    runSequentialPulses([120, 180], 60);
+    pulseTrain([200, 250], 80);
   }
+}
+
+/** Keep activation alive while the student taps the exam UI. */
+export function refreshHapticUnlock() {
+  primed = true;
+  // Tiny no-op-ish pulse to refresh some WebView gesture chains
+  vibrateRaw(1);
+  const id = window.setTimeout(() => vibrateRaw(0), 15);
+  timers.push(id);
 }
 
 export function haptic(kind: HapticKind) {
@@ -85,31 +106,48 @@ export function haptic(kind: HapticKind) {
 
   const pattern = PATTERNS[kind] ?? PATTERNS.none;
 
-  // 1) Full pattern in one call (best on Chrome Android)
-  const ok = navVibrate(pattern);
+  // Cancel previous pattern so the new one is felt clearly
+  vibrateRaw(0);
 
-  // 2) Retry shortly if ignored
+  // Primary: full pattern
+  let ok = vibrateRaw(pattern);
+
+  // Immediate retry (some devices need a second call)
   if (!ok) {
-    const id = window.setTimeout(() => navVibrate(pattern), 50);
-    pending.push(id);
+    const id = window.setTimeout(() => {
+      ok = vibrateRaw(pattern);
+    }, 40);
+    timers.push(id);
   }
 
-  // 3) Sequential single-pulse fallback (picky WebViews)
-  const onOnly: number[] = [];
+  // Fallback: only the "on" segments as single pulses
+  const ons: number[] = [];
   for (let i = 0; i < pattern.length; i += 2) {
-    onOnly.push(pattern[i]);
+    ons.push(pattern[i]!);
   }
-  if (!ok) {
-    runSequentialPulses(onOnly, 100);
-  }
+  const idFb = window.setTimeout(() => {
+    // If still nothing felt / first call was ignored, use pulse train
+    if (!ok) pulseTrain(ons, 100);
+  }, 80);
+  timers.push(idFb);
 
-  // 4) Officer warning: keep pulsing longer
+  // Officer warning: keep motor going longer
   if (kind === "officer_warning") {
-    const id1 = window.setTimeout(() => navVibrate([500, 120, 550, 120, 600]), 2500);
-    const id2 = window.setTimeout(() => navVibrate([550, 140, 650, 140, 700]), 5000);
-    const id3 = window.setTimeout(() => runSequentialPulses([500, 550, 600, 650], 120), 100);
-    pending.push(id1, id2, id3);
+    clearTimers();
+    // Restart clean for the long warning
+    vibrateRaw(0);
+    vibrateRaw(pattern);
+    pulseTrain(ons, 120);
+    timers.push(
+      window.setTimeout(() => vibrateRaw([600, 150, 700, 150, 800]), 2800),
+      window.setTimeout(() => vibrateRaw([700, 200, 800]), 5500),
+      window.setTimeout(() => pulseTrain([600, 700, 800], 150), 100),
+    );
   }
+}
+
+export function hapticExamStart() {
+  haptic("start");
 }
 
 export function hapticOfficerWarning() {
@@ -122,10 +160,6 @@ export function hapticFaceNone() {
 
 export function hapticFaceMulti() {
   haptic("multi");
-}
-
-export function hapticExamStart() {
-  haptic("start");
 }
 
 export function isHapticPrimed() {
