@@ -6,6 +6,7 @@ import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { friendlyError } from "@/lib/friendly-error";
+import { notifyStudentsResultsReleased } from "@/lib/notify";
 
 export const Route = createFileRoute("/officer/results")({
   head: () => ({ meta: [{ title: "Results Release — D4EXAM" }] }),
@@ -114,27 +115,16 @@ function Page() {
       metadata: { result_ids: released.map((r) => r.id), count: released.length },
     } as never);
 
-    const studentIds = [...new Set(released.map((r) => r.student_id).filter(Boolean))];
+    const studentIds = [...new Set(released.map((r) => r.student_id).filter(Boolean))] as string[];
     if (studentIds.length) {
-      const { data: students } = await supabase
-        .from("students")
-        .select("id, profile_id")
-        .in("id", studentIds)
-        .eq("school_id", schoolId);
       const examTitle =
         (examsQ.data ?? []).find((e) => e.id === examId)?.title ?? "your examination";
-      const notifs = (students ?? [])
-        .filter((s) => s.profile_id)
-        .map((s) => ({
-          recipient_user_id: s.profile_id as string,
-          school_id: schoolId,
-          title: "Result released",
-          message: `Your result for ${examTitle} is now available. Open My Results to view it.`,
-          type: "success",
-        }));
-      if (notifs.length) {
-        await supabase.from("notifications").insert(notifs as never);
-      }
+      // recipient_user_id must be auth.users id — notify helper resolves via profiles.auth_user_id
+      void notifyStudentsResultsReleased({
+        schoolId,
+        studentIds,
+        examTitle,
+      });
     }
 
     toast.success(`Released ${released.length} result(s) — students can view their scores now`);
