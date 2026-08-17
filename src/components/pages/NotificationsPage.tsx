@@ -157,6 +157,25 @@ export function NotificationsPage({ scope }: { scope: string }) {
     toast.success("Notification dismissed");
   }
 
+  function formatNotifTime(iso: string) {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const now = new Date();
+    const sameDay =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate();
+    if (sameDay) {
+      return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    }
+    return d.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
   function renderList(list: Notif[]) {
     return (
       <ul className="divide-y divide-border">
@@ -178,7 +197,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
             <li
               key={n.id}
               className={cn(
-                "group flex gap-3 py-4 first:pt-0 last:pb-0",
+                "group flex items-start gap-2.5 py-2.5 sm:gap-3 sm:py-3 first:pt-0 last:pb-0",
                 href || unreadItem ? "cursor-pointer" : "",
               )}
               onClick={() => {
@@ -192,39 +211,46 @@ export function NotificationsPage({ scope }: { scope: string }) {
             >
               <span
                 className={cn(
-                  "grid h-9 w-9 shrink-0 place-items-center rounded-lg",
+                  "mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md sm:h-8 sm:w-8 sm:rounded-lg",
                   tones[t] ?? tones.info,
                 )}
               >
-                <Icon className="h-4 w-4" aria-hidden />
+                <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
               </span>
               <div className="min-w-0 flex-1">
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-                  <p className={cn("text-sm", unreadItem ? "font-semibold" : "font-medium")}>
+                <div className="flex items-start justify-between gap-2">
+                  <p
+                    className={cn(
+                      "text-[13px] leading-snug sm:text-sm",
+                      unreadItem ? "font-semibold text-slate-900" : "font-medium text-slate-800",
+                    )}
+                  >
                     {n.title}
                   </p>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {new Date(n.created_at).toLocaleString()}
+                  <span className="shrink-0 pt-0.5 text-[10px] leading-none text-muted-foreground sm:text-xs">
+                    {formatNotifTime(n.created_at)}
                   </span>
                 </div>
-                <p className="mt-1 text-sm text-muted-foreground">{n.message}</p>
+                <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground sm:mt-1 sm:line-clamp-none sm:text-sm">
+                  {n.message}
+                </p>
                 {href && (
-                  <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-primary">
-                    Open related page <ExternalLink className="h-3 w-3" />
+                  <p className="mt-0.5 inline-flex items-center gap-0.5 text-[11px] font-semibold text-primary sm:mt-1 sm:gap-1 sm:text-xs">
+                    Open related page <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                   </p>
                 )}
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-2">
-                {unreadItem && <span className="mt-2 h-2 w-2 rounded-full bg-primary" />}
+              <div className="flex shrink-0 flex-col items-center gap-1">
+                {unreadItem && <span className="h-1.5 w-1.5 rounded-full bg-primary sm:h-2 sm:w-2" />}
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 text-slate-400 opacity-70 hover:text-red-600 group-hover:opacity-100"
+                  className="h-7 w-7 text-slate-400 opacity-60 hover:text-red-600 group-hover:opacity-100 sm:h-8 sm:w-8"
                   aria-label="Dismiss notification"
                   onClick={(ev) => void dismissOne(n.id, ev)}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 </Button>
               </div>
             </li>
@@ -286,7 +312,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
             )}
           </SectionCard>
 
-          <div className="mt-6">
+          <div className="mt-4 sm:mt-6">
             <SectionCard title="History" description={`${historyItems.length} older notifications`}>
               {historyItems.length === 0 ? (
                 <EmptyState
