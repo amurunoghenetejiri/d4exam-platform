@@ -87,11 +87,16 @@ export function StatCard({
   label: string;
   value: ReactNode;
   hint?: string;
-  icon?: ReactNode;
+  icon?: ReactNode | ComponentType<{ className?: string }>;
   to?: string;
   search?: Record<string, string | undefined>;
   className?: string;
 }) {
+  // Accept either an element (<Icon />) or a component reference (Icon).
+  const IconComp =
+    typeof icon === "function" ? (icon as ComponentType<{ className?: string }>) : null;
+  const renderedIcon: ReactNode = IconComp ? <IconComp className="h-5 w-5" /> : (icon as ReactNode);
+
   const body = (
     <>
       <div className="flex items-start justify-between gap-2">
