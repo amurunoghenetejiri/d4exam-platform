@@ -19,6 +19,7 @@ import { ExamCameraPip, type FaceSecurityEvent } from "@/components/cbt/ExamCame
 import { saveCbtResult } from "@/lib/cbt-save-result";
 import { logSecurityEvent } from "@/lib/cbt-security";
 import { mapFaceSecurityEvent } from "@/lib/live-monitor";
+import { startLiveCamPublisher, type LiveCamPublisher } from "@/lib/live-video";
 
 function isPreviewPath() {
   if (typeof window === "undefined") return false;
@@ -94,6 +95,7 @@ export function CbtExamPage() {
     cameraActive: false,
   });
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const liveCamPublisherRef = useRef<LiveCamPublisher | null>(null);
   const finishingRef = useRef(false);
   const startedRef = useRef(false);
   const doneRef = useRef(false);
@@ -142,11 +144,17 @@ export function CbtExamPage() {
 
   const security = useMemo(() => fromExamSettingsRow(settingsQ.data, examQ.data?.description), [settingsQ.data, examQ.data?.description]);
 
+  const stopLiveCamStream = useCallback(() => {
+    liveCamPublisherRef.current?.stop();
+    liveCamPublisherRef.current = null;
+  }, []);
+
   const shutdownMedia = useCallback(() => {
+    stopLiveCamStream();
     stopMediaStream(mediaStreamRef.current);
     mediaStreamRef.current = null;
     setLiveStream(null);
-  }, []);
+  }, [stopLiveCamStream]);
 
   const invalidateStudentExamCaches = useCallback(async () => {
     await Promise.all([
@@ -276,10 +284,54 @@ export function CbtExamPage() {
 
   useEffect(() => {
     return () => {
+      stopLiveCamStream();
       stopMediaStream(mediaStreamRef.current);
       mediaStreamRef.current = null;
     };
-  }, []);
+  }, [stopLiveCamStream]);
+
+  /** Near-live camera frames for officers — only while writing with camera on; stops when exam ends / camera closed. */
+  useEffect(() => {
+    stopLiveCamStream();
+
+    if (previewMode || !started || done) return;
+    if (!security.requireCamera) return;
+
+    const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? "");
+    const studentId = student?.studentId;
+    const attemptId = attemptIdRef.current;
+    if (!schoolId || !studentId || !attemptId) return;
+    if (!liveStream) return;
+
+    const publisher = startLiveCamPublisher({
+      schoolId,
+      attemptId,
+      studentId,
+      examId: id,
+      getStream: () => mediaStreamRef.current ?? liveStream,
+      getFaceMeta: () => ({
+        faceStatus: facePresenceRef.current.faceStatus,
+        cameraActive: facePresenceRef.current.cameraActive,
+      }),
+    });
+    liveCamPublisherRef.current = publisher;
+
+    return () => {
+      publisher.stop();
+      if (liveCamPublisherRef.current === publisher) liveCamPublisherRef.current = null;
+    };
+  }, [
+    previewMode,
+    started,
+    done,
+    security.requireCamera,
+    liveStream,
+    examQ.data?.school_id,
+    student?.schoolId,
+    student?.studentId,
+    id,
+    stopLiveCamStream,
+  ]);
 
   const questionsToAnswer = useMemo(() => {
     const row = (settingsQ.data as { questions_to_answer?: number } | null)?.questions_to_answer;
@@ -349,6 +401,7 @@ export function CbtExamPage() {
         answeredCount: Object.keys(answers).length,
         totalQuestions: questions.length,
         timeRemainingSec: seconds,
+        videoStreaming: Boolean(liveCamPublisherRef.current && camLive),
       };
       try {
         if (aid) {
@@ -546,6 +599,26 @@ export function CbtExamPage() {
           toast.message("Please allow fullscreen to continue the exam");
           setFsGate(true);
         }
+      }
+      // Ensure attempt row exists before live-cam publisher starts
+      if (!previewMode && student?.studentId && examQ.data?.school_id && !attemptIdRef.current) {
+        const { data } = await supabase
+          .from("exam_attempts")
+          .upsert(
+            {
+              exam_id: id,
+              student_id: student.studentId,
+              school_id: examQ.data.school_id,
+              status: "in_progress",
+              started_at: new Date().toISOString(),
+              answers: {},
+              metadata: { cameraActive: needCam, lastSeenAt: new Date().toISOString(), videoStreaming: needCam },
+            } as never,
+            { onConflict: "exam_id,student_id" },
+          )
+          .select("id")
+          .maybeSingle();
+        if (data?.id) attemptIdRef.current = data.id as string;
       }
       setSeconds((examQ.data?.duration_minutes ?? 60) * 60);
       setStarted(true);
