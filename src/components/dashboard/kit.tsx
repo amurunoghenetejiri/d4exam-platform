@@ -109,9 +109,9 @@ export function StatCard({
           <p className="mt-1 text-xl font-extrabold tabular-nums text-slate-900 sm:text-2xl">{value}</p>
           {hint ? <p className="mt-0.5 text-[11px] text-slate-500 sm:text-xs">{hint}</p> : null}
         </div>
-        {icon ? (
+        {renderedIcon ? (
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary sm:h-10 sm:w-10">
-            {icon}
+            {renderedIcon}
           </div>
         ) : null}
       </div>
