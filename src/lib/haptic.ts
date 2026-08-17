@@ -1,10 +1,5 @@
 /** Browser Vibration API helpers for CBT security feedback. */
 
-export function canVibrate(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return typeof navigator.vibrate === "function";
-}
-
 export type HapticKind =
   | "none"
   | "unclear"
@@ -14,110 +9,167 @@ export type HapticKind =
   | "officer_warning";
 
 /**
- * Patterns in ms (vibrate / pause / vibrate…).
- * officer_warning is intentionally the longest / strongest.
- * Keep individual pulses under ~1s — some Android builds clamp longer ones.
+ * Pulse durations in ms (on-only). Gaps are applied between pulses in code.
+ * Simpler than alternating vibrate/pause arrays — more reliable on Android WebViews.
  */
-const PATTERNS: Record<HapticKind, number[]> = {
-  none: [220, 90, 220, 90, 280],
-  unclear: [140, 70, 140, 70, 160],
-  multi: [280, 90, 280, 90, 320, 100, 320],
-  camera_blocked: [240, 80, 240, 80, 280],
-  tab_switch: [160, 70, 160],
-  // ~6–7s of strong pulses — clearly above face alerts
-  officer_warning: [
-    450, 100, 450, 100, 500, 120, 500, 120, 550, 140, 550, 140, 600, 160, 600,
-  ],
+const PULSES: Record<HapticKind, number[]> = {
+  none: [200, 200, 250],
+  unclear: [120, 120],
+  multi: [250, 250, 300],
+  camera_blocked: [220, 220, 260],
+  tab_switch: [150, 150],
+  // Longer than face alerts
+  officer_warning: [400, 400, 450, 450, 500, 500, 550],
 };
 
-function tryVibrate(pattern: number | number[]): boolean {
+const GAPS: Record<HapticKind, number> = {
+  none: 100,
+  unclear: 80,
+  multi: 100,
+  camera_blocked: 90,
+  tab_switch: 80,
+  officer_warning: 130,
+};
+
+let audioCtx: AudioContext | null = null;
+let primed = false;
+const pendingTimers: number[] = [];
+
+export function canVibrate(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return typeof navigator.vibrate === "function";
+}
+
+function clearPending() {
+  for (const t of pendingTimers) window.clearTimeout(t);
+  pendingTimers.length = 0;
+}
+
+function navVibrate(ms: number | number[]): boolean {
   if (!canVibrate()) return false;
   try {
-    // Some WebViews ignore patterns until a prior cancel
-    navigator.vibrate(0);
-  } catch {
-    /* ignore */
-  }
-  try {
-    const ok = navigator.vibrate(pattern);
-    // Spec: returns false if the call was ignored
-    return ok !== false;
+    const result = navigator.vibrate(ms as never);
+    return result !== false;
   } catch {
     return false;
   }
 }
 
-/** Short audible cue when vibration API is missing/ignored (e.g. many iOS browsers). */
-function playAlertTone(kind: HapticKind) {
-  if (typeof window === "undefined") return;
+function ensureAudio(): AudioContext | null {
+  if (typeof window === "undefined") return null;
   try {
     const AC =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return;
-    const ctx = new AC();
-    const now = ctx.currentTime;
-    const pulses =
-      kind === "officer_warning"
-        ? [
-            { t: 0, f: 880, d: 0.18 },
-            { t: 0.28, f: 880, d: 0.18 },
-            { t: 0.56, f: 660, d: 0.22 },
-            { t: 0.9, f: 990, d: 0.28 },
-            { t: 1.3, f: 880, d: 0.35 },
-          ]
-        : kind === "multi" || kind === "camera_blocked"
-          ? [
-              { t: 0, f: 720, d: 0.12 },
-              { t: 0.2, f: 720, d: 0.12 },
-            ]
-          : [{ t: 0, f: 640, d: 0.1 }];
-
-    for (const p of pulses) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "square";
-      osc.frequency.value = p.f;
-      gain.gain.setValueAtTime(0.0001, now + p.t);
-      gain.gain.exponentialRampToValueAtTime(0.12, now + p.t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + p.t + p.d);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + p.t);
-      osc.stop(now + p.t + p.d + 0.02);
+    if (!AC) return null;
+    if (!audioCtx || audioCtx.state === "closed") {
+      audioCtx = new AC();
     }
-    window.setTimeout(() => {
-      try {
-        void ctx.close();
-      } catch {
-        /* ignore */
-      }
-    }, 2500);
+    if (audioCtx.state === "suspended") {
+      void audioCtx.resume();
+    }
+    return audioCtx;
   } catch {
-    /* autoplay / policy */
+    return null;
+  }
+}
+
+function beep(freq: number, durationSec: number, when = 0) {
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.value = freq;
+    const t0 = ctx.currentTime + when;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.15, t0 + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durationSec);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + durationSec + 0.03);
+  } catch {
+    /* ignore */
+  }
+}
+
+function playTone(kind: HapticKind) {
+  if (kind === "officer_warning") {
+    beep(880, 0.16, 0);
+    beep(880, 0.16, 0.28);
+    beep(660, 0.2, 0.55);
+    beep(990, 0.25, 0.9);
+    beep(880, 0.32, 1.25);
+    return;
+  }
+  if (kind === "multi" || kind === "camera_blocked") {
+    beep(740, 0.12, 0);
+    beep(740, 0.12, 0.2);
+    return;
+  }
+  if (kind === "tab_switch") {
+    beep(520, 0.08, 0);
+    return;
+  }
+  beep(640, 0.1, 0);
+}
+
+/**
+ * Must be called from a user gesture (e.g. Start exam) so vibration + audio unlock.
+ */
+export function primeHaptics() {
+  primed = true;
+  // Unlock vibration on Android (must be in gesture stack)
+  navVibrate(1);
+  window.setTimeout(() => navVibrate(0), 20);
+  // Unlock Web Audio
+  const ctx = ensureAudio();
+  if (ctx && ctx.state === "suspended") {
+    void ctx.resume();
+  }
+}
+
+function runPulseSequence(kind: HapticKind) {
+  clearPending();
+  const pulses = PULSES[kind];
+  const gap = GAPS[kind];
+  let delay = 0;
+  for (const ms of pulses) {
+    const d = delay;
+    const t = window.setTimeout(() => {
+      navVibrate(ms);
+    }, d);
+    pendingTimers.push(t);
+    delay += ms + gap;
   }
 }
 
 export function haptic(kind: HapticKind) {
-  const pattern = PATTERNS[kind];
-  let started = tryVibrate(pattern);
+  if (typeof window === "undefined") return;
 
-  // Retry once shortly after — cancel+pattern is flaky on some Androids
-  if (!started) {
-    window.setTimeout(() => {
-      tryVibrate(pattern);
-    }, 50);
-  } else {
-    // Re-assert mid-pattern for officer warning so the device keeps pulsing
-    if (kind === "officer_warning") {
-      window.setTimeout(() => tryVibrate([500, 120, 500, 120, 600]), 1800);
-      window.setTimeout(() => tryVibrate([550, 140, 600, 140, 650]), 3600);
-    }
+  // Prefer pulse sequence (works better than long alternating patterns)
+  runPulseSequence(kind);
+
+  // Also try a single alternating pattern as backup (some devices prefer this)
+  const alt: number[] = [];
+  for (const ms of PULSES[kind]) {
+    alt.push(ms, GAPS[kind]);
   }
+  window.setTimeout(() => {
+    // Only if nothing is still buzzing from sequence on picky devices
+    navVibrate(alt);
+  }, 30);
 
-  // Always reinforce officer warning with tone; face alerts only if vibrate unavailable
+  // Audio always for officer; for others when vibrate is missing OR after prime
   if (kind === "officer_warning" || !canVibrate()) {
-    playAlertTone(kind);
+    playTone(kind);
+  } else if (primed) {
+    // Soft tone even when vibrate exists — helps when vibrate is silently ignored
+    if (kind === "multi" || kind === "camera_blocked" || kind === "none") {
+      playTone(kind);
+    }
   }
 }
 
