@@ -16,6 +16,7 @@ export type NotifyType =
   | "exam_scheduled"
   | "exam_available"
   | "result_published"
+  | "result_pending_release"
   | "announcement"
   | "system_alert"
   | "officer_warning";
@@ -228,6 +229,60 @@ export async function notifyOfficersExamSubmitted(opts: {
       dedupeMinutes: 30,
     })),
   );
+}
+
+/**
+ * Student finished CBT → officers notified that result is held pending release/approval.
+ * Results stay pending until officer releases (or holds) them.
+ */
+export async function notifyOfficersStudentResultPending(opts: {
+  schoolId: string;
+  examId: string;
+  examTitle?: string | null;
+  studentName?: string | null;
+  studentId: string;
+  resultId?: string | null;
+  published?: boolean;
+}) {
+  if (opts.published) return; // already visible — no “pending release” notice
+  try {
+    const officers = await listOfficerUserIds(opts.schoolId);
+    if (!officers.length) return;
+
+    let title = opts.examTitle;
+    if (!title) {
+      const { data } = await supabase.from("examinations").select("title").eq("id", opts.examId).maybeSingle();
+      title = (data as { title?: string } | null)?.title ?? "Examination";
+    }
+
+    let studentLabel = opts.studentName?.trim() || "";
+    if (!studentLabel && opts.studentId) {
+      const { data: st } = await supabase
+        .from("students")
+        .select("full_name, matric_number, student_id")
+        .eq("id", opts.studentId)
+        .maybeSingle();
+      const row = st as { full_name?: string | null; matric_number?: string | null; student_id?: string | null } | null;
+      studentLabel = row?.full_name || row?.matric_number || row?.student_id || "A student";
+    }
+    if (!studentLabel) studentLabel = "A student";
+
+    await notifyMany(
+      officers.map((id) => ({
+        recipientUserId: id,
+        schoolId: opts.schoolId,
+        title: "Result waiting for release",
+        message: `${studentLabel} submitted “${title}”. Result is held pending your approval or release.`,
+        type: "result_pending_release",
+        link: "/officer/results",
+        entityType: "result",
+        entityId: opts.resultId || opts.examId,
+        dedupeMinutes: 15,
+      })),
+    );
+  } catch (e) {
+    console.warn("[notify] notifyOfficersStudentResultPending failed", e);
+  }
 }
 
 /** Notify teacher after officer decision. */
