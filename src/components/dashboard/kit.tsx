@@ -21,13 +21,15 @@ export function PageHeader({
 }) {
   const right = actions ?? action;
   return (
-    <div className="mb-4 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+    <div className="mb-4 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:items-start sm:justify-between sm:gap-4 lg:mb-8">
       <div className="min-w-0 flex-1">
-        <h1 className="truncate text-lg font-extrabold leading-snug tracking-tight text-slate-900 sm:text-2xl sm:text-[1.75rem]">
+        <h1 className="text-lg font-extrabold leading-snug tracking-tight text-slate-900 sm:text-2xl lg:text-3xl">
           {title}
         </h1>
         {description ? (
-          <p className="mt-0.5 max-w-2xl truncate text-xs leading-snug text-slate-500 sm:mt-1 sm:text-sm">{description}</p>
+          <div className="mt-0.5 max-w-3xl text-xs leading-snug text-slate-500 sm:mt-1.5 sm:text-sm lg:mt-2 lg:max-w-4xl lg:text-[0.9375rem] lg:leading-relaxed">
+            {description}
+          </div>
         ) : null}
       </div>
       {right ? <div className="flex shrink-0 flex-wrap items-center gap-2">{right}</div> : null}
@@ -63,7 +65,7 @@ export function NavCard({
       aria-label={ariaLabel}
       preload="intent"
       className={cn(
-        "pressable pressable-soft block cursor-pointer rounded-xl border border-slate-200/90 bg-white p-2.5 text-left shadow-sm sm:rounded-2xl sm:p-3.5",
+        "pressable pressable-soft block cursor-pointer rounded-xl border border-slate-200/90 bg-white p-2.5 text-left shadow-sm sm:rounded-2xl sm:p-4 lg:p-5",
         "hover:border-primary/40 hover:shadow-md",
         "active:scale-[0.985] active:border-primary/50 active:bg-primary/5 active:shadow-sm",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
@@ -102,19 +104,19 @@ export function StatCard({
     typeof icon === "function" ||
     (typeof icon === "object" && icon !== null && !isValidElement(icon) && "$$typeof" in icon);
   const renderedIcon: ReactNode = isIconType
-    ? createElement(icon as ElementType, { className: "h-4 w-4 sm:h-5 sm:w-5" })
+    ? createElement(icon as ElementType, { className: "h-4 w-4 sm:h-5 sm:w-5 lg:h-6 lg:w-6" })
     : (icon as ReactNode);
 
   const body = (
     <>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-xs">{label}</p>
-          <p className="mt-0.5 text-lg font-extrabold tabular-nums text-slate-900 sm:mt-1 sm:text-2xl">{value}</p>
-          {hint ? <p className="mt-0.5 text-[10px] text-slate-500 sm:text-xs">{hint}</p> : null}
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:text-xs lg:text-[13px]">{label}</p>
+          <p className="mt-0.5 text-lg font-extrabold tabular-nums text-slate-900 sm:mt-1 sm:text-2xl lg:text-3xl">{value}</p>
+          {hint ? <p className="mt-0.5 text-[10px] text-slate-500 sm:text-xs lg:text-sm">{hint}</p> : null}
         </div>
         {renderedIcon ? (
-          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary sm:h-10 sm:w-10 sm:rounded-xl">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary sm:h-10 sm:w-10 sm:rounded-xl lg:h-12 lg:w-12">
             {renderedIcon}
           </div>
         ) : null}
@@ -132,7 +134,7 @@ export function StatCard({
 
   return (
     <Card className={cn("rounded-xl border-slate-200/90 shadow-sm sm:rounded-2xl", className)}>
-      <CardContent className="p-2.5 sm:p-4">{body}</CardContent>
+      <CardContent className="p-2.5 sm:p-4 lg:p-5">{body}</CardContent>
     </Card>
   );
 }
@@ -157,17 +159,17 @@ export function SectionCard({
   return (
     <Card className={cn("overflow-hidden rounded-xl border-slate-200/90 shadow-sm sm:rounded-2xl", className)}>
       {(title || description || right) && (
-        <CardHeader className="flex flex-row items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-5 sm:py-3.5">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-5 sm:py-4 lg:px-6 lg:py-5">
           <div className="min-w-0">
-            {title ? <CardTitle className="text-[13px] font-bold text-slate-900 sm:text-base">{title}</CardTitle> : null}
+            {title ? <CardTitle className="text-[13px] font-bold text-slate-900 sm:text-base lg:text-lg">{title}</CardTitle> : null}
             {description ? (
-              <CardDescription className="mt-0.5 line-clamp-1 text-[11px] text-slate-500 sm:text-xs">{description}</CardDescription>
+              <CardDescription className="mt-0.5 line-clamp-2 text-[11px] text-slate-500 sm:text-xs lg:line-clamp-none lg:text-sm">{description}</CardDescription>
             ) : null}
           </div>
           {right ? <div className="flex shrink-0 flex-wrap gap-1.5">{right}</div> : null}
         </CardHeader>
       )}
-      <CardContent className="px-3 py-2.5 sm:px-5 sm:py-4">{children}</CardContent>
+      <CardContent className="px-3 py-2.5 sm:px-5 sm:py-4 lg:px-6 lg:py-5">{children}</CardContent>
     </Card>
   );
 }
@@ -239,7 +241,7 @@ export function DataTable<T extends { id: string }>({
             {columns.map((c) => (
               <th
                 key={c.key}
-                className={cn("px-2 py-2 sm:px-3", c.hideOnMobile && "hidden sm:table-cell")}
+                className={cn("px-2 py-2 sm:px-3 lg:px-4", c.hideOnMobile && "hidden sm:table-cell")}
               >
                 {c.header}
               </th>
@@ -252,7 +254,7 @@ export function DataTable<T extends { id: string }>({
               {columns.map((c) => (
                 <td
                   key={c.key}
-                  className={cn("px-2 py-2.5 align-top sm:px-3", c.hideOnMobile && "hidden sm:table-cell")}
+                  className={cn("px-2 py-2.5 align-top sm:px-3 lg:px-4 lg:py-3", c.hideOnMobile && "hidden sm:table-cell")}
                 >
                   {c.render
                     ? c.render(row)
@@ -290,12 +292,12 @@ export function EmptyState({
       </Button>
     ) : null);
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center sm:rounded-2xl sm:px-6 sm:py-12">
-      <div className="mb-2 grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-slate-400 sm:mb-3 sm:h-12 sm:w-12">
-        <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center sm:rounded-2xl sm:px-6 sm:py-12 lg:py-14">
+      <div className="mb-2 grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-slate-400 sm:mb-3 sm:h-12 sm:w-12 lg:h-14 lg:w-14">
+        <Icon className="h-5 w-5 sm:h-6 sm:w-6 lg:h-7 lg:w-7" />
       </div>
-      <p className="text-sm font-bold text-slate-800">{title}</p>
-      {description ? <p className="mt-1 max-w-sm text-xs text-slate-500">{description}</p> : null}
+      <p className="text-sm font-bold text-slate-800 sm:text-base">{title}</p>
+      {description ? <p className="mt-1 max-w-sm text-xs text-slate-500 sm:text-sm">{description}</p> : null}
       {resolvedAction ? <div className="mt-3 sm:mt-4">{resolvedAction}</div> : null}
     </div>
   );
@@ -344,12 +346,12 @@ export function TableSkeleton({ rows = 5 }: { rows?: number }) {
 }
 
 export function StatSkeleton() {
-  return <Skeleton className="h-20 w-full rounded-xl sm:h-24 sm:rounded-2xl" />;
+  return <Skeleton className="h-20 w-full rounded-xl sm:h-24 sm:rounded-2xl lg:h-28" />;
 }
 
 export function InfoRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="border-b border-slate-50 py-2 last:border-0">
+    <div className="border-b border-slate-50 py-2 last:border-0 lg:py-2.5">
       <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <span className="shrink-0 text-xs text-slate-500 sm:text-sm">{label}</span>
         <span className="min-w-0 break-words text-sm font-semibold leading-snug text-slate-900 sm:text-right [overflow-wrap:anywhere]">
