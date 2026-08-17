@@ -83,6 +83,49 @@ function normalizeAnswer(s: string): string {
 }
 
 /**
+ * Resolve the correct option *text* from a letter (A–D) or stored answer string
+ * using the original (pre-shuffle) options array.
+ */
+export function resolveCorrectOptionText(
+  correctAnswer: string | null | undefined,
+  options: string[],
+): string | null {
+  if (!correctAnswer) return null;
+  const raw = String(correctAnswer).trim();
+  if (!raw) return null;
+
+  // Letter key: A / B / C / D
+  if (/^[A-Da-d]$/.test(raw)) {
+    const idx = raw.toUpperCase().charCodeAt(0) - 65;
+    const text = options[idx];
+    return text != null && String(text).trim() ? String(text) : null;
+  }
+
+  // "A. text" / "B) text" style
+  const letterPrefixed = raw.match(/^([A-Da-d])[).:\-\s]+(.+)$/);
+  if (letterPrefixed) {
+    const idx = letterPrefixed[1].toUpperCase().charCodeAt(0) - 65;
+    if (options[idx] != null && String(options[idx]).trim()) return String(options[idx]);
+    const rest = letterPrefixed[2].trim();
+    if (rest) return rest;
+  }
+
+  // Exact / normalized match against option texts
+  const norm = normalizeAnswer(raw);
+  for (const opt of options) {
+    if (normalizeAnswer(String(opt ?? "")) === norm) return String(opt);
+  }
+
+  // Numeric index stored as string
+  if (/^\d+$/.test(raw)) {
+    const idx = Number(raw);
+    if (options[idx] != null) return String(options[idx]);
+  }
+
+  return raw;
+}
+
+/**
  * Score objective answers.
  * Prefer `correctOptionText` (resolved before option shuffle) so letter answers
  * still match after randomize_options.
@@ -111,27 +154,41 @@ export function scoreObjectiveAnswers(
       unanswered += 1;
       continue;
     }
-    const chosen = normalizeAnswer(String(q.options[idx] ?? ""));
+    const chosenRaw = String(q.options[Number(idx)] ?? "");
+    const chosen = normalizeAnswer(chosenRaw);
     if (!chosen) {
       unanswered += 1;
       continue;
     }
 
+    // 1) Preferred: resolved option text (survives shuffle)
     const textKey = (q.correctOptionText || "").trim();
-    const raw = (q.correct_answer || "").trim();
-    let ok = false;
+    // 2) Fallback: resolve from correct_answer + current options
+    const resolved =
+      textKey ||
+      resolveCorrectOptionText(q.correct_answer, q.options) ||
+      "";
+    const expected = normalizeAnswer(resolved);
 
-    if (textKey) {
-      ok = chosen === normalizeAnswer(textKey);
-    } else if (/^[A-Da-d]$/.test(raw)) {
-      const letterIdx = raw.toUpperCase().charCodeAt(0) - 65;
-      ok = idx === letterIdx;
-      if (!ok) ok = chosen === raw.toLowerCase();
-    } else if (raw) {
-      ok =
-        chosen === normalizeAnswer(raw) ||
-        String(idx) === raw ||
-        chosen === normalizeAnswer(raw.replace(/^[A-Da-d][).:\-\s]+/, ""));
+    let ok = false;
+    if (expected) {
+      ok = chosen === expected;
+    }
+
+    // 3) Extra fallbacks for letter / index storage
+    if (!ok) {
+      const raw = (q.correct_answer || "").trim();
+      if (/^[A-Da-d]$/.test(raw)) {
+        if (chosen === raw.toLowerCase()) ok = true;
+        if (!ok && !textKey) {
+          const letterIdx = raw.toUpperCase().charCodeAt(0) - 65;
+          if (Number(idx) === letterIdx) ok = true;
+        }
+      } else if (raw) {
+        const stripped = normalizeAnswer(raw.replace(/^[A-Da-d][).:\-\s]+/, ""));
+        if (stripped && chosen === stripped) ok = true;
+        if (!ok && String(idx) === raw) ok = true;
+      }
     }
 
     if (ok) {
