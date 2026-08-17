@@ -865,8 +865,12 @@ export type Database = {
       }
       notifications: {
         Row: {
+          action_url: string | null
           created_at: string
+          entity_id: string | null
+          entity_type: string | null
           id: string
+          link: string | null
           message: string
           read_at: string | null
           recipient_user_id: string
@@ -875,9 +879,13 @@ export type Database = {
           type: string
         }
         Insert: {
+          action_url?: string | null
           created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
           id?: string
-          message: string
+          link?: string | null
+          message?: string
           read_at?: string | null
           recipient_user_id: string
           school_id?: string | null
@@ -885,8 +893,12 @@ export type Database = {
           type?: string
         }
         Update: {
+          action_url?: string | null
           created_at?: string
+          entity_id?: string | null
+          entity_type?: string | null
           id?: string
+          link?: string | null
           message?: string
           read_at?: string | null
           recipient_user_id?: string
@@ -1706,8 +1718,22 @@ export type Database = {
         Returns: boolean
       }
       in_school: { Args: { _school: string }; Returns: boolean }
+      insert_notification: {
+        Args: {
+          _entity_id?: string
+          _entity_type?: string
+          _link?: string
+          _message?: string
+          _recipient: string
+          _school_id?: string
+          _title: string
+          _type?: string
+        }
+        Returns: string
+      }
       is_school_teacher: { Args: { _school: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
+      notifications_add_to_realtime: { Args: never; Returns: undefined }
       resolve_login_identity: {
         Args: { _identifier: string; _school_code: string }
         Returns: {

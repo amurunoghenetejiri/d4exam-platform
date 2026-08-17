@@ -51,6 +51,7 @@ import { Route as OfficerAuditLogsRouteImport } from './routes/officer.audit-log
 import { Route as OfficerIntegrityRouteImport } from './routes/officer.integrity'
 import { Route as OfficerLiveMonitorRouteImport } from './routes/officer.live-monitor'
 import { Route as OfficerNotificationsRouteImport } from './routes/officer.notifications'
+import { Route as OfficerProfileRouteImport } from './routes/officer.profile'
 import { Route as OfficerReportsRouteImport } from './routes/officer.reports'
 import { Route as OfficerResultsRouteImport } from './routes/officer.results'
 import { Route as OfficerSettingsRouteImport } from './routes/officer.settings'
@@ -302,6 +303,11 @@ const OfficerLiveMonitorRoute = OfficerLiveMonitorRouteImport.update({
 const OfficerNotificationsRoute = OfficerNotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
+  getParentRoute: () => OfficerRoute,
+} as any)
+const OfficerProfileRoute = OfficerProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
   getParentRoute: () => OfficerRoute,
 } as any)
 const OfficerReportsRoute = OfficerReportsRouteImport.update({
@@ -556,6 +562,7 @@ export interface FileRoutesByFullPath {
   '/officer/integrity': typeof OfficerIntegrityRoute
   '/officer/live-monitor': typeof OfficerLiveMonitorRoute
   '/officer/notifications': typeof OfficerNotificationsRoute
+  '/officer/profile': typeof OfficerProfileRoute
   '/officer/reports': typeof OfficerReportsRoute
   '/officer/results': typeof OfficerResultsRoute
   '/officer/settings': typeof OfficerSettingsRoute
@@ -637,6 +644,7 @@ export interface FileRoutesByTo {
   '/officer/integrity': typeof OfficerIntegrityRoute
   '/officer/live-monitor': typeof OfficerLiveMonitorRoute
   '/officer/notifications': typeof OfficerNotificationsRoute
+  '/officer/profile': typeof OfficerProfileRoute
   '/officer/reports': typeof OfficerReportsRoute
   '/officer/results': typeof OfficerResultsRoute
   '/officer/settings': typeof OfficerSettingsRoute
@@ -723,6 +731,7 @@ export interface FileRoutesById {
   '/officer/integrity': typeof OfficerIntegrityRoute
   '/officer/live-monitor': typeof OfficerLiveMonitorRoute
   '/officer/notifications': typeof OfficerNotificationsRoute
+  '/officer/profile': typeof OfficerProfileRoute
   '/officer/reports': typeof OfficerReportsRoute
   '/officer/results': typeof OfficerResultsRoute
   '/officer/settings': typeof OfficerSettingsRoute
@@ -811,6 +820,7 @@ export interface FileRouteTypes {
     | '/officer/integrity'
     | '/officer/live-monitor'
     | '/officer/notifications'
+    | '/officer/profile'
     | '/officer/reports'
     | '/officer/results'
     | '/officer/settings'
@@ -892,6 +902,7 @@ export interface FileRouteTypes {
     | '/officer/integrity'
     | '/officer/live-monitor'
     | '/officer/notifications'
+    | '/officer/profile'
     | '/officer/reports'
     | '/officer/results'
     | '/officer/settings'
@@ -977,6 +988,7 @@ export interface FileRouteTypes {
     | '/officer/integrity'
     | '/officer/live-monitor'
     | '/officer/notifications'
+    | '/officer/profile'
     | '/officer/reports'
     | '/officer/results'
     | '/officer/settings'
@@ -1339,6 +1351,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OfficerNotificationsRouteImport
       parentRoute: typeof OfficerRoute
     }
+    '/officer/profile': {
+      id: '/officer/profile'
+      path: '/profile'
+      fullPath: '/officer/profile'
+      preLoaderRoute: typeof OfficerProfileRouteImport
+      parentRoute: typeof OfficerRoute
+    }
     '/officer/reports': {
       id: '/officer/reports'
       path: '/reports'
@@ -1690,6 +1709,7 @@ interface OfficerRouteChildren {
   OfficerIntegrityRoute: typeof OfficerIntegrityRoute
   OfficerLiveMonitorRoute: typeof OfficerLiveMonitorRoute
   OfficerNotificationsRoute: typeof OfficerNotificationsRoute
+  OfficerProfileRoute: typeof OfficerProfileRoute
   OfficerReportsRoute: typeof OfficerReportsRoute
   OfficerResultsRoute: typeof OfficerResultsRoute
   OfficerSettingsRoute: typeof OfficerSettingsRoute
@@ -1703,6 +1723,7 @@ const OfficerRouteChildren: OfficerRouteChildren = {
   OfficerIntegrityRoute: OfficerIntegrityRoute,
   OfficerLiveMonitorRoute: OfficerLiveMonitorRoute,
   OfficerNotificationsRoute: OfficerNotificationsRoute,
+  OfficerProfileRoute: OfficerProfileRoute,
   OfficerReportsRoute: OfficerReportsRoute,
   OfficerResultsRoute: OfficerResultsRoute,
   OfficerSettingsRoute: OfficerSettingsRoute,

@@ -80,6 +80,7 @@ export function StatCard({
   value,
   hint,
   icon,
+  tone,
   to,
   search,
   className,
@@ -87,11 +88,19 @@ export function StatCard({
   label: string;
   value: ReactNode;
   hint?: string;
-  icon?: ReactNode;
+  icon?: ReactNode | ComponentType<{ className?: string }>;
+  /** Optional accent tone for the icon chip. */
+  tone?: "primary" | "aqua" | "warning" | "info" | "destructive";
   to?: string;
   search?: Record<string, string | undefined>;
   className?: string;
 }) {
+  void tone;
+  // Accept either an element (<Icon />) or a component reference (Icon).
+  const IconComp =
+    typeof icon === "function" ? (icon as ComponentType<{ className?: string }>) : null;
+  const renderedIcon: ReactNode = IconComp ? <IconComp className="h-5 w-5" /> : (icon as ReactNode);
+
   const body = (
     <>
       <div className="flex items-start justify-between gap-2">
@@ -100,9 +109,9 @@ export function StatCard({
           <p className="mt-1 text-xl font-extrabold tabular-nums text-slate-900 sm:text-2xl">{value}</p>
           {hint ? <p className="mt-0.5 text-[11px] text-slate-500 sm:text-xs">{hint}</p> : null}
         </div>
-        {icon ? (
+        {renderedIcon ? (
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary sm:h-10 sm:w-10">
-            {icon}
+            {renderedIcon}
           </div>
         ) : null}
       </div>
@@ -193,19 +202,30 @@ export function StatusBadge({ status, className }: { status: string; className?:
   );
 }
 
+export type Column<T> = {
+  key: string;
+  header: string;
+  render?: (row: T) => ReactNode;
+  hideOnMobile?: boolean;
+};
+
 export function DataTable<T extends { id: string }>({
   columns,
   rows,
   emptyTitle = "No records",
   emptyDescription,
+  caption,
+  empty,
 }: {
-  columns: { key: string; header: string; render: (row: T) => ReactNode }[];
+  columns: Column<T>[];
   rows: T[];
   emptyTitle?: string;
   emptyDescription?: string;
+  caption?: string;
+  empty?: ReactNode;
 }) {
   if (!rows.length) {
-    return <EmptyState title={emptyTitle} description={emptyDescription} />;
+    return <>{empty ?? <EmptyState title={emptyTitle} description={emptyDescription} />}</>;
   }
   return (
     <div className="overflow-x-auto">
@@ -213,7 +233,10 @@ export function DataTable<T extends { id: string }>({
         <thead>
           <tr className="border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-500">
             {columns.map((c) => (
-              <th key={c.key} className="px-2 py-2 sm:px-3">
+              <th
+                key={c.key}
+                className={cn("px-2 py-2 sm:px-3", c.hideOnMobile && "hidden sm:table-cell")}
+              >
                 {c.header}
               </th>
             ))}
@@ -223,8 +246,13 @@ export function DataTable<T extends { id: string }>({
           {rows.map((row) => (
             <tr key={row.id} className="border-b border-slate-50 last:border-0">
               {columns.map((c) => (
-                <td key={c.key} className="px-2 py-2.5 align-top sm:px-3">
-                  {c.render(row)}
+                <td
+                  key={c.key}
+                  className={cn("px-2 py-2.5 align-top sm:px-3", c.hideOnMobile && "hidden sm:table-cell")}
+                >
+                  {c.render
+                    ? c.render(row)
+                    : ((row as Record<string, unknown>)[c.key] as ReactNode) ?? "—"}
                 </td>
               ))}
             </tr>
@@ -239,13 +267,24 @@ export function EmptyState({
   title,
   description,
   action,
+  actionLabel,
+  onAction,
   icon: Icon = Inbox,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  actionLabel?: string;
+  onAction?: () => void;
   icon?: ComponentType<{ className?: string }>;
 }) {
+  const resolvedAction =
+    action ??
+    (actionLabel ? (
+      <Button size="sm" onClick={onAction}>
+        {actionLabel}
+      </Button>
+    ) : null);
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center sm:rounded-2xl sm:px-6 sm:py-12">
       <div className="mb-2 grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-slate-400 sm:mb-3 sm:h-12 sm:w-12">
@@ -253,7 +292,7 @@ export function EmptyState({
       </div>
       <p className="text-sm font-bold text-slate-800">{title}</p>
       {description ? <p className="mt-1 max-w-sm text-xs text-slate-500">{description}</p> : null}
-      {action ? <div className="mt-3 sm:mt-4">{action}</div> : null}
+      {resolvedAction ? <div className="mt-3 sm:mt-4">{resolvedAction}</div> : null}
     </div>
   );
 }

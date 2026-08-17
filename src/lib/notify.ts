@@ -113,7 +113,7 @@ export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
       .from("user_roles")
       .select("user_id, role")
       .eq("school_id", schoolId)
-      .in("role", ["examination_officer", "exam_officer", "officer"]);
+      .in("role", ["examination_officer", "exam_officer", "officer"] as never[]);
     if (error) {
       const { data: roles2 } = await supabase
         .from("user_roles")

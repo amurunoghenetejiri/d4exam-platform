@@ -299,7 +299,7 @@ export function CbtExamPage() {
     const key = student?.studentId ?? (previewMode ? "officer-preview" : session?.userId ?? "anon");
     let picked = pickExamQuestions(bank as never, { questionsToAnswer, randomize: Boolean(security.randomizeQuestions), studentKey: key, examId: id });
     if (security.randomizeOptions) {
-      picked = picked.map((q: { id: string; options: string[] }) => ({ ...q, options: seededShuffle(q.options, `${id}:${key}:${q.id}:opts`) }));
+      picked = (picked as Array<{ id: string; options: string[] }>).map((q) => ({ ...q, options: seededShuffle(q.options, `${id}:${key}:${q.id}:opts`) }));
     }
     return picked as Array<{ id: string; question_text: string; marks: number; correct_answer: string | null; options: string[] }>;
   }, [questionsQ.data, questionsToAnswer, security.randomizeQuestions, security.randomizeOptions, student?.studentId, session?.userId, previewMode, id]);
