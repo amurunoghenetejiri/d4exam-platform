@@ -1,0 +1,3 @@
+# Force redeploy marker
+# Updated: 2026-08-17T10:27:00Z
+# Triggers a clean Vercel production deploy from main.
