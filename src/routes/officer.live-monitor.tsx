@@ -25,6 +25,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { logSecurityEvent } from "@/lib/cbt-security";
+import { notifyStudentOfficerWarning } from "@/lib/notify";
 import { toast } from "sonner";
 import {
   faceLabel,
@@ -50,9 +51,7 @@ export const Route = createFileRoute("/officer/live-monitor")({
   component: Page,
 });
 
-/** Offline / finished cards leave the grid after this (3 minutes). */
 const OFFLINE_HIDE_MS = 3 * 60 * 1000;
-/** Recently submitted attempts shown briefly before disappearing. */
 const RECENT_SUBMIT_MS = 3 * 60 * 1000;
 
 type AttemptRow = {
@@ -236,7 +235,6 @@ function Page() {
     },
   });
 
-  /** Recently finished attempts — show "Submitted" for up to 3 minutes, then drop. */
   const recentDoneQ = useQuery({
     queryKey: ["officer-live-recent-done", schoolId],
     enabled: Boolean(schoolId),
@@ -343,7 +341,6 @@ function Page() {
         return { a, presence, sev, name, matric, course, title, frame, hasLiveVideo, bars, isDone, activity };
       })
       .filter((c) => {
-        // Hide stale offline / long-finished rows after 3 minutes
         if (c.isDone) {
           if (c.activity == null) return false;
           return now - c.activity <= RECENT_SUBMIT_MS;
@@ -417,7 +414,6 @@ function Page() {
       .slice(0, 25);
   }, [events]);
 
-  // Instant toast for new high/medium integrity events
   useEffect(() => {
     if (!events.length) return;
     if (!alertsBootstrappedRef.current) {
@@ -463,11 +459,23 @@ function Page() {
         attemptId: selected.a.id,
         studentId: selected.a.student_id,
         eventType: "WARNING_SHOWN",
-        severity: "medium",
-        description: `Officer warning sent to ${selected.name} (${selected.matric})`,
-        extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null },
+        severity: "high",
+        description: `Officer warning: you are defaulting too much — stay focused on the exam (${selected.name} / ${selected.matric})`,
+        extra: {
+          source: "officer_live_monitor",
+          officer_user_id: user?.userId ?? null,
+          student_facing: true,
+        },
       });
-      toast.success(`Warning logged for ${selected.name}`);
+      await notifyStudentOfficerWarning({
+        schoolId,
+        studentId: selected.a.student_id,
+        examId: selected.a.exam_id,
+        examTitle: selected.title,
+        message:
+          "An examination officer has warned you: you are leaving the exam rules too often. Stay on the exam screen, keep your face visible, and do not switch tabs. Further violations may be flagged.",
+      });
+      toast.success(`Warning sent to ${selected.name}`);
       void eventsQ.refetch();
     } catch (e) {
       toast.error("Could not send warning");
@@ -491,7 +499,6 @@ function Page() {
         }
       />
 
-      {/* Compact stats — smaller padding on mobile */}
       <div className="mb-3 grid grid-cols-3 gap-1.5 sm:mb-4 sm:grid-cols-3 sm:gap-2 lg:grid-cols-6">
         <StatCard label="Writing" value={stats.writing} />
         <StatCard label="Online" value={stats.online} tone="emerald" />
@@ -501,7 +508,6 @@ function Page() {
         <StatCard label="Done (12h)" value={stats.completed} tone="blue" />
       </div>
 
-      {/* Search + filters — stacked tightly on mobile */}
       <div className="mb-3 space-y-2 sm:mb-4">
         <div className="relative w-full sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 sm:h-4 sm:w-4" />
@@ -776,6 +782,7 @@ function Page() {
               <Info label="Connection" value={isOnline(selected.presence.lastSeenAt) ? "Online" : "Offline"} />
               <Info label="Camera" value={selected.presence.cameraActive ? "Active" : "Off"} />
               <Info label="Face" value={faceLabel(selected.presence)} />
+              <Info label="Tab switches" value={String(selected.a.tab_switch_count ?? 0)} />
             </div>
             {!selected.isDone && (
               <div className="flex flex-wrap gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-4 sm:py-3">
@@ -793,7 +800,9 @@ function Page() {
                   )}
                   Send warning
                 </Button>
-                <p className="w-full text-[10px] text-slate-400">Logs a proctoring warning. Live video is never saved.</p>
+                <p className="w-full text-[10px] text-slate-400">
+                  Student gets a red alert instantly. Event is logged. Live video is never saved.
+                </p>
               </div>
             )}
             <div className="p-3 sm:p-4">
