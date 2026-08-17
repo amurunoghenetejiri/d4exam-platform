@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import { createElement, isValidElement, type ComponentType, type ElementType, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { AlertCircle, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -88,7 +88,7 @@ export function StatCard({
   label: string;
   value: ReactNode;
   hint?: string;
-  icon?: ReactNode | ComponentType<{ className?: string }>;
+  icon?: ReactNode | ElementType;
   /** Optional accent tone for the icon chip. */
   tone?: "primary" | "aqua" | "warning" | "info" | "destructive";
   to?: string;
@@ -96,10 +96,14 @@ export function StatCard({
   className?: string;
 }) {
   void tone;
-  // Accept either an element (<Icon />) or a component reference (Icon).
-  const IconComp =
-    typeof icon === "function" ? (icon as ComponentType<{ className?: string }>) : null;
-  const renderedIcon: ReactNode = IconComp ? <IconComp className="h-5 w-5" /> : (icon as ReactNode);
+  // Lucide icons are forwardRef objects rather than plain functions. Render any
+  // element type through React instead of passing that object through as a child.
+  const isIconType =
+    typeof icon === "function" ||
+    (typeof icon === "object" && icon !== null && !isValidElement(icon) && "$$typeof" in icon);
+  const renderedIcon: ReactNode = isIconType
+    ? createElement(icon as ElementType, { className: "h-5 w-5" })
+    : (icon as ReactNode);
 
   const body = (
     <>
