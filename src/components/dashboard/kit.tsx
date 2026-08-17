@@ -202,19 +202,25 @@ export function StatusBadge({ status, className }: { status: string; className?:
   );
 }
 
+export type Column<T> = { key: string; header: string; render: (row: T) => ReactNode };
+
 export function DataTable<T extends { id: string }>({
   columns,
   rows,
   emptyTitle = "No records",
   emptyDescription,
+  caption,
+  empty,
 }: {
-  columns: { key: string; header: string; render: (row: T) => ReactNode }[];
+  columns: Column<T>[];
   rows: T[];
   emptyTitle?: string;
   emptyDescription?: string;
+  caption?: string;
+  empty?: ReactNode;
 }) {
   if (!rows.length) {
-    return <EmptyState title={emptyTitle} description={emptyDescription} />;
+    return <>{empty ?? <EmptyState title={emptyTitle} description={emptyDescription} />}</>;
   }
   return (
     <div className="overflow-x-auto">
