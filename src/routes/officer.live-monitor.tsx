@@ -12,6 +12,10 @@ import {
   ShieldAlert,
   UserRound,
   X,
+  Wifi,
+  WifiOff,
+  MessageSquareWarning,
+  Loader2,
 } from "lucide-react";
 import { PageHeader, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -20,6 +24,8 @@ import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import { logSecurityEvent } from "@/lib/cbt-security";
+import { toast } from "sonner";
 import {
   faceLabel,
   formatDuration,
@@ -35,6 +41,7 @@ import {
 import {
   isLiveCamFrameFresh,
   startLiveCamSubscriber,
+  LIVE_CAM_STALE_MS,
   type LiveCamFramePayload,
 } from "@/lib/live-video";
 
@@ -69,6 +76,44 @@ type FilterKey = "all" | "normal" | "warning" | "violation" | "offline";
 
 type FrameEntry = { src: string; ts: number };
 
+/** Signal quality from frame freshness + presence heartbeat (0–4 bars). */
+function signalBars(
+  frameTs: number | null | undefined,
+  lastSeenAt: string | null | undefined,
+  now = Date.now(),
+): 0 | 1 | 2 | 3 | 4 {
+  const frameAge = frameTs != null ? now - frameTs : Infinity;
+  const seenAge = lastSeenAt ? now - new Date(lastSeenAt).getTime() : Infinity;
+  if (Number.isNaN(seenAge)) return 0;
+  if (frameAge <= 2_500) return 4;
+  if (frameAge <= 5_000) return 3;
+  if (frameAge <= LIVE_CAM_STALE_MS || seenAge <= 15_000) return 2;
+  if (seenAge <= 45_000) return 1;
+  return 0;
+}
+
+function SignalBars({ bars, className }: { bars: number; className?: string }) {
+  const color =
+    bars >= 3 ? "bg-emerald-400" : bars === 2 ? "bg-amber-400" : bars === 1 ? "bg-orange-500" : "bg-red-500";
+  return (
+    <div className={cn("flex items-end gap-0.5", className)} title={`Signal: ${bars}/4`} aria-label={`Signal ${bars} of 4`}>
+      {[1, 2, 3, 4].map((i) => (
+        <span
+          key={i}
+          className={cn(
+            "w-[3px] rounded-sm transition-colors",
+            i <= bars ? color : "bg-white/25",
+            i === 1 && "h-1.5",
+            i === 2 && "h-2.5",
+            i === 3 && "h-3.5",
+            i === 4 && "h-4",
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
@@ -79,6 +124,7 @@ function Page() {
   const [readAlertIds, setReadAlertIds] = useState<Set<string>>(new Set());
   const [showAlertsMobile, setShowAlertsMobile] = useState(false);
   const [frames, setFrames] = useState<Record<string, FrameEntry>>({});
+  const [warningBusy, setWarningBusy] = useState(false);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -159,7 +205,7 @@ function Page() {
     },
   });
 
-  // Drop frames when attempt is no longer in progress (exam over / submitted / camera closed long enough)
+  // Drop frames when attempt is no longer in progress (exam over / submitted / camera closed)
   useEffect(() => {
     const liveIds = new Set((attemptsQ.data ?? []).map((a) => a.id));
     setFrames((prev) => {
@@ -225,7 +271,8 @@ function Page() {
       const title = a.examinations?.title || "Exam";
       const frame = frames[a.id];
       const hasLiveVideo = Boolean(frame && isLiveCamFrameFresh(frame.ts, now));
-      return { a, presence, sev, name, matric, course, title, frame, hasLiveVideo };
+      const bars = signalBars(frame?.ts, presence.lastSeenAt, now);
+      return { a, presence, sev, name, matric, course, title, frame, hasLiveVideo, bars };
     });
   }, [attempts, now, frames]);
 
@@ -259,7 +306,7 @@ function Page() {
   const alerts = useMemo(() => {
     return events.filter((e) => {
       const t = e.event_type.toUpperCase();
-      return t.includes("FACE") || t.includes("CAMERA") || t.includes("TAB") || t.includes("FULLSCREEN") || t.includes("CONNECTION") || t.includes("SUBMIT") || e.severity === "high" || e.severity === "medium";
+      return t.includes("FACE") || t.includes("CAMERA") || t.includes("TAB") || t.includes("FULLSCREEN") || t.includes("CONNECTION") || t.includes("SUBMIT") || t.includes("WARNING") || e.severity === "high" || e.severity === "medium";
     }).slice(0, 25);
   }, [events]);
 
@@ -273,6 +320,30 @@ function Page() {
     ? `${(liveExams[0].courses as { code?: string } | null)?.code ?? ""} · ${liveExams[0].title}`
     : cards[0] ? `${cards[0].course} · ${cards[0].title}` : "No live exam";
 
+  async function sendOfficerWarning() {
+    if (!selected || !schoolId || warningBusy) return;
+    setWarningBusy(true);
+    try {
+      await logSecurityEvent({
+        schoolId,
+        examId: selected.a.exam_id,
+        attemptId: selected.a.id,
+        studentId: selected.a.student_id,
+        eventType: "WARNING_SHOWN",
+        severity: "medium",
+        description: `Officer warning sent to ${selected.name} (${selected.matric})`,
+        extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null },
+      });
+      toast.success(`Warning logged for ${selected.name}`);
+      void eventsQ.refetch();
+    } catch (e) {
+      toast.error("Could not send warning");
+      console.warn(e);
+    } finally {
+      setWarningBusy(false);
+    }
+  }
+
   return (
     <div className="mx-auto w-full max-w-[1400px]">
       <PageHeader
@@ -283,6 +354,7 @@ function Page() {
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> LIVE
             </span>
             <span className="text-slate-600">{primaryExamLabel}</span>
+            <span className="hidden text-[11px] font-medium text-slate-400 sm:inline">· Live camera · no recording</span>
           </span>
         }
       />
@@ -324,7 +396,7 @@ function Page() {
           {attemptsQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading live sessions…</p>
           ) : filtered.length === 0 ? (
-            <EmptyState icon={Radio} title="No students match this view" description="When students start writing with camera monitoring, their live camera feed and presence appear here in realtime." />
+            <EmptyState icon={Radio} title="No students match this view" description="When students start writing with camera monitoring, their live camera feed and presence appear here in realtime. Video is never saved." />
           ) : view === "grid" ? (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
               {filtered.map((c) => (
@@ -337,6 +409,7 @@ function Page() {
                   presence={c.presence}
                   frameSrc={c.hasLiveVideo ? c.frame?.src : undefined}
                   streamLive={c.hasLiveVideo}
+                  bars={c.bars}
                   onClick={() => setSelectedId(c.a.id)}
                 />
               ))}
@@ -357,6 +430,7 @@ function Page() {
                       <p className="truncate text-sm font-bold text-slate-900">{c.name}</p>
                       <p className="truncate text-[11px] text-slate-500">{c.matric} · {c.course}</p>
                     </div>
+                    <SignalBars bars={c.bars} className="mr-1" />
                     <FaceChip presence={c.presence} sev={c.sev} />
                     <span className="font-mono text-[11px] font-semibold text-slate-600">{formatDuration(c.presence.timeRemainingSec)}</span>
                   </button>
@@ -400,11 +474,18 @@ function Page() {
                   <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" /> LIVE
                   </div>
+                  <div className="absolute right-2 top-2 flex items-center gap-1.5 rounded-full bg-black/55 px-2 py-1">
+                    {selected.bars >= 2 ? <Wifi className="h-3 w-3 text-emerald-300" /> : <WifiOff className="h-3 w-3 text-red-300" />}
+                    <SignalBars bars={selected.bars} />
+                  </div>
                 </>
               ) : (
                 <>
                   <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold text-white">
                     {selected.presence.cameraActive ? "WAITING FOR VIDEO" : "CAMERA OFF"}
+                  </div>
+                  <div className="absolute right-2 top-2 flex items-center gap-1.5 rounded-full bg-black/55 px-2 py-1">
+                    <SignalBars bars={selected.bars} />
                   </div>
                   <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-white">
                     {selected.presence.cameraActive ? (
@@ -415,7 +496,7 @@ function Page() {
                     <p className="text-sm font-semibold">{faceLabel(selected.presence)}</p>
                     <p className="text-[11px] text-white/70">
                       {selected.presence.cameraActive
-                        ? "Live frames appear when the student camera is streaming. Stream stops when the exam ends or the camera is closed."
+                        ? "Live frames appear when the student camera is streaming. Stream stops when the exam ends or the camera is closed. Nothing is recorded."
                         : "Student camera is off or unavailable."}
                     </p>
                   </div>
@@ -431,6 +512,19 @@ function Page() {
               <Info label="Camera" value={selected.presence.cameraActive ? "Active" : "Off"} />
               <Info label="Face" value={faceLabel(selected.presence)} />
               <Info label="Video" value={selected.hasLiveVideo ? "Streaming" : "Not streaming"} />
+            </div>
+            <div className="flex flex-wrap gap-2 border-b border-slate-100 px-4 py-3">
+              <Button
+                size="sm"
+                variant="outline"
+                className="font-semibold text-amber-800 border-amber-300 bg-amber-50 hover:bg-amber-100"
+                disabled={warningBusy}
+                onClick={() => void sendOfficerWarning()}
+              >
+                {warningBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <MessageSquareWarning className="mr-1.5 h-4 w-4" />}
+                Send warning
+              </Button>
+              <p className="w-full text-[10px] text-slate-400">Logs a proctoring warning for this student. Live video is never saved.</p>
             </div>
             <div className="p-4">
               <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Events timeline</h4>
@@ -484,6 +578,7 @@ function StudentCard({
   presence,
   frameSrc,
   streamLive,
+  bars,
   onClick,
 }: {
   name: string;
@@ -493,6 +588,7 @@ function StudentCard({
   presence: ReturnType<typeof parsePresence>;
   frameSrc?: string;
   streamLive?: boolean;
+  bars: number;
   onClick: () => void;
 }) {
   return (
@@ -507,6 +603,9 @@ function StudentCard({
           <span className={cn("h-1.5 w-1.5 rounded-full", streamLive ? "animate-pulse bg-red-500" : isOnline(presence.lastSeenAt) ? "animate-pulse bg-emerald-400" : "bg-slate-400")} />
           {streamLive ? "Live cam" : isOnline(presence.lastSeenAt) ? "Live" : "Offline"}
         </span>
+        <div className="absolute right-1.5 top-1.5 rounded-md bg-black/55 px-1.5 py-1">
+          <SignalBars bars={bars} />
+        </div>
         <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1">
           <FaceChip presence={presence} sev={sev} />
           <span className="rounded bg-black/50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white">{formatDuration(presence.timeRemainingSec)}</span>
