@@ -1,15 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
-  CheckCircle2,
   ChevronRight,
   Clock,
   Loader2,
   ShieldAlert,
   UserRound,
-  X,
 } from "lucide-react";
 import { PageHeader, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -138,7 +136,9 @@ function Page() {
     queryKey: ["officer-results-counts", schoolId, examIds.join(",")],
     enabled: Boolean(schoolId && examIds.length),
     queryFn: async () => {
-      if (!examIds.length) return {} as Record<string, { total: number; held: number; published: number; flagged: number }>;
+      if (!examIds.length) {
+        return {} as Record<string, { total: number; held: number; published: number; flagged: number }>;
+      }
       const { data, error } = await supabase
         .from("results")
         .select("exam_id, status, released_at, security_review_status")
@@ -150,10 +150,15 @@ function Page() {
         const eid = (r as { exam_id: string }).exam_id;
         if (!map[eid]) map[eid] = { total: 0, held: 0, published: 0, flagged: 0 };
         map[eid].total += 1;
-        const held = isHeldStatus(String((r as { status: string }).status), (r as { released_at: string | null }).released_at);
+        const held = isHeldStatus(
+          String((r as { status: string }).status),
+          (r as { released_at: string | null }).released_at,
+        );
         if (held) map[eid].held += 1;
         else map[eid].published += 1;
-        const sec = String((r as { security_review_status: string | null }).security_review_status || "").toLowerCase();
+        const sec = String(
+          (r as { security_review_status: string | null }).security_review_status || "",
+        ).toLowerCase();
         if (sec === "flagged") map[eid].flagged += 1;
       }
       return map;
@@ -186,7 +191,12 @@ function Page() {
   const selectedResult = (examResultsQ.data ?? []).find((r) => r.id === selectedResultId) ?? null;
 
   const detailEventsQ = useQuery({
-    queryKey: ["officer-result-events", schoolId, selectedResult?.student_id, selectedResult?.exam_id],
+    queryKey: [
+      "officer-result-events",
+      schoolId,
+      selectedResult?.student_id,
+      selectedResult?.exam_id,
+    ],
     enabled: Boolean(schoolId && selectedResult?.student_id && selectedResult?.exam_id),
     queryFn: async () => {
       if (!schoolId || !selectedResult) return [] as IntegrityEvent[];
@@ -204,7 +214,12 @@ function Page() {
   });
 
   const attemptDetailQ = useQuery({
-    queryKey: ["officer-result-attempt", selectedResult?.attempt_id, selectedResult?.exam_id, selectedResult?.student_id],
+    queryKey: [
+      "officer-result-attempt",
+      selectedResult?.attempt_id,
+      selectedResult?.exam_id,
+      selectedResult?.student_id,
+    ],
     enabled: Boolean(selectedResult),
     queryFn: async () => {
       if (!selectedResult) return null;
@@ -283,7 +298,8 @@ function Page() {
       } as never);
       const studentIds = [...new Set(released.map((r) => r.student_id).filter(Boolean))] as string[];
       if (studentIds.length) {
-        const examTitle = (examsQ.data ?? []).find((e) => e.id === examId)?.title ?? "your examination";
+        const examTitle =
+          (examsQ.data ?? []).find((e) => e.id === examId)?.title ?? "your examination";
         void notifyStudentsResultsReleased({ schoolId, studentIds, examTitle });
       }
       toast.success(`Released ${released.length} result(s)`);
@@ -383,7 +399,7 @@ function Page() {
   const attempts = attemptsQ.data ?? {};
   const counts = resultsCountsQ.data ?? {};
 
-  // —— Detail panel: one student result ——
+  // Step 3 — one student detail
   if (selectedExam && selectedResult) {
     const name =
       selectedResult.students?.full_name ||
@@ -441,7 +457,10 @@ function Page() {
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <MiniStat label="Score" value={`${selectedResult.total_score ?? "—"} / ${selectedResult.max_score ?? "—"}`} />
+            <MiniStat
+              label="Score"
+              value={`${selectedResult.total_score ?? "—"} / ${selectedResult.max_score ?? "—"}`}
+            />
             <MiniStat label="%" value={`${Math.round(pct)}%`} />
             <MiniStat label="Grade" value={selectedResult.grade || "—"} />
             <MiniStat
@@ -471,8 +490,14 @@ function Page() {
             <Meta label="Started" value={formatWhen(attempt?.started_at)} />
             <Meta label="Attempt" value={attempt?.status || "—"} />
             <Meta label="Tab switches" value={String(attempt?.tab_switch_count ?? 0)} />
-            <Meta label="Security" value={(selectedResult.security_review_status || "pending").replaceAll("_", " ")} />
-            <Meta label="Released" value={selectedResult.released_at ? formatWhen(selectedResult.released_at) : "Not yet"} />
+            <Meta
+              label="Security"
+              value={(selectedResult.security_review_status || "pending").replaceAll("_", " ")}
+            />
+            <Meta
+              label="Released"
+              value={selectedResult.released_at ? formatWhen(selectedResult.released_at) : "Not yet"}
+            />
           </div>
         </div>
 
@@ -499,7 +524,9 @@ function Page() {
                     )}
                   />
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-slate-800">{humanEventLabel(ev.event_type, ev.description)}</p>
+                    <p className="font-semibold text-slate-800">
+                      {humanEventLabel(ev.event_type, ev.description)}
+                    </p>
                     <p className="text-slate-500">{relativeTime(ev.created_at)}</p>
                   </div>
                 </li>
@@ -511,7 +538,7 @@ function Page() {
     );
   }
 
-  // —— Students for one exam ——
+  // Step 2 — students for one exam
   if (selectedExam) {
     const results = examResultsQ.data ?? [];
     const heldCount = results.filter((r) => isHeldStatus(r.status, r.released_at)).length;
@@ -609,7 +636,10 @@ function Page() {
             <p className="p-4 text-sm text-slate-500">Loading results…</p>
           ) : results.length === 0 ? (
             <div className="p-6">
-              <EmptyState title="No results yet" description="When students submit, their scores appear here for review and release." />
+              <EmptyState
+                title="No results yet"
+                description="When students submit, their scores appear here for review and release."
+              />
             </div>
           ) : (
             <ul className="divide-y divide-slate-50">
@@ -642,12 +672,18 @@ function Page() {
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-0.5">
                         {held ? (
-                          <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700">Held</span>
+                          <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700">
+                            Held
+                          </span>
                         ) : (
-                          <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">Out</span>
+                          <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
+                            Out
+                          </span>
                         )}
                         {flagged && (
-                          <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">Flag</span>
+                          <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">
+                            Flag
+                          </span>
                         )}
                       </div>
                       <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
@@ -662,7 +698,7 @@ function Page() {
     );
   }
 
-  // —— Exam list (default) ——
+  // Step 1 — exam list (default)
   return (
     <div className="mx-auto w-full max-w-3xl">
       <PageHeader
@@ -679,7 +715,8 @@ function Page() {
           {rows.map((e) => {
             const st = attempts[e.id];
             const rc = counts[e.id];
-            const blocked = st && st.total > 0 && st.finished < st.total && e.status !== "completed";
+            const blocked =
+              st && st.total > 0 && st.finished < st.total && e.status !== "completed";
             return (
               <li key={e.id}>
                 <button
@@ -705,7 +742,7 @@ function Page() {
                     <p className="mt-1 text-[10px] text-slate-400 sm:text-[11px]">
                       {e.scheduled_start ? formatWhen(e.scheduled_start) : "Not scheduled"}
                       {e.duration_minutes ? ` · ${e.duration_minutes} min` : ""}
-                      {st ? ` · ${st.finished}/${st.total} done` : " · No attempts"}
+                      {st ? ` · ${st.finished}/{st.total} done` : " · No attempts"}
                       {rc ? ` · ${rc.total} result${rc.total === 1 ? "" : "s"}` : ""}
                     </p>
                     {blocked && (
