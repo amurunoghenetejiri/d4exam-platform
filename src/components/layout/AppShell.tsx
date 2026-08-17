@@ -1,10 +1,23 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useState, type ReactNode } from "react";
-import { Bell, LogOut, Menu, Search, Settings, UserRound, X } from "lucide-react";
+import {
+  Bell,
+  Building2,
+  GraduationCap,
+  LogOut,
+  Menu,
+  Search,
+  Settings,
+  Shield,
+  ShieldCheck,
+  UserRound,
+  X,
+} from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { Watermark } from "@/components/brand/Watermark";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
@@ -15,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn, shortLabel, shortDisplayName } from "@/lib/utils";
-import { signOut, useSessionUser } from "@/lib/session";
+import { initials, signOut, useSessionUser, type AppRole } from "@/lib/session";
 import { useSchoolIdentity } from "@/lib/school-identity";
 import { useUnreadNotificationCount } from "@/lib/queries";
 import { useRealtimeInvalidate } from "@/lib/realtime";
@@ -25,6 +38,63 @@ export interface AppUser {
   name: string;
   avatar: string;
   subtitle: string;
+}
+
+const roleLabel: Record<string, string> = {
+  student: "Student",
+  teacher: "Teacher",
+  school_admin: "School Admin",
+  examination_officer: "Exam Officer",
+  super_admin: "Super Admin",
+};
+
+const roleBadgeStyles: Record<
+  string,
+  { className: string; icon: typeof UserRound }
+> = {
+  student: {
+    className: "border-sky-200/80 bg-sky-50 text-sky-800",
+    icon: GraduationCap,
+  },
+  teacher: {
+    className: "border-violet-200/80 bg-violet-50 text-violet-800",
+    icon: UserRound,
+  },
+  school_admin: {
+    className: "border-emerald-200/80 bg-emerald-50 text-emerald-800",
+    icon: Building2,
+  },
+  examination_officer: {
+    className: "border-amber-200/80 bg-amber-50 text-amber-900",
+    icon: Shield,
+  },
+  super_admin: {
+    className: "border-indigo-200/80 bg-indigo-50 text-indigo-900",
+    icon: ShieldCheck,
+  },
+};
+
+function AccountRoleBadge({ role }: { role: AppRole | string | null | undefined }) {
+  if (!role) return null;
+  const label = roleLabel[role] ?? String(role).replace(/_/g, " ");
+  const style = roleBadgeStyles[role] ?? {
+    className: "border-slate-200 bg-slate-50 text-slate-700",
+    icon: UserRound,
+  };
+  const Icon = style.icon;
+
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "mt-1.5 inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide",
+        style.className,
+      )}
+    >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      <span className="truncate">{label}</span>
+    </Badge>
+  );
 }
 
 function NavLinks({ config, onNavigate }: { config: RoleConfig; onNavigate?: () => void }) {
@@ -180,6 +250,7 @@ export function AppShell({
   const logoUrl = school?.logoUrl ?? session?.schoolLogoUrl ?? null;
   const schoolName = school?.name ?? session?.schoolName ?? null;
   const isSchoolPortal = Boolean(session?.schoolId) && session?.role !== "super_admin";
+  const avatarLetters = user.avatar || initials(user.name || "U");
 
   return (
     <div className="relative min-h-dvh bg-slate-50">
@@ -322,8 +393,8 @@ export function AppShell({
                   className="gap-2 px-1.5 sm:px-2"
                   aria-label="Account menu"
                 >
-                  <span className="grid h-8 w-8 place-items-center rounded-full bg-primary/10 text-primary">
-                    <UserRound className="h-4 w-4" />
+                  <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/80 text-[11px] font-bold text-white shadow-sm shadow-primary/20 ring-2 ring-white">
+                    {avatarLetters.slice(0, 2)}
                   </span>
                   <span className="hidden max-w-[8rem] truncate text-left text-sm font-semibold sm:block">
                     {shortDisplayName(user.name, 16)}
@@ -333,30 +404,52 @@ export function AppShell({
               <DropdownMenuContent
                 align="end"
                 className={cn(
-                  "z-[70] w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-0",
+                  "z-[70] w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-0 shadow-lg shadow-slate-200/60",
                 )}
               >
-                <div className="border-b border-slate-100 px-3 py-2.5">
-                  <p className="truncate text-sm font-bold text-slate-900">{shortDisplayName(user.name, 28)}</p>
-                  <p className="truncate text-xs text-slate-500">{user.subtitle}</p>
+                <div className="border-b border-slate-100 bg-gradient-to-br from-slate-50 via-white to-primary/[0.04] px-3 py-3">
+                  <div className="flex items-start gap-2.5">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/80 text-sm font-bold text-white shadow-sm shadow-primary/25 ring-2 ring-white">
+                      {avatarLetters.slice(0, 2)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold leading-tight text-slate-900">
+                        {shortDisplayName(user.name, 28)}
+                      </p>
+                      {user.subtitle ? (
+                        <p className="mt-0.5 truncate text-[11px] font-medium text-slate-500">
+                          {user.subtitle}
+                        </p>
+                      ) : null}
+                      <AccountRoleBadge role={session?.role} />
+                    </div>
+                  </div>
                 </div>
-                <DropdownMenuItem asChild>
-                  <Link to={`${config.home}/profile` as never} className="cursor-pointer">
-                    <UserRound className="mr-2 h-4 w-4" /> Profile
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to={`${config.home}/settings` as never} className="cursor-pointer">
-                    <Settings className="mr-2 h-4 w-4" /> Settings
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="cursor-pointer text-red-600 focus:text-red-600"
-                  onClick={() => void signOut()}
-                >
-                  <LogOut className="mr-2 h-4 w-4" /> Logout
-                </DropdownMenuItem>
+                <div className="p-1.5">
+                  <DropdownMenuItem asChild>
+                    <Link
+                      to={`${config.home}/profile` as never}
+                      className="cursor-pointer rounded-lg"
+                    >
+                      <UserRound className="mr-2 h-4 w-4" /> Profile
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link
+                      to={`${config.home}/settings` as never}
+                      className="cursor-pointer rounded-lg"
+                    >
+                      <Settings className="mr-2 h-4 w-4" /> Settings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="my-1" />
+                  <DropdownMenuItem
+                    className="cursor-pointer rounded-lg text-red-600 focus:bg-red-50 focus:text-red-600"
+                    onClick={() => void signOut()}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" /> Logout
+                  </DropdownMenuItem>
+                </div>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
