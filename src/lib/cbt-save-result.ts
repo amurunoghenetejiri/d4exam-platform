@@ -34,15 +34,14 @@ export async function saveCbtResult(input: {
     marks: number;
     correct_answer: string | null;
     correctOptionText?: string | null;
+    originalOptions?: string[];
     options: string[];
   }[];
   answers: Record<string, number>;
   terminated?: boolean;
   faceWarned?: boolean;
-  /** Teacher setting: immediate → publish now; otherwise pending for officer */
   resultVisibility?: ResultVisibility | string | null;
 }) {
-  // Re-load authoritative correct answers + original option order from DB
   const qIds = input.questions.map((q) => q.id).filter(Boolean);
   const bankById = new Map<
     string,
@@ -66,18 +65,23 @@ export async function saveCbtResult(input: {
     const bank = bankById.get(q.id);
     const correctAnswer = bank?.correct_answer ?? q.correct_answer;
     const originalOpts = decodeOptionsFromExplanation(bank?.explanation);
-    // Prefer text resolved from ORIGINAL A–D order (survives option shuffle in UI)
+    const originals = originalOpts.length
+      ? originalOpts
+      : q.originalOptions?.length
+        ? q.originalOptions
+        : [];
     const correctOptionText =
       q.correctOptionText ||
-      resolveCorrectOptionText(correctAnswer, originalOpts.length ? originalOpts : q.options) ||
+      (originals.length ? resolveCorrectOptionText(correctAnswer, originals) : null) ||
+      resolveCorrectOptionText(correctAnswer, q.options) ||
       null;
     return {
       id: q.id,
       marks: Number(bank?.marks ?? q.marks) || 1,
       correct_answer: correctAnswer,
       correctOptionText,
-      // Student chose by index into the options they saw (may be shuffled)
       options: q.options,
+      originalOptions: originals.length ? originals : undefined,
     };
   });
 
@@ -113,9 +117,7 @@ export async function saveCbtResult(input: {
         answers: input.answers,
       } as never)
       .eq("id", input.attemptId);
-    if (attErr) {
-      console.warn("exam_attempts update", attErr);
-    }
+    if (attErr) console.warn("exam_attempts update", attErr);
   }
 
   const payload = {
