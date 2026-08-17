@@ -30,6 +30,33 @@ type Audit = {
   created_at: string;
 };
 
+/** Same window as live-monitor online / offline hide — only “really writing” students. */
+const ACTIVE_WRITER_MS = 3 * 60 * 1000;
+
+function isAttemptActiveNow(
+  row: {
+    updated_at?: string | null;
+    started_at?: string | null;
+    metadata?: Record<string, unknown> | null;
+  },
+  now = Date.now(),
+): boolean {
+  const meta = row.metadata ?? {};
+  const lastSeen = String(meta.lastSeenAt ?? meta.last_seen_at ?? "");
+  const candidates: number[] = [];
+  if (lastSeen) {
+    const t = new Date(lastSeen).getTime();
+    if (!Number.isNaN(t)) candidates.push(t);
+  }
+  if (row.updated_at) {
+    const t = new Date(row.updated_at).getTime();
+    if (!Number.isNaN(t)) candidates.push(t);
+  }
+  // Do not use started_at alone — that keeps stale attempts “alive” forever
+  if (!candidates.length) return false;
+  return now - Math.max(...candidates) <= ACTIVE_WRITER_MS;
+}
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
@@ -42,6 +69,7 @@ function Page() {
           { table: "examinations", filter: `school_id=eq.${schoolId}` },
           { table: "exam_attempts", filter: `school_id=eq.${schoolId}` },
           { table: "results", filter: `school_id=eq.${schoolId}` },
+          { table: "integrity_events", filter: `school_id=eq.${schoolId}` },
         ]
       : [],
     [
@@ -67,73 +95,44 @@ function Page() {
   );
 
   /**
-   * Live examinations = distinct exams that are actually running right now:
-   * 1) any exam with ≥1 student status=in_progress, OR
-   * 2) status=ongoing and within scheduled window (start ≤ now ≤ end, or no end).
-   * Scheduled-only exams do NOT count.
+   * Live examinations + Ongoing integrity — same source of truth as Live Monitor:
+   * only in_progress attempts with recent activity (last 3 min presence/update).
+   * Stale in_progress rows and bare “ongoing” exams with nobody writing do NOT count.
    */
-  const liveQ = useQuery({
+  const liveStatsQ = useQuery({
     queryKey: ["officer-dash-live", schoolId],
     enabled,
-    staleTime: 3_000,
-    refetchInterval: 8_000,
+    staleTime: 2_000,
+    refetchInterval: 6_000,
     queryFn: async () => {
-      if (!schoolId) return 0;
-      const ids = new Set<string>();
-      const now = Date.now();
-
-      // Students currently writing → those exams are live
-      const { data: attempts } = await supabase
+      if (!schoolId) return { liveExams: 0, writers: 0 };
+      const { data: attempts, error } = await supabase
         .from("exam_attempts")
-        .select("exam_id")
+        .select("id, exam_id, updated_at, started_at, metadata")
         .eq("school_id", schoolId)
         .eq("status", "in_progress")
         .limit(1000);
-      for (const a of attempts ?? []) {
+      if (error) return { liveExams: 0, writers: 0 };
+
+      const now = Date.now();
+      const active = (attempts ?? []).filter((a) =>
+        isAttemptActiveNow(
+          a as {
+            updated_at?: string | null;
+            started_at?: string | null;
+            metadata?: Record<string, unknown> | null;
+          },
+          now,
+        ),
+      );
+      const examIds = new Set<
+        string
+      >();
+      for (const a of active) {
         const eid = (a as { exam_id: string | null }).exam_id;
-        if (eid) ids.add(eid);
+        if (eid) examIds.add(eid);
       }
-
-      // Officially ongoing + inside schedule window
-      const { data: ongoing } = await supabase
-        .from("examinations")
-        .select("id, scheduled_start, scheduled_end, status")
-        .eq("school_id", schoolId)
-        .eq("status", "ongoing");
-
-      for (const e of ongoing ?? []) {
-        const row = e as {
-          id: string;
-          scheduled_start: string | null;
-          scheduled_end: string | null;
-        };
-        const start = row.scheduled_start ? new Date(row.scheduled_start).getTime() : null;
-        const end = row.scheduled_end ? new Date(row.scheduled_end).getTime() : null;
-        // Count if no schedule, or start has passed, and end not passed
-        const startedOk = start == null || !Number.isNaN(start) ? (start == null || start <= now) : true;
-        const notEnded = end == null || Number.isNaN(end) || end >= now;
-        if (startedOk && notEnded) ids.add(row.id);
-      }
-
-      return ids.size;
-    },
-  });
-
-  /** Ongoing integrity = number of students currently writing (in_progress). */
-  const integrityQ = useQuery({
-    queryKey: ["officer-dash-integrity", schoolId],
-    enabled,
-    staleTime: 3_000,
-    refetchInterval: 8_000,
-    queryFn: async () => {
-      if (!schoolId) return 0;
-      const { count, error } = await supabase
-        .from("exam_attempts")
-        .select("id", { count: "exact", head: true })
-        .eq("school_id", schoolId)
-        .eq("status", "in_progress");
-      if (error) return 0;
-      return count ?? 0;
+      return { liveExams: examIds.size, writers: active.length };
     },
   });
 
@@ -161,8 +160,8 @@ function Page() {
     enabled,
   });
 
-  const liveValue = liveQ.isLoading ? "…" : String(liveQ.data ?? 0);
-  const integrityValue = integrityQ.isLoading ? "…" : String(integrityQ.data ?? 0);
+  const liveValue = liveStatsQ.isLoading ? "…" : String(liveStatsQ.data?.liveExams ?? 0);
+  const integrityValue = liveStatsQ.isLoading ? "…" : String(liveStatsQ.data?.writers ?? 0);
 
   return (
     <>
