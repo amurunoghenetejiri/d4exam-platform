@@ -185,8 +185,8 @@ export function AppShell({
     <div className="relative min-h-dvh bg-slate-50">
       <Watermark opacity={0.08} size="xl" className="pointer-events-none lg:left-64" />
 
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-[#0b1b3a] lg:flex">
-        <div className="flex h-[4.5rem] items-center border-b border-white/10 px-4">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden h-dvh max-h-dvh w-64 flex-col bg-[#0b1b3a] lg:flex">
+        <div className="flex h-[4.5rem] shrink-0 items-center border-b border-white/10 px-4">
           <PortalBrand
             isSchoolPortal={isSchoolPortal}
             logoUrl={logoUrl}
@@ -194,10 +194,10 @@ export function AppShell({
             homeTo={config.home}
           />
         </div>
-        <div className="flex-1 overflow-y-auto hide-scrollbar">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain hide-scrollbar">
           <NavLinks config={config} />
         </div>
-        <div className="border-t border-white/10 p-3">
+        <div className="shrink-0 border-t border-white/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
           <button
             type="button"
             onClick={() => void signOut()}
@@ -234,10 +234,10 @@ export function AppShell({
               <SheetContent
                 side="left"
                 hideClose
-                className="w-[min(100vw-2rem,18rem)] border-r-0 bg-[#0b1b3a] p-0 text-white"
+                className="flex h-dvh max-h-dvh w-[min(100vw-2rem,18rem)] flex-col border-r-0 bg-[#0b1b3a] p-0 text-white"
               >
                 <SheetTitle className="sr-only">{config.label} navigation</SheetTitle>
-                <div className="flex h-16 items-center justify-between gap-2 border-b border-white/10 px-3 sm:px-4">
+                <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 sm:px-4">
                   <div className="min-w-0 flex-1">
                     <PortalBrand
                       isSchoolPortal={isSchoolPortal}
@@ -255,8 +255,21 @@ export function AppShell({
                     <X className="h-5 w-5" strokeWidth={2.25} />
                   </button>
                 </div>
-                <div className="h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   <NavLinks config={config} onNavigate={() => setOpen(false)} />
+                </div>
+                <div className="shrink-0 border-t border-white/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      void signOut();
+                    }}
+                    className="pressable flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-300 transition-colors hover:bg-white/5 hover:text-white active:scale-[0.98]"
+                  >
+                    <LogOut className="h-4 w-4" aria-hidden />
+                    Logout
+                  </button>
                 </div>
               </SheetContent>
             </Sheet>
@@ -279,148 +292,71 @@ export function AppShell({
                     size="sm"
                     className="bg-transparent"
                   />
-                  <span className="max-w-[42vw] truncate text-sm font-bold text-slate-900 sm:max-w-[200px]">
-                    {schoolName || config.label}
+                  <span className="truncate text-sm font-extrabold text-slate-900">
+                    {schoolName || "School"}
                   </span>
                 </>
               ) : (
-                <Logo size="md" wordmark={false} />
+                <Logo size="sm" />
               )}
             </Link>
           </div>
 
-          <div className="hidden justify-center md:flex">
-            <div className="relative w-full max-w-sm">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-                aria-hidden
-              />
+          <div className="hidden min-w-0 md:block">
+            <div className="relative max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
-                type="search"
-                placeholder="Search exams, courses, students…"
+                placeholder="Search…"
+                className="h-10 rounded-xl border-slate-200 bg-slate-50 pl-9"
                 aria-label="Search"
-                className="h-10 rounded-full border-slate-200 bg-slate-50/90 pl-9"
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-0.5 justify-self-end sm:gap-1">
+          <div className="flex items-center justify-end gap-1 sm:gap-2">
             <NotificationBell to={notifPath} unread={unreadCount} />
-
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="pressable flex items-center gap-1.5 rounded-full border border-transparent p-0.5 transition-colors hover:border-slate-200 hover:bg-slate-50 active:scale-[0.98] sm:gap-2 sm:pr-2"
+                <Button
+                  variant="ghost"
+                  className="gap-2 px-2"
                   aria-label="Account menu"
                 >
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary/20 to-primary/10 text-[11px] font-bold text-primary ring-2 ring-white sm:h-9 sm:w-9 sm:text-xs">
-                    {user.avatar}
+                  <span className="grid h-8 w-8 place-items-center rounded-full bg-primary/10 text-primary">
+                    <UserRound className="h-4 w-4" />
                   </span>
-                  <span className="hidden min-w-0 text-left sm:block">
-                    <span className="block max-w-[120px] truncate text-xs font-bold leading-tight text-slate-900 md:max-w-[140px]">
-                      {user.name}
-                    </span>
-                    <span className="block max-w-[120px] truncate text-[10px] leading-tight text-slate-500 md:max-w-[140px]">
-                      {user.subtitle || config.label}
-                    </span>
+                  <span className="hidden max-w-[8rem] truncate text-left text-sm font-semibold sm:block">
+                    {user.name}
                   </span>
-                </button>
+                </Button>
               </DropdownMenuTrigger>
-
-              {/* Compact profile menu — fits content, not oversized */}
               <DropdownMenuContent
                 align="end"
-                sideOffset={6}
                 className={cn(
                   "z-[70] w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-0",
-                  "shadow-lg",
                 )}
               >
                 <div className="border-b border-slate-100 px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary text-[11px] font-bold text-white">
-                      {user.avatar}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-xs font-bold text-slate-900">{user.name}</p>
-                      <p className="mt-0.5 inline-flex rounded-full bg-primary/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-primary">
-                        {config.label}
-                      </p>
-                      {user.subtitle ? (
-                        <p className="mt-0.5 truncate text-[10px] text-slate-500">{user.subtitle}</p>
-                      ) : null}
-                    </div>
-                  </div>
+                  <p className="truncate text-sm font-bold text-slate-900">{user.name}</p>
+                  <p className="truncate text-xs text-slate-500">{user.subtitle}</p>
                 </div>
-
-                <div className="p-1">
-                  <DropdownMenuItem
-                    asChild
-                    className="cursor-pointer rounded-lg px-2 py-1.5 focus:bg-slate-50"
-                  >
-                    <Link
-                      to={`${config.home}/profile` as string}
-                      preload="intent"
-                      className="flex w-full items-center gap-2"
-                    >
-                      <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
-                      <span className="text-xs font-semibold text-slate-900">Profile</span>
-                    </Link>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem
-                    asChild
-                    className="cursor-pointer rounded-lg px-2 py-1.5 focus:bg-slate-50"
-                  >
-                    <Link
-                      to={`${config.home}/settings` as string}
-                      preload="intent"
-                      className="flex w-full items-center gap-2"
-                    >
-                      <Settings className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
-                      <span className="text-xs font-semibold text-slate-900">Settings</span>
-                    </Link>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem
-                    asChild
-                    className="cursor-pointer rounded-lg px-2 py-1.5 focus:bg-slate-50"
-                  >
-                    <Link
-                      to={notifPath as string}
-                      preload="intent"
-                      className="flex w-full items-center gap-2"
-                    >
-                      <span className="relative">
-                        <Bell className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
-                        {unreadCount > 0 ? (
-                          <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-red-500" />
-                        ) : null}
-                      </span>
-                      <span className="flex flex-1 items-center justify-between gap-2 text-xs font-semibold text-slate-900">
-                        Notifications
-                        {unreadCount > 0 ? (
-                          <span className="rounded-full bg-red-500 px-1.5 py-px text-[9px] font-bold text-white">
-                            {unreadCount > 99 ? "99+" : unreadCount}
-                          </span>
-                        ) : null}
-                      </span>
-                    </Link>
-                  </DropdownMenuItem>
-                </div>
-
-                <DropdownMenuSeparator className="my-0 bg-slate-100" />
-
-                <div className="p-1">
-                  <DropdownMenuItem
-                    onSelect={() => void signOut()}
-                    className="cursor-pointer rounded-lg px-2 py-1.5 text-red-600 focus:bg-red-50 focus:text-red-700"
-                  >
-                    <LogOut className="mr-2 h-3.5 w-3.5" aria-hidden />
-                    <span className="text-xs font-semibold">Logout</span>
-                  </DropdownMenuItem>
-                </div>
+                <DropdownMenuItem asChild>
+                  <Link to={`${config.home}/profile` as never} className="cursor-pointer">
+                    <UserRound className="mr-2 h-4 w-4" /> Profile
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to={`${config.home}/settings` as never} className="cursor-pointer">
+                    <Settings className="mr-2 h-4 w-4" /> Settings
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="cursor-pointer text-red-600 focus:text-red-600"
+                  onClick={() => void signOut()}
+                >
+                  <LogOut className="mr-2 h-4 w-4" /> Logout
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
