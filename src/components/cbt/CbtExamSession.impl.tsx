@@ -15,7 +15,7 @@ import { fromExamSettingsRow, type ExamSettingsRow } from "@/lib/exam-security";
 import { parseExamMeta, pickExamQuestions, seededShuffle } from "@/lib/exam-meta";
 import { type DeviceCapabilities } from "@/lib/device-capabilities";
 import { toast } from "sonner";
-import { hapticOfficerWarning, haptic as fireHaptic, primeHaptics } from "@/lib/haptic";
+import { hapticOfficerWarning, haptic as fireHaptic, primeHaptics, refreshHapticUnlock } from "@/lib/haptic";
 import { ExamCameraPip, type FaceSecurityEvent } from "@/components/cbt/ExamCameraPip";
 import { saveCbtResult } from "@/lib/cbt-save-result";
 import { logSecurityEvent } from "@/lib/cbt-security";
@@ -432,6 +432,24 @@ export function CbtExamPage() {
     session?.schoolId,
     id,
   ]);
+
+  /** Keep vibration unlocked while the student interacts with the exam UI. */
+  useEffect(() => {
+    if (previewMode || !started || done) return;
+    const onInteract = () => {
+      try {
+        refreshHapticUnlock();
+      } catch {
+        /* ignore */
+      }
+    };
+    document.addEventListener("pointerdown", onInteract, { passive: true });
+    document.addEventListener("touchstart", onInteract, { passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", onInteract);
+      document.removeEventListener("touchstart", onInteract);
+    };
+  }, [previewMode, started, done]);
 
   useEffect(() => {
     if (previewMode || !started || done) return;
