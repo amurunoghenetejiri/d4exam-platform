@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { scoreObjectiveAnswers, resolveCorrectOptionText } from "@/lib/cbt-security";
 import { friendlyError } from "@/lib/friendly-error";
+import { notifyOfficersStudentResultPending } from "@/lib/notify";
 import type { ResultVisibility } from "@/types";
 
 /** Decode OPTIONS::A=...|B=... from question explanation into ordered option texts. */
@@ -190,6 +191,17 @@ export async function saveCbtResult(input: {
     }
   } else {
     resultId = upsert.data?.id as string | undefined;
+  }
+
+  // Officer notification: result held until release (skip if already published)
+  if (!error && input.schoolId && !publishNow) {
+    void notifyOfficersStudentResultPending({
+      schoolId: input.schoolId,
+      examId: input.examId,
+      studentId: input.studentId,
+      resultId: resultId ?? null,
+      published: false,
+    });
   }
 
   return {
