@@ -1,0 +1,3 @@
+redeploy-trigger: 2026-08-18T00:34:00Z
+reason: force Vercel/Lovable production rebuild after officer dashboard + live-cam + notify fixes
+commits: 47da523, 0810e46, 47aa9ce, this

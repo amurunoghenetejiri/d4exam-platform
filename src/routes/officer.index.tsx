@@ -48,8 +48,8 @@ function Page() {
       ["count", "examinations"],
       ["officer-dash-live", schoolId],
       ["officer-dash-integrity", schoolId],
-      ["officer-dash-pending-results", schoolId],
       ["rows", "examinations"],
+      ["rows", "audit_logs"],
     ],
     enabled,
     2000,
@@ -66,43 +66,65 @@ function Page() {
     enabled,
   );
 
-  /** Live examinations = distinct exams currently running (status ongoing OR students writing). */
+  /**
+   * Live examinations = distinct exams that are actually running right now:
+   * 1) any exam with ≥1 student status=in_progress, OR
+   * 2) status=ongoing and within scheduled window (start ≤ now ≤ end, or no end).
+   * Scheduled-only exams do NOT count.
+   */
   const liveQ = useQuery({
     queryKey: ["officer-dash-live", schoolId],
     enabled,
-    staleTime: 5_000,
-    refetchInterval: 10_000,
+    staleTime: 3_000,
+    refetchInterval: 8_000,
     queryFn: async () => {
       if (!schoolId) return 0;
       const ids = new Set<string>();
+      const now = Date.now();
 
-      const { data: ongoing } = await supabase
-        .from("examinations")
-        .select("id")
-        .eq("school_id", schoolId)
-        .eq("status", "ongoing");
-      for (const e of ongoing ?? []) ids.add((e as { id: string }).id);
-
+      // Students currently writing → those exams are live
       const { data: attempts } = await supabase
         .from("exam_attempts")
         .select("exam_id")
         .eq("school_id", schoolId)
         .eq("status", "in_progress")
-        .limit(800);
+        .limit(1000);
       for (const a of attempts ?? []) {
         const eid = (a as { exam_id: string | null }).exam_id;
         if (eid) ids.add(eid);
       }
+
+      // Officially ongoing + inside schedule window
+      const { data: ongoing } = await supabase
+        .from("examinations")
+        .select("id, scheduled_start, scheduled_end, status")
+        .eq("school_id", schoolId)
+        .eq("status", "ongoing");
+
+      for (const e of ongoing ?? []) {
+        const row = e as {
+          id: string;
+          scheduled_start: string | null;
+          scheduled_end: string | null;
+        };
+        const start = row.scheduled_start ? new Date(row.scheduled_start).getTime() : null;
+        const end = row.scheduled_end ? new Date(row.scheduled_end).getTime() : null;
+        // Count if no schedule, or start has passed, and end not passed
+        const startedOk = start == null || !Number.isNaN(start) ? (start == null || start <= now) : true;
+        const notEnded = end == null || Number.isNaN(end) || end >= now;
+        if (startedOk && notEnded) ids.add(row.id);
+      }
+
       return ids.size;
     },
   });
 
-  /** Ongoing integrity = students currently writing (in_progress attempts). */
+  /** Ongoing integrity = number of students currently writing (in_progress). */
   const integrityQ = useQuery({
     queryKey: ["officer-dash-integrity", schoolId],
     enabled,
-    staleTime: 5_000,
-    refetchInterval: 10_000,
+    staleTime: 3_000,
+    refetchInterval: 8_000,
     queryFn: async () => {
       if (!schoolId) return 0;
       const { count, error } = await supabase
