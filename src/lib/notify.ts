@@ -109,13 +109,22 @@ export async function notifyMany(payloads: NotifyPayload[]): Promise<void> {
 /** All examination officers for a school (auth user ids). */
 export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
   try {
-    const { data: roles } = await supabase
+    const { data: roles, error } = await supabase
       .from("user_roles")
-      .select("user_id")
+      .select("user_id, role")
       .eq("school_id", schoolId)
-      .eq("role", "examination_officer");
-    const ids = (roles ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean);
-    return [...new Set(ids)];
+      .in("role", ["examination_officer", "exam_officer", "officer"]);
+    if (error) {
+      const { data: roles2 } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("school_id", schoolId)
+        .eq("role", "examination_officer");
+      return [...new Set((roles2 ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
+    }
+    const preferred = (roles ?? []).filter((r) => (r as { role?: string }).role === "examination_officer");
+    const pool = preferred.length ? preferred : (roles ?? []);
+    return [...new Set(pool.map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
   } catch {
     return [];
   }
@@ -149,7 +158,10 @@ export async function studentIdsToAuthUserIds(studentIds: string[]): Promise<str
       .from("profiles")
       .select("id, auth_user_id")
       .in("id", profileIds);
-    return [...new Set((profiles ?? []).map((p) => p.auth_user_id).filter(Boolean))] as string[];
+    const fromAuth = (profiles ?? []).map((p) => p.auth_user_id).filter(Boolean) as string[];
+    // Fallback: some older rows used profile id equal to auth user id
+    if (fromAuth.length) return [...new Set(fromAuth)];
+    return [...new Set(profileIds)];
   } catch {
     return [];
   }
