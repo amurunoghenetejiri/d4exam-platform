@@ -1,1 +1,1 @@
-SEE_FILE
+export { CbtExamPage as CbtExamSession, CbtExamPage } from "./CbtExamSession.backup";
