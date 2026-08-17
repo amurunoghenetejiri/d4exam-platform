@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+import { cn, shortLabel, shortDisplayName } from "@/lib/utils";
 import { signOut, useSessionUser } from "@/lib/session";
 import { useSchoolIdentity } from "@/lib/school-identity";
 import { useUnreadNotificationCount } from "@/lib/queries";
@@ -218,14 +218,14 @@ export function AppShell({
         )}
         style={{ position: "fixed" }}
       >
-        <div className="mx-auto grid h-14 max-w-[1400px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 sm:h-16 sm:gap-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="mx-auto grid h-12 max-w-[1400px] grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 px-2.5 sm:h-16 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
                 <Button
                   variant="outline"
                   size="icon"
-                  className="shrink-0 lg:hidden"
+                  className="h-9 w-9 shrink-0 lg:hidden"
                   aria-label="Open menu"
                 >
                   <Menu className="h-5 w-5" />
@@ -281,7 +281,7 @@ export function AppShell({
             <Link
               to={config.home}
               preload="intent"
-              className="pressable flex min-w-0 items-center gap-2 active:scale-[0.98] lg:hidden"
+              className="pressable flex min-w-0 max-w-[min(100%,11rem)] items-center gap-1.5 active:scale-[0.98] sm:max-w-[16rem] lg:hidden"
               aria-label={isSchoolPortal ? schoolName || "Home" : "D4EXAM home"}
             >
               {isSchoolPortal ? (
@@ -290,10 +290,10 @@ export function AppShell({
                     logoUrl={logoUrl}
                     schoolName={schoolName}
                     size="sm"
-                    className="bg-transparent"
+                    className="shrink-0 bg-transparent"
                   />
-                  <span className="truncate text-sm font-extrabold text-slate-900">
-                    {schoolName || "School"}
+                  <span className="truncate text-xs font-bold leading-tight text-slate-900 sm:text-sm sm:font-extrabold">
+                    {shortLabel(schoolName || "School", 20)}
                   </span>
                 </>
               ) : (
@@ -313,20 +313,20 @@ export function AppShell({
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-1 sm:gap-2">
+          <div className="flex items-center justify-end gap-0.5 sm:gap-2">
             <NotificationBell to={notifPath} unread={unreadCount} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="gap-2 px-2"
+                  className="gap-2 px-1.5 sm:px-2"
                   aria-label="Account menu"
                 >
                   <span className="grid h-8 w-8 place-items-center rounded-full bg-primary/10 text-primary">
                     <UserRound className="h-4 w-4" />
                   </span>
                   <span className="hidden max-w-[8rem] truncate text-left text-sm font-semibold sm:block">
-                    {user.name}
+                    {shortDisplayName(user.name, 16)}
                   </span>
                 </Button>
               </DropdownMenuTrigger>
@@ -337,7 +337,7 @@ export function AppShell({
                 )}
               >
                 <div className="border-b border-slate-100 px-3 py-2.5">
-                  <p className="truncate text-sm font-bold text-slate-900">{user.name}</p>
+                  <p className="truncate text-sm font-bold text-slate-900">{shortDisplayName(user.name, 28)}</p>
                   <p className="truncate text-xs text-slate-500">{user.subtitle}</p>
                 </div>
                 <DropdownMenuItem asChild>
@@ -363,7 +363,7 @@ export function AppShell({
         </div>
       </header>
 
-      <div className="relative z-10 pt-14 sm:pt-16 lg:pl-64">
+      <div className="relative z-10 pt-12 sm:pt-16 lg:pl-64">
         <main className="mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:pb-10">
           <div className="min-w-0 w-full">{children}</div>
         </main>
