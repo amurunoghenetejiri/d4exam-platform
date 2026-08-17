@@ -15,7 +15,7 @@ import { fromExamSettingsRow, type ExamSettingsRow } from "@/lib/exam-security";
 import { parseExamMeta, pickExamQuestions, seededShuffle } from "@/lib/exam-meta";
 import { type DeviceCapabilities } from "@/lib/device-capabilities";
 import { toast } from "sonner";
-import { hapticOfficerWarning, haptic as fireHaptic } from "@/lib/haptic";
+import { hapticOfficerWarning, haptic as fireHaptic, primeHaptics } from "@/lib/haptic";
 import { ExamCameraPip, type FaceSecurityEvent } from "@/components/cbt/ExamCameraPip";
 import { saveCbtResult } from "@/lib/cbt-save-result";
 import { logSecurityEvent } from "@/lib/cbt-security";
@@ -370,7 +370,6 @@ export function CbtExamPage() {
     [previewMode, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId, id],
   );
 
-  /** Tab leave / blur → integrity log + tab_switch_count (officer can see). */
   useEffect(() => {
     if (previewMode || !started || done) return;
     if (!security.tabMonitoring) return;
@@ -434,7 +433,6 @@ export function CbtExamPage() {
     id,
   ]);
 
-  /** Instant alert when officer warns this student (integrity_events + notifications). */
   useEffect(() => {
     if (previewMode || !started || done) return;
     const studentId = student?.studentId;
@@ -455,7 +453,6 @@ export function CbtExamPage() {
 
     const channels: ReturnType<typeof supabase.channel>[] = [];
 
-    // Path 1: integrity_events (officer live-monitor logSecurityEvent)
     if (studentId) {
       const ch = supabase
         .channel(`cbt-officer-warn-ie-${studentId}-${id}`)
@@ -484,7 +481,6 @@ export function CbtExamPage() {
       channels.push(ch);
     }
 
-    // Path 2: notifications (always on realtime) — backup if integrity_events not in publication
     if (authUserId) {
       const ch = supabase
         .channel(`cbt-officer-warn-ntf-${authUserId}-${id}`)
@@ -517,14 +513,7 @@ export function CbtExamPage() {
     return () => {
       for (const ch of channels) void supabase.removeChannel(ch);
     };
-  }, [
-    previewMode,
-    started,
-    done,
-    student?.studentId,
-    session?.userId,
-    id,
-  ]);
+  }, [previewMode, started, done, student?.studentId, session?.userId, id]);
 
   useEffect(() => {
     if (previewMode || !started || done || !student?.studentId || !examQ.data?.school_id) return;
@@ -688,6 +677,12 @@ export function CbtExamPage() {
 
   async function beginWithMedia(_opts: { skipScreenShare: boolean; caps: DeviceCapabilities }) {
     setMediaBusy(true);
+    // Unlock vibration + audio while still in the user-gesture stack from Start
+    try {
+      primeHaptics();
+    } catch {
+      /* ignore */
+    }
     try {
       if (!previewMode && student?.studentId) {
         const { data: existing } = await supabase.from("exam_attempts").select("id, status")
