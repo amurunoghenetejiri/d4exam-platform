@@ -17,7 +17,8 @@ export type NotifyType =
   | "exam_available"
   | "result_published"
   | "announcement"
-  | "system_alert";
+  | "system_alert"
+  | "officer_warning";
 
 export type NotifyPayload = {
   recipientUserId: string;
@@ -112,7 +113,6 @@ export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
     [...new Set(ids.filter((x): x is string => Boolean(x)))];
 
   try {
-    // 1) user_roles for this school — only valid enum value examination_officer
     const { data: bySchool, error: e1 } = await supabase
       .from("user_roles")
       .select("user_id")
@@ -125,8 +125,6 @@ export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
       console.warn("[notify] officer roles by school", e1.message);
     }
 
-    // 2) All examination_officer roles, then filter by profiles.school_id
-    //    (covers rows where user_roles.school_id is null)
     const { data: allOfficers, error: e2 } = await supabase
       .from("user_roles")
       .select("user_id")
@@ -145,7 +143,6 @@ export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
       if (ids.length) return ids;
     }
 
-    // 3) examination_officers.profile_id → profiles.auth_user_id for this school
     const { data: officerRows } = await supabase
       .from("examination_officers")
       .select("profile_id")
@@ -198,7 +195,6 @@ export async function studentIdsToAuthUserIds(studentIds: string[]): Promise<str
       .select("id, auth_user_id")
       .in("id", profileIds);
     const fromAuth = (profiles ?? []).map((p) => p.auth_user_id).filter(Boolean) as string[];
-    // Fallback: some older rows used profile id equal to auth user id
     if (fromAuth.length) return [...new Set(fromAuth)];
     return [...new Set(profileIds)];
   } catch {
@@ -402,5 +398,38 @@ export async function notifyStudentExamSubmitted(opts: {
     entityType: "examination",
     entityId: opts.examId,
     dedupeMinutes: 10,
+  });
+}
+
+/**
+ * Officer proctoring warning → student receives a red alert instantly
+ * (in-app notification + integrity event already logged by caller).
+ */
+export async function notifyStudentOfficerWarning(opts: {
+  schoolId: string;
+  studentId: string;
+  examId: string;
+  examTitle?: string;
+  message?: string;
+}) {
+  const authIds = await studentIdsToAuthUserIds([opts.studentId]);
+  const uid = authIds[0];
+  if (!uid) {
+    console.warn("[notify] no auth user for student warning", opts.studentId);
+    return null;
+  }
+  const examBit = opts.examTitle ? ` during “${opts.examTitle}”` : "";
+  return notifyUser({
+    recipientUserId: uid,
+    schoolId: opts.schoolId,
+    title: "⚠ Officer warning",
+    message:
+      opts.message ||
+      `An examination officer has issued a warning${examBit}. Stay focused on your exam and follow all rules. Further violations may be flagged.`,
+    type: "officer_warning",
+    link: "/student/examinations",
+    entityType: "examination",
+    entityId: opts.examId,
+    dedupeMinutes: 1,
   });
 }
