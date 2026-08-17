@@ -36,7 +36,7 @@ import {
   type ExamSettingsRow,
 } from "@/lib/exam-security";
 import { parseExamMeta } from "@/lib/exam-meta";
-import { notifyTeacherExamDecision } from "@/lib/notify";
+import { notifyTeacherExamDecision, notifyStudentsExamApproved } from "@/lib/notify";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/officer/approvals")({
@@ -329,6 +329,16 @@ function Page() {
           decision: action,
           scheduleNote: when,
           comment: comment.trim() || undefined,
+        });
+      }
+
+      if (action === "approve" && schoolId) {
+        void notifyStudentsExamApproved({
+          schoolId,
+          examId: selected.id,
+          examTitle: selected.title,
+          courseId: selected.course_id,
+          scheduledStart: scheduleStart || selected.scheduled_start,
         });
       }
 
