@@ -19,7 +19,7 @@ function haptic(kind: SecurityAlertKind) {
   fireHaptic(map[kind]);
 }
 
-const ALERT_COOLDOWN_MS = 4000;
+const ALERT_COOLDOWN_MS = 2500;
 
 const ALERT_COPY: Record<
   SecurityAlertKind,
@@ -28,7 +28,7 @@ const ALERT_COPY: Record<
   none: {
     message: "Face not detected. Please position your face in the camera.",
     toastId: "cbt-face-none",
-    level: "warning",
+    level: "error",
   },
   multi: {
     message: "Multiple faces detected. Only the candidate should be visible.",
@@ -36,7 +36,7 @@ const ALERT_COPY: Record<
     level: "error",
   },
   unclear: {
-    message: "Please face the camera clearly.",
+    message: "Face not clear. Improve lighting and face the camera clearly.",
     toastId: "cbt-face-unclear",
     level: "warning",
   },
@@ -114,6 +114,13 @@ export function ExamCameraPip({
     if (now - lastAlertRef.current < ALERT_COOLDOWN_MS) return;
     lastAlertRef.current = now;
 
+    // Vibration first (must not depend on toast)
+    try {
+      haptic(kind);
+    } catch {
+      /* ignore */
+    }
+
     const copy = ALERT_COPY[kind];
     const opts = {
       id: copy.toastId,
@@ -125,7 +132,6 @@ export function ExamCameraPip({
     } else {
       toast.warning(copy.message, opts);
     }
-    haptic(kind);
     onSecRef.current?.({
       kind,
       faceCount,
@@ -138,48 +144,41 @@ export function ExamCameraPip({
       if (externalStream) return;
       if (!enabled) return;
       if (acquiringRef.current) return;
-      if (reason === "reconnect" && streamIsLive(ownStreamRef.current)) {
-        setStream(ownStreamRef.current);
-        setCamConn("active");
-        return;
-      }
-
       acquiringRef.current = true;
       setCamConn("reconnecting");
       try {
-        stopStream(ownStreamRef.current);
-        ownStreamRef.current = null;
-
         const s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false,
         });
+        if (!enabled) {
+          stopStream(s);
+          return;
+        }
+        stopStream(ownStreamRef.current);
         ownStreamRef.current = s;
         setStream(s);
         setCamConn("active");
-        setFaceStatus(faceDetection ? "unclear" : "ok");
+        if (reason === "reconnect") {
+          toast.success("Camera reconnected", { id: "cbt-cam-reconnect", duration: 2200 });
+        }
       } catch {
-        ownStreamRef.current = null;
-        setStream(null);
         setCamConn("unavailable");
-        setFaceStatus("unavailable");
+        setStream(null);
         fireAlert("camera_blocked", null);
-        toast.error("Camera not available. Please allow camera access to continue the exam.", {
-          id: "cbt-cam-permission",
-          duration: 5000,
-          className: "cbt-exam-toast",
-        });
       } finally {
         acquiringRef.current = false;
       }
     },
-    [enabled, externalStream, faceDetection, fireAlert],
+    [enabled, externalStream, fireAlert],
   );
 
   useEffect(() => {
     if (externalStream) {
+      stopStream(ownStreamRef.current);
+      ownStreamRef.current = null;
       setStream(externalStream);
-      setCamConn(streamIsLive(externalStream) ? "active" : "unavailable");
+      setCamConn(streamIsLive(externalStream) ? "active" : "reconnecting");
       return;
     }
     if (!enabled) {
@@ -187,12 +186,9 @@ export function ExamCameraPip({
       ownStreamRef.current = null;
       setStream(null);
       setCamConn("unavailable");
-      setFaceStatus("unavailable");
       return;
     }
-
     void acquireOwnCamera("mount");
-
     return () => {
       stopStream(ownStreamRef.current);
       ownStreamRef.current = null;
@@ -200,92 +196,62 @@ export function ExamCameraPip({
   }, [enabled, externalStream, acquireOwnCamera]);
 
   useEffect(() => {
-    if (!enabled || externalStream) return;
-
-    const tryReconnect = () => {
-      if (document.visibilityState !== "visible") return;
-      const live = streamIsLive(ownStreamRef.current) || streamIsLive(stream);
-      if (live) {
-        setCamConn("active");
-        const v = videoRef.current;
-        if (v && v.srcObject) {
-          void v.play().catch(() => {});
-        }
-        return;
-      }
-      void acquireOwnCamera("reconnect");
-    };
-
-    const onVis = () => tryReconnect();
-    const onFocus = () => tryReconnect();
-    const onPageShow = () => tryReconnect();
-
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("pageshow", onPageShow);
-
-    const health = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      if (!streamIsLive(ownStreamRef.current) && !streamIsLive(stream)) {
-        void acquireOwnCamera("reconnect");
-      }
-    }, 8000);
-
-    return () => {
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("pageshow", onPageShow);
-      window.clearInterval(health);
-    };
-  }, [enabled, externalStream, stream, acquireOwnCamera]);
+    if (externalStream) {
+      setStream(externalStream);
+      setCamConn(streamIsLive(externalStream) ? "active" : "reconnecting");
+    }
+  }, [externalStream]);
 
   useEffect(() => {
-    if (!stream || !enabled || externalStream) return;
-    const tracks = stream.getVideoTracks();
+    const v = videoRef.current;
+    if (!v) return;
+    if (!stream) {
+      v.srcObject = null;
+      return;
+    }
+    v.srcObject = stream;
+    void v.play().catch(() => {});
+  }, [stream]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (externalStream) return;
+    if (!stream) return;
+
     const onEnded = () => {
-      setFaceStatus("unavailable");
       setCamConn("reconnecting");
       fireAlert("camera_blocked", null);
       void acquireOwnCamera("reconnect");
     };
     const onMute = () => {
-      setFaceStatus("unavailable");
-      fireAlert("camera_blocked", null);
+      if (!streamIsLive(stream)) {
+        setCamConn("reconnecting");
+        fireAlert("camera_blocked", null);
+        void acquireOwnCamera("reconnect");
+      }
     };
-    for (const t of tracks) {
+
+    for (const t of stream.getVideoTracks()) {
       t.addEventListener("ended", onEnded);
       t.addEventListener("mute", onMute);
     }
+    const poll = window.setInterval(() => {
+      if (!streamIsLive(stream)) {
+        setCamConn("reconnecting");
+        void acquireOwnCamera("reconnect");
+      } else {
+        setCamConn("active");
+      }
+    }, 4000);
+
     return () => {
-      for (const t of tracks) {
+      for (const t of stream.getVideoTracks()) {
         t.removeEventListener("ended", onEnded);
         t.removeEventListener("mute", onMute);
       }
+      window.clearInterval(poll);
     };
   }, [stream, enabled, externalStream, fireAlert, acquireOwnCamera]);
-
-  const setVideoNode = useCallback(
-    (node: HTMLVideoElement | null) => {
-      videoRef.current = node;
-      if (node && stream) {
-        node.srcObject = stream;
-        node.muted = true;
-        void node.play().catch(() => {});
-      }
-    },
-    [stream],
-  );
-
-  useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.muted = true;
-      void videoRef.current.play().catch(() => {});
-    }
-    if (!stream && videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  }, [stream]);
 
   useEffect(() => {
     if (!stream || !faceDetection || !enabled) {
@@ -369,121 +335,72 @@ export function ExamCameraPip({
     const onMove = (e: PointerEvent) => {
       const d = dragState.current;
       if (!d || e.pointerId !== d.pointerId) return;
-      e.preventDefault();
       const dx = e.clientX - d.startX;
       const dy = e.clientY - d.startY;
-      const edge = 2;
-      const el = document.querySelector("[data-exam-pip]") as HTMLElement | null;
-      const w = el?.offsetWidth || 132;
-      const h = el?.offsetHeight || 160;
-      const maxL = Math.max(edge, window.innerWidth - w - edge);
-      const maxT = Math.max(edge, window.innerHeight - h - edge);
-      setPos({
-        left: Math.min(maxL, Math.max(edge, d.originLeft + dx)),
-        top: Math.min(maxT, Math.max(edge, d.originTop + dy)),
-      });
+      const left = Math.max(0, Math.min(window.innerWidth - 120, d.originLeft + dx));
+      const top = Math.max(0, Math.min(window.innerHeight - 160, d.originTop + dy));
+      setPos({ left, top });
     };
-
     const onUp = (e: PointerEvent) => {
       const d = dragState.current;
       if (!d || e.pointerId !== d.pointerId) return;
       dragState.current = null;
       setDragging(false);
     };
-
-    document.addEventListener("pointermove", onMove, { passive: false });
-    document.addEventListener("pointerup", onUp);
-    document.addEventListener("pointercancel", onUp);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     return () => {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
   }, [dragging]);
 
   if (!enabled) return null;
 
-  const faceLabel =
-    camConn === "reconnecting"
-      ? "Reconnecting camera…"
-      : camConn === "unavailable"
-        ? "Camera not available"
-        : faceStatus === "multi"
-          ? "Multiple faces"
-          : faceStatus === "none"
-            ? "Face not seen"
-            : faceStatus === "ok"
-              ? "Monitoring · 1 face"
-              : faceStatus === "unavailable"
-                ? "Camera blocked"
-                : "Face unclear";
-
-  const statusDot =
-    camConn === "active" && faceStatus !== "unavailable"
-      ? "bg-emerald-400"
+  const badge =
+    camConn === "unavailable"
+      ? { text: "Camera off", className: "bg-red-600" }
       : camConn === "reconnecting"
-        ? "bg-amber-400"
-        : "bg-red-500";
+        ? { text: "Reconnecting…", className: "bg-amber-500" }
+        : faceStatus === "ok"
+          ? { text: "Face OK", className: "bg-emerald-600" }
+          : faceStatus === "none"
+            ? { text: "No face", className: "bg-red-600" }
+            : faceStatus === "multi"
+              ? { text: "Multi face", className: "bg-red-600" }
+              : { text: "Checking…", className: "bg-slate-600" };
 
   return (
     <div
-      data-exam-pip
-      className="fixed z-[100] w-[120px] touch-none overflow-hidden rounded-xl border-2 border-white/80 bg-black shadow-2xl sm:w-[148px]"
+      className="fixed z-[90] w-[112px] overflow-hidden rounded-xl border-2 border-white/80 bg-slate-900 shadow-xl sm:w-[128px]"
       style={{ left: pos.left, top: pos.top }}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-        dragState.current = {
-          pointerId: e.pointerId,
-          startX: e.clientX,
-          startY: e.clientY,
-          originLeft: pos.left,
-          originTop: pos.top,
-        };
-        setDragging(true);
-      }}
     >
-      <div className="flex cursor-grab items-center gap-1 bg-black/80 px-2 py-1.5 active:cursor-grabbing">
-        <span className={cn("h-2 w-2 shrink-0 rounded-full", statusDot)} aria-hidden />
-        <GripVertical className="h-3.5 w-3.5 text-white/80" />
-        <span className="text-[10px] font-semibold text-white/90">
-          {camConn === "active"
-            ? "Camera active"
-            : camConn === "reconnecting"
-              ? "Reconnecting…"
-              : "Camera off"}
-        </span>
-      </div>
-      {stream ? (
-        <video
-          ref={setVideoNode}
-          className="aspect-[4/3] w-full scale-x-[-1] bg-black object-cover pointer-events-none"
-          autoPlay
-          playsInline
-          muted
-        />
-      ) : (
-        <div className="flex aspect-[4/3] w-full items-center justify-center bg-slate-900 px-2 text-center text-[10px] font-semibold text-white/80">
-          {camConn === "reconnecting"
-            ? "Reconnecting camera…"
-            : "Allow camera access"}
-        </div>
-      )}
       <div
-        className={cn(
-          "px-2 py-1 text-center text-[10px] font-bold text-white",
-          camConn === "reconnecting" && "bg-amber-600",
-          camConn === "unavailable" && "bg-red-700",
-          camConn === "active" && faceStatus === "multi" && "bg-red-600",
-          camConn === "active" && faceStatus === "none" && "bg-amber-600",
-          camConn === "active" && faceStatus === "unclear" && "bg-amber-500",
-          camConn === "active" && faceStatus === "ok" && "bg-emerald-600",
-          camConn === "active" && faceStatus === "unavailable" && "bg-red-700",
-        )}
+        className="flex cursor-grab items-center gap-1 bg-black/50 px-1.5 py-0.5 active:cursor-grabbing"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          dragState.current = {
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            startY: e.clientY,
+            originLeft: pos.left,
+            originTop: pos.top,
+          };
+          setDragging(true);
+        }}
       >
-        {faceLabel}
+        <GripVertical className="h-3 w-3 text-white/70" />
+        <span className={cn("rounded px-1 text-[9px] font-bold text-white", badge.className)}>{badge.text}</span>
       </div>
+      <video
+        ref={videoRef}
+        muted
+        playsInline
+        autoPlay
+        className="aspect-[3/4] w-full scale-x-[-1] object-cover"
+      />
     </div>
   );
 }
