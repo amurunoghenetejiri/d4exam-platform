@@ -81,6 +81,27 @@ type IntegrityEvent = {
 type FilterKey = "all" | "normal" | "warning" | "violation" | "offline";
 type FrameEntry = { src: string; ts: number };
 
+/** Face / camera monitoring stays in the log only — never toast-notify the officer. */
+function isFaceOrCameraLogOnly(eventType: string): boolean {
+  const t = String(eventType || "").toUpperCase();
+  return (
+    t.includes("FACE") ||
+    t.includes("CAMERA") ||
+    t.includes("NO_FACE") ||
+    t.includes("ONE_FACE") ||
+    t.includes("MULTIPLE_FACE") ||
+    t.includes("UNCLEAR")
+  );
+}
+
+function doneStatusLabel(status: string): string {
+  const st = String(status || "").toLowerCase();
+  if (st === "submitted") return "Submitted";
+  if (st === "terminated") return "Terminated";
+  if (st === "flagged") return "Flagged";
+  return "Ended";
+}
+
 function signalBars(
   frameTs: number | null | undefined,
   lastSeenAt: string | null | undefined,
@@ -395,6 +416,7 @@ function Page() {
     return m;
   }, [cards]);
 
+  /** Log panel: face/camera/tab/etc stay here (not toast notifications). */
   const alerts = useMemo(() => {
     return events
       .filter((e) => {
@@ -424,6 +446,10 @@ function Page() {
     for (const e of events) {
       if (seenAlertIdsRef.current.has(e.id)) continue;
       seenAlertIdsRef.current.add(e.id);
+
+      // Face / camera monitoring → log only (Alerts panel). Do not toast-notify officer.
+      if (isFaceOrCameraLogOnly(e.event_type)) continue;
+
       const high = e.severity === "high";
       const med = e.severity === "medium";
       if (!high && !med) continue;
@@ -605,7 +631,7 @@ function Page() {
                   streamLive={c.hasLiveVideo}
                   bars={c.bars}
                   isDone={c.isDone}
-                  statusLabel={c.isDone ? (String(c.a.status).toLowerCase() === "submitted" ? "Submitted" : "Ended") : undefined}
+                  statusLabel={c.isDone ? doneStatusLabel(c.a.status) : undefined}
                   onClick={() => setSelectedId(c.a.id)}
                 />
               ))}
@@ -638,7 +664,12 @@ function Page() {
                       </p>
                     </div>
                     {!c.isDone && <SignalBars bars={c.bars} className="hidden sm:flex" />}
-                    <FaceChip presence={c.presence} sev={c.sev} isDone={c.isDone} statusLabel={c.isDone ? "Submitted" : undefined} />
+                    <FaceChip
+                      presence={c.presence}
+                      sev={c.sev}
+                      isDone={c.isDone}
+                      statusLabel={c.isDone ? doneStatusLabel(c.a.status) : undefined}
+                    />
                     {!c.isDone && (
                       <span className="hidden font-mono text-[10px] font-semibold text-slate-600 sm:inline sm:text-[11px]">
                         {formatDuration(c.presence.timeRemainingSec)}
@@ -747,7 +778,7 @@ function Page() {
                 <>
                   <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold text-white">
                     {selected.isDone
-                      ? "SUBMITTED"
+                      ? doneStatusLabel(selected.a.status).toUpperCase()
                       : selected.presence.cameraActive
                         ? "WAITING FOR VIDEO"
                         : "CAMERA OFF"}
@@ -764,7 +795,9 @@ function Page() {
                       <CameraOff className="h-12 w-12 opacity-40" />
                     )}
                     <p className="text-sm font-semibold">
-                      {selected.isDone ? "Exam submitted" : faceLabel(selected.presence)}
+                      {selected.isDone
+                        ? doneStatusLabel(selected.a.status)
+                        : faceLabel(selected.presence)}
                     </p>
                     <p className="text-[11px] text-white/70">
                       {selected.isDone
@@ -780,7 +813,10 @@ function Page() {
             <div className="grid grid-cols-2 gap-2 border-b border-slate-100 p-3 text-sm sm:p-4">
               <Info label="Course" value={selected.course} />
               <Info label="Exam" value={selected.title} />
-              <Info label="Status" value={selected.isDone ? String(selected.a.status) : selected.sev} />
+              <Info
+                label="Status"
+                value={selected.isDone ? doneStatusLabel(selected.a.status) : selected.sev}
+              />
               <Info
                 label="Time left"
                 value={selected.isDone ? "—" : formatDuration(selected.presence.timeRemainingSec)}
@@ -795,7 +831,7 @@ function Page() {
               />
               <Info label="Connection" value={isOnline(selected.presence.lastSeenAt) ? "Online" : "Offline"} />
               <Info label="Camera" value={selected.presence.cameraActive ? "Active" : "Off"} />
-              <Info label="Face" value={faceLabel(selected.presence)} />
+              <Info label="Face" value={selected.isDone ? "—" : faceLabel(selected.presence)} />
               <Info label="Tab switches" value={String(selected.a.tab_switch_count ?? 0)} />
             </div>
             {!selected.isDone && (
@@ -896,11 +932,14 @@ function FaceChip({
       </span>
     );
   }
+  // No face / unclear → amber warning look
+  const isAmberFace =
+    presence.faceStatus === "none" || presence.faceStatus === "unclear" || sev === "warning";
   return (
     <span
       className={cn(
         "inline-flex max-w-full items-center gap-0.5 truncate rounded-full px-1.5 py-0.5 text-[9px] font-bold text-white sm:gap-1 sm:px-2 sm:text-[10px]",
-        severityBadgeClass(sev),
+        isAmberFace ? "bg-amber-500 text-white" : severityBadgeClass(sev),
       )}
     >
       {!presence.cameraActive ? (
@@ -1013,7 +1052,7 @@ function AlertsPanel({
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
         <h3 className="text-sm font-extrabold text-slate-900">
-          Alerts <span className="text-slate-400">({alerts.length})</span>
+          Log <span className="text-slate-400">({alerts.length})</span>
         </h3>
         <button type="button" onClick={onMarkAll} className="text-[11px] font-semibold text-primary hover:underline">
           Mark all read
@@ -1021,7 +1060,7 @@ function AlertsPanel({
       </div>
       <ul className="max-h-[22rem] divide-y divide-slate-50 overflow-y-auto sm:max-h-[28rem]">
         {alerts.length === 0 ? (
-          <li className="p-4 text-center text-xs text-slate-500">No recent alerts</li>
+          <li className="p-4 text-center text-xs text-slate-500">No recent log entries</li>
         ) : (
           alerts.map((ev) => {
             const who = ev.student_id ? studentNameById.get(ev.student_id) : null;
