@@ -1,9 +1,29 @@
 import { supabase } from "@/integrations/supabase/client";
-import { scoreObjectiveAnswers } from "@/lib/cbt-security";
+import { scoreObjectiveAnswers, resolveCorrectOptionText } from "@/lib/cbt-security";
 import { friendlyError } from "@/lib/friendly-error";
 import type { ResultVisibility } from "@/types";
 
-/** Score answers and upsert into public.results (correct table for student/officer UI). */
+/** Decode OPTIONS::A=...|B=... from question explanation into ordered option texts. */
+function decodeOptionsFromExplanation(explanation: string | null | undefined): string[] {
+  if (!explanation) return [];
+  const optLine = String(explanation)
+    .split("\n")
+    .find((l) => l.startsWith("OPTIONS::"));
+  if (!optLine) return [];
+  const body = optLine.slice("OPTIONS::".length);
+  const map: Record<string, string> = {};
+  for (const part of body.split("|")) {
+    const eq = part.indexOf("=");
+    if (eq > 0) map[part.slice(0, eq).trim().toUpperCase()] = part.slice(eq + 1);
+  }
+  return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
+}
+
+/**
+ * Score answers and upsert into public.results.
+ * Always re-resolves the correct option TEXT from the DB (original A–D order)
+ * so scoring stays correct even when the student UI shuffled options.
+ */
 export async function saveCbtResult(input: {
   examId: string;
   studentId: string;
@@ -22,21 +42,50 @@ export async function saveCbtResult(input: {
   /** Teacher setting: immediate → publish now; otherwise pending for officer */
   resultVisibility?: ResultVisibility | string | null;
 }) {
-  const scored = scoreObjectiveAnswers(
-    input.questions.map((q) => ({
+  // Re-load authoritative correct answers + original option order from DB
+  const qIds = input.questions.map((q) => q.id).filter(Boolean);
+  const bankById = new Map<
+    string,
+    { correct_answer: string | null; explanation: string | null; marks: number | null }
+  >();
+  if (qIds.length) {
+    const { data: bankRows } = await supabase
+      .from("questions")
+      .select("id, correct_answer, explanation, marks")
+      .in("id", qIds);
+    for (const row of bankRows ?? []) {
+      bankById.set(String((row as { id: string }).id), {
+        correct_answer: (row as { correct_answer: string | null }).correct_answer,
+        explanation: (row as { explanation: string | null }).explanation,
+        marks: (row as { marks: number | null }).marks,
+      });
+    }
+  }
+
+  const questionsForScore = input.questions.map((q) => {
+    const bank = bankById.get(q.id);
+    const correctAnswer = bank?.correct_answer ?? q.correct_answer;
+    const originalOpts = decodeOptionsFromExplanation(bank?.explanation);
+    // Prefer text resolved from ORIGINAL A–D order (survives option shuffle in UI)
+    const correctOptionText =
+      q.correctOptionText ||
+      resolveCorrectOptionText(correctAnswer, originalOpts.length ? originalOpts : q.options) ||
+      null;
+    return {
       id: q.id,
-      marks: q.marks,
-      correct_answer: q.correct_answer,
-      correctOptionText: q.correctOptionText,
+      marks: Number(bank?.marks ?? q.marks) || 1,
+      correct_answer: correctAnswer,
+      correctOptionText,
+      // Student chose by index into the options they saw (may be shuffled)
       options: q.options,
-    })),
-    input.answers,
-  );
+    };
+  });
+
+  const scored = scoreObjectiveAnswers(questionsForScore, input.answers);
 
   const status = input.terminated ? "terminated" : "submitted";
   const secStatus = input.terminated || input.faceWarned ? "flagged" : "pending";
 
-  // Teacher release rule — never ignore saved setting
   const vis = String(input.resultVisibility || "after_officer_release")
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
@@ -50,7 +99,6 @@ export async function saveCbtResult(input: {
   ]);
   const publishNow =
     immediateAliases.has(vis) && !input.terminated && secStatus !== "flagged";
-  // after_officer_release | after_marking | after_exam_closes | held → pending until officer
   const resultStatus = publishNow ? "published" : "pending";
   const releasedAt = publishNow ? new Date().toISOString() : null;
 
