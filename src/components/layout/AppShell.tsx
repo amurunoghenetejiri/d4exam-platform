@@ -286,7 +286,12 @@ export function AppShell({
               <SheetContent
                 side="left"
                 hideClose
-                className="flex h-dvh max-h-dvh w-[min(100vw-2rem,18rem)] flex-col border-r-0 bg-[#0b1b3a] p-0 text-white"
+                className={cn(
+                  "flex flex-col gap-0 border-r-0 bg-[#0b1b3a] p-0 text-white",
+                  "!inset-y-0 !top-0 !bottom-0",
+                  "!h-[100dvh] !min-h-[100dvh] !max-h-[100dvh]",
+                  "w-[min(100vw-2rem,18rem)]",
+                )}
               >
                 <SheetTitle className="sr-only">{config.label} navigation</SheetTitle>
                 <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 sm:px-4">
@@ -310,7 +315,7 @@ export function AppShell({
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   <NavLinks config={config} onNavigate={() => setOpen(false)} />
                 </div>
-                <div className="shrink-0 border-t border-white/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
+                <div className="mt-auto shrink-0 border-t border-white/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
                   <button
                     type="button"
                     onClick={() => {
