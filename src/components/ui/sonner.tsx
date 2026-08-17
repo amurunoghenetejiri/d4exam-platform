@@ -17,11 +17,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
       richColors
       closeButton
       expand={false}
-      gap={10}
-      offset={12}
-      duration={3500}
+      gap={8}
+      offset={8}
+      mobileOffset={8}
+      duration={3200}
       visibleToasts={2}
-      // Mobile: swipe left or right to dismiss so toasts do not block the exam
+      // Swipe to dismiss so toasts do not block the exam
       swipeDirections={["left", "right", "top"]}
       icons={{
         success: <CircleCheck className="h-4 w-4" />,
@@ -33,9 +34,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
       toastOptions={{
         classNames: {
           toast:
-            "group toast d4-toast group-[.toaster]:border group-[.toaster]:shadow-md group-[.toaster]:rounded-xl group-[.toaster]:cursor-grab active:group-[.toaster]:cursor-grabbing",
-          title: "group-[.toast]:text-sm group-[.toast]:font-semibold group-[.toast]:leading-snug",
-          description: "group-[.toast]:text-xs group-[.toast]:opacity-90 group-[.toast]:leading-snug",
+            "group toast d4-toast group-[.toaster]:border group-[.toaster]:shadow-md group-[.toaster]:rounded-xl group-[.toaster]:cursor-grab active:group-[.toaster]:cursor-grabbing group-[.toaster]:w-[min(100vw-1rem,22rem)] group-[.toaster]:max-w-[min(100vw-1rem,22rem)] group-[.toaster]:mx-auto group-[.toaster]:px-3 group-[.toaster]:py-2.5",
+          title: "group-[.toast]:text-[13px] group-[.toast]:font-semibold group-[.toast]:leading-snug group-[.toast]:pr-4",
+          description: "group-[.toast]:text-[11px] group-[.toast]:opacity-90 group-[.toast]:leading-snug group-[.toast]:line-clamp-3",
           actionButton:
             "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground group-[.toast]:rounded-lg group-[.toast]:text-xs",
           cancelButton:
