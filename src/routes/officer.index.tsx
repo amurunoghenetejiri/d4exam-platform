@@ -1,9 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { PageHeader, SectionCard, StatusBadge, EmptyState, NavCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { CheckSquare, Radio, FileText, ShieldAlert } from "lucide-react";
 import { useCount, useRows } from "@/lib/queries";
 import { useSessionUser } from "@/lib/session";
+import { supabase } from "@/integrations/supabase/client";
+import { useRealtimeInvalidate } from "@/lib/realtime";
 
 export const Route = createFileRoute("/officer/")({
   head: () => ({
@@ -32,6 +35,23 @@ function Page() {
   const schoolId = user?.schoolId ?? null;
   const enabled = Boolean(schoolId);
 
+  useRealtimeInvalidate(
+    `officer-dash-${schoolId ?? "x"}`,
+    schoolId
+      ? [
+          { table: "examinations", filter: `school_id=eq.${schoolId}` },
+          { table: "exam_attempts", filter: `school_id=eq.${schoolId}` },
+        ]
+      : [],
+    [
+      ["count", "examinations"],
+      ["officer-dash-live", schoolId],
+      ["rows", "examinations"],
+    ],
+    enabled,
+    2000,
+  );
+
   const pending = useCount(
     "examinations",
     schoolId
@@ -42,16 +62,36 @@ function Page() {
       : [],
     enabled,
   );
-  const live = useCount(
-    "examinations",
-    schoolId
-      ? [
-          { column: "school_id", value: schoolId },
-          { column: "status", value: "ongoing" },
-        ]
-      : [],
+
+  /** Live = exams marked ongoing, or any exam with students currently writing. */
+  const liveQ = useQuery({
+    queryKey: ["officer-dash-live", schoolId],
     enabled,
-  );
+    staleTime: 8_000,
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      if (!schoolId) return 0;
+      const { data: ongoing } = await supabase
+        .from("examinations")
+        .select("id")
+        .eq("school_id", schoolId)
+        .eq("status", "ongoing");
+      const ongoingIds = new Set((ongoing ?? []).map((e) => (e as { id: string }).id));
+
+      const { data: attempts } = await supabase
+        .from("exam_attempts")
+        .select("exam_id")
+        .eq("school_id", schoolId)
+        .eq("status", "in_progress")
+        .limit(500);
+      for (const a of attempts ?? []) {
+        const eid = (a as { exam_id: string }).exam_id;
+        if (eid) ongoingIds.add(eid);
+      }
+      return ongoingIds.size;
+    },
+  });
+
   const totalExams = useCount(
     "examinations",
     schoolId ? [{ column: "school_id", value: schoolId }] : [],
@@ -76,6 +116,8 @@ function Page() {
     enabled,
   });
 
+  const liveValue = liveQ.isLoading ? "…" : String(liveQ.data ?? 0);
+
   return (
     <>
       <PageHeader
@@ -93,10 +135,34 @@ function Page() {
       />
 
       <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4">
-        <Stat to="/officer/approvals" label="Pending approvals" value={fmt(pending)} icon={CheckSquare} color="bg-violet-50 text-violet-600" />
-        <Stat to="/officer/live-monitor" label="Live examinations" value={fmt(live)} icon={Radio} color="bg-blue-50 text-blue-600" />
-        <Stat to="/officer/approvals" label="Total exams" value={fmt(totalExams)} icon={FileText} color="bg-slate-100 text-slate-700" />
-        <Stat to="/officer/integrity" label="Ongoing (integrity)" value={fmt(live)} icon={ShieldAlert} color="bg-red-50 text-red-600" />
+        <Stat
+          to="/officer/approvals"
+          label="Pending approvals"
+          value={fmt(pending)}
+          icon={CheckSquare}
+          color="bg-violet-50 text-violet-600"
+        />
+        <Stat
+          to="/officer/live-monitor"
+          label="Live examinations"
+          value={liveValue}
+          icon={Radio}
+          color="bg-blue-50 text-blue-600"
+        />
+        <Stat
+          to="/officer/approvals"
+          label="Total exams"
+          value={fmt(totalExams)}
+          icon={FileText}
+          color="bg-slate-100 text-slate-700"
+        />
+        <Stat
+          to="/officer/integrity"
+          label="Ongoing (integrity)"
+          value={liveValue}
+          icon={ShieldAlert}
+          color="bg-red-50 text-red-600"
+        />
       </div>
 
       <div className="mt-4 grid gap-4 sm:mt-6 sm:gap-6 lg:grid-cols-2">
