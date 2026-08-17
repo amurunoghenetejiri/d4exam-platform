@@ -5,6 +5,7 @@ import { PageHeader, SectionCard, EmptyState, NavCard } from "@/components/dashb
 import { Button } from "@/components/ui/button";
 import { useTeacherContext } from "@/lib/teacher";
 import { supabase } from "@/integrations/supabase/client";
+import { shortDisplayName } from "@/lib/utils";
 
 export const Route = createFileRoute("/teacher/courses")({
   head: () => ({
@@ -71,7 +72,7 @@ function Page() {
     <>
       <PageHeader
         title="My Courses"
-        description={`Assigned by School Admin · ${teacher.fullName} · ${teacher.staffId}`}
+        description={`Assigned by School Admin · ${shortDisplayName(teacher.fullName)} · ${teacher.staffId}`}
       />
 
       {teacher.courses.length === 0 ? (
@@ -80,7 +81,7 @@ function Page() {
           description="School Admin must assign courses to your staff account under Teachers & Courses or Courses."
         />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {teacher.courses.map((c) => {
             const s = stats[c.id] ?? { exams: 0, questions: 0 };
             return (
@@ -89,51 +90,51 @@ function Page() {
                 to="/teacher/question-bank"
                 search={{ course: c.id }}
                 ariaLabel={`Open ${c.code} questions`}
-                className="p-5"
+                className="p-3.5 sm:p-5"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide text-primary">{c.code}</p>
-                    <h2 className="mt-1 text-base font-extrabold text-slate-900">{c.name}</h2>
-                    <p className="mt-1 text-xs text-slate-500">{c.credit_units} units</p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-primary sm:text-xs">{c.code}</p>
+                    <h2 className="mt-0.5 truncate text-[15px] font-extrabold leading-snug text-slate-900 sm:mt-1 sm:text-base">{c.name}</h2>
+                    <p className="mt-0.5 text-[11px] text-slate-500 sm:mt-1 sm:text-xs">{c.credit_units} units</p>
                   </div>
-                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 text-primary">
-                    <BookOpen className="h-5 w-5" />
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary sm:h-10 sm:w-10 sm:rounded-xl">
+                    <BookOpen className="h-4 w-4 sm:h-5 sm:w-5" />
                   </span>
                 </div>
 
-                <dl className="mt-4 grid grid-cols-2 gap-2 text-center">
-                  <div className="rounded-lg bg-slate-50 px-2 py-2">
+                <dl className="mt-3 grid grid-cols-2 gap-1.5 text-center sm:mt-4 sm:gap-2">
+                  <div className="rounded-lg bg-slate-50 px-2 py-1.5 sm:py-2">
                     <dt className="text-[10px] font-semibold uppercase text-slate-500">Exams</dt>
                     <dd className="text-sm font-bold text-slate-900">{s.exams}</dd>
                   </div>
-                  <div className="rounded-lg bg-slate-50 px-2 py-2">
+                  <div className="rounded-lg bg-slate-50 px-2 py-1.5 sm:py-2">
                     <dt className="text-[10px] font-semibold uppercase text-slate-500">Questions</dt>
                     <dd className="text-sm font-bold text-slate-900">{s.questions}</dd>
                   </div>
                 </dl>
 
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap gap-1.5 sm:mt-4 sm:gap-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    className="font-semibold"
+                    className="h-8 px-2.5 text-xs font-semibold sm:h-9 sm:px-3 sm:text-sm"
                     asChild
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Link to="/teacher/question-bank" search={{ course: c.id }}>
-                      <Layers className="mr-1.5 h-3.5 w-3.5" />
+                      <Layers className="mr-1 h-3.5 w-3.5" />
                       Questions
                     </Link>
                   </Button>
                   <Button
                     size="sm"
-                    className="font-semibold"
+                    className="h-8 px-2.5 text-xs font-semibold sm:h-9 sm:px-3 sm:text-sm"
                     asChild
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Link to="/teacher/examinations" search={{ course: c.id }}>
-                      <FileText className="mr-1.5 h-3.5 w-3.5" />
+                      <FileText className="mr-1 h-3.5 w-3.5" />
                       Exams
                     </Link>
                   </Button>
