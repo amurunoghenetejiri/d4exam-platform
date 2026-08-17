@@ -8,19 +8,15 @@ export type HapticKind =
   | "tab_switch"
   | "officer_warning";
 
-/**
- * Alternating [vibrate, pause, vibrate, …] in ms.
- * Chrome Android handles this form most reliably.
- */
+/** Alternating [on, off, on, …] ms — Chrome Android standard form */
 const PATTERNS: Record<HapticKind, number[]> = {
-  none: [250, 100, 250, 100, 300],
-  unclear: [150, 80, 150, 80, 180],
-  multi: [300, 100, 300, 100, 350, 100, 350],
-  camera_blocked: [260, 90, 260, 90, 300],
-  tab_switch: [180, 80, 180],
-  // Longest — clearly stronger than face alerts
+  none: [280, 90, 280, 90, 320],
+  unclear: [160, 70, 160, 70, 200],
+  multi: [320, 90, 320, 90, 360, 90, 360],
+  camera_blocked: [280, 80, 280, 80, 320],
+  tab_switch: [200, 70, 200],
   officer_warning: [
-    400, 120, 400, 120, 450, 140, 450, 140, 500, 160, 500, 160, 550, 180, 600,
+    450, 110, 450, 110, 500, 130, 500, 130, 550, 150, 550, 150, 600, 160, 650,
   ],
 };
 
@@ -28,15 +24,13 @@ let audioCtx: AudioContext | null = null;
 let primed = false;
 
 export function canVibrate(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return typeof navigator.vibrate === "function";
+  return typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
 }
 
 function navVibrate(pattern: number | number[]): boolean {
   if (!canVibrate()) return false;
   try {
-    const ok = navigator.vibrate(pattern as never);
-    return ok !== false;
+    return navigator.vibrate(pattern as never) !== false;
   } catch {
     return false;
   }
@@ -49,12 +43,8 @@ function ensureAudio(): AudioContext | null {
       window.AudioContext ||
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AC) return null;
-    if (!audioCtx || audioCtx.state === "closed") {
-      audioCtx = new AC();
-    }
-    if (audioCtx.state === "suspended") {
-      void audioCtx.resume();
-    }
+    if (!audioCtx || audioCtx.state === "closed") audioCtx = new AC();
+    if (audioCtx.state === "suspended") void audioCtx.resume();
     return audioCtx;
   } catch {
     return null;
@@ -71,12 +61,12 @@ function beep(freq: number, durationSec: number, when = 0) {
     osc.frequency.value = freq;
     const t0 = ctx.currentTime + when;
     gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.exponentialRampToValueAtTime(0.18, t0 + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.2, t0 + 0.01);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durationSec);
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start(t0);
-    osc.stop(t0 + durationSec + 0.03);
+    osc.stop(t0 + durationSec + 0.02);
   } catch {
     /* ignore */
   }
@@ -84,50 +74,42 @@ function beep(freq: number, durationSec: number, when = 0) {
 
 function playTone(kind: HapticKind) {
   if (kind === "officer_warning") {
-    beep(880, 0.16, 0);
-    beep(880, 0.16, 0.28);
-    beep(660, 0.2, 0.55);
-    beep(990, 0.25, 0.9);
-    beep(880, 0.32, 1.25);
+    beep(900, 0.14, 0);
+    beep(900, 0.14, 0.22);
+    beep(700, 0.18, 0.45);
+    beep(1000, 0.22, 0.75);
+    beep(900, 0.28, 1.1);
     return;
   }
   if (kind === "multi" || kind === "camera_blocked") {
-    beep(740, 0.12, 0);
-    beep(740, 0.12, 0.2);
+    beep(760, 0.11, 0);
+    beep(760, 0.11, 0.18);
     return;
   }
   if (kind === "tab_switch") {
-    beep(520, 0.09, 0);
-    beep(520, 0.09, 0.14);
+    beep(540, 0.08, 0);
+    beep(540, 0.08, 0.12);
     return;
   }
-  // none / unclear
-  beep(640, 0.11, 0);
-  beep(640, 0.11, 0.16);
+  beep(660, 0.1, 0);
+  beep(660, 0.1, 0.14);
 }
 
-/**
- * Call from a real user gesture (Start exam button) to unlock vibration + audio.
- * Without this, many browsers silently ignore later vibrate()/AudioContext calls.
- */
+/** Must run inside a user gesture (Start exam). Unlocks vibrate + audio. */
 export function primeHaptics() {
   primed = true;
-  // Short buzz in the same gesture stack — unlocks Vibration API on Android
-  navVibrate(40);
+  navVibrate(50);
   window.setTimeout(() => {
     try {
       navigator.vibrate?.(0);
     } catch {
       /* ignore */
     }
-  }, 50);
+  }, 60);
   const ctx = ensureAudio();
-  if (ctx && ctx.state === "suspended") {
-    void ctx.resume();
-  }
-  // Tiny silent-ish beep to fully unlock audio graph
+  if (ctx?.state === "suspended") void ctx.resume();
   try {
-    beep(40, 0.02, 0);
+    beep(30, 0.015, 0);
   } catch {
     /* ignore */
   }
@@ -137,25 +119,17 @@ export function haptic(kind: HapticKind) {
   if (typeof window === "undefined") return;
 
   const pattern = PATTERNS[kind];
-
-  // Primary: full pattern in one call (best Chrome Android support)
-  const ok = navVibrate(pattern);
-
-  // Retry once if the first call was ignored
-  if (!ok) {
-    window.setTimeout(() => navVibrate(pattern), 60);
+  // Fire immediately
+  if (!navVibrate(pattern)) {
+    window.setTimeout(() => navVibrate(pattern), 40);
   }
-
-  // Officer warning: re-fire mid-way so the pulse feels longer on devices that clamp
+  // Extra pulses for officer warning length
   if (kind === "officer_warning") {
-    window.setTimeout(() => navVibrate([450, 140, 500, 140, 550]), 2000);
-    window.setTimeout(() => navVibrate([500, 160, 600]), 4000);
+    window.setTimeout(() => navVibrate([500, 130, 550, 130, 600]), 2200);
+    window.setTimeout(() => navVibrate([550, 150, 650]), 4200);
   }
-
-  // Tones: always for officer; for face/tab after prime or when vibrate missing
-  if (kind === "officer_warning") {
-    playTone(kind);
-  } else if (!canVibrate() || primed) {
+  // Always play tone after unlock (works even when vibrate is ignored)
+  if (primed || kind === "officer_warning" || !canVibrate()) {
     playTone(kind);
   }
 }
