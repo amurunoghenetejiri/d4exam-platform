@@ -3,10 +3,18 @@ import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { initials, useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2 } from "lucide-react";
+import {
+  Building2,
+  GraduationCap,
+  Loader2,
+  Shield,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { useSchoolIdentity } from "@/lib/school-identity";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,6 +30,37 @@ const roleLabel: Record<string, string> = {
   super_admin: "Super Administrator",
 };
 
+const roleBadgeStyles: Record<
+  string,
+  { className: string; icon: typeof UserRound }
+> = {
+  student: {
+    className:
+      "border-sky-200/80 bg-sky-50 text-sky-800 shadow-sm shadow-sky-100/80",
+    icon: GraduationCap,
+  },
+  teacher: {
+    className:
+      "border-violet-200/80 bg-violet-50 text-violet-800 shadow-sm shadow-violet-100/80",
+    icon: UserRound,
+  },
+  school_admin: {
+    className:
+      "border-emerald-200/80 bg-emerald-50 text-emerald-800 shadow-sm shadow-emerald-100/80",
+    icon: Building2,
+  },
+  examination_officer: {
+    className:
+      "border-amber-200/80 bg-amber-50 text-amber-900 shadow-sm shadow-amber-100/80",
+    icon: Shield,
+  },
+  super_admin: {
+    className:
+      "border-indigo-200/80 bg-indigo-50 text-indigo-900 shadow-sm shadow-indigo-100/80",
+    icon: ShieldCheck,
+  },
+};
+
 /** Stacked on mobile so long values never overflow the card */
 function ProfileField({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -33,6 +72,28 @@ function ProfileField({ label, value }: { label: string; value: ReactNode }) {
         {value ?? "—"}
       </p>
     </div>
+  );
+}
+
+function RoleBadge({ roleKey }: { roleKey: string }) {
+  const label = roleLabel[roleKey] ?? roleKey;
+  const style = roleBadgeStyles[roleKey] ?? {
+    className: "border-slate-200 bg-slate-50 text-slate-700 shadow-sm",
+    icon: UserRound,
+  };
+  const Icon = style.icon;
+
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold tracking-wide sm:text-xs",
+        style.className,
+      )}
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      {label}
+    </Badge>
   );
 }
 
@@ -121,10 +182,11 @@ export function ProfilePage() {
   }
 
   const avatar = initials(user.fullName || user.email || "U");
-  const role = user.role ? roleLabel[user.role] ?? user.role : "User";
+  const roleKey = user.role || "user";
   const logoUrl = school?.logoUrl ?? user.schoolLogoUrl;
   const schoolName = school?.name ?? user.schoolName;
   const displayName = fullName || user.fullName || "—";
+  const statusLabel = (user.status || "active").replace(/_/g, " ");
 
   return (
     <div className="mx-auto w-full max-w-3xl">
@@ -132,38 +194,63 @@ export function ProfilePage() {
 
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]">
         {/* Identity card */}
-        <SectionCard className="overflow-hidden">
-          <div className="flex flex-col items-center px-1 text-center">
-            {logoUrl ? (
-              <SchoolLogo
-                logoUrl={logoUrl}
-                schoolName={schoolName}
-                size="xl"
-                className="ring-1 ring-slate-200"
-              />
-            ) : (
-              <span className="grid h-16 w-16 place-items-center rounded-full bg-primary/15 font-display text-xl font-bold text-primary sm:h-20 sm:w-20 sm:text-2xl">
-                {avatar}
-              </span>
-            )}
-            <h2 className="mt-3 max-w-full break-words text-base font-extrabold leading-snug text-slate-900 sm:mt-4 sm:text-lg [overflow-wrap:anywhere]">
-              {displayName}
-            </h2>
-            <p className="mt-0.5 text-xs font-medium text-slate-500 sm:text-sm">{role}</p>
-            {schoolName ? (
-              <p className="mt-1 max-w-full break-words text-[11px] font-semibold leading-snug text-slate-600 sm:text-xs [overflow-wrap:anywhere]">
-                {schoolName}
-              </p>
-            ) : null}
+        <SectionCard className="overflow-hidden p-0">
+          <div className="relative bg-gradient-to-br from-primary/12 via-sky-50/80 to-white px-4 pb-5 pt-6 sm:px-5 sm:pb-6 sm:pt-7">
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/15 via-transparent to-transparent"
+              aria-hidden
+            />
+            <div className="relative flex flex-col items-center text-center">
+              <div className="relative">
+                {logoUrl ? (
+                  <SchoolLogo
+                    logoUrl={logoUrl}
+                    schoolName={schoolName}
+                    size="xl"
+                    className="ring-2 ring-white shadow-md shadow-slate-200/80"
+                  />
+                ) : (
+                  <span className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/80 font-display text-xl font-bold text-white shadow-md shadow-primary/25 ring-2 ring-white sm:h-20 sm:w-20 sm:text-2xl">
+                    {avatar}
+                  </span>
+                )}
+              </div>
+
+              <h2 className="mt-3 max-w-full break-words text-base font-extrabold leading-snug text-slate-900 sm:mt-3.5 sm:text-lg [overflow-wrap:anywhere]">
+                {displayName}
+              </h2>
+
+              <RoleBadge roleKey={roleKey} />
+
+              {schoolName ? (
+                <p className="mt-2.5 max-w-full break-words text-[11px] font-semibold leading-snug text-slate-600 sm:text-xs [overflow-wrap:anywhere]">
+                  {schoolName}
+                </p>
+              ) : null}
+            </div>
           </div>
 
-          <div className="mt-4 sm:mt-5">
+          <div className="px-4 pb-4 pt-1 sm:px-5 sm:pb-5">
             <ProfileField
               label={user.identifierLabel || "Matric number"}
               value={user.identifier || student?.matric || "—"}
             />
             <ProfileField label="Email" value={user.email || "—"} />
-            <ProfileField label="Status" value={user.status || "active"} />
+            <ProfileField
+              label="Status"
+              value={
+                <span className="inline-flex items-center gap-1.5 capitalize">
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                      statusLabel === "active" ? "bg-emerald-500" : "bg-slate-400",
+                    )}
+                    aria-hidden
+                  />
+                  {statusLabel}
+                </span>
+              }
+            />
             {user.schoolCode ? <ProfileField label="School code" value={user.schoolCode} /> : null}
             {student?.departmentName ? (
               <ProfileField label="Department" value={student.departmentName} />
