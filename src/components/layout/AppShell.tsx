@@ -97,7 +97,7 @@ function PortalBrand({
           className="shrink-0 bg-transparent"
         />
         <span className="min-w-0">
-          <span className="block truncate text-sm font-extrabold leading-tight text-white">
+          <span className="block truncate text-sm font-extrabold leading-tight text-white sm:text-base">
             {schoolName || "School"}
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
@@ -281,7 +281,7 @@ export function AppShell({
             <Link
               to={config.home}
               preload="intent"
-              className="pressable flex min-w-0 max-w-[min(100%,11rem)] items-center gap-1.5 active:scale-[0.98] sm:max-w-[16rem] lg:hidden"
+              className="pressable flex min-w-0 max-w-[min(100%,13.5rem)] items-center gap-1.5 active:scale-[0.98] sm:max-w-[18rem] md:max-w-[22rem] lg:hidden"
               aria-label={isSchoolPortal ? schoolName || "Home" : "D4EXAM home"}
             >
               {isSchoolPortal ? (
@@ -292,8 +292,8 @@ export function AppShell({
                     size="sm"
                     className="shrink-0 bg-transparent"
                   />
-                  <span className="truncate text-xs font-bold leading-tight text-slate-900 sm:text-sm sm:font-extrabold">
-                    {shortLabel(schoolName || "School", 20)}
+                  <span className="truncate text-sm font-extrabold leading-tight tracking-tight text-slate-900 sm:text-[0.9375rem] md:text-base">
+                    {shortLabel(schoolName || "School", 28)}
                   </span>
                 </>
               ) : (
