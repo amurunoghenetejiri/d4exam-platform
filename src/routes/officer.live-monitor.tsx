@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -33,6 +33,11 @@ import {
   severityFromPresence,
   type MonitorSeverity,
 } from "@/lib/live-monitor";
+import {
+  isLiveCamFrameFresh,
+  startLiveCamSubscriber,
+  type LiveCamFramePayload,
+} from "@/lib/live-video";
 
 export const Route = createFileRoute("/officer/live-monitor")({
   head: () => ({ meta: [{ title: "Live Monitoring — D4EXAM" }] }),
@@ -63,6 +68,8 @@ type IntegrityEvent = {
 
 type FilterKey = "all" | "normal" | "warning" | "violation" | "offline";
 
+type FrameEntry = { src: string; ts: number };
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
@@ -72,6 +79,50 @@ function Page() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [readAlertIds, setReadAlertIds] = useState<Set<string>>(new Set());
   const [showAlertsMobile, setShowAlertsMobile] = useState(false);
+  const [frames, setFrames] = useState<Record<string, FrameEntry>>({});
+  const [, setTick] = useState(0);
+
+  // Refresh freshness UI every few seconds
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 3000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  // Subscribe to near-live camera frames for this school
+  useEffect(() => {
+    if (!schoolId) return;
+    const sub = startLiveCamSubscriber({
+      schoolId,
+      onFrame: (p: LiveCamFramePayload) => {
+        setFrames((prev) => ({
+          ...prev,
+          [p.attemptId]: { src: p.frame, ts: p.ts },
+        }));
+      },
+    });
+    return () => sub.stop();
+  }, [schoolId]);
+
+  // Drop frames for attempts that are no longer in progress (exam over / submitted)
+  useEffect(() => {
+    const liveIds = new Set((attemptsQ.data ?? []).map((a) => a.id));
+    setFrames((prev) => {
+      let changed = false;
+      const next: Record<string, FrameEntry> = {};
+      for (const [id, entry] of Object.entries(prev)) {
+        if (liveIds.has(id) && isLiveCamFrameFresh(entry.ts)) {
+          next[id] = entry;
+        } else if (liveIds.has(id)) {
+          // keep stale briefly so UI can show "stream ended"
+          next[id] = entry;
+        } else {
+          changed = true;
+        }
+      }
+      return changed || Object.keys(next).length !== Object.keys(prev).length ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attemptsQ.data]);
 
   useRealtimeInvalidate(
     `officer-live-${schoolId ?? "x"}`,
@@ -179,9 +230,11 @@ function Page() {
       const matric = a.students?.matric_number || a.students?.student_id || "—";
       const course = a.examinations?.courses?.code || "—";
       const title = a.examinations?.title || "Exam";
-      return { a, presence, sev, name, matric, course, title };
+      const frame = frames[a.id];
+      const hasLiveVideo = Boolean(frame && isLiveCamFrameFresh(frame.ts, now));
+      return { a, presence, sev, name, matric, course, title, frame, hasLiveVideo };
     });
-  }, [attempts, now]);
+  }, [attempts, now, frames]);
 
   const stats = useMemo(() => {
     let online = 0, warnings = 0, violations = 0, offline = 0;
@@ -278,11 +331,21 @@ function Page() {
           {attemptsQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading live sessions…</p>
           ) : filtered.length === 0 ? (
-            <EmptyState icon={Radio} title="No students match this view" description="When students start writing with camera monitoring, their presence appears here in realtime from exam_attempts metadata and integrity events." />
+            <EmptyState icon={Radio} title="No students match this view" description="When students start writing with camera monitoring, their live camera feed and presence appear here in realtime." />
           ) : view === "grid" ? (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
               {filtered.map((c) => (
-                <StudentCard key={c.a.id} name={c.name} matric={c.matric} course={c.course} sev={c.sev} presence={c.presence} onClick={() => setSelectedId(c.a.id)} />
+                <StudentCard
+                  key={c.a.id}
+                  name={c.name}
+                  matric={c.matric}
+                  course={c.course}
+                  sev={c.sev}
+                  presence={c.presence}
+                  frameSrc={c.hasLiveVideo ? c.frame?.src : undefined}
+                  streamLive={c.hasLiveVideo}
+                  onClick={() => setSelectedId(c.a.id)}
+                />
               ))}
             </div>
           ) : (
@@ -290,7 +353,13 @@ function Page() {
               {filtered.map((c) => (
                 <li key={c.a.id}>
                   <button type="button" onClick={() => setSelectedId(c.a.id)} className={cn("flex w-full items-center gap-3 rounded-xl border bg-white p-3 text-left shadow-sm transition hover:shadow-md", severityBorderClass(c.sev))}>
-                    <StatusAvatar sev={c.sev} />
+                    <div className="relative h-12 w-16 shrink-0 overflow-hidden rounded-lg bg-slate-900">
+                      {c.hasLiveVideo && c.frame?.src ? (
+                        <img src={c.frame.src} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="grid h-full place-items-center"><UserRound className="h-5 w-5 text-white/30" /></div>
+                      )}
+                    </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-bold text-slate-900">{c.name}</p>
                       <p className="truncate text-[11px] text-slate-500">{c.matric} · {c.course}</p>
@@ -332,14 +401,33 @@ function Page() {
               <button type="button" className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100" onClick={() => setSelectedId(null)} aria-label="Close"><X className="h-5 w-5" /></button>
             </div>
             <div className="relative aspect-video bg-slate-900">
-              <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" /> LIVE STATUS
-              </div>
-              <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-white">
-                <UserRound className="h-12 w-12 opacity-40" />
-                <p className="text-sm font-semibold">{faceLabel(selected.presence)}</p>
-                <p className="text-[11px] text-white/70">Realtime presence from the student CBT session (face, camera, connection). Events are stored in integrity_events.</p>
-              </div>
+              {selected.hasLiveVideo && selected.frame?.src ? (
+                <>
+                  <img src={selected.frame.src} alt={`${selected.name} live camera`} className="h-full w-full object-cover" />
+                  <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" /> LIVE
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold text-white">
+                    {selected.presence.cameraActive ? "WAITING FOR VIDEO" : "CAMERA OFF"}
+                  </div>
+                  <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-white">
+                    {selected.presence.cameraActive ? (
+                      <UserRound className="h-12 w-12 opacity-40" />
+                    ) : (
+                      <CameraOff className="h-12 w-12 opacity-40" />
+                    )}
+                    <p className="text-sm font-semibold">{faceLabel(selected.presence)}</p>
+                    <p className="text-[11px] text-white/70">
+                      {selected.presence.cameraActive
+                        ? "Live frames appear when the student camera is streaming. Stream stops when the exam ends or the camera is closed."
+                        : "Student camera is off or unavailable."}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-2 border-b border-slate-100 p-4 text-sm">
               <Info label="Course" value={selected.course} />
@@ -349,7 +437,7 @@ function Page() {
               <Info label="Connection" value={isOnline(selected.presence.lastSeenAt) ? "Online" : "Offline"} />
               <Info label="Camera" value={selected.presence.cameraActive ? "Active" : "Off"} />
               <Info label="Face" value={faceLabel(selected.presence)} />
-              <Info label="Fullscreen" value={selected.presence.fullscreen ? "On" : "Off"} />
+              <Info label="Video" value={selected.hasLiveVideo ? "Streaming" : "Not streaming"} />
             </div>
             <div className="p-4">
               <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Events timeline</h4>
@@ -386,14 +474,6 @@ function StatCard({ label, value, tone = "slate" }: { label: string; value: numb
   );
 }
 
-function StatusAvatar({ sev }: { sev: MonitorSeverity }) {
-  return (
-    <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-full text-white", sev === "normal" && "bg-emerald-500", sev === "warning" && "bg-amber-500", sev === "violation" && "bg-red-600", sev === "offline" && "bg-slate-400", sev === "completed" && "bg-slate-300")}>
-      {sev === "offline" ? <WifiOff className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
-    </span>
-  );
-}
-
 function FaceChip({ presence, sev }: { presence: ReturnType<typeof parsePresence>; sev: MonitorSeverity }) {
   return (
     <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold text-white", severityBadgeClass(sev))}>
@@ -403,15 +483,37 @@ function FaceChip({ presence, sev }: { presence: ReturnType<typeof parsePresence
   );
 }
 
-function StudentCard({ name, matric, course, sev, presence, onClick }: { name: string; matric: string; course: string; sev: MonitorSeverity; presence: ReturnType<typeof parsePresence>; onClick: () => void }) {
+function StudentCard({
+  name,
+  matric,
+  course,
+  sev,
+  presence,
+  frameSrc,
+  streamLive,
+  onClick,
+}: {
+  name: string;
+  matric: string;
+  course: string;
+  sev: MonitorSeverity;
+  presence: ReturnType<typeof parsePresence>;
+  frameSrc?: string;
+  streamLive?: boolean;
+  onClick: () => void;
+}) {
   return (
     <button type="button" onClick={onClick} className={cn("overflow-hidden rounded-xl border-2 bg-white text-left shadow-sm transition hover:shadow-md", severityBorderClass(sev))}>
       <div className="relative aspect-[4/3] bg-gradient-to-br from-slate-800 to-slate-900">
-        <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-black/50 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">
-          <span className={cn("h-1.5 w-1.5 rounded-full", isOnline(presence.lastSeenAt) ? "animate-pulse bg-emerald-400" : "bg-slate-400")} />
-          {isOnline(presence.lastSeenAt) ? "Live" : "Offline"}
+        {frameSrc ? (
+          <img src={frameSrc} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center"><UserRound className="h-10 w-10 text-white/25" /></div>
+        )}
+        <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 rounded-full bg-black/55 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">
+          <span className={cn("h-1.5 w-1.5 rounded-full", streamLive ? "animate-pulse bg-red-500" : isOnline(presence.lastSeenAt) ? "animate-pulse bg-emerald-400" : "bg-slate-400")} />
+          {streamLive ? "Live cam" : isOnline(presence.lastSeenAt) ? "Live" : "Offline"}
         </span>
-        <div className="flex h-full items-center justify-center"><UserRound className="h-10 w-10 text-white/25" /></div>
         <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between gap-1">
           <FaceChip presence={presence} sev={sev} />
           <span className="rounded bg-black/50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white">{formatDuration(presence.timeRemainingSec)}</span>
