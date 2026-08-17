@@ -80,6 +80,7 @@ export function StatCard({
   value,
   hint,
   icon,
+  tone,
   to,
   search,
   className,
@@ -88,10 +89,13 @@ export function StatCard({
   value: ReactNode;
   hint?: string;
   icon?: ReactNode | ComponentType<{ className?: string }>;
+  /** Optional accent tone for the icon chip. */
+  tone?: "primary" | "aqua" | "warning" | "info" | "destructive";
   to?: string;
   search?: Record<string, string | undefined>;
   className?: string;
 }) {
+  void tone;
   // Accept either an element (<Icon />) or a component reference (Icon).
   const IconComp =
     typeof icon === "function" ? (icon as ComponentType<{ className?: string }>) : null;
