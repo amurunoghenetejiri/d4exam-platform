@@ -202,7 +202,12 @@ export function StatusBadge({ status, className }: { status: string; className?:
   );
 }
 
-export type Column<T> = { key: string; header: string; render: (row: T) => ReactNode };
+export type Column<T> = {
+  key: string;
+  header: string;
+  render?: (row: T) => ReactNode;
+  hideOnMobile?: boolean;
+};
 
 export function DataTable<T extends { id: string }>({
   columns,
@@ -228,7 +233,10 @@ export function DataTable<T extends { id: string }>({
         <thead>
           <tr className="border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-slate-500">
             {columns.map((c) => (
-              <th key={c.key} className="px-2 py-2 sm:px-3">
+              <th
+                key={c.key}
+                className={cn("px-2 py-2 sm:px-3", c.hideOnMobile && "hidden sm:table-cell")}
+              >
                 {c.header}
               </th>
             ))}
@@ -238,8 +246,13 @@ export function DataTable<T extends { id: string }>({
           {rows.map((row) => (
             <tr key={row.id} className="border-b border-slate-50 last:border-0">
               {columns.map((c) => (
-                <td key={c.key} className="px-2 py-2.5 align-top sm:px-3">
-                  {c.render(row)}
+                <td
+                  key={c.key}
+                  className={cn("px-2 py-2.5 align-top sm:px-3", c.hideOnMobile && "hidden sm:table-cell")}
+                >
+                  {c.render
+                    ? c.render(row)
+                    : ((row as Record<string, unknown>)[c.key] as ReactNode) ?? "—"}
                 </td>
               ))}
             </tr>
@@ -254,13 +267,24 @@ export function EmptyState({
   title,
   description,
   action,
+  actionLabel,
+  onAction,
   icon: Icon = Inbox,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  actionLabel?: string;
+  onAction?: () => void;
   icon?: ComponentType<{ className?: string }>;
 }) {
+  const resolvedAction =
+    action ??
+    (actionLabel ? (
+      <Button size="sm" onClick={onAction}>
+        {actionLabel}
+      </Button>
+    ) : null);
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50 px-4 py-8 text-center sm:rounded-2xl sm:px-6 sm:py-12">
       <div className="mb-2 grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-slate-400 sm:mb-3 sm:h-12 sm:w-12">
@@ -268,7 +292,7 @@ export function EmptyState({
       </div>
       <p className="text-sm font-bold text-slate-800">{title}</p>
       {description ? <p className="mt-1 max-w-sm text-xs text-slate-500">{description}</p> : null}
-      {action ? <div className="mt-3 sm:mt-4">{action}</div> : null}
+      {resolvedAction ? <div className="mt-3 sm:mt-4">{resolvedAction}</div> : null}
     </div>
   );
 }
