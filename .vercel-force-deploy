@@ -1,4 +1,4 @@
 # Force Vercel production deploy
-# Triggered: 2026-08-17T12:00:00Z
-# Reason: clear GitHub cancelled deploy statuses; site code is healthy
-# Latest: CBT restored + live monitor fixes on main
+# 2026-08-17T12:16:00Z
+# Includes fix: officer.live-monitor.tsx syntax (commit acd618c)
+# Previous fail was on fdff9a7 only — do not redeploy that commit
