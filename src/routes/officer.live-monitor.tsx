@@ -97,9 +97,9 @@ function Page() {
       if (!schoolId) return [];
       try {
         const { data, error } = await supabase
-          .from("security_events")
+          .from("security_events" as never)
           .select("id, event_type, severity, description, created_at, student_id, exam_id")
-          .eq("school_id", schoolId)
+          .eq("school_id" as never, schoolId as never)
           .order("created_at", { ascending: false })
           .limit(40);
         if (error) return [];
