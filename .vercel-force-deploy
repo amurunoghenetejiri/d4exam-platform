@@ -1,4 +1,1 @@
-# Force Vercel production deploy
-# 2026-08-17T12:16:00Z
-# Includes fix: officer.live-monitor.tsx syntax (commit acd618c)
-# Previous fail was on fdff9a7 only — do not redeploy that commit
+redeploy-2026-08-17-cbt-export-ok
