@@ -40,7 +40,6 @@ export interface AppUser {
   subtitle: string;
 }
 
-/** Shared neutral profile look — same for every role; only label/icon differ. */
 const ROLE_LABELS: Record<string, { label: string; icon: typeof UserRound }> = {
   student: { label: "Student", icon: GraduationCap },
   teacher: { label: "Teacher", icon: UserRound },
@@ -63,7 +62,6 @@ function AccountRoleBadge({
 }) {
   if (!role) return null;
   const { label, icon: Icon } = roleMeta(role);
-
   return (
     <span
       className={cn(
@@ -79,7 +77,6 @@ function AccountRoleBadge({
 
 function NavLinks({ config, onNavigate }: { config: RoleConfig; onNavigate?: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-
   return (
     <nav className="flex flex-col gap-5 px-3 py-4" aria-label={`${config.label} navigation`}>
       {config.groups.map((group, gi) => (
@@ -172,7 +169,6 @@ function PortalBrand({
 function NotificationBell({ to, unread }: { to: string; unread: number }) {
   const hasUnread = unread > 0;
   const label = unread > 99 ? "99+" : unread > 0 ? String(unread) : undefined;
-
   return (
     <Button
       variant="ghost"
@@ -225,7 +221,6 @@ export function AppShell({
 
   const unreadQ = useUnreadNotificationCount(session?.userId);
   const unreadCount = unreadQ.data ?? 0;
-
   const notifPath = `${config.home}/notifications`;
   const logoUrl = school?.logoUrl ?? session?.schoolLogoUrl ?? null;
   const schoolName = school?.name ?? session?.schoolName ?? null;
@@ -270,7 +265,7 @@ export function AppShell({
         )}
         style={{ position: "fixed" }}
       >
-        <div className="mx-auto grid h-12 max-w-[1400px] grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 px-2.5 sm:h-16 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-6">
+        <div className="mx-auto grid h-12 max-w-[1400px] grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 px-2.5 sm:h-16 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
@@ -409,7 +404,6 @@ export function AppShell({
                     </div>
                   </div>
                 </div>
-
                 <div className="p-1">
                   <DropdownMenuItem asChild>
                     <Link
@@ -447,7 +441,7 @@ export function AppShell({
       </header>
 
       <div className="relative z-10 pt-12 sm:pt-16 lg:pl-64">
-        <main className="mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:pb-10">
+        <main className="mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:max-w-[1400px] lg:px-8 lg:pb-12 lg:pt-8 xl:max-w-[1480px]">
           <div className="min-w-0 w-full">{children}</div>
         </main>
       </div>
