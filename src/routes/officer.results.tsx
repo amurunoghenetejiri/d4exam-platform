@@ -420,43 +420,43 @@ function Page() {
     const events = detailEventsQ.data ?? [];
 
     return (
-      <div className="mx-auto w-full max-w-3xl space-y-3">
+      <div className="mx-auto w-full max-w-3xl space-y-2.5">
         <button
           type="button"
           onClick={() => setSelectedResultId(null)}
-          className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+          className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
         >
           <ArrowLeft className="h-3.5 w-3.5" /> Back to students
         </button>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm sm:rounded-xl sm:p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate text-sm font-extrabold text-slate-900">{name}</p>
-              <p className="truncate text-[11px] text-slate-500">{matric}</p>
-              <p className="mt-0.5 truncate text-[11px] text-slate-500">
+              <p className="truncate text-sm font-bold text-slate-900">{name}</p>
+              <p className="truncate text-[10px] text-slate-500">{matric}</p>
+              <p className="mt-0.5 truncate text-[10px] text-slate-500">
                 {selectedExam.courses?.code} · {selectedExam.title}
               </p>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1">
               {held ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700">
                   <span className="h-1.5 w-1.5 rounded-full bg-red-500" /> Held
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Released
                 </span>
               )}
               {sec === "flagged" && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">
                   <ShieldAlert className="h-3 w-3" /> Flagged
                 </span>
               )}
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="mt-2.5 grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
             <MiniStat
               label="Score"
               value={`${selectedResult.total_score ?? "—"} / ${selectedResult.max_score ?? "—"}`}
@@ -470,22 +470,22 @@ function Page() {
             />
           </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
-            <div className="rounded-lg bg-emerald-50 py-2">
-              <p className="font-extrabold text-emerald-800">{selectedResult.correct_count ?? "—"}</p>
+          <div className="mt-2.5 grid grid-cols-3 gap-1.5 text-center text-[10px]">
+            <div className="rounded-md bg-emerald-50 py-1.5">
+              <p className="font-bold text-emerald-800">{selectedResult.correct_count ?? "—"}</p>
               <p className="text-emerald-700">Correct</p>
             </div>
-            <div className="rounded-lg bg-red-50 py-2">
-              <p className="font-extrabold text-red-800">{selectedResult.wrong_count ?? "—"}</p>
+            <div className="rounded-md bg-red-50 py-1.5">
+              <p className="font-bold text-red-800">{selectedResult.wrong_count ?? "—"}</p>
               <p className="text-red-700">Wrong</p>
             </div>
-            <div className="rounded-lg bg-amber-50 py-2">
-              <p className="font-extrabold text-amber-900">{selectedResult.unanswered_count ?? "—"}</p>
+            <div className="rounded-md bg-amber-50 py-1.5">
+              <p className="font-bold text-amber-900">{selectedResult.unanswered_count ?? "—"}</p>
               <p className="text-amber-800">Blank</p>
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] sm:text-xs">
+          <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] sm:text-[11px]">
             <Meta label="Submitted" value={formatWhen(attempt?.submitted_at ?? selectedResult.created_at)} />
             <Meta label="Started" value={formatWhen(attempt?.started_at)} />
             <Meta label="Attempt" value={attempt?.status || "—"} />
@@ -501,21 +501,21 @@ function Page() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Activity log</h3>
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm sm:rounded-xl sm:p-4">
+          <h3 className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Activity log</h3>
           {detailEventsQ.isLoading ? (
-            <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
+            <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-500">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
             </p>
           ) : events.length === 0 ? (
-            <p className="mt-2 text-xs text-slate-500">No integrity events recorded for this attempt.</p>
+            <p className="mt-1.5 text-[11px] text-slate-500">No integrity events recorded for this attempt.</p>
           ) : (
-            <ul className="mt-2 max-h-64 space-y-2 overflow-y-auto">
+            <ul className="mt-1.5 max-h-56 space-y-1.5 overflow-y-auto">
               {events.map((ev) => (
-                <li key={ev.id} className="flex gap-2 text-xs">
+                <li key={ev.id} className="flex gap-2 text-[11px]">
                   <span
                     className={cn(
-                      "mt-1.5 h-2 w-2 shrink-0 rounded-full",
+                      "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
                       ev.severity === "high"
                         ? "bg-red-500"
                         : ev.severity === "medium"
@@ -544,38 +544,38 @@ function Page() {
     const heldCount = results.filter((r) => isHeldStatus(r.status, r.released_at)).length;
 
     return (
-      <div className="mx-auto w-full max-w-3xl space-y-3">
+      <div className="mx-auto w-full max-w-3xl space-y-2.5">
         <button
           type="button"
           onClick={() => {
             setSelectedExamId(null);
             setSelectedResultId(null);
           }}
-          className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+          className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
         >
           <ArrowLeft className="h-3.5 w-3.5" /> All examinations
         </button>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-          <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm sm:rounded-xl sm:p-4">
+          <div className="flex flex-wrap items-start justify-between gap-1.5">
             <div className="min-w-0">
-              <p className="text-[11px] font-semibold text-primary">{selectedExam.courses?.code}</p>
-              <h2 className="text-sm font-extrabold text-slate-900 sm:text-base">{selectedExam.title}</h2>
-              <p className="mt-0.5 text-[11px] text-slate-500">
+              <p className="text-[10px] font-semibold text-primary">{selectedExam.courses?.code}</p>
+              <h2 className="text-sm font-bold text-slate-900">{selectedExam.title}</h2>
+              <p className="mt-0.5 text-[10px] text-slate-500">
                 {selectedExam.courses?.name}
                 {selectedExam.duration_minutes ? ` · ${selectedExam.duration_minutes} min` : ""}
               </p>
-              <p className="text-[11px] text-slate-500">{formatWhen(selectedExam.scheduled_start)}</p>
+              <p className="text-[10px] text-slate-500">{formatWhen(selectedExam.scheduled_start)}</p>
             </div>
             <StatusPill status={selectedExam.status} />
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-2.5 flex flex-wrap gap-1">
             {selectedExam.status !== "completed" && selectedExam.status !== "closed" && (
               <Button
                 size="sm"
                 variant="outline"
-                className="h-8 px-2.5 text-xs"
+                className="h-7 px-2 text-[11px]"
                 disabled={busy}
                 onClick={() => void markCompleted(selectedExam.id)}
               >
@@ -584,7 +584,7 @@ function Page() {
             )}
             <Button
               size="sm"
-              className="h-8 px-2.5 text-xs font-semibold"
+              className="h-7 px-2 text-[11px] font-semibold"
               disabled={busy}
               onClick={() => void releaseResults(selectedExam.id)}
             >
@@ -593,7 +593,7 @@ function Page() {
             <Button
               size="sm"
               variant="outline"
-              className="h-8 px-2.5 text-xs"
+              className="h-7 px-2 text-[11px]"
               disabled={busy}
               onClick={() => void holdAllResults(selectedExam.id)}
             >
@@ -602,7 +602,7 @@ function Page() {
             <Button
               size="sm"
               variant="outline"
-              className="h-8 px-2.5 text-xs"
+              className="h-7 px-2 text-[11px]"
               disabled={busy}
               onClick={() => void rescheduleExam(selectedExam.id)}
             >
@@ -611,7 +611,7 @@ function Page() {
             <Button
               size="sm"
               variant="outline"
-              className="h-8 px-2.5 text-xs"
+              className="h-7 px-2 text-[11px]"
               disabled={busy}
               onClick={() => void allowRewrite(selectedExam.id)}
             >
@@ -620,22 +620,22 @@ function Page() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm sm:rounded-xl">
+          <div className="flex items-center justify-between border-b border-slate-100 px-2.5 py-1.5 sm:px-3 sm:py-2">
+            <h3 className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
               Student results ({results.length})
             </h3>
             {heldCount > 0 && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-600">
+              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-red-600">
                 <span className="h-1.5 w-1.5 rounded-full bg-red-500" /> {heldCount} held
               </span>
             )}
           </div>
 
           {examResultsQ.isLoading ? (
-            <p className="p-4 text-sm text-slate-500">Loading results…</p>
+            <p className="p-3 text-xs text-slate-500">Loading results…</p>
           ) : results.length === 0 ? (
-            <div className="p-6">
+            <div className="p-4">
               <EmptyState
                 title="No results yet"
                 description="When students submit, their scores appear here for review and release."
@@ -654,39 +654,39 @@ function Page() {
                     <button
                       type="button"
                       onClick={() => setSelectedResultId(r.id)}
-                      className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 sm:gap-3"
+                      className="flex w-full items-center gap-2 px-2.5 py-2 text-left transition hover:bg-slate-50 sm:gap-3 sm:px-3 sm:py-2.5"
                     >
-                      <div className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-500">
-                        <UserRound className="h-4 w-4" />
+                      <div className="relative grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-500">
+                        <UserRound className="h-3.5 w-3.5" />
                         {held && (
-                          <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-red-500" />
+                          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border-2 border-white bg-red-500" />
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-bold text-slate-900 sm:text-sm">{name}</p>
-                        <p className="truncate text-[10px] text-slate-500 sm:text-[11px]">{matric}</p>
+                        <p className="truncate text-xs font-semibold text-slate-900">{name}</p>
+                        <p className="truncate text-[9px] text-slate-500">{matric}</p>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-0.5">
-                        <span className="text-xs font-extrabold tabular-nums text-slate-900">{pct}%</span>
-                        <span className="text-[10px] font-semibold text-slate-500">{r.grade || "—"}</span>
+                        <span className="text-xs font-bold tabular-nums text-slate-900">{pct}%</span>
+                        <span className="text-[9px] font-semibold text-slate-500">{r.grade || "—"}</span>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-0.5">
                         {held ? (
-                          <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700">
+                          <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[8px] font-bold text-red-700">
                             Held
                           </span>
                         ) : (
-                          <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
+                          <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[8px] font-bold text-emerald-700">
                             Out
                           </span>
                         )}
                         {flagged && (
-                          <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-800">
+                          <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[8px] font-bold text-amber-800">
                             Flag
                           </span>
                         )}
                       </div>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
                     </button>
                   </li>
                 );
@@ -698,7 +698,7 @@ function Page() {
     );
   }
 
-  // Step 1 — exam list (default)
+  // Step 1 — exam list (default) — compact on mobile
   return (
     <div className="mx-auto w-full max-w-3xl">
       <PageHeader
@@ -711,7 +711,7 @@ function Page() {
       ) : rows.length === 0 ? (
         <EmptyState title="No examinations yet" description="Approved and scheduled exams appear here." />
       ) : (
-        <ul className="space-y-2">
+        <ul className="space-y-1.5 sm:space-y-2">
           {rows.map((e) => {
             const st = attempts[e.id];
             const rc = counts[e.id];
@@ -722,36 +722,38 @@ function Page() {
                 <button
                   type="button"
                   onClick={() => setSelectedExamId(e.id)}
-                  className="flex w-full items-start gap-2 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-primary/30 hover:shadow-md sm:gap-3 sm:p-3.5"
+                  className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left shadow-sm transition hover:border-primary/30 hover:shadow-md sm:gap-3 sm:rounded-xl sm:px-3.5 sm:py-3"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="rounded bg-primary/10 px-1.5 py-px text-[9px] font-bold text-primary sm:text-[10px]">
                         {e.courses?.code || "—"}
                       </span>
                       <StatusPill status={e.status} />
                       {(rc?.held ?? 0) > 0 && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700">
-                          <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-red-50 px-1.5 py-px text-[8px] font-bold text-red-700 sm:text-[9px]">
+                          <span className="h-1 w-1 rounded-full bg-red-500 sm:h-1.5 sm:w-1.5" />
                           {rc!.held} held
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 truncate text-sm font-bold text-slate-900">{e.title}</p>
-                    <p className="truncate text-[11px] text-slate-500">{e.courses?.name}</p>
-                    <p className="mt-1 text-[10px] text-slate-400 sm:text-[11px]">
+                    <p className="mt-0.5 truncate text-xs font-bold leading-snug text-slate-900 sm:text-sm">
+                      {e.title}
+                    </p>
+                    <p className="truncate text-[10px] leading-snug text-slate-500">{e.courses?.name}</p>
+                    <p className="mt-0.5 text-[9px] leading-snug text-slate-400 sm:text-[10px]">
                       {e.scheduled_start ? formatWhen(e.scheduled_start) : "Not scheduled"}
                       {e.duration_minutes ? ` · ${e.duration_minutes} min` : ""}
-                      {st ? ` · ${st.finished}/{st.total} done` : " · No attempts"}
+                      {st ? ` · ${st.finished}/${st.total} done` : " · No attempts"}
                       {rc ? ` · ${rc.total} result${rc.total === 1 ? "" : "s"}` : ""}
                     </p>
                     {blocked && (
-                      <p className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-amber-700">
-                        <Clock className="h-3 w-3" /> Waiting for remaining students
+                      <p className="mt-0.5 flex items-center gap-1 text-[9px] font-semibold text-amber-700">
+                        <Clock className="h-2.5 w-2.5" /> Waiting for remaining students
                       </p>
                     )}
                   </div>
-                  <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-slate-300" />
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300 sm:h-4 sm:w-4" />
                 </button>
               </li>
             );
@@ -774,7 +776,7 @@ function StatusPill({ status }: { status: string }) {
           ? "bg-sky-50 text-sky-700"
           : "bg-slate-100 text-slate-600";
   return (
-    <span className={cn("rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide", tone)}>
+    <span className={cn("rounded-full px-1.5 py-px text-[8px] font-bold uppercase tracking-wide sm:text-[9px]", tone)}>
       {s}
     </span>
   );
@@ -795,16 +797,16 @@ function MiniStat({
     red: "bg-red-50 text-red-800",
   };
   return (
-    <div className={cn("rounded-lg px-2 py-2 text-center", tones[tone])}>
-      <p className="text-[9px] font-semibold uppercase tracking-wide opacity-70">{label}</p>
-      <p className="text-sm font-extrabold tabular-nums">{value}</p>
+    <div className={cn("rounded-md px-1.5 py-1.5 text-center sm:rounded-lg sm:px-2 sm:py-2", tones[tone])}>
+      <p className="text-[8px] font-semibold uppercase tracking-wide opacity-70 sm:text-[9px]">{label}</p>
+      <p className="text-xs font-bold tabular-nums sm:text-sm">{value}</p>
     </div>
   );
 }
 
 function Meta({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between gap-2 border-b border-slate-50 py-1 last:border-0">
+    <div className="flex justify-between gap-2 border-b border-slate-50 py-0.5 last:border-0">
       <span className="text-slate-400">{label}</span>
       <span className="truncate font-semibold capitalize text-slate-800">{value}</span>
     </div>
