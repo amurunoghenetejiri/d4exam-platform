@@ -11,7 +11,6 @@ import {
   Search,
   ShieldAlert,
   UserRound,
-  WifiOff,
   X,
 } from "lucide-react";
 import { PageHeader, EmptyState } from "@/components/dashboard/kit";
@@ -82,13 +81,11 @@ function Page() {
   const [frames, setFrames] = useState<Record<string, FrameEntry>>({});
   const [, setTick] = useState(0);
 
-  // Refresh freshness UI every few seconds
   useEffect(() => {
     const t = window.setInterval(() => setTick((n) => n + 1), 3000);
     return () => window.clearInterval(t);
   }, []);
 
-  // Subscribe to near-live camera frames for this school
   useEffect(() => {
     if (!schoolId) return;
     const sub = startLiveCamSubscriber({
@@ -102,27 +99,6 @@ function Page() {
     });
     return () => sub.stop();
   }, [schoolId]);
-
-  // Drop frames for attempts that are no longer in progress (exam over / submitted)
-  useEffect(() => {
-    const liveIds = new Set((attemptsQ.data ?? []).map((a) => a.id));
-    setFrames((prev) => {
-      let changed = false;
-      const next: Record<string, FrameEntry> = {};
-      for (const [id, entry] of Object.entries(prev)) {
-        if (liveIds.has(id) && isLiveCamFrameFresh(entry.ts)) {
-          next[id] = entry;
-        } else if (liveIds.has(id)) {
-          // keep stale briefly so UI can show "stream ended"
-          next[id] = entry;
-        } else {
-          changed = true;
-        }
-      }
-      return changed || Object.keys(next).length !== Object.keys(prev).length ? next : prev;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attemptsQ.data]);
 
   useRealtimeInvalidate(
     `officer-live-${schoolId ?? "x"}`,
@@ -182,6 +158,23 @@ function Page() {
       return (data ?? []) as unknown as AttemptRow[];
     },
   });
+
+  // Drop frames when attempt is no longer in progress (exam over / submitted / camera closed long enough)
+  useEffect(() => {
+    const liveIds = new Set((attemptsQ.data ?? []).map((a) => a.id));
+    setFrames((prev) => {
+      const next: Record<string, FrameEntry> = {};
+      let changed = false;
+      for (const [id, entry] of Object.entries(prev)) {
+        if (liveIds.has(id)) {
+          next[id] = entry;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [attemptsQ.data]);
 
   const completedQ = useQuery({
     queryKey: ["officer-live-completed", schoolId],
