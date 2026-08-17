@@ -1,3 +1,4 @@
-# Force redeploy
-# 2026-08-17T11:50:00Z
-# CBT session restored + live monitor timeline/back button
+# Force Vercel production deploy
+# Triggered: 2026-08-17T12:00:00Z
+# Reason: clear GitHub cancelled deploy statuses; site code is healthy
+# Latest: CBT restored + live monitor fixes on main
