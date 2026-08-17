@@ -108,24 +108,63 @@ export async function notifyMany(payloads: NotifyPayload[]): Promise<void> {
 
 /** All examination officers for a school (auth user ids). */
 export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
+  const uniq = (ids: (string | null | undefined)[]) =>
+    [...new Set(ids.filter((x): x is string => Boolean(x)))];
+
   try {
-    const { data: roles, error } = await supabase
+    // 1) user_roles for this school — only valid enum value examination_officer
+    const { data: bySchool, error: e1 } = await supabase
       .from("user_roles")
-      .select("user_id, role")
+      .select("user_id")
       .eq("school_id", schoolId)
-      .in("role", ["examination_officer", "exam_officer", "officer"] as never[]);
-    if (error) {
-      const { data: roles2 } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("school_id", schoolId)
-        .eq("role", "examination_officer");
-      return [...new Set((roles2 ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
+      .eq("role", "examination_officer");
+    if (!e1) {
+      const ids = uniq((bySchool ?? []).map((r) => (r as { user_id: string }).user_id));
+      if (ids.length) return ids;
+    } else {
+      console.warn("[notify] officer roles by school", e1.message);
     }
-    const preferred = (roles ?? []).filter((r) => (r as { role?: string }).role === "examination_officer");
-    const pool = preferred.length ? preferred : (roles ?? []);
-    return [...new Set(pool.map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
-  } catch {
+
+    // 2) All examination_officer roles, then filter by profiles.school_id
+    //    (covers rows where user_roles.school_id is null)
+    const { data: allOfficers, error: e2 } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "examination_officer");
+    if (e2) {
+      console.warn("[notify] officer roles global", e2.message);
+    }
+    const candidates = uniq((allOfficers ?? []).map((r) => (r as { user_id: string }).user_id));
+    if (candidates.length) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("auth_user_id")
+        .eq("school_id", schoolId)
+        .in("auth_user_id", candidates);
+      const ids = uniq((profiles ?? []).map((p) => (p as { auth_user_id: string | null }).auth_user_id));
+      if (ids.length) return ids;
+    }
+
+    // 3) examination_officers.profile_id → profiles.auth_user_id for this school
+    const { data: officerRows } = await supabase
+      .from("examination_officers")
+      .select("profile_id")
+      .limit(500);
+    const profileIds = uniq((officerRows ?? []).map((o) => (o as { profile_id: string | null }).profile_id));
+    if (profileIds.length) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("auth_user_id")
+        .eq("school_id", schoolId)
+        .in("id", profileIds);
+      const ids = uniq((profiles ?? []).map((p) => (p as { auth_user_id: string | null }).auth_user_id));
+      if (ids.length) return ids;
+    }
+
+    console.warn("[notify] no examination officers resolved for school", schoolId);
+    return [];
+  } catch (e) {
+    console.warn("[notify] listOfficerUserIds failed", e);
     return [];
   }
 }
@@ -235,6 +274,73 @@ export async function notifyTeacherExamDecision(opts: {
     entityId: opts.examId,
     dedupeMinutes: 5,
   });
+}
+
+/** Notify eligible students when officer approves / schedules an exam. */
+export async function notifyStudentsExamApproved(opts: {
+  schoolId: string;
+  examId: string;
+  examTitle: string;
+  courseId?: string | null;
+  scheduledStart?: string | null;
+}) {
+  try {
+    let studentIds: string[] = [];
+
+    if (opts.courseId) {
+      const { data: course } = await supabase
+        .from("courses")
+        .select("id, department_id, level_id")
+        .eq("id", opts.courseId)
+        .maybeSingle();
+
+      let q = supabase
+        .from("students")
+        .select("id")
+        .eq("school_id", opts.schoolId)
+        .limit(2000);
+      const dept = (course as { department_id?: string | null } | null)?.department_id;
+      const level = (course as { level_id?: string | null } | null)?.level_id;
+      if (dept) q = q.eq("department_id", dept);
+      if (level) q = q.eq("level_id", level);
+      const { data: students } = await q;
+      studentIds = [...new Set((students ?? []).map((s) => (s as { id: string }).id).filter(Boolean))];
+    }
+
+    if (!studentIds.length) {
+      const { data: students } = await supabase
+        .from("students")
+        .select("id")
+        .eq("school_id", opts.schoolId)
+        .limit(500);
+      studentIds = [...new Set((students ?? []).map((s) => (s as { id: string }).id).filter(Boolean))];
+    }
+
+    const authIds = await studentIdsToAuthUserIds(studentIds);
+    if (!authIds.length) {
+      console.warn("[notify] no student auth users for exam approval", opts.examId);
+      return;
+    }
+
+    const when = opts.scheduledStart
+      ? ` Starts ${new Date(opts.scheduledStart).toLocaleString()}.`
+      : "";
+    await notifyMany(
+      authIds.map((uid) => ({
+        recipientUserId: uid,
+        schoolId: opts.schoolId,
+        title: "Exam available",
+        message: `“${opts.examTitle}” is now available for your programme.${when}`,
+        type: "exam_available",
+        link: "/student/examinations",
+        entityType: "examination",
+        entityId: opts.examId,
+        dedupeMinutes: 120,
+      })),
+    );
+  } catch (e) {
+    console.warn("[notify] notifyStudentsExamApproved failed", e);
+  }
 }
 
 /** Notify student that result is published. */
