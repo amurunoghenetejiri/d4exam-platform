@@ -3,6 +3,9 @@
  *
  * Android Chrome supports navigator.vibrate.
  * iOS Safari generally does not — calls are no-ops there.
+ *
+ * Intensity order (shortest → longest):
+ *   start < unclear < none < multi < camera_blocked < tab_switch < officer_warning
  */
 
 export type HapticKind =
@@ -16,15 +19,25 @@ export type HapticKind =
 
 /** [on, off, on, off, …] milliseconds */
 const PATTERNS: Record<HapticKind, number[]> = {
-  start: [200, 80, 250],
-  none: [350, 120, 350, 120, 450],
-  unclear: [200, 90, 200, 90, 250],
-  multi: [400, 120, 400, 120, 450, 120, 500],
-  camera_blocked: [350, 100, 350, 100, 400],
-  tab_switch: [250, 90, 250],
-  // Longest — officer warning
+  // Short buzz when student taps Start Exam
+  start: [180, 70, 220],
+
+  // No face — long, repeated soft pulses
+  none: [280, 100, 280, 100, 320, 100, 360, 100, 400],
+
+  // Face unclear — medium
+  unclear: [200, 80, 220, 80, 260],
+
+  // Multiple faces — longer / stronger
+  multi: [400, 100, 450, 100, 500, 120, 550, 120, 600],
+
+  camera_blocked: [350, 90, 380, 90, 420, 100, 450],
+
+  tab_switch: [280, 90, 300],
+
+  // Officer warning — longest and strongest
   officer_warning: [
-    500, 150, 500, 150, 600, 150, 600, 150, 700, 200, 700, 200, 800,
+    600, 120, 650, 120, 700, 140, 750, 140, 800, 160, 850, 160, 900, 180, 950,
   ],
 };
 
@@ -57,7 +70,6 @@ function clearTimers() {
 function vibrateRaw(arg: number | number[]): boolean {
   if (!canVibrate()) return false;
   try {
-    // Spec: returns false if the user agent ignored the call
     const result = navigator.vibrate(arg);
     return result !== false;
   } catch {
@@ -65,7 +77,7 @@ function vibrateRaw(arg: number | number[]): boolean {
   }
 }
 
-/** Fire a list of single pulses with gaps (fallback when patterns are ignored). */
+/** Fire a list of single pulses with gaps (fallback when full patterns are ignored). */
 function pulseTrain(ons: number[], gap: number) {
   let delay = 0;
   for (const ms of ons) {
@@ -78,26 +90,39 @@ function pulseTrain(ons: number[], gap: number) {
   }
 }
 
+function extractOns(pattern: number[]): number[] {
+  const ons: number[] = [];
+  for (let i = 0; i < pattern.length; i += 2) {
+    ons.push(pattern[i]!);
+  }
+  return ons;
+}
+
 /**
  * Call from a user gesture (Start exam / touch).
  * Unlocks vibration on strict browsers and buzzes on start.
  */
 export function primeHaptics() {
   primed = true;
-  // Cancel anything leftover, then start pattern
+  clearTimers();
   vibrateRaw(0);
-  const ok = vibrateRaw(PATTERNS.start);
+  const pattern = PATTERNS.start;
+  const ok = vibrateRaw(pattern);
   if (!ok) {
-    pulseTrain([200, 250], 80);
+    pulseTrain(extractOns(pattern), 70);
   }
+  // Second wave shortly after — helps when first call is dropped mid-gesture
+  const id = window.setTimeout(() => {
+    vibrateRaw(pattern);
+  }, 120);
+  timers.push(id);
 }
 
 /** Keep activation alive while the student taps the exam UI. */
 export function refreshHapticUnlock() {
   primed = true;
-  // Tiny no-op-ish pulse to refresh some WebView gesture chains
   vibrateRaw(1);
-  const id = window.setTimeout(() => vibrateRaw(0), 15);
+  const id = window.setTimeout(() => vibrateRaw(0), 12);
   timers.push(id);
 }
 
@@ -105,43 +130,50 @@ export function haptic(kind: HapticKind) {
   if (typeof window === "undefined") return;
 
   const pattern = PATTERNS[kind] ?? PATTERNS.none;
+  const ons = extractOns(pattern);
 
-  // Cancel previous pattern so the new one is felt clearly
+  clearTimers();
   vibrateRaw(0);
 
-  // Primary: full pattern
+  // Primary full pattern
   let ok = vibrateRaw(pattern);
 
-  // Immediate retry (some devices need a second call)
-  if (!ok) {
-    const id = window.setTimeout(() => {
-      ok = vibrateRaw(pattern);
-    }, 40);
-    timers.push(id);
-  }
+  // Immediate retry (some Android WebViews need a second call)
+  const idRetry = window.setTimeout(() => {
+    if (!ok) ok = vibrateRaw(pattern);
+  }, 35);
+  timers.push(idRetry);
 
-  // Fallback: only the "on" segments as single pulses
-  const ons: number[] = [];
-  for (let i = 0; i < pattern.length; i += 2) {
-    ons.push(pattern[i]!);
-  }
+  // Fallback pulse train
   const idFb = window.setTimeout(() => {
-    // If still nothing felt / first call was ignored, use pulse train
-    if (!ok) pulseTrain(ons, 100);
-  }, 80);
+    if (!ok) pulseTrain(ons, 90);
+  }, 70);
   timers.push(idFb);
 
-  // Officer warning: keep motor going longer
+  // Officer warning: extend the motor much longer
   if (kind === "officer_warning") {
-    clearTimers();
-    // Restart clean for the long warning
-    vibrateRaw(0);
-    vibrateRaw(pattern);
-    pulseTrain(ons, 120);
+    // Extra waves so it is clearly the longest / strongest
     timers.push(
-      window.setTimeout(() => vibrateRaw([600, 150, 700, 150, 800]), 2800),
-      window.setTimeout(() => vibrateRaw([700, 200, 800]), 5500),
-      window.setTimeout(() => pulseTrain([600, 700, 800], 150), 100),
+      window.setTimeout(() => vibrateRaw([700, 140, 800, 140, 900]), 2200),
+      window.setTimeout(() => vibrateRaw([750, 150, 850, 150, 950]), 4500),
+      window.setTimeout(() => pulseTrain([700, 800, 900, 950], 130), 90),
+      window.setTimeout(() => vibrateRaw([800, 160, 900]), 7000),
+    );
+  }
+
+  // Multi-face: a bit more sustained than no-face
+  if (kind === "multi") {
+    timers.push(
+      window.setTimeout(() => vibrateRaw([450, 100, 500, 100, 550]), 1800),
+      window.setTimeout(() => pulseTrain([400, 500, 550], 100), 80),
+    );
+  }
+
+  // No-face: long soft train
+  if (kind === "none") {
+    timers.push(
+      window.setTimeout(() => pulseTrain([280, 320, 360, 400], 100), 80),
+      window.setTimeout(() => vibrateRaw([300, 100, 350, 100, 400]), 2000),
     );
   }
 }
