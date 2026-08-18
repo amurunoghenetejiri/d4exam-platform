@@ -29,12 +29,10 @@ type ResultRow = {
 };
 
 function Page() {
-  // /student/results/$id is a child of this route — must render Outlet or detail never shows
   const childMatches = useChildMatches();
   if (childMatches.length > 0) {
     return <Outlet />;
   }
-
   return <ResultsList />;
 }
 
@@ -96,7 +94,10 @@ function ResultsList() {
             const st = (r.status || "").toLowerCase();
             const published = st === "published" || Boolean(r.released_at);
             const flagged = (r.security_review_status || "").toLowerCase() === "flagged";
-            const statusLabel = published
+            const terminated = st === "terminated" || String(r.security_review_status || "").toLowerCase() === "terminated";
+            const statusLabel = terminated
+              ? "Terminated"
+              : published
               ? "Released"
               : flagged
                 ? "Pending officer review"
@@ -116,7 +117,11 @@ function ResultsList() {
                     <p className="text-xs text-slate-500">
                       {r.examinations?.courses?.code} — {r.examinations?.courses?.name}
                     </p>
-                    {published ? (
+                    {terminated ? (
+                      <p className="mt-1 text-xs font-semibold text-red-700">
+                        This examination was terminated by the Examination Officer. Scores are not released.
+                      </p>
+                    ) : published ? (
                       <p className="mt-1 text-sm font-semibold text-slate-800">
                         {r.percentage != null ? `${Math.round(Number(r.percentage))}%` : "—"}
                         {r.grade ? ` · Grade ${r.grade}` : ""}
