@@ -97,7 +97,6 @@ function LoginPage() {
           password,
         },
       });
-      // Session may still be present even when role is missing — set it first
       if ("session" in result && result.session) {
         const { error: sessErr } = await supabase.auth.setSession(result.session);
         if (sessErr) {
@@ -116,7 +115,6 @@ function LoginPage() {
         return;
       }
 
-      // Prefer role from server — avoids client RLS race after setSession
       const serverRole = "role" in result && result.role ? String(result.role).toLowerCase() : null;
       if (serverRole && serverRole in roleHome) {
         navigate({ to: roleHome[serverRole as keyof typeof roleHome] as never });
@@ -139,7 +137,7 @@ function LoginPage() {
           /* ignore */
         }
         setError(
-          "Signed in, but no dashboard role was found for this account. Contact your school administrator to assign school_admin, teacher, officer, or student.",
+          "Signed in, but no dashboard role was found for this account. Contact your school administrator.",
         );
         return;
       }
@@ -147,13 +145,11 @@ function LoginPage() {
     } catch (err) {
       const detail = err instanceof Error ? err.message : "";
       console.error("[login] sign-in failed:", err);
-      const friendly =
-        detail.includes("schoolCode") || detail.includes("too_small")
-          ? "School code is required for school accounts. Super admins leave school code blank and sign in with email only."
-          : detail
-            ? `Unable to sign in right now: ${detail}`
-            : "Unable to sign in right now. Check your connection and try again.";
-      setError(friendly);
+      setError(
+        detail
+          ? `Unable to sign in right now: ${detail}`
+          : "Unable to sign in right now. Check your connection and try again.",
+      );
     } finally {
       inFlight.current = false;
       setLoading(false);
@@ -194,7 +190,7 @@ function LoginPage() {
             </div>
             <h1 className="text-xl font-extrabold text-slate-900">Sign in</h1>
             <p className="mt-1 text-sm text-slate-500">
-              School users need a school code. Super admins leave it blank.
+              Enter your credentials to continue.
             </p>
 
             {error ? (
@@ -205,7 +201,7 @@ function LoginPage() {
 
             <form onSubmit={submit} className="mt-6 space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="schoolCode">School code (optional for super admin)</Label>
+                <Label htmlFor="schoolCode">School code</Label>
                 <Input
                   id="schoolCode"
                   autoComplete="organization"
