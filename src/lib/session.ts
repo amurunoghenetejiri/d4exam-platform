@@ -38,17 +38,22 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   const user = userData.user;
   if (!user) return null;
 
-  // Parallel: profile + roles at once (was sequential)
-  const [profileRes, roleRes] = await Promise.all([
+  // Parallel: profile + roles at once
+  const [profileByAuth, profileById, roleRes] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, full_name, email, status, school_id")
+      .select("id, full_name, email, status, school_id, auth_user_id")
       .eq("auth_user_id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, status, school_id, auth_user_id")
+      .eq("id", user.id)
       .maybeSingle(),
     supabase.from("user_roles").select("role").eq("user_id", user.id),
   ]);
 
-  const profile = profileRes.data;
+  const profile = profileByAuth.data ?? profileById.data ?? null;
   const roles = (roleRes.data ?? []).map((r) => r.role as AppRole);
 
   let schoolName: string | null = null;
@@ -57,7 +62,6 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   let identifier: string | null = null;
   let identifierLabel = "Email";
 
-  // Parallel school + role-specific identifier
   const extra: Promise<void>[] = [];
 
   if (profile?.school_id) {
@@ -125,19 +129,27 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     "student",
   ];
 
+  const primaryRole = priority.find((r) => roles.includes(r)) ?? null;
+
+  // Super admin must never be stuck as "pending" when profile is missing/incomplete
+  let status = (profile?.status as string | undefined) ?? "pending";
+  if (primaryRole === "super_admin" && (status === "pending" || status === "invited" || !profile)) {
+    status = "active";
+  }
+
   return {
     userId: user.id,
-    profileId: profile?.id ?? "",
+    profileId: profile?.id ?? user.id,
     email: profile?.email ?? user.email ?? "",
     fullName: profile?.full_name || user.email || "",
-    status: profile?.status ?? "pending",
+    status,
     schoolId: profile?.school_id ?? null,
     schoolName,
     schoolCode,
     schoolLogoUrl,
     roles,
-    role: priority.find((r) => roles.includes(r)) ?? null,
-    identifier: identifier ?? profile?.email ?? null,
+    role: primaryRole,
+    identifier: identifier ?? profile?.email ?? user.email ?? null,
     identifierLabel,
   };
 }
