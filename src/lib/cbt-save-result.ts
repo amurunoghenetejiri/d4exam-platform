@@ -108,28 +108,26 @@ export async function saveCbtResult(input: {
   const releasedAt = publishNow ? new Date().toISOString() : null;
 
   const submittedAt = new Date().toISOString();
+  // Always stamp updated_at so officer live-monitor recent-done query finds this row
+  const attemptPatch = {
+    status,
+    submitted_at: submittedAt,
+    updated_at: submittedAt,
+    score: scored.totalScore,
+    max_score: scored.maxMarks,
+    answers: input.answers,
+  } as never;
+
   if (input.attemptId) {
     const { error: attErr } = await supabase
       .from("exam_attempts")
-      .update({
-        status,
-        submitted_at: submittedAt,
-        score: scored.totalScore,
-        max_score: scored.maxMarks,
-        answers: input.answers,
-      } as never)
+      .update(attemptPatch)
       .eq("id", input.attemptId);
     if (attErr) {
       console.warn("exam_attempts update by id", attErr);
       await supabase
         .from("exam_attempts")
-        .update({
-          status,
-          submitted_at: submittedAt,
-          score: scored.totalScore,
-          max_score: scored.maxMarks,
-          answers: input.answers,
-        } as never)
+        .update(attemptPatch)
         .eq("exam_id", input.examId)
         .eq("student_id", input.studentId)
         .eq("status", "in_progress");
@@ -137,13 +135,7 @@ export async function saveCbtResult(input: {
   } else {
     await supabase
       .from("exam_attempts")
-      .update({
-        status,
-        submitted_at: submittedAt,
-        score: scored.totalScore,
-        max_score: scored.maxMarks,
-        answers: input.answers,
-      } as never)
+      .update(attemptPatch)
       .eq("exam_id", input.examId)
       .eq("student_id", input.studentId)
       .eq("status", "in_progress");
