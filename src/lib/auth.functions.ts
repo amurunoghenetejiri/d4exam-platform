@@ -175,6 +175,9 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     };
   });
 
+/** Alias used by login route — keep in sync with loginWithSchoolCode */
+export const signInWithSchoolCode = loginWithSchoolCode;
+
 export const reviewSchoolApplication = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) =>
