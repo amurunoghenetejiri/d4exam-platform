@@ -1,11 +1,19 @@
 /**
- * Server-only email helper.
- * Uses Resend (https://resend.com) when RESEND_API_KEY is set on Vercel.
- * Optional: EMAIL_FROM like "D4EXAM <onboarding@yourdomain.com>"
- * Optional: APP_URL like "https://your-app.vercel.app" for login link in the body.
+ * Server-only email helper (Resend).
+ * RESEND_API_KEY on Vercel enables sending.
  */
 
 export type SendEmailResult = { ok: true; id?: string } | { ok: false; error: string };
+
+function escapeHtml(s: string) {
+  // Avoid raw HTML entities in source (they can be corrupted by some tools).
+  const amp = String.fromCharCode(38);
+  return String(s)
+    .replace(/&/g, amp + "amp;")
+    .replace(/</g, amp + "lt;")
+    .replace(/>/g, amp + "gt;")
+    .replace(/"/g, amp + "quot;");
+}
 
 export async function sendEmail(params: {
   to: string;
@@ -81,7 +89,6 @@ export async function sendSchoolApprovalEmail(params: {
     ``,
     `Congratulations! Your school application has been approved on D4EXAM.`,
     ``,
-    `=== Your school profile ===`,
     `School name: ${params.schoolName}`,
     `School code: ${params.schoolCode}`,
     `Admin name: ${params.applicantName}`,
@@ -90,40 +97,31 @@ export async function sendSchoolApprovalEmail(params: {
     params.phone ? `Phone: ${params.phone}` : null,
     params.officialEmail ? `Official school email: ${params.officialEmail}` : null,
     ``,
-    `=== How to sign in ===`,
-    `1. Open ${loginUrl}`,
-    `2. Enter school code: ${params.schoolCode}`,
-    `3. Enter email: ${params.adminEmail}`,
-    `4. Enter the temporary password above`,
-    `5. Change your password after first login`,
-    ``,
-    `Keep this email private. Do not share your password.`,
+    `Sign in: ${loginUrl}`,
+    `Use school code + email + temporary password. Change password after first login.`,
     ``,
     `— D4EXAM Team`,
   ]
     .filter((line) => line !== null)
     .join("\n");
 
-  const html = `
-  <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 560px; margin: 0 auto; color: #0f172a; line-height: 1.5;">
-    <h1 style="font-size: 20px; margin-bottom: 8px;">Your school is approved</h1>
-    <p>Hello <strong>${escapeHtml(params.applicantName)}</strong>,</p>
-    <p>Congratulations! Your school application has been <strong>approved</strong> on D4EXAM. Your school space and admin profile are ready.</p>
-    <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
-      <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc; width: 40%;"><strong>School name</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.schoolName)}</td></tr>
-      <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>School code</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; font-family: ui-monospace, monospace; font-size: 16px;"><strong>${escapeHtml(params.schoolCode)}</strong></td></tr>
-      <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Admin name</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.applicantName)}</td></tr>
-      <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Login email</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.adminEmail)}</td></tr>
-      <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Temporary password</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; font-family: ui-monospace, monospace;">${escapeHtml(params.adminPassword)}</td></tr>
-      ${params.phone ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Phone</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.phone)}</td></tr>` : ""}
-      ${params.officialEmail ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Official school email</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.officialEmail)}</td></tr>` : ""}
-    </table>
-    <p style="margin: 16px 0;">
-      <a href="${escapeHtml(loginUrl)}" style="display: inline-block; background: #1d4ed8; color: #fff; text-decoration: none; padding: 10px 16px; border-radius: 8px; font-weight: 600;">Sign in to D4EXAM</a>
-    </p>
-    <p style="font-size: 13px; color: #475569;">Use your <strong>school code</strong>, <strong>email</strong>, and the <strong>temporary password</strong> above. Change your password after the first login.</p>
-    <p style="font-size: 12px; color: #94a3b8; margin-top: 24px;">— D4EXAM Team</p>
-  </div>`.trim();
+  const html = [
+    `<div style="font-family: system-ui, sans-serif; max-width: 560px; margin: 0 auto; color: #0f172a; line-height: 1.5;">`,
+    `<h1 style="font-size: 20px;">Your school is approved</h1>`,
+    `<p>Hello <strong>${escapeHtml(params.applicantName)}</strong>,</p>`,
+    `<p>Your school application has been <strong>approved</strong> on D4EXAM.</p>`,
+    `<p><strong>School name:</strong> ${escapeHtml(params.schoolName)}</p>`,
+    `<p><strong>School code:</strong> ${escapeHtml(params.schoolCode)}</p>`,
+    `<p><strong>Login email:</strong> ${escapeHtml(params.adminEmail)}</p>`,
+    `<p><strong>Temporary password:</strong> ${escapeHtml(params.adminPassword)}</p>`,
+    params.phone ? `<p><strong>Phone:</strong> ${escapeHtml(params.phone)}</p>` : "",
+    params.officialEmail
+      ? `<p><strong>Official email:</strong> ${escapeHtml(params.officialEmail)}</p>`
+      : "",
+    `<p><a href="${escapeHtml(loginUrl)}">Sign in to D4EXAM</a></p>`,
+    `<p style="font-size: 12px; color: #94a3b8;">— D4EXAM Team</p>`,
+    `</div>`,
+  ].join("\n");
 
   return sendEmail({
     to: params.to,
@@ -131,12 +129,4 @@ export async function sendSchoolApprovalEmail(params: {
     html,
     text,
   });
-}
-
-function escapeHtml(s: string) {
-  return String(s)
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
-    .replace(/"/g, """);
 }
