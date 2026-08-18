@@ -1,13 +1,14 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { PublicLayout } from "@/components/layout/PublicLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { StatusBadge } from "@/components/dashboard/kit";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2, Clock, Info, XCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { setApprovedSchoolAdminPassword } from "@/lib/auth.school-admin.functions";
 
 export const Route = createFileRoute("/application-status")({
   head: () => ({
@@ -15,7 +16,7 @@ export const Route = createFileRoute("/application-status")({
       { title: "Application Status — D4EXAM" },
       {
         name: "description",
-        content: "Track the verification progress of your D4EXAM school application.",
+        content: "Check the progress of your D4EXAM school application.",
       },
     ],
   }),
@@ -38,12 +39,66 @@ type AppRow = {
   issued_admin_password: string | null;
 };
 
+function friendlyStatus(status: string) {
+  const s = status.toLowerCase();
+  if (s === "approved") {
+    return {
+      title: "Approved",
+      tone: "text-emerald-800 bg-emerald-50 border-emerald-200",
+      icon: CheckCircle2,
+      message:
+        "Great news — your school has been approved. Set a password below, then sign in to your school admin panel.",
+    };
+  }
+  if (s === "rejected") {
+    return {
+      title: "Not approved",
+      tone: "text-rose-800 bg-rose-50 border-rose-200",
+      icon: XCircle,
+      message:
+        "Your application was not approved at this time. Read any note from the reviewer below, or contact support if you need help.",
+    };
+  }
+  if (s === "more_information_required") {
+    return {
+      title: "More information needed",
+      tone: "text-amber-900 bg-amber-50 border-amber-200",
+      icon: Info,
+      message:
+        "The reviewer needs a little more detail before they can finish. Check the note below and reply through the channel you used to apply, or submit an updated application if asked.",
+    };
+  }
+  if (s === "under_review") {
+    return {
+      title: "Under review",
+      tone: "text-sky-900 bg-sky-50 border-sky-200",
+      icon: Clock,
+      message:
+        "A platform administrator is reviewing your application. You do not need to do anything right now — this page will update when there is news.",
+    };
+  }
+  return {
+    title: "Pending approval",
+    tone: "text-slate-800 bg-slate-50 border-slate-200",
+    icon: Clock,
+    message:
+      "Your application has been received and is waiting for platform admin approval. Please check back here later — you will see an update as soon as a decision is made.",
+  };
+}
+
 function Page() {
+  const navigate = useNavigate();
+  const setPasswordFn = useServerFn(setApprovedSchoolAdminPassword);
   const [email, setEmail] = useState("");
   const [refId, setRefId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [rows, setRows] = useState<AppRow[] | null>(null);
+  const [pwd, setPwd] = useState("");
+  const [pwd2, setPwd2] = useState("");
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [pwdError, setPwdError] = useState("");
+  const [pwdOk, setPwdOk] = useState<{ schoolCode: string; adminEmail: string } | null>(null);
 
   useEffect(() => {
     try {
@@ -57,109 +112,159 @@ function Page() {
     }
   }, []);
 
+  // Live updates while this page is open
+  useEffect(() => {
+    if (!rows?.length) return;
+    const ids = rows.map((r) => r.id);
+    const channel = supabase
+      .channel(`app-status-${ids.join("-").slice(0, 40)}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "school_applications" },
+        (payload) => {
+          const next = payload.new as AppRow | undefined;
+          if (!next?.id) return;
+          setRows((prev) =>
+            prev
+              ? prev.map((r) => (r.id === next.id ? { ...r, ...next } : r))
+              : prev,
+          );
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [rows?.map((r) => r.id).join(",")]);
+
   async function check(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setRows(null);
+    setPwdOk(null);
     setLoading(true);
     try {
       const em = email.trim().toLowerCase();
       const code = refId.trim();
       if (!em) {
-        setError("Enter the applicant email used when you applied.");
+        setError("Enter the email you used when you applied.");
         return;
       }
       if (!code) {
-        setError("Enter your tracking code (shown after you submitted the application).");
+        setError("Enter the reference code you received after submitting your application.");
         return;
       }
 
-      let q = supabase
+      const { data, error: qErr } = await supabase
         .from("school_applications")
         .select(
           "id, school_name, status, created_at, reviewed_at, review_notes, applicant_email, tracking_code, issued_school_code, issued_admin_email, issued_admin_password",
         )
         .ilike("applicant_email", em)
+        .eq("tracking_code", code)
         .order("created_at", { ascending: false })
         .limit(5);
 
-      if (code.includes("-") && code.length > 20) {
-        q = q.eq("id", code);
-      } else {
-        q = q.ilike("tracking_code", code);
+      if (qErr) {
+        setError("We could not look up your application right now. Please try again shortly.");
+        return;
+      }
+      if (!data?.length) {
+        setError(
+          "No application found for that email and reference code. Double-check both and try again.",
+        );
+        return;
       }
 
-      const { data, error: qError } = await q;
-      if (qError) {
-        setError(qError.message);
-        return;
-      }
-      if (!data || data.length === 0) {
-        setError("No application found for that email and tracking code.");
-        return;
-      }
       setRows(data as AppRow[]);
       try {
-        localStorage.setItem(
-          TRACK_KEY,
-          JSON.stringify({
-            id: data[0].id,
-            trackingCode: data[0].tracking_code || code,
-            email: em,
-            schoolName: data[0].school_name,
-          }),
-        );
+        localStorage.setItem(TRACK_KEY, JSON.stringify({ email: em, trackingCode: code }));
       } catch {
         /* ignore */
       }
-    } catch {
-      setError("Could not look up status. Please try again.");
     } finally {
       setLoading(false);
     }
   }
 
+  async function confirmPassword(app: AppRow) {
+    setPwdError("");
+    if (pwd.length < 8) {
+      setPwdError("Password must be at least 8 characters.");
+      return;
+    }
+    if (pwd !== pwd2) {
+      setPwdError("Passwords do not match.");
+      return;
+    }
+    setPwdBusy(true);
+    try {
+      const result = await setPasswordFn({
+        data: {
+          email: email.trim().toLowerCase(),
+          trackingCode: refId.trim(),
+          password: pwd,
+        },
+      });
+      if (result && "error" in result && result.error) {
+        setPwdError(String(result.error));
+        return;
+      }
+      if (result && "ok" in result && result.ok) {
+        setPwdOk({
+          schoolCode: result.schoolCode || app.issued_school_code || "",
+          adminEmail: result.adminEmail || app.issued_admin_email || email,
+        });
+        setPwd("");
+        setPwd2("");
+      }
+    } catch (err) {
+      setPwdError(err instanceof Error ? err.message : "Could not save password.");
+    } finally {
+      setPwdBusy(false);
+    }
+  }
+
   return (
     <PublicLayout>
-      <div className="mx-auto w-full max-w-2xl px-4 py-14 sm:px-6">
-        <h1 className="text-3xl font-extrabold text-slate-900 sm:text-4xl">Application status</h1>
-        <p className="mt-3 text-slate-600">
-          Your application is saved in our database. Enter the applicant email and tracking code to
-          see progress. If approved, your school login credentials appear below.
-        </p>
+      <div className="mx-auto max-w-lg space-y-6 px-4 py-10">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-900">Application status</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Enter the email and reference code from your application to see the latest update.
+          </p>
+        </div>
 
-        <form
-          className="mt-8 space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-          onSubmit={check}
-        >
-          <div className="space-y-2">
+        <form onSubmit={check} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="space-y-1.5">
             <Label htmlFor="email">Applicant email</Label>
             <Input
               id="email"
               type="email"
-              required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@school.edu"
+              className="h-11"
+              required
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="ref">Tracking code</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="ref">Reference code</Label>
             <Input
               id="ref"
-              required
               value={refId}
               onChange={(e) => setRefId(e.target.value)}
-              placeholder="e.g. D4AB12CD34"
-              className="font-mono uppercase"
+              placeholder="Shown after you applied"
+              className="h-11"
+              required
             />
           </div>
-          {error && (
+          {error ? (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
-          )}
-          <Button type="submit" disabled={loading} className="font-semibold">
+          ) : null}
+          <Button type="submit" className="h-11 w-full font-semibold" disabled={loading}>
             {loading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Checking…
@@ -170,76 +275,142 @@ function Page() {
           </Button>
         </form>
 
-        {rows && (
-          <ul className="mt-8 space-y-4">
+        {rows && rows.length > 0 && (
+          <ul className="space-y-4">
             {rows.map((r) => {
+              const info = friendlyStatus(r.status);
+              const Icon = info.icon;
               const approved = String(r.status).toLowerCase() === "approved";
-              const hasCreds = approved && r.issued_school_code && r.issued_admin_password;
+              const schoolCode = r.issued_school_code;
+              const adminEmail = r.issued_admin_email || r.applicant_email;
+
               return (
                 <li
                   key={r.id}
-                  className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-3"
+                  className={`rounded-2xl border p-5 shadow-sm ${info.tone}`}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-lg font-bold text-slate-900">{r.school_name}</h2>
-                    <StatusBadge status={r.status} />
+                  <div className="flex items-start gap-3">
+                    <Icon className="mt-0.5 h-5 w-5 shrink-0" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div>
+                        <p className="text-lg font-extrabold">{r.school_name}</p>
+                        <p className="text-sm font-semibold">{info.title}</p>
+                      </div>
+                      <p className="text-sm leading-relaxed">{info.message}</p>
+
+                      {r.review_notes ? (
+                        <p className="rounded-lg border border-black/5 bg-white/70 px-3 py-2 text-sm">
+                          <span className="font-semibold">Message from reviewer: </span>
+                          {r.review_notes}
+                        </p>
+                      ) : null}
+
+                      {approved && schoolCode && (
+                        <div className="space-y-3 rounded-xl border border-emerald-200 bg-white p-4 text-slate-800">
+                          <p className="text-sm font-bold text-emerald-900">Your school is ready</p>
+                          <ul className="space-y-1 text-sm">
+                            <li>
+                              <span className="text-slate-500">School code:</span>{" "}
+                              <strong className="font-mono">{schoolCode}</strong>
+                            </li>
+                            <li>
+                              <span className="text-slate-500">Admin email:</span>{" "}
+                              <strong>{adminEmail}</strong>
+                            </li>
+                          </ul>
+
+                          {pwdOk ? (
+                            <Alert className="border-emerald-300 bg-emerald-50">
+                              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                              <AlertTitle className="text-emerald-900">Password saved</AlertTitle>
+                              <AlertDescription className="text-emerald-900">
+                                Sign in with school code <strong className="font-mono">{pwdOk.schoolCode}</strong>,
+                                email <strong>{pwdOk.adminEmail}</strong>, and the password you just set.
+                                <div className="mt-3">
+                                  <Button
+                                    type="button"
+                                    className="h-10 font-semibold"
+                                    onClick={() => navigate({ to: "/login" })}
+                                  >
+                                    Go to login
+                                  </Button>
+                                </div>
+                              </AlertDescription>
+                            </Alert>
+                          ) : (
+                            <div className="space-y-3 border-t border-emerald-100 pt-3">
+                              <p className="text-sm font-semibold text-slate-800">
+                                Create your login password
+                              </p>
+                              <div className="space-y-1.5">
+                                <Label htmlFor={`pwd-${r.id}`}>New password</Label>
+                                <Input
+                                  id={`pwd-${r.id}`}
+                                  type="password"
+                                  value={pwd}
+                                  onChange={(e) => setPwd(e.target.value)}
+                                  className="h-11"
+                                  autoComplete="new-password"
+                                  placeholder="At least 8 characters"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label htmlFor={`pwd2-${r.id}`}>Confirm password</Label>
+                                <Input
+                                  id={`pwd2-${r.id}`}
+                                  type="password"
+                                  value={pwd2}
+                                  onChange={(e) => setPwd2(e.target.value)}
+                                  className="h-11"
+                                  autoComplete="new-password"
+                                />
+                              </div>
+                              {pwdError ? (
+                                <p className="text-sm text-rose-600">{pwdError}</p>
+                              ) : null}
+                              <Button
+                                type="button"
+                                className="h-11 w-full font-semibold"
+                                disabled={pwdBusy}
+                                onClick={() => void confirmPassword(r)}
+                              >
+                                {pwdBusy ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving…
+                                  </>
+                                ) : (
+                                  "Confirm password"
+                                )}
+                              </Button>
+                              <p className="text-xs text-slate-500">
+                                After you confirm, you will go to the login page and open your school admin
+                                dashboard.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {approved && !schoolCode && (
+                        <p className="text-sm">
+                          Approval is recorded. Your school login details are being prepared — refresh this
+                          page in a moment.
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-sm text-slate-600">
-                    Tracking:{" "}
-                    <span className="font-mono font-semibold">{r.tracking_code || "—"}</span>
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Submitted {new Date(r.created_at).toLocaleString()}
-                    {r.reviewed_at ? ` · Reviewed ${new Date(r.reviewed_at).toLocaleString()}` : ""}
-                  </p>
-                  {r.review_notes && (
-                    <p className="text-sm text-slate-600">Note: {r.review_notes}</p>
-                  )}
-
-                  {hasCreds && (
-                    <Alert className="border-emerald-200 bg-emerald-50">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      <AlertTitle className="text-emerald-900">Approved — your login details</AlertTitle>
-                      <AlertDescription className="space-y-1 text-emerald-900">
-                        <p>
-                          School code:{" "}
-                          <strong className="font-mono">{r.issued_school_code}</strong>
-                        </p>
-                        <p>
-                          Admin email: <strong>{r.issued_admin_email || r.applicant_email}</strong>
-                        </p>
-                        <p>
-                          Temporary password:{" "}
-                          <strong className="font-mono">{r.issued_admin_password}</strong>
-                        </p>
-                        <p className="pt-1">
-                          <Link to="/login" className="font-semibold text-primary underline">
-                            Go to login
-                          </Link>{" "}
-                          and sign in with school code, email, and this password. Change the password
-                          after first login.
-                        </p>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {approved && !hasCreds && (
-                    <p className="text-sm text-amber-700">
-                      Status is approved. If credentials are missing, contact support or wait for the
-                      super admin to re-issue credentials.
-                    </p>
-                  )}
-
-                  {!approved && String(r.status).toLowerCase() === "pending" && (
-                    <p className="text-sm text-slate-600">
-                      Your application is saved and waiting for review. Check this page again later.
-                    </p>
-                  )}
                 </li>
               );
             })}
           </ul>
         )}
+
+        <p className="text-center text-xs text-slate-500">
+          Need to apply?{" "}
+          <Link to="/school-application" className="font-semibold text-primary hover:underline">
+            Start a school application
+          </Link>
+        </p>
       </div>
     </PublicLayout>
   );
