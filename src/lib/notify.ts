@@ -364,3 +364,140 @@ export async function notifyStudentResultTerminated(opts: {
     dedupeMinutes: 10,
   });
 }
+
+/** Notify every examination officer that a teacher submitted an exam for review. */
+export async function notifyOfficersExamSubmitted(opts: {
+  schoolId: string;
+  teacherName: string;
+  examId: string;
+  examTitle: string;
+  courseLabel?: string;
+}) {
+  const officers = await listOfficerUserIds(opts.schoolId);
+  if (!officers.length) {
+    console.warn("[notify] no examination officers found for school", opts.schoolId);
+  }
+  const label = opts.courseLabel ? `${opts.courseLabel} — ${opts.examTitle}` : opts.examTitle;
+  await notifyMany(
+    officers.map((id) => ({
+      recipientUserId: id,
+      schoolId: opts.schoolId,
+      title: "Exam submitted for review",
+      message: `${opts.teacherName} submitted ${label} for examination review.`,
+      type: "exam_submitted",
+      link: "/officer/approvals",
+      entityType: "examination",
+      entityId: opts.examId,
+      dedupeMinutes: 30,
+    })),
+  );
+}
+
+/** Notify teacher after officer decision. */
+export async function notifyTeacherExamDecision(opts: {
+  teacherUserId: string;
+  schoolId?: string | null;
+  examId: string;
+  examTitle: string;
+  decision: "approve" | "reject" | "changes";
+  scheduleNote?: string;
+  comment?: string;
+}) {
+  const titles = {
+    approve: "Examination approved",
+    reject: "Examination rejected",
+    changes: "Revision requested",
+  } as const;
+  const types = {
+    approve: "exam_approved",
+    reject: "exam_rejected",
+    changes: "exam_revision_requested",
+  } as const;
+  let message =
+    opts.decision === "approve"
+      ? `Your examination “${opts.examTitle}” was approved.`
+      : opts.decision === "reject"
+        ? `Your examination “${opts.examTitle}” was rejected.`
+        : `Changes were requested on “${opts.examTitle}”.`;
+  if (opts.scheduleNote) message += ` ${opts.scheduleNote}`;
+  if (opts.comment) message += ` Message: ${opts.comment}`;
+
+  await notifyUser({
+    recipientUserId: opts.teacherUserId,
+    schoolId: opts.schoolId,
+    title: titles[opts.decision],
+    message,
+    type: types[opts.decision],
+    link: `/teacher/examinations`,
+    entityType: "examination",
+    entityId: opts.examId,
+    dedupeMinutes: 5,
+  });
+}
+
+/** Notify eligible students when officer approves / schedules an exam. */
+export async function notifyStudentsExamApproved(opts: {
+  schoolId: string;
+  examId: string;
+  examTitle: string;
+  courseId?: string | null;
+  scheduledStart?: string | null;
+}) {
+  try {
+    let studentIds: string[] = [];
+
+    if (opts.courseId) {
+      const { data: course } = await supabase
+        .from("courses")
+        .select("id, department_id, level_id")
+        .eq("id", opts.courseId)
+        .maybeSingle();
+
+      let q = supabase
+        .from("students")
+        .select("id")
+        .eq("school_id", opts.schoolId)
+        .limit(2000);
+      const dept = (course as { department_id?: string | null } | null)?.department_id;
+      const level = (course as { level_id?: string | null } | null)?.level_id;
+      if (dept) q = q.eq("department_id", dept);
+      if (level) q = q.eq("level_id", level);
+      const { data: students } = await q;
+      studentIds = [...new Set((students ?? []).map((s) => (s as { id: string }).id).filter(Boolean))];
+    }
+
+    if (!studentIds.length) {
+      const { data: students } = await supabase
+        .from("students")
+        .select("id")
+        .eq("school_id", opts.schoolId)
+        .limit(500);
+      studentIds = [...new Set((students ?? []).map((s) => (s as { id: string }).id).filter(Boolean))];
+    }
+
+    const authIds = await studentIdsToAuthUserIds(studentIds);
+    if (!authIds.length) {
+      console.warn("[notify] no student auth users for exam approval", opts.examId);
+      return;
+    }
+
+    const when = opts.scheduledStart
+      ? ` Starts ${new Date(opts.scheduledStart).toLocaleString()}.`
+      : "";
+    await notifyMany(
+      authIds.map((uid) => ({
+        recipientUserId: uid,
+        schoolId: opts.schoolId,
+        title: "Exam available",
+        message: `“${opts.examTitle}” is now available for your programme.${when}`,
+        type: "exam_available",
+        link: "/student/examinations",
+        entityType: "examination",
+        entityId: opts.examId,
+        dedupeMinutes: 120,
+      })),
+    );
+  } catch (e) {
+    console.warn("[notify] notifyStudentsExamApproved failed", e);
+  }
+}
