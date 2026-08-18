@@ -224,20 +224,8 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       /* optional RPC */
     }
 
-    if (!looksLikeEmail(ident) && hasAdminKey()) {
-      try {
-        const provisioned = await provisionStudentLogin({
-          schoolId,
-          identifier: ident,
-          password,
-        });
-        if (provisioned?.email) {
-          // use provisioned path on retry below if needed
-        }
-      } catch (e) {
-        console.error("[login] SUPABASE_SERVICE_ROLE_KEY missing — student provisioning skipped.");
-      }
-    }
+
+
 
     let emailForAuth = looksLikeEmail(ident) ? ident.toLowerCase() : ident;
 
