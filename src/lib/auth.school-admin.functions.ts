@@ -50,6 +50,8 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
     let schoolCode: string | null = null;
     let adminEmail: string | null = null;
     let adminPassword: string | null = null;
+    let emailSent = false;
+    let emailError: string | null = null;
 
     if (data.decision === "approved") {
       if (app.status === "approved") {
@@ -123,9 +125,29 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
         recipient_user_id: created.user.id,
         school_id: school.id,
         title: "Welcome to D4EXAM",
-        message: `Congratulations! Your school space is ready. School code: ${schoolCode}. Sign in at /login with your email and the password shared by the D4EXAM super admin.`,
+        message: `Congratulations! Your school space is ready. School code: ${schoolCode}. Check your email for full login details.`,
         type: "success",
       });
+
+      // Email the applicant with full credentials
+      try {
+        const { sendSchoolApprovalEmail } = await import("@/lib/email.server");
+        const mail = await sendSchoolApprovalEmail({
+          to: String(app.applicant_email),
+          applicantName: String(app.applicant_name || "School Admin"),
+          schoolName: String(app.school_name),
+          schoolCode: String(schoolCode),
+          adminEmail: String(adminEmail),
+          adminPassword: String(adminPassword),
+          officialEmail: app.official_email ? String(app.official_email) : null,
+          phone: app.applicant_phone ? String(app.applicant_phone) : null,
+        });
+        emailSent = mail.ok;
+        if (!mail.ok) emailError = mail.error;
+      } catch (e) {
+        emailError = e instanceof Error ? e.message : "Email failed";
+        console.error("[approve] email exception:", emailError);
+      }
 
       await supabaseAdmin.from("audit_logs").insert({
         school_id: school.id,
@@ -134,8 +156,13 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
         action: "school_approved",
         entity_type: "school",
         entity_id: school.id,
-        description: `Approved ${app.school_name} (${schoolCode}) with instant school admin credentials`,
-        metadata: { profile_id: profile?.id ?? null, logo_url: logoUrl },
+        description: `Approved ${app.school_name} (${schoolCode}); credentials email ${emailSent ? "sent" : "failed"}`,
+        metadata: {
+          profile_id: profile?.id ?? null,
+          logo_url: logoUrl,
+          email_sent: emailSent,
+          email_error: emailError,
+        },
       });
     } else {
       await supabaseAdmin.from("audit_logs").insert({
@@ -154,6 +181,8 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
       adminEmail,
       adminPassword,
       schoolName: app.school_name as string,
+      emailSent,
+      emailError,
     };
   });
 
@@ -199,7 +228,6 @@ export const createSchoolUser = createServerFn({ method: "POST" })
     if (!canManage) throw new Error("Forbidden");
 
     const { createPerson } = await import("@/lib/users.server");
-    // Pass school-admin session for DB writes when service role is unavailable (Lovable Cloud → Vercel).
     const result = await createPerson(schoolId, data, { db: context.supabase as never });
 
     try {
