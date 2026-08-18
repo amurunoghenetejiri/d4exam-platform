@@ -2,6 +2,7 @@ import { createFileRoute, Outlet } from "@tanstack/react-router";
 import { StudentLayout } from "@/layouts";
 import { requireRole } from "@/lib/guard";
 import { useStudentContext, useStudentRealtimeSync } from "@/lib/student";
+import { StudentEmailCapture } from "@/components/student/StudentEmailCapture";
 
 export const Route = createFileRoute("/student")({
   ssr: false,
@@ -15,6 +16,7 @@ function Layout() {
 
   return (
     <StudentLayout>
+      <StudentEmailCapture />
       <Outlet />
     </StudentLayout>
   );
