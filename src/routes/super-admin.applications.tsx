@@ -127,7 +127,7 @@ function Page() {
     <>
       <PageHeader
         title="School Applications"
-        description="Review applications. Approve creates the school, emails login details to the applicant, and shows credentials here as backup."
+        description="Review applications. Approve creates the school, generates login credentials, and shows them on this page."
       />
 
       {creds && (
@@ -215,11 +215,11 @@ function Page() {
                     <Button
                       size="sm"
                       className="font-semibold"
-                      disabled={busyId === app.id || app.status === "approved"}
+                      disabled={busyId === app.id}
                       onClick={() => void decide(app.id, "approved")}
                     >
                       {busyId === app.id && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
-                      Approve
+                      {app.status === "approved" ? "Re-issue credentials" : "Approve"}
                     </Button>
                     <Button
                       size="sm"
