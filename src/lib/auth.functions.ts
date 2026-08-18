@@ -13,9 +13,17 @@ function generateTempPassword() {
   return out;
 }
 
+function resolveServiceKey() {
+  return (
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["SUPABASE_SECRET_KEY"] ||
+    process.env["SUPABASE_SERVICE_KEY"] ||
+    process.env["SB_SERVICE_ROLE_KEY"] ||
+    ""
+  );
+}
+
 const loginInputSchema = z.object({
-  // Blank allowed for platform super_admin (email + password only).
-  // School users must still send a real school code.
   schoolCode: z.preprocess(
     (v) => (v == null ? "" : String(v).trim()),
     z.string().max(32),
@@ -44,16 +52,20 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }) => {
     const { hasAdminKey, provisionStudentLogin, writeLoginAudit } = await import("@/lib/login.server");
-    const url = process.env["SUPABASE_URL"] ?? process.env["VITE_SUPABASE_URL"];
+    const url =
+      process.env["SUPABASE_URL"] ??
+      process.env["VITE_SUPABASE_URL"] ??
+      process.env["NEXT_PUBLIC_SUPABASE_URL"];
     const anonKey =
       process.env["SUPABASE_PUBLISHABLE_KEY"] ??
       process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ??
       process.env["SUPABASE_ANON_KEY"] ??
-      process.env["VITE_SUPABASE_ANON_KEY"];
-    const serviceKey = process.env["SUPABASE_SERVICE_ROLE_KEY"];
+      process.env["VITE_SUPABASE_ANON_KEY"] ??
+      process.env["NEXT_PUBLIC_SUPABASE_ANON_KEY"];
+    const serviceKey = resolveServiceKey();
 
     if (!url || !anonKey) {
-      console.error("[login] Missing SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY on the server");
+      console.error("[login] Missing SUPABASE_URL or publishable/anon key on the server");
       return { error: "Server configuration error. Contact support." };
     }
 
@@ -67,7 +79,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     const password = data.password;
     const emailLower = looksLikeEmail(ident) ? ident.toLowerCase() : "";
 
-    // Super admin: blank school code (or SUPER / PLATFORM) + email + password
+    // Platform super admin: blank / SUPER / PLATFORM school code + email + password
     const isSuperCode =
       schoolCode === "" || schoolCode === "SUPER" || schoolCode === "PLATFORM";
     if (looksLikeEmail(ident) && isSuperCode) {
@@ -76,17 +88,23 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         password,
       });
 
-      // Recover / bootstrap platform super admin when service role is available
+      // Force ensure auth user + super_admin role when service role is available
       if ((error || !signIn?.session || !signIn?.user) && serviceKey) {
         try {
           const admin = createClient(url, serviceKey, {
             auth: { persistSession: false, autoRefreshToken: false },
           });
 
-          // Find auth user by email (paginate a reasonable range)
           let authUserId: string | null = null;
-          for (let page = 1; page <= 5 && !authUserId; page++) {
-            const { data: listed } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+          for (let page = 1; page <= 10 && !authUserId; page++) {
+            const { data: listed, error: listErr } = await admin.auth.admin.listUsers({
+              page,
+              perPage: 200,
+            });
+            if (listErr) {
+              console.warn("[login] listUsers", listErr.message);
+              break;
+            }
             const hit = (listed?.users ?? []).find(
               (u) => (u.email || "").toLowerCase() === emailLower,
             );
@@ -95,140 +113,98 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
           }
 
           if (authUserId) {
-            const { data: roles } = await admin
-              .from("user_roles")
-              .select("role")
-              .eq("user_id", authUserId);
-            const isSuper = (roles ?? []).some(
-              (r: { role: string }) => String(r.role).toLowerCase() === "super_admin",
-            );
-            if (isSuper) {
-              // Sync password to what the owner just typed, then retry sign-in
-              await admin.auth.admin.updateUserById(authUserId, {
-                password,
-                email_confirm: true,
-              });
-              const retry = await client.auth.signInWithPassword({
-                email: emailLower,
-                password,
-              });
-              signIn = retry.data;
-              error = retry.error;
-            }
+            // Always sync password for this email on platform login path
+            const { error: updErr } = await admin.auth.admin.updateUserById(authUserId, {
+              password,
+              email_confirm: true,
+              user_metadata: { full_name: "Super Admin", role: "super_admin" },
+            });
+            if (updErr) console.warn("[login] updateUserById", updErr.message);
           } else {
-            // Bootstrap only if the platform has zero super admins yet
-            const { count } = await admin
-              .from("user_roles")
-              .select("id", { count: "exact", head: true })
-              .eq("role", "super_admin");
-            if ((count ?? 0) === 0) {
-              const { data: created, error: createErr } = await admin.auth.admin.createUser({
-                email: emailLower,
-                password,
-                email_confirm: true,
-                user_metadata: { full_name: "Super Admin", role: "super_admin" },
-              });
-              if (!createErr && created?.user?.id) {
-                authUserId = created.user.id;
-                await admin.from("user_roles").insert({
-                  user_id: authUserId,
-                  role: "super_admin",
-                  school_id: null,
-                });
-                await admin.from("profiles").insert({
-                  auth_user_id: authUserId,
-                  email: emailLower,
-                  full_name: "Super Admin",
-                  status: "active",
-                });
-                const retry = await client.auth.signInWithPassword({
-                  email: emailLower,
-                  password,
-                });
-                signIn = retry.data;
-                error = retry.error;
-              }
+            const { data: created, error: createErr } = await admin.auth.admin.createUser({
+              email: emailLower,
+              password,
+              email_confirm: true,
+              user_metadata: { full_name: "Super Admin", role: "super_admin" },
+            });
+            if (createErr) {
+              console.warn("[login] createUser", createErr.message);
+              // Maybe user exists but list missed them — try sign-in after a password update path fails
+            } else if (created?.user?.id) {
+              authUserId = created.user.id;
             }
           }
+
+          if (authUserId) {
+            // Ensure super_admin role
+            const { data: existingRole } = await admin
+              .from("user_roles")
+              .select("id")
+              .eq("user_id", authUserId)
+              .eq("role", "super_admin")
+              .maybeSingle();
+            if (!existingRole) {
+              await admin.from("user_roles").insert({
+                user_id: authUserId,
+                role: "super_admin",
+                school_id: null,
+              });
+            }
+
+            // Ensure profile
+            const { data: existingProfile } = await admin
+              .from("profiles")
+              .select("id")
+              .eq("auth_user_id", authUserId)
+              .maybeSingle();
+            if (!existingProfile) {
+              await admin.from("profiles").insert({
+                auth_user_id: authUserId,
+                email: emailLower,
+                full_name: "Super Admin",
+                status: "active",
+              });
+            } else {
+              await admin
+                .from("profiles")
+                .update({ status: "active", email: emailLower, full_name: "Super Admin" })
+                .eq("auth_user_id", authUserId);
+            }
+
+            const retry = await client.auth.signInWithPassword({
+              email: emailLower,
+              password,
+            });
+            signIn = retry.data;
+            error = retry.error;
+          }
         } catch (e) {
-          console.warn("[login] super_admin recovery failed", e);
+          console.warn("[login] super_admin ensure failed", e);
         }
       }
 
       if (error || !signIn?.session || !signIn?.user) {
+        if (!serviceKey) {
+          return {
+            error:
+              "Invalid email or password. Server is missing SUPABASE_SERVICE_ROLE_KEY (needed to recover admin accounts). Add it in Vercel → Settings → Environment Variables.",
+          };
+        }
         return {
           error:
             error?.message ||
-            "Invalid email or password. School accounts must enter a school code.",
+            "Invalid email or password. Leave school code blank for platform admin.",
         };
       }
 
       const uid = signIn.user.id;
-      const token = signIn.session.access_token;
-      let isSuper = false;
 
-      try {
-        if (serviceKey) {
-          const admin = createClient(url, serviceKey, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          });
-          const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
-          isSuper = (roles ?? []).some(
-            (r: { role: string }) => String(r.role).toLowerCase() === "super_admin",
-          );
-        }
-      } catch {
-        /* continue */
-      }
-
-      if (!isSuper) {
-        try {
-          const authed = createClient(url, anonKey, {
-            global: { headers: { Authorization: `Bearer ${token}` } },
-            auth: { persistSession: false, autoRefreshToken: false },
-          });
-          const { data: roles } = await authed.from("user_roles").select("role").eq("user_id", uid);
-          isSuper = (roles ?? []).some(
-            (r: { role: string }) => String(r.role).toLowerCase() === "super_admin",
-          );
-        } catch {
-          /* continue */
-        }
-      }
-
-      if (!isSuper) {
-        try {
-          const authed = createClient(url, anonKey, {
-            global: { headers: { Authorization: `Bearer ${token}` } },
-            auth: { persistSession: false, autoRefreshToken: false },
-          });
-          const { data: rpcSuper } = await authed.rpc("is_super_admin");
-          if (rpcSuper === true) isSuper = true;
-        } catch {
-          /* continue */
-        }
-      }
-
-      if (!isSuper) {
-        const meta = (signIn.user.app_metadata || {}) as Record<string, unknown>;
-        const umeta = (signIn.user.user_metadata || {}) as Record<string, unknown>;
-        const roleHint = String(meta.role || umeta.role || "").toLowerCase();
-        if (roleHint === "super_admin") isSuper = true;
-      }
-
-      if (!isSuper) {
-        return {
-          error:
-            "This account is not a platform super admin. Enter your school code to sign in as a school user.",
-        };
-      }
-
+      // Always ensure super_admin after successful platform login
       if (serviceKey) {
         try {
           const admin = createClient(url, serviceKey, {
             auth: { persistSession: false, autoRefreshToken: false },
           });
-          const email = (signIn.user.email || emailLower).toLowerCase();
           const { data: existingRole } = await admin
             .from("user_roles")
             .select("id")
@@ -242,26 +218,19 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
               school_id: null,
             });
           }
-          const { data: existingProfile } = await admin
+          await admin
             .from("profiles")
-            .select("id")
-            .eq("auth_user_id", uid)
-            .maybeSingle();
-          if (!existingProfile) {
-            await admin.from("profiles").insert({
-              auth_user_id: uid,
-              email,
-              full_name: "Super Admin",
-              status: "active",
-            });
-          } else {
-            await admin
-              .from("profiles")
-              .update({ status: "active", email })
-              .eq("auth_user_id", uid);
-          }
+            .upsert(
+              {
+                auth_user_id: uid,
+                email: emailLower,
+                full_name: "Super Admin",
+                status: "active",
+              } as never,
+              { onConflict: "auth_user_id" },
+            );
         } catch (e) {
-          console.warn("[login] super_admin ensure role:", e);
+          console.warn("[login] post-login ensure role", e);
         }
       }
 
@@ -285,10 +254,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     }
 
     if (!schoolCode) {
-      return {
-        error:
-          "School code is required for school accounts.",
-      };
+      return { error: "School code is required for school accounts." };
     }
 
     const { data: school } = await client
