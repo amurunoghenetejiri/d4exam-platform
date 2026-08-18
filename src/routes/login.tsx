@@ -1,8 +1,6 @@
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
 import { useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { signInWithSchoolCode } from "@/lib/auth.functions";
 import { fetchSessionUser, roleHome } from "@/lib/session";
 
 import {
@@ -16,7 +14,6 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
-import { Watermark } from "@/components/brand/Watermark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,21 +21,20 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export const Route = createFileRoute("/login")({
-  ssr: false,
   head: () => ({
     meta: [
-      { title: "Login — D4EXAM" },
-      {
-        name: "description",
-        content:
-          "Sign in to your institution's D4EXAM account with your school code and credentials.",
-      },
+      { title: "Sign in — D4EXAM" },
+      { name: "description", content: "Sign in to your D4EXAM school account." },
     ],
   }),
   beforeLoad: async () => {
-    const user = await fetchSessionUser();
-    if (user?.role) {
-      throw redirect({ to: roleHome[user.role] as never });
+    try {
+      const user = await fetchSessionUser();
+      if (user?.role) {
+        throw redirect({ to: roleHome[user.role] as never });
+      }
+    } catch (e) {
+      if (e && typeof e === "object" && "to" in e) throw e;
     }
   },
   component: LoginPage,
@@ -76,7 +72,6 @@ function LoginPage() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
-  const signIn = useServerFn(signInWithSchoolCode);
   const inFlight = useRef(false);
 
   async function submit(e: React.FormEvent) {
@@ -90,42 +85,67 @@ function LoginPage() {
     inFlight.current = true;
     setLoading(true);
     try {
-      const result = await signIn({
-        data: {
-          schoolCode: code.trim(),
-          identifier: identifier.trim(),
-          password,
-        },
-      });
-      if ("session" in result && result.session) {
-        const { error: sessErr } = await supabase.auth.setSession(result.session);
-        if (sessErr) {
-          console.error("[login] setSession failed", sessErr);
-          setError(sessErr.message || "Could not establish session. Try again.");
-          return;
+      const schoolCode = code.trim().toUpperCase();
+      const ident = identifier.trim();
+      const pass = password;
+      const looksEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ident);
+
+      const emails: string[] = [];
+      if (looksEmail) emails.push(ident.toLowerCase());
+
+      if (schoolCode && !looksEmail) {
+        try {
+          const { data: resolved } = await supabase.rpc("resolve_login_identity", {
+            _school_code: schoolCode,
+            _identifier: ident,
+          });
+          const row = Array.isArray(resolved) ? resolved[0] : resolved;
+          if (row && typeof row === "object" && (row as { email?: string }).email) {
+            emails.push(String((row as { email: string }).email).toLowerCase());
+          }
+        } catch {
+          /* optional */
         }
+        const safeMatric = ident.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const safeCode = schoolCode.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        emails.push(`${safeMatric}@${safeCode || "school"}.student.d4exam.local`);
       }
 
-      if ("error" in result && result.error) {
-        setError(result.error);
-        return;
-      }
-      if (!("session" in result) || !result.session) {
-        setError("Unable to sign in. Please try again.");
+      if (emails.length === 0) {
+        setError("Enter a valid email, or school code plus matric / staff ID.");
         return;
       }
 
-      const serverRole = "role" in result && result.role ? String(result.role).toLowerCase() : null;
-      if (serverRole && serverRole in roleHome) {
-        navigate({ to: roleHome[serverRole as keyof typeof roleHome] as never });
+      let lastMsg = "Invalid login credentials";
+      let signedIn = false;
+
+      for (const email of emails) {
+        const { data, error: authErr } = await supabase.auth.signInWithPassword({
+          email,
+          password: pass,
+        });
+        if (authErr || !data.session) {
+          lastMsg = authErr?.message || lastMsg;
+          continue;
+        }
+        signedIn = true;
+        break;
+      }
+
+      if (!signedIn) {
+        setError(
+          lastMsg ||
+            "Invalid login credentials. Check email/matric, password, and school code (leave school code blank for super admin).",
+        );
         return;
       }
 
       let user = await fetchSessionUser();
-      for (let i = 0; i < 3 && !user?.role; i++) {
-        await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+      for (let i = 0; i < 4 && !user?.role; i++) {
+        await new Promise((r) => setTimeout(r, 150 * (i + 1)));
         user = await fetchSessionUser();
       }
+
       if (!user?.role) {
         try {
           const { data: isSuper } = await supabase.rpc("is_super_admin");
@@ -136,62 +156,78 @@ function LoginPage() {
         } catch {
           /* ignore */
         }
+        try {
+          const { data: myRoles } = await supabase.rpc("get_my_roles");
+          const list = Array.isArray(myRoles)
+            ? myRoles.map((r: { role?: string } | string) =>
+                typeof r === "string" ? r : String((r as { role?: string }).role || ""),
+              )
+            : [];
+          const priority = [
+            "super_admin",
+            "school_admin",
+            "examination_officer",
+            "teacher",
+            "student",
+          ];
+          const found = priority.find((r) => list.map((x) => x.toLowerCase()).includes(r));
+          if (found && found in roleHome) {
+            navigate({ to: roleHome[found as keyof typeof roleHome] as never });
+            return;
+          }
+        } catch {
+          /* ignore */
+        }
         setError(
-          "Signed in, but no dashboard role was found for this account. Contact your school administrator.",
+          "Signed in, but no dashboard role was found for this account. Ask your admin to assign a role, or run the super-admin SQL if this is the platform owner.",
         );
         return;
       }
+
       navigate({ to: roleHome[user.role] as never });
     } catch (err) {
-      const detail = err instanceof Error ? err.message : "";
       console.error("[login] sign-in failed:", err);
-      setError(
-        detail
-          ? `Unable to sign in right now: ${detail}`
-          : "Unable to sign in right now. Check your connection and try again.",
-      );
+      setError(err instanceof Error ? err.message : "Unable to sign in. Please try again.");
     } finally {
-      inFlight.current = false;
       setLoading(false);
+      inFlight.current = false;
     }
   }
 
   return (
-    <div className="relative min-h-[100dvh] overflow-hidden bg-slate-50">
-      <Watermark />
-      <div className="relative mx-auto grid min-h-[100dvh] max-w-6xl lg:grid-cols-2">
-        <aside className="hidden flex-col justify-between bg-slate-900 px-10 py-12 text-white lg:flex">
-          <div>
-            <Logo className="h-10 w-auto" />
-            <h2 className="mt-10 text-3xl font-extrabold tracking-tight">Welcome back</h2>
-            <p className="mt-3 max-w-sm text-sm leading-relaxed text-slate-300">
-              Sign in with your school code and credentials to access exams, results and admin tools.
+    <div className="min-h-screen bg-slate-50">
+      <div className="mx-auto grid min-h-screen max-w-6xl lg:grid-cols-2">
+        <div className="relative hidden overflow-hidden bg-slate-950 lg:flex lg:flex-col lg:justify-between lg:p-12">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-600/30 via-slate-950 to-slate-950" />
+          <div className="relative">
+            <Logo className="h-10 w-auto text-white" />
+            <p className="mt-8 max-w-sm text-lg font-semibold leading-snug text-white">
+              Examination platform for modern schools
+            </p>
+            <p className="mt-3 max-w-sm text-sm text-slate-300">
+              Secure CBT, results, and school operations in one place.
             </p>
           </div>
-          <ul className="space-y-4">
+          <div className="relative grid gap-4">
             {features.map((f) => (
-              <li key={f.title} className="flex gap-3">
-                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/10">
-                  <f.icon className="h-4 w-4 text-sky-300" />
-                </span>
+              <div key={f.title} className="flex gap-3 rounded-xl border border-white/10 bg-white/5 p-4">
+                <f.icon className="mt-0.5 h-5 w-5 shrink-0 text-blue-300" />
                 <div>
-                  <p className="text-sm font-bold">{f.title}</p>
-                  <p className="text-xs text-slate-400">{f.desc}</p>
+                  <p className="text-sm font-semibold text-white">{f.title}</p>
+                  <p className="text-xs text-slate-300">{f.desc}</p>
                 </div>
-              </li>
+              </div>
             ))}
-          </ul>
-        </aside>
+          </div>
+        </div>
 
-        <div className="flex items-center justify-center p-4 sm:p-8">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-            <div className="mb-6 text-center lg:hidden">
-              <Logo className="mx-auto h-9 w-auto" />
+        <div className="flex flex-col justify-center px-4 py-10 sm:px-8">
+          <div className="mx-auto w-full max-w-md">
+            <div className="mb-8 flex items-center gap-2 lg:hidden">
+              <Logo className="h-9 w-auto" />
             </div>
-            <h1 className="text-xl font-extrabold text-slate-900">Sign in</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Enter your credentials to continue.
-            </p>
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Sign in</h1>
+            <p className="mt-1 text-sm text-slate-500">Enter your credentials to continue.</p>
 
             {error ? (
               <Alert variant="destructive" className="mt-4">
@@ -201,68 +237,68 @@ function LoginPage() {
 
             <form onSubmit={submit} className="mt-6 space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="schoolCode">School code</Label>
+                <Label htmlFor="school-code">School code</Label>
                 <Input
-                  id="schoolCode"
-                  autoComplete="organization"
-                  placeholder="e.g. D4UNI"
+                  id="school-code"
                   value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="Leave blank for super admin"
                   className="h-11"
+                  autoComplete="organization"
                 />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="identifier">Email / matric / staff ID</Label>
                 <Input
                   id="identifier"
-                  autoComplete="username"
-                  placeholder="you@school.edu or matric number"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="you@email.com or matric number"
                   className="h-11"
+                  autoComplete="username"
                   required
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  <Link
+                    to="/forgot-password"
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
                 <div className="relative">
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    placeholder="Your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="h-11 pr-10"
+                    autoComplete="current-password"
                     required
                   />
                   <button
                     type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1.5 text-slate-400 hover:text-slate-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
                     onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
-
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="remember"
-                    checked={remember}
-                    onCheckedChange={(v) => setRemember(v === true)}
-                  />
-                  <label htmlFor="remember" className="text-xs text-slate-600">
-                    Remember this device
-                  </label>
-                </div>
-                <Link to="/forgot-password" className="text-sm font-medium text-primary hover:underline">
-                  Forgot password?
-                </Link>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="remember"
+                  checked={remember}
+                  onCheckedChange={(v) => setRemember(v === true)}
+                />
+                <Label htmlFor="remember" className="text-sm font-normal text-slate-600">
+                  Remember this device
+                </Label>
               </div>
-
               <Button type="submit" className="h-11 w-full font-semibold" disabled={loading}>
                 {loading ? (
                   <>
@@ -276,7 +312,7 @@ function LoginPage() {
               </Button>
             </form>
 
-            <p className="mt-6 text-center text-xs text-slate-500">
+            <p className="mt-6 text-center text-sm text-slate-500">
               New institution?{" "}
               <Link to="/school-application" className="font-semibold text-primary hover:underline">
                 Apply for school
