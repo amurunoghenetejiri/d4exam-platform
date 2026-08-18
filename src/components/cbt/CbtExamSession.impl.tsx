@@ -570,7 +570,7 @@ export function CbtExamPage() {
               {
                 exam_id: id,
                 student_id: student.studentId,
-                school_id: examQ.data.school_id,
+                school_id: examQ.data?.school_id,
                 status: "in_progress",
                 started_at: new Date().toISOString(),
                 answers,
@@ -625,7 +625,7 @@ export function CbtExamPage() {
               {
                 exam_id: id,
                 student_id: student.studentId,
-                school_id: examQ.data.school_id,
+                school_id: examQ.data?.school_id,
                 status: "in_progress",
                 started_at: new Date().toISOString(),
                 answers,
@@ -749,7 +749,7 @@ export function CbtExamPage() {
             {
               exam_id: id,
               student_id: student.studentId,
-              school_id: examQ.data.school_id,
+              school_id: examQ.data?.school_id,
               status: "in_progress",
               started_at: new Date().toISOString(),
               answers: {},
