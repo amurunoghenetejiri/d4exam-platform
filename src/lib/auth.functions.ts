@@ -1,16 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 function looksLikeEmail(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
-}
-
-function generateTempPassword() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  let out = "";
-  for (let i = 0; i < 12; i++) out += chars[Math.floor(Math.random() * chars.length)];
-  return out;
 }
 
 function resolveServiceKey() {
@@ -51,7 +43,16 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     return loginInputSchema.parse(raw);
   })
   .handler(async ({ data }) => {
-    const { hasAdminKey, provisionStudentLogin, writeLoginAudit } = await import("@/lib/login.server");
+    // Service role is optional. Login works with anon/publishable key + public RPCs.
+    const { hasAdminKey, provisionStudentLogin, writeLoginAudit } = await import("@/lib/login.server").catch(
+      () =>
+        ({
+          hasAdminKey: () => false,
+          provisionStudentLogin: async () => null,
+          writeLoginAudit: async () => undefined,
+        }) as never,
+    );
+
     const url =
       process.env["SUPABASE_URL"] ??
       process.env["VITE_SUPABASE_URL"] ??
@@ -79,153 +80,63 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     const password = data.password;
     const emailLower = looksLikeEmail(ident) ? ident.toLowerCase() : "";
 
-    // Platform super admin: blank / SUPER / PLATFORM school code + email + password
+    // ---------- Platform super admin (blank school code + email) ----------
     const isSuperCode =
       schoolCode === "" || schoolCode === "SUPER" || schoolCode === "PLATFORM";
     if (looksLikeEmail(ident) && isSuperCode) {
-      let { data: signIn, error } = await client.auth.signInWithPassword({
+      const { data: signIn, error } = await client.auth.signInWithPassword({
         email: emailLower,
         password,
       });
 
-      if ((error || !signIn?.session || !signIn?.user) && serviceKey) {
-        try {
-          const admin = createClient(url, serviceKey, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          });
-
-          let authUserId: string | null = null;
-          for (let page = 1; page <= 10 && !authUserId; page++) {
-            const { data: listed, error: listErr } = await admin.auth.admin.listUsers({
-              page,
-              perPage: 200,
-            });
-            if (listErr) {
-              console.warn("[login] listUsers", listErr.message);
-              break;
-            }
-            const hit = (listed?.users ?? []).find(
-              (u) => (u.email || "").toLowerCase() === emailLower,
-            );
-            if (hit?.id) authUserId = hit.id;
-            if ((listed?.users?.length ?? 0) < 200) break;
-          }
-
-          if (authUserId) {
-            const { error: updErr } = await admin.auth.admin.updateUserById(authUserId, {
-              password,
-              email_confirm: true,
-              user_metadata: { full_name: "Super Admin", role: "super_admin" },
-            });
-            if (updErr) console.warn("[login] updateUserById", updErr.message);
-          } else {
-            const { data: created, error: createErr } = await admin.auth.admin.createUser({
-              email: emailLower,
-              password,
-              email_confirm: true,
-              user_metadata: { full_name: "Super Admin", role: "super_admin" },
-            });
-            if (createErr) {
-              console.warn("[login] createUser", createErr.message);
-            } else if (created?.user?.id) {
-              authUserId = created.user.id;
-            }
-          }
-
-          if (authUserId) {
-            const { data: existingRole } = await admin
-              .from("user_roles")
-              .select("id")
-              .eq("user_id", authUserId)
-              .eq("role", "super_admin")
-              .maybeSingle();
-            if (!existingRole) {
-              await admin.from("user_roles").insert({
-                user_id: authUserId,
-                role: "super_admin",
-                school_id: null,
-              });
-            }
-
-            const { data: existingProfile } = await admin
-              .from("profiles")
-              .select("id")
-              .eq("auth_user_id", authUserId)
-              .maybeSingle();
-            if (!existingProfile) {
-              await admin.from("profiles").insert({
-                auth_user_id: authUserId,
-                email: emailLower,
-                full_name: "Super Admin",
-                status: "active",
-              });
-            } else {
-              await admin
-                .from("profiles")
-                .update({ status: "active", email: emailLower, full_name: "Super Admin" })
-                .eq("auth_user_id", authUserId);
-            }
-
-            const retry = await client.auth.signInWithPassword({
-              email: emailLower,
-              password,
-            });
-            signIn = retry.data;
-            error = retry.error;
-          }
-        } catch (e) {
-          console.warn("[login] super_admin ensure failed", e);
-        }
-      }
-
       if (error || !signIn?.session || !signIn?.user) {
-        if (!serviceKey) {
-          return {
-            error:
-              "Invalid email or password. Server is missing SUPABASE_SERVICE_ROLE_KEY (needed to recover admin accounts). Add it in Vercel → Settings → Environment Variables.",
-          };
-        }
         return {
-          error:
-            error?.message ||
-            "Invalid email or password. Leave school code blank for platform admin.",
+          error: error?.message || "Invalid email or password.",
         };
       }
 
+      const token = signIn.session.access_token;
       const uid = signIn.user.id;
+      let isSuper = false;
 
-      if (serviceKey) {
+      // Prefer JWT + public RPC (no service role needed)
+      try {
+        const authed = createClient(url, anonKey, {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data: rpcSuper } = await authed.rpc("is_super_admin");
+        if (rpcSuper === true) isSuper = true;
+        if (!isSuper) {
+          const { data: roles } = await authed.from("user_roles").select("role").eq("user_id", uid);
+          isSuper = (roles ?? []).some(
+            (r: { role: string }) => String(r.role).toLowerCase() === "super_admin",
+          );
+        }
+      } catch {
+        /* continue */
+      }
+
+      // Optional service-role recovery (only if key exists)
+      if (!isSuper && serviceKey) {
         try {
           const admin = createClient(url, serviceKey, {
             auth: { persistSession: false, autoRefreshToken: false },
           });
-          const { data: existingRole } = await admin
-            .from("user_roles")
-            .select("id")
-            .eq("user_id", uid)
-            .eq("role", "super_admin")
-            .maybeSingle();
-          if (!existingRole) {
-            await admin.from("user_roles").insert({
-              user_id: uid,
-              role: "super_admin",
-              school_id: null,
-            });
-          }
-          await admin
-            .from("profiles")
-            .upsert(
-              {
-                auth_user_id: uid,
-                email: emailLower,
-                full_name: "Super Admin",
-                status: "active",
-              } as never,
-              { onConflict: "auth_user_id" },
-            );
-        } catch (e) {
-          console.warn("[login] post-login ensure role", e);
+          const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
+          isSuper = (roles ?? []).some(
+            (r: { role: string }) => String(r.role).toLowerCase() === "super_admin",
+          );
+        } catch {
+          /* ignore */
         }
+      }
+
+      if (!isSuper) {
+        return {
+          error:
+            "This account is not a platform super admin. Enter your school code to sign in as a school user.",
+        };
       }
 
       try {
@@ -247,151 +158,117 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       };
     }
 
+    // ---------- School users (all roles) ----------
     if (!schoolCode) {
       return { error: "School code is required for school accounts." };
     }
 
-    // Resolve school — anon cannot read schools (RLS is authenticated-only).
-    // Prefer service role, then flexible match.
-    let school: { id: string; school_code: string; status?: string } | null = null;
+    // Resolve school via public SECURITY DEFINER RPC (works without service role)
+    let schoolId: string | null = null;
+    let schoolStatus: string | null = null;
 
-    if (serviceKey) {
+    try {
+      const { data: rpcSchool, error: rpcErr } = await client.rpc("resolve_school_for_login", {
+        _school_code: schoolCode,
+      });
+      if (rpcErr) console.warn("[login] resolve_school_for_login", rpcErr.message);
+      const row = Array.isArray(rpcSchool) ? rpcSchool[0] : rpcSchool;
+      if (row && typeof row === "object" && (row as { id?: string }).id) {
+        schoolId = String((row as { id: string }).id);
+        schoolStatus = String((row as { status?: string }).status || "");
+      }
+    } catch (e) {
+      console.warn("[login] school rpc failed", e);
+    }
+
+    // Optional service-role fallback if RPC not migrated yet
+    if (!schoolId && serviceKey) {
       try {
         const admin = createClient(url, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
         });
         const { data: exact } = await admin
           .from("schools")
-          .select("id, school_code, status")
+          .select("id, status")
           .eq("school_code", schoolCode)
           .maybeSingle();
         if (exact?.id) {
-          school = exact as { id: string; school_code: string; status?: string };
-        } else {
-          // Case-insensitive / whitespace-tolerant fallback
-          const { data: all } = await admin
-            .from("schools")
-            .select("id, school_code, status")
-            .limit(500);
-          const hit = (all ?? []).find(
-            (s) => String(s.school_code || "").trim().toUpperCase() === schoolCode,
-          );
-          if (hit?.id) school = hit as { id: string; school_code: string; status?: string };
+          schoolId = exact.id as string;
+          schoolStatus = String(exact.status || "");
         }
-      } catch (e) {
-        console.warn("[login] service-role school lookup failed", e);
-      }
-    }
-
-    // Anon fallback (works only if a public/login policy exists)
-    if (!school?.id) {
-      try {
-        const { data: exact } = await client
-          .from("schools")
-          .select("id, school_code, status")
-          .eq("school_code", schoolCode)
-          .maybeSingle();
-        if (exact?.id) school = exact as { id: string; school_code: string; status?: string };
       } catch {
         /* ignore */
       }
     }
 
-    if (!school?.id) {
-      if (!serviceKey) {
-        return {
-          error:
-            "Could not verify school code. Server is missing SUPABASE_SERVICE_ROLE_KEY. Add it in Vercel environment variables.",
-        };
+    // Last resort: anon table read (fails under RLS — kept for open policies)
+    if (!schoolId) {
+      try {
+        const { data: exact } = await client
+          .from("schools")
+          .select("id, status")
+          .eq("school_code", schoolCode)
+          .maybeSingle();
+        if (exact?.id) {
+          schoolId = exact.id as string;
+          schoolStatus = String(exact.status || "");
+        }
+      } catch {
+        /* ignore */
       }
-      return { error: "Invalid school code." };
     }
 
-    if (school.status && String(school.status).toLowerCase() === "suspended") {
+    if (!schoolId) {
+      return {
+        error:
+          "Invalid school code. If this persists, run the latest SQL migration (resolve_school_for_login) in Supabase.",
+      };
+    }
+
+    if (schoolStatus && schoolStatus.toLowerCase() === "suspended") {
       return { error: "This school account is suspended. Contact support." };
     }
 
-    const schoolId = school.id as string;
-
     let signInPassword = password;
     let resolvedKind: string | null = null;
-
-    try {
-      if (!looksLikeEmail(ident)) {
-        const { data: resolved } = await client.rpc("resolve_staff_login" as never, {
-          _identifier: ident,
-          _school_code: schoolCode,
-        } as never);
-        const row = Array.isArray(resolved) ? resolved[0] : resolved;
-        if (row && typeof row === "object" && (row as { email?: string }).email) {
-          resolvedKind = String((row as { kind?: string }).kind || "staff");
-        }
-      }
-    } catch {
-      /* optional RPC */
-    }
-
-    if (!looksLikeEmail(ident) && hasAdminKey()) {
-      try {
-        await provisionStudentLogin({
-          schoolId,
-          schoolCode,
-          identifier: ident,
-          password,
-        });
-      } catch {
-        /* skip */
-      }
-    }
-
     let emailForAuth = looksLikeEmail(ident) ? ident.toLowerCase() : ident;
 
+    // Public identity resolver (granted to anon)
     try {
       const { data: resolved } = await client.rpc("resolve_login_identity", {
-        _identifier: ident,
         _school_code: schoolCode,
+        _identifier: ident,
       });
       const row = Array.isArray(resolved) ? resolved[0] : resolved;
-      if (row && typeof row === "object" && (row as { email?: string }).email) {
-        emailForAuth = String((row as { email: string }).email).toLowerCase();
-        resolvedKind = String((row as { kind?: string }).kind || resolvedKind || "user");
+      if (row && typeof row === "object") {
+        if ((row as { kind?: string }).kind === "school_inactive") {
+          return { error: "This school is not active." };
+        }
+        if ((row as { email?: string }).email) {
+          emailForAuth = String((row as { email: string }).email).toLowerCase();
+          resolvedKind = String((row as { kind?: string }).kind || "user");
+        }
       }
     } catch {
       /* optional */
     }
 
-    // Service-role identity resolve if RPC did not return an email
-    if ((!looksLikeEmail(emailForAuth) || emailForAuth === ident.toLowerCase()) && serviceKey && looksLikeEmail(ident) === false) {
+    // Optional student provisioning only when service role is available
+    if (!looksLikeEmail(ident) && hasAdminKey?.() && schoolId) {
       try {
-        const admin = createClient(url, serviceKey, {
-          auth: { persistSession: false, autoRefreshToken: false },
+        const provisioned = await provisionStudentLogin({
+          schoolId,
+          schoolCode,
+          identifier: ident,
+          password,
         });
-        // Teachers / staff by email stored on profiles linked to this school
-        const { data: staffRoles } = await admin
-          .from("user_roles")
-          .select("user_id, role")
-          .eq("school_id", schoolId)
-          .limit(2000);
-        const userIds = [...new Set((staffRoles ?? []).map((r) => r.user_id as string))];
-        if (userIds.length) {
-          const { data: profiles } = await admin
-            .from("profiles")
-            .select("auth_user_id, email, full_name")
-            .in("auth_user_id", userIds)
-            .limit(2000);
-          const idLower = ident.toLowerCase();
-          const match = (profiles ?? []).find((p) => {
-            const em = String(p.email || "").toLowerCase();
-            const nm = String(p.full_name || "").toLowerCase();
-            return em === idLower || nm === idLower || nm.includes(idLower);
-          });
-          if (match?.email) {
-            emailForAuth = String(match.email).toLowerCase();
-            resolvedKind = resolvedKind || "staff";
-          }
+        if (provisioned && "email" in provisioned && provisioned.email && provisioned.password) {
+          emailForAuth = provisioned.email;
+          signInPassword = provisioned.password;
+          resolvedKind = "student";
         }
-      } catch (e) {
-        console.warn("[login] staff identity fallback", e);
+      } catch {
+        /* skip — student can still sign in if already provisioned */
       }
     }
 
@@ -400,7 +277,8 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       password: signInPassword,
     });
 
-    if ((error || !signIn?.session) && !looksLikeEmail(ident) && hasAdminKey() && schoolId) {
+    // One more provision retry if password failed and service role exists
+    if ((error || !signIn?.session) && !looksLikeEmail(ident) && hasAdminKey?.() && schoolId) {
       try {
         const provisioned = await provisionStudentLogin({
           schoolId,
@@ -408,11 +286,10 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
           identifier: ident,
           password,
         });
-        if (provisioned?.email && provisioned?.password) {
-          signInPassword = provisioned.password;
+        if (provisioned && "email" in provisioned && provisioned.email && provisioned.password) {
           const retry = await client.auth.signInWithPassword({
             email: provisioned.email,
-            password: signInPassword,
+            password: provisioned.password,
           });
           signIn = retry.data;
           error = retry.error;
@@ -439,6 +316,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     }
 
     const uid = signIn.user?.id ?? null;
+    const token = signIn.session.access_token;
     const priority = ["super_admin", "school_admin", "examination_officer", "teacher", "student"];
     let primaryRole: string | null = null;
 
@@ -447,14 +325,37 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       return priority.find((r) => list.includes(r)) ?? list[0] ?? null;
     };
 
-    try {
-      if (uid && serviceKey) {
+    // Role from user's own JWT (works without service role if RLS allows own roles)
+    if (uid && token) {
+      try {
+        const authed = createClient(url, anonKey, {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data: roles } = await authed.from("user_roles").select("role").eq("user_id", uid);
+        primaryRole = pickRole(roles as { role: string }[] | null);
+
+        if (!primaryRole) {
+          try {
+            const { data: rpcSuper } = await authed.rpc("is_super_admin");
+            if (rpcSuper === true) primaryRole = "super_admin";
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch (e) {
+        console.warn("[login] jwt role lookup failed", e);
+      }
+    }
+
+    // Optional service-role role lookup
+    if (!primaryRole && uid && serviceKey) {
+      try {
         const admin = createClient(url, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
         });
         const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
         primaryRole = pickRole(roles as { role: string }[] | null);
-
         try {
           await admin
             .from("profiles")
@@ -464,32 +365,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         } catch {
           /* ignore */
         }
-      }
-    } catch (e) {
-      console.warn("[login] service-role role lookup failed", e);
-    }
-
-    if (!primaryRole && uid && signIn.session?.access_token) {
-      try {
-        const authed = createClient(url, anonKey, {
-          global: { headers: { Authorization: `Bearer ${signIn.session.access_token}` } },
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
-        const { data: roles } = await authed.from("user_roles").select("role").eq("user_id", uid);
-        primaryRole = pickRole(roles as { role: string }[] | null);
-      } catch (e) {
-        console.warn("[login] jwt role lookup failed", e);
-      }
-    }
-
-    if (!primaryRole && uid && signIn.session?.access_token) {
-      try {
-        const authed = createClient(url, anonKey, {
-          global: { headers: { Authorization: `Bearer ${signIn.session.access_token}` } },
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
-        const { data: rpcSuper } = await authed.rpc("is_super_admin");
-        if (rpcSuper === true) primaryRole = "super_admin";
       } catch {
         /* ignore */
       }
