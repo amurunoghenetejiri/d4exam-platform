@@ -106,7 +106,14 @@ function LoginPage() {
         return;
       }
       await supabase.auth.setSession(result.session);
-      // Brief pause so the client JWT is fully applied before role lookup
+
+      // Prefer role from server (service-role) — avoids client RLS race
+      const serverRole = "role" in result && result.role ? String(result.role) : null;
+      if (serverRole && serverRole in roleHome) {
+        navigate({ to: roleHome[serverRole as keyof typeof roleHome] as never });
+        return;
+      }
+
       await new Promise((r) => setTimeout(r, 150));
       let user = await fetchSessionUser();
       if (!user?.role) {
