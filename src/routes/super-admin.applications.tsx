@@ -36,6 +36,8 @@ type Creds = {
   schoolCode: string;
   adminEmail: string;
   adminPassword: string;
+  emailSent?: boolean;
+  emailError?: string | null;
 };
 
 function Page() {
@@ -68,14 +70,32 @@ function Page() {
       });
 
       if (decision === "approved" && result && "schoolCode" in result && result.schoolCode) {
+        const r = result as {
+          schoolName?: string;
+          schoolCode?: string;
+          adminEmail?: string;
+          adminPassword?: string;
+          emailSent?: boolean;
+          emailError?: string | null;
+        };
         const packet: Creds = {
-          schoolName: String(result.schoolName ?? "School"),
-          schoolCode: String(result.schoolCode),
-          adminEmail: String(result.adminEmail ?? ""),
-          adminPassword: String(result.adminPassword ?? ""),
+          schoolName: String(r.schoolName ?? "School"),
+          schoolCode: String(r.schoolCode),
+          adminEmail: String(r.adminEmail ?? ""),
+          adminPassword: String(r.adminPassword ?? ""),
+          emailSent: Boolean(r.emailSent),
+          emailError: r.emailError ?? null,
         };
         setCreds(packet);
-        toast.success("School approved. Copy the login details below and send them to the school.");
+        if (r.emailSent) {
+          toast.success("School approved. Login details emailed to the applicant.");
+        } else {
+          toast.success(
+            r.emailError
+              ? `School approved. Email failed (${r.emailError}). Copy details below.`
+              : "School approved. Copy the login details below (email not configured).",
+          );
+        }
       } else {
         toast.success(`Application marked ${decision.replaceAll("_", " ")}`);
       }
@@ -107,7 +127,7 @@ function Page() {
     <>
       <PageHeader
         title="School Applications"
-        description="Review applications. Approve creates the school and shows login details on this page — no email password setup required."
+        description="Review applications. Approve creates the school, emails login details to the applicant, and shows credentials here as backup."
       />
 
       {creds && (
@@ -132,6 +152,14 @@ function Page() {
               </li>
             </ul>
             <p className="mt-3 font-sans text-xs text-slate-600">
+              {creds.emailSent ? (
+                <span className="text-emerald-700">Email sent to applicant.</span>
+              ) : (
+                <span className="text-amber-700">
+                  Email not sent{creds.emailError ? `: ${creds.emailError}` : " (set RESEND_API_KEY on Vercel)"}.
+                </span>
+              )}
+              <br />
               Tell them: go to Login → enter school code + email + password → they open the School Admin
               dashboard and can add teachers and students.
             </p>
