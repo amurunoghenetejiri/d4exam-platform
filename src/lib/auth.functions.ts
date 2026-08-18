@@ -32,7 +32,6 @@ const loginInputSchema = z.object({
 
 export const loginWithSchoolCode = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => {
-    // TanStack may pass either the payload or { data: payload }
     const raw =
       data &&
       typeof data === "object" &&
@@ -66,20 +65,101 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     const schoolCode = (data.schoolCode ?? "").trim().toUpperCase();
     const ident = data.identifier.trim();
     const password = data.password;
+    const emailLower = looksLikeEmail(ident) ? ident.toLowerCase() : "";
 
     // Super admin: blank school code (or SUPER / PLATFORM) + email + password
     const isSuperCode =
       schoolCode === "" || schoolCode === "SUPER" || schoolCode === "PLATFORM";
     if (looksLikeEmail(ident) && isSuperCode) {
-      const { data: signIn, error } = await client.auth.signInWithPassword({
-        email: ident.toLowerCase(),
+      let { data: signIn, error } = await client.auth.signInWithPassword({
+        email: emailLower,
         password,
       });
-      if (error || !signIn.session || !signIn.user) {
+
+      // Recover / bootstrap platform super admin when service role is available
+      if ((error || !signIn?.session || !signIn?.user) && serviceKey) {
+        try {
+          const admin = createClient(url, serviceKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+
+          // Find auth user by email (paginate a reasonable range)
+          let authUserId: string | null = null;
+          for (let page = 1; page <= 5 && !authUserId; page++) {
+            const { data: listed } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+            const hit = (listed?.users ?? []).find(
+              (u) => (u.email || "").toLowerCase() === emailLower,
+            );
+            if (hit?.id) authUserId = hit.id;
+            if ((listed?.users?.length ?? 0) < 200) break;
+          }
+
+          if (authUserId) {
+            const { data: roles } = await admin
+              .from("user_roles")
+              .select("role")
+              .eq("user_id", authUserId);
+            const isSuper = (roles ?? []).some(
+              (r: { role: string }) => String(r.role).toLowerCase() === "super_admin",
+            );
+            if (isSuper) {
+              // Sync password to what the owner just typed, then retry sign-in
+              await admin.auth.admin.updateUserById(authUserId, {
+                password,
+                email_confirm: true,
+              });
+              const retry = await client.auth.signInWithPassword({
+                email: emailLower,
+                password,
+              });
+              signIn = retry.data;
+              error = retry.error;
+            }
+          } else {
+            // Bootstrap only if the platform has zero super admins yet
+            const { count } = await admin
+              .from("user_roles")
+              .select("id", { count: "exact", head: true })
+              .eq("role", "super_admin");
+            if ((count ?? 0) === 0) {
+              const { data: created, error: createErr } = await admin.auth.admin.createUser({
+                email: emailLower,
+                password,
+                email_confirm: true,
+                user_metadata: { full_name: "Super Admin", role: "super_admin" },
+              });
+              if (!createErr && created?.user?.id) {
+                authUserId = created.user.id;
+                await admin.from("user_roles").insert({
+                  user_id: authUserId,
+                  role: "super_admin",
+                  school_id: null,
+                });
+                await admin.from("profiles").insert({
+                  auth_user_id: authUserId,
+                  email: emailLower,
+                  full_name: "Super Admin",
+                  status: "active",
+                });
+                const retry = await client.auth.signInWithPassword({
+                  email: emailLower,
+                  password,
+                });
+                signIn = retry.data;
+                error = retry.error;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[login] super_admin recovery failed", e);
+        }
+      }
+
+      if (error || !signIn?.session || !signIn?.user) {
         return {
           error:
             error?.message ||
-            "Invalid email or password. School accounts must enter a school code. Super admins leave school code blank.",
+            "Invalid email or password. School accounts must enter a school code.",
         };
       }
 
@@ -87,7 +167,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       const token = signIn.session.access_token;
       let isSuper = false;
 
-      // 1) Service-role role list
       try {
         if (serviceKey) {
           const admin = createClient(url, serviceKey, {
@@ -102,7 +181,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         /* continue */
       }
 
-      // 2) JWT-authenticated role list
       if (!isSuper) {
         try {
           const authed = createClient(url, anonKey, {
@@ -118,7 +196,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         }
       }
 
-      // 3) SECURITY DEFINER RPC (works even when SELECT on user_roles is blocked)
       if (!isSuper) {
         try {
           const authed = createClient(url, anonKey, {
@@ -132,7 +209,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         }
       }
 
-      // 4) User metadata fallback (rare but useful for platform accounts)
       if (!isSuper) {
         const meta = (signIn.user.app_metadata || {}) as Record<string, unknown>;
         const umeta = (signIn.user.user_metadata || {}) as Record<string, unknown>;
@@ -147,13 +223,12 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         };
       }
 
-      // Self-heal role + profile (never fail login if this errors)
       if (serviceKey) {
         try {
           const admin = createClient(url, serviceKey, {
             auth: { persistSession: false, autoRefreshToken: false },
           });
-          const email = (signIn.user.email || ident).toLowerCase();
+          const email = (signIn.user.email || emailLower).toLowerCase();
           const { data: existingRole } = await admin
             .from("user_roles")
             .select("id")
@@ -212,11 +287,10 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     if (!schoolCode) {
       return {
         error:
-          "School code is required. Super admins may leave school code blank and sign in with email only.",
+          "School code is required for school accounts.",
       };
     }
 
-    // Resolve school
     const { data: school } = await client
       .from("schools")
       .select("id, school_code, status")
@@ -229,14 +303,11 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
 
     const schoolId = school.id as string;
 
-    // Try staff login helpers via RPC (no service role)
     let signInPassword = password;
     let resolvedKind: string | null = null;
 
     try {
-      if (looksLikeEmail(ident)) {
-        // email path below
-      } else {
+      if (!looksLikeEmail(ident)) {
         const { data: resolved } = await client.rpc("resolve_staff_login" as never, {
           _identifier: ident,
           _school_code: schoolCode,
@@ -252,22 +323,18 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
 
     if (!looksLikeEmail(ident) && hasAdminKey()) {
       try {
-        const provisioned = await provisionStudentLogin({
+        await provisionStudentLogin({
           schoolId,
           identifier: ident,
           password,
         });
-        if (provisioned?.email) {
-          // use provisioned path on retry below if needed
-        }
-      } catch (e) {
-        console.error("[login] SUPABASE_SERVICE_ROLE_KEY missing — student provisioning skipped.");
+      } catch {
+        /* skip */
       }
     }
 
     let emailForAuth = looksLikeEmail(ident) ? ident.toLowerCase() : ident;
 
-    // Resolve login identity RPC when available
     try {
       const { data: resolved } = await client.rpc("resolve_login_identity", {
         _identifier: ident,
@@ -333,7 +400,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       return priority.find((r) => list.includes(r)) ?? list[0] ?? null;
     };
 
-    // 1) Prefer service-role lookup (bypasses RLS)
     try {
       if (uid && serviceKey) {
         const admin = createClient(url, serviceKey, {
@@ -342,7 +408,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
         primaryRole = pickRole(roles as { role: string }[] | null);
 
-        // Activate profile so requireRole does not bounce pending users back to /login
         try {
           await admin
             .from("profiles")
@@ -357,7 +422,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       console.warn("[login] service-role role lookup failed", e);
     }
 
-    // 2) Fallback: query roles with the user's own JWT (works when SERVICE_ROLE is missing)
     if (!primaryRole && uid && signIn.session?.access_token) {
       try {
         const authed = createClient(url, anonKey, {
@@ -371,7 +435,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       }
     }
 
-    // Last resort: platform super admin signing in with a school code filled by mistake
     if (!primaryRole && uid && signIn.session?.access_token) {
       try {
         const authed = createClient(url, anonKey, {
@@ -393,7 +456,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         },
         role: null,
         error:
-          "Signed in, but no role is assigned to this account yet. Ask your school admin to assign a role (school_admin, teacher, officer, or student).",
+          "Signed in, but no role is assigned to this account yet. Ask your school admin to assign a role.",
       };
     }
 
@@ -406,7 +469,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     };
   });
 
-/** Alias used by login route — keep in sync with loginWithSchoolCode */
 export const signInWithSchoolCode = loginWithSchoolCode;
 
 export {
