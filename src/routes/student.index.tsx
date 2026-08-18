@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
@@ -70,6 +70,13 @@ function Page() {
   const { data: user } = useSessionUser();
   const navigate = useNavigate();
 
+  // Live clock so Ready exams flips when scheduled windows open/close
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 15_000);
+    return () => window.clearInterval(t);
+  }, []);
+
   useRealtimeInvalidate(
     `student-dash-${student?.studentId ?? "anon"}`,
     [
@@ -94,8 +101,8 @@ function Page() {
   const examsQ = useQuery({
     queryKey: ["student-dashboard-exams", student?.schoolId, student?.courseIds?.join(",")],
     enabled: Boolean(student?.schoolId),
-    staleTime: 2_000,
-    refetchInterval: 8_000,
+    staleTime: 1_500,
+    refetchInterval: 5_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async () => {
@@ -119,8 +126,8 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["student-dashboard-attempts", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 2_000,
-    refetchInterval: 8_000,
+    staleTime: 1_500,
+    refetchInterval: 5_000,
     refetchOnMount: "always",
     queryFn: async () => {
       const { data, error } = await supabase
@@ -206,18 +213,19 @@ function Page() {
   }, [attemptsQ.data, finishedByResult]);
 
   const { availableNow, upcoming } = useMemo(() => {
+    void tick; // re-evaluate time windows live
     const live: ExamRow[] = [];
     const up: ExamRow[] = [];
     for (const e of exams) {
       if (isStudentFinished(e.id)) continue;
       if (isWriting(e.id)) continue; // already in session
-      if (["completed", "closed"].includes(String(e.status).toLowerCase())) continue;
+      if (["completed", "closed", "cancelled"].includes(String(e.status).toLowerCase())) continue;
       const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
       if (avail === "available") live.push(e);
       else if (avail === "upcoming") up.push(e);
     }
     return { availableNow: live, upcoming: up };
-  }, [exams, attemptsByExam, finishedByResult]);
+  }, [exams, attemptsByExam, finishedByResult, tick]);
 
   const readyNow = availableNow;
   const readyList = [...availableNow, ...upcoming];
