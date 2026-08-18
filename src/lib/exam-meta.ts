@@ -2,28 +2,31 @@
 
 import { META_MARKER, stripInternalMarkers } from "@/lib/exam-security";
 
+export type AssessmentKind = "examination" | "test" | "assignment";
+
 export type ExamMeta = {
   questionsToAnswer: number | null;
+  /** What the teacher is creating — defaults to examination */
+  assessmentKind?: AssessmentKind | null;
 };
 
 export function embedExamMeta(
   description: string | null | undefined,
   meta: ExamMeta,
 ): string {
-  // Start from human text only (no security / meta markers)
   const cleaned = stripInternalMarkers(description);
   const blob = `${META_MARKER}${JSON.stringify(meta)}`;
   return cleaned ? `${cleaned}\n${blob}` : blob;
 }
 
 export function parseExamMeta(description: string | null | undefined): ExamMeta {
-  if (!description) return { questionsToAnswer: null };
+  if (!description) return { questionsToAnswer: null, assessmentKind: "examination" };
   const idx = description.indexOf(META_MARKER);
-  if (idx < 0) return { questionsToAnswer: null };
+  if (idx < 0) return { questionsToAnswer: null, assessmentKind: "examination" };
   try {
     let raw = description.slice(idx + META_MARKER.length).trim();
     const start = raw.indexOf("{");
-    if (start < 0) return { questionsToAnswer: null };
+    if (start < 0) return { questionsToAnswer: null, assessmentKind: "examination" };
     let depth = 0;
     let end = -1;
     for (let i = start; i < raw.length; i++) {
@@ -36,16 +39,27 @@ export function parseExamMeta(description: string | null | undefined): ExamMeta 
         }
       }
     }
-    if (end < 0) return { questionsToAnswer: null };
+    if (end < 0) return { questionsToAnswer: null, assessmentKind: "examination" };
     const parsed = JSON.parse(raw.slice(start, end + 1)) as Partial<ExamMeta>;
     const n =
       typeof parsed.questionsToAnswer === "number" && parsed.questionsToAnswer > 0
         ? Math.floor(parsed.questionsToAnswer)
         : null;
-    return { questionsToAnswer: n };
+    const kindRaw = String(parsed.assessmentKind || "examination").toLowerCase();
+    const assessmentKind: AssessmentKind =
+      kindRaw === "test" || kindRaw === "assignment" || kindRaw === "examination"
+        ? (kindRaw as AssessmentKind)
+        : "examination";
+    return { questionsToAnswer: n, assessmentKind };
   } catch {
-    return { questionsToAnswer: null };
+    return { questionsToAnswer: null, assessmentKind: "examination" };
   }
+}
+
+export function assessmentKindLabel(kind: AssessmentKind | null | undefined): string {
+  if (kind === "test") return "Test";
+  if (kind === "assignment") return "Assignment";
+  return "Examination";
 }
 
 /** Deterministic shuffle so each student gets a stable personal paper. */
