@@ -304,7 +304,10 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
         review_notes: data.notes ?? null,
         reviewed_by: context.userId,
         reviewed_at: new Date().toISOString(),
-      })
+        issued_school_code: schoolCode,
+        issued_admin_email: adminEmail,
+        issued_admin_password: adminPassword,
+      } as never)
       .eq("id", data.applicationId);
 
     try {
