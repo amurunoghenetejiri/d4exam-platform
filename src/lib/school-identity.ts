@@ -1,25 +1,126 @@
-// School branding helpers — identity fetch + logo upload/validation.
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useSessionUser } from "@/lib/session";
+
+type SchoolSubscription = {
+  channel: ReturnType<typeof supabase.channel>;
+  listeners: Set<() => void>;
+  cleanupTimer: ReturnType<typeof setTimeout> | null;
+};
+
+const schoolSubscriptions = new Map<string, SchoolSubscription>();
+let schoolChannelSequence = 0;
+
+function subscribeToSchool(schoolId: string, onChange: () => void) {
+  let entry = schoolSubscriptions.get(schoolId);
+  if (!entry) {
+    const channel = supabase
+      .channel(`school-identity-${schoolId}-${++schoolChannelSequence}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "schools", filter: `id=eq.${schoolId}` },
+        () => {
+          const current = schoolSubscriptions.get(schoolId);
+          if (!current) return;
+          current.listeners.forEach((fn) => {
+            try {
+              fn();
+            } catch {
+              /* ignore */
+            }
+          });
+        },
+      )
+      .subscribe();
+    entry = { channel, listeners: new Set(), cleanupTimer: null };
+    schoolSubscriptions.set(schoolId, entry);
+  }
+  if (entry.cleanupTimer) {
+    clearTimeout(entry.cleanupTimer);
+    entry.cleanupTimer = null;
+  }
+  entry.listeners.add(onChange);
+  return () => {
+    const current = schoolSubscriptions.get(schoolId);
+    if (!current) return;
+    current.listeners.delete(onChange);
+    if (current.listeners.size === 0) {
+      current.cleanupTimer = setTimeout(() => {
+        const latest = schoolSubscriptions.get(schoolId);
+        if (!latest || latest.listeners.size > 0) return;
+        void supabase.removeChannel(latest.channel);
+        schoolSubscriptions.delete(schoolId);
+      }, 5_000);
+    }
+  };
+}
 
 export type SchoolIdentity = {
   id: string;
   name: string;
-  schoolCode: string | null;
+  schoolCode: string;
   logoUrl: string | null;
-  status: string | null;
+  status: string;
 };
 
-const MAX_LOGO_BYTES = 2 * 1024 * 1024; // 2MB
-const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/jpg"]);
+export function useSchoolIdentity(schoolId?: string | null) {
+  const { data: session } = useSessionUser();
+  const qc = useQueryClient();
+  const id = schoolId ?? session?.schoolId ?? null;
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    const unsubscribe = subscribeToSchool(id, () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        void qc.invalidateQueries({ queryKey: ["school-identity", id] });
+      }, 1500);
+    });
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      unsubscribe();
+    };
+  }, [id, qc]);
+
+  return useQuery({
+    queryKey: ["school-identity", id],
+    enabled: Boolean(id),
+    staleTime: 10 * 60_000,
+    queryFn: async (): Promise<SchoolIdentity | null> => {
+      if (!id) return null;
+      const { data, error } = await supabase
+        .from("schools")
+        .select("id, name, school_code, logo_url, status")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      return {
+        id: data.id as string,
+        name: (data.name as string) || "School",
+        schoolCode: (data.school_code as string) || "",
+        logoUrl: (data.logo_url as string | null) ?? null,
+        status: (data.status as string) || "active",
+      };
+    },
+  });
+}
 
 export function validateLogoFile(file: File): string | null {
-  if (!file) return "No file selected.";
-  if (file.size <= 0) return "Empty file.";
-  if (file.size > MAX_LOGO_BYTES) return "Logo must be under 2MB.";
-  const type = (file.type || "").toLowerCase();
   const name = file.name.toLowerCase();
+  const type = (file.type || "").toLowerCase();
   const okType =
-    ALLOWED_TYPES.has(type) ||
+    type === "image/png" ||
+    type === "image/jpeg" ||
+    type === "image/jpg" ||
+    type === "image/webp" ||
     name.endsWith(".png") ||
     name.endsWith(".jpg") ||
     name.endsWith(".jpeg") ||
@@ -28,6 +129,8 @@ export function validateLogoFile(file: File): string | null {
   if (name.endsWith(".heic") || name.endsWith(".heif") || type.includes("heic")) {
     return "HEIC is not supported. Export as PNG or JPG first.";
   }
+  if (file.size <= 0) return "Empty file.";
+  if (file.size > 2 * 1024 * 1024) return "Logo must be under 2MB.";
   return null;
 }
 
@@ -41,7 +144,6 @@ async function fileToRawDataUrl(file: File): Promise<string> {
 }
 
 async function fileToCompressedDataUrl(file: File): Promise<string> {
-  // Draw onto canvas to normalize format and reduce size for storage in JSON documents.
   const bitmap = await createImageBitmap(file);
   try {
     const maxSide = 512;
@@ -54,39 +156,15 @@ async function fileToCompressedDataUrl(file: File): Promise<string> {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Canvas not available");
     ctx.drawImage(bitmap, 0, 0, w, h);
-    // Prefer PNG for logos with transparency; JPEG is smaller for photos.
     const isPng =
       file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
-    const dataUrl = isPng
-      ? canvas.toDataURL("image/png")
-      : canvas.toDataURL("image/jpeg", 0.85);
-    return dataUrl;
+    return isPng ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85);
   } finally {
     try {
       bitmap.close();
     } catch {
       /* ignore */
     }
-  }
-}
-
-export async function fetchSchoolIdentity(schoolId: string): Promise<SchoolIdentity | null> {
-  try {
-    const { data, error } = await supabase
-      .from("schools")
-      .select("id, name, school_code, logo_url, status")
-      .eq("id", schoolId)
-      .maybeSingle();
-    if (error || !data) return null;
-    return {
-      id: data.id as string,
-      name: (data.name as string) || "",
-      schoolCode: (data.school_code as string | null) ?? null,
-      logoUrl: (data.logo_url as string | null) ?? null,
-      status: (data.status as string | null) ?? null,
-    };
-  } catch {
-    return null;
   }
 }
 
@@ -105,8 +183,8 @@ export async function uploadSchoolLogo(opts: {
         : "jpg";
   const path = `${opts.folder}/logo-${Date.now()}.${ext}`;
 
-  // Prefer compressed data URL for reliability (always displays; storage buckets may be private / missing).
-  // Still attempt storage upload so files exist when buckets are configured.
+  // Attempt storage upload, but prefer compressed data URL so logos always display
+  // even when buckets are private/missing (fixes broken <img> on applications).
   let storedUrl: string | null = null;
   let storedPath: string | null = null;
   const buckets = ["school-logos", "public", "avatars"];
@@ -132,11 +210,9 @@ export async function uploadSchoolLogo(opts: {
   try {
     const dataUrl = await fileToCompressedDataUrl(opts.file);
     if (dataUrl.length > 900_000) {
-      // Too large for data URL — fall back to storage URL if we have one
       if (storedUrl) return { url: storedUrl, path: storedPath || path };
       throw new Error("Logo is still too large after compression. Use a smaller image.");
     }
-    // Data URLs always render in <img>; avoids broken images when storage is private.
     return { url: dataUrl, path: storedPath || "data-url" };
   } catch (compressErr) {
     if (storedUrl) return { url: storedUrl, path: storedPath || path };
