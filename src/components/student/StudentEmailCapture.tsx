@@ -7,10 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-/**
- * Minimal banner: shown when the student still has a system/synthetic email.
- * Does not change shell layout — only a small card above page content.
- */
 export function StudentEmailCapture() {
   const { data: session } = useSessionUser();
   const qc = useQueryClient();
@@ -27,34 +23,28 @@ export function StudentEmailCapture() {
   async function save() {
     setError("");
     const value = email.trim().toLowerCase();
-    if (!/^[\^\s@]+@[\^\s@]+\.[\^\s@]+$/.test(value)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
       setError("Enter a valid email address.");
       return;
     }
     setSaving(true);
     try {
-      const updates: PromiseLike<unknown>[] = [];
       if (session!.profileId) {
-        updates.push(
-          supabase
-            .from("profiles")
-            .update({ email: value } as never)
-            .eq("id", session!.profileId),
-        );
-      }
-      updates.push(
-        supabase
+        await supabase
           .from("profiles")
           .update({ email: value } as never)
-          .eq("auth_user_id", session!.userId),
-      );
-      updates.push(
-        supabase
+          .eq("id", session!.profileId);
+      }
+      await supabase
+        .from("profiles")
+        .update({ email: value } as never)
+        .eq("auth_user_id", session!.userId);
+      if (session!.profileId) {
+        await supabase
           .from("students")
           .update({ email: value } as never)
-          .eq("profile_id", session!.profileId),
-      );
-      await Promise.all(updates);
+          .eq("profile_id", session!.profileId);
+      }
       setDone(true);
       void qc.invalidateQueries({ queryKey: ["session-user"] });
     } catch (e) {
