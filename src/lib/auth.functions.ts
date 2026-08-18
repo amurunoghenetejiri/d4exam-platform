@@ -125,6 +125,50 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         return { error: "Invalid credentials or not a platform super admin." };
       }
 
+      // Ensure role + profile exist (self-heal if SQL was partial)
+      if (serviceKey) {
+        try {
+          const admin = createClient(url, serviceKey, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const uid = signIn.user.id;
+          const email = (signIn.user.email || ident).toLowerCase();
+          const { data: existingRole } = await admin
+            .from("user_roles")
+            .select("id")
+            .eq("user_id", uid)
+            .eq("role", "super_admin")
+            .maybeSingle();
+          if (!existingRole) {
+            await admin.from("user_roles").insert({
+              user_id: uid,
+              role: "super_admin",
+              school_id: null,
+            });
+          }
+          const { data: existingProfile } = await admin
+            .from("profiles")
+            .select("id")
+            .eq("auth_user_id", uid)
+            .maybeSingle();
+          if (!existingProfile) {
+            await admin.from("profiles").insert({
+              auth_user_id: uid,
+              email,
+              full_name: "Super Admin",
+              status: "active",
+            });
+          } else {
+            await admin
+              .from("profiles")
+              .update({ status: "active", email })
+              .eq("auth_user_id", uid);
+          }
+        } catch (e) {
+          console.warn("[login] super_admin ensure role:", e);
+        }
+      }
+
       await writeLoginAudit({
         schoolId: null,
         userId: signIn.user.id,
@@ -135,6 +179,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
           access_token: signIn.session.access_token,
           refresh_token: signIn.session.refresh_token,
         },
+        role: "super_admin" as const,
       };
     }
 
@@ -159,77 +204,83 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     const schoolId = school.id as string;
 
     // Try staff login helpers via RPC (no service role)
-    let email = looksLikeEmail(ident) ? ident.toLowerCase() : "";
     let signInPassword = password;
     let resolvedKind: string | null = null;
 
-    if (!email) {
-      try {
+    try {
+      if (looksLikeEmail(ident)) {
+        // email path below
+      } else {
         const { data: resolved } = await client.rpc("resolve_staff_login" as never, {
-          _school_code: schoolCode,
           _identifier: ident,
+          _school_code: schoolCode,
         } as never);
         const row = Array.isArray(resolved) ? resolved[0] : resolved;
-        if (row && typeof row === "object" && "email" in (row as object)) {
-          email = String((row as { email: string }).email || "");
+        if (row && typeof row === "object" && (row as { email?: string }).email) {
           resolvedKind = String((row as { kind?: string }).kind || "staff");
         }
-      } catch {
-        /* RPC may not exist on all projects */
       }
+    } catch {
+      /* optional RPC */
     }
 
-    // Student provisioning path — only when service role is available
-    if (!email && !looksLikeEmail(ident)) {
-      if (!hasAdminKey()) {
-        console.error("[login] SUPABASE_SERVICE_ROLE_KEY missing — student provisioning skipped.");
-      } else {
+    if (!looksLikeEmail(ident) && hasAdminKey()) {
+      try {
         const provisioned = await provisionStudentLogin({
           schoolId,
-          schoolCode,
           identifier: ident,
           password,
         });
-        if (provisioned && "error" in provisioned) {
-          return { error: provisioned.error };
+        if (provisioned?.email) {
+          // use provisioned path on retry below if needed
         }
-        if (provisioned && "email" in provisioned) {
-          email = provisioned.email;
-          signInPassword = provisioned.password;
-          resolvedKind = "student";
-        }
+      } catch (e) {
+        console.error("[login] SUPABASE_SERVICE_ROLE_KEY missing — student provisioning skipped.");
       }
     }
 
-    if (!email) {
-      return {
-        error:
-          "Invalid school code, staff ID/email or password. Teachers: use staff ID or email + your password. Students need SUPABASE_SERVICE_ROLE_KEY on the server if accounts are not provisioned yet.",
-      };
+    let emailForAuth = looksLikeEmail(ident) ? ident.toLowerCase() : ident;
+
+    // Resolve login identity RPC when available
+    try {
+      const { data: resolved } = await client.rpc("resolve_login_identity", {
+        _identifier: ident,
+        _school_code: schoolCode,
+      });
+      const row = Array.isArray(resolved) ? resolved[0] : resolved;
+      if (row && typeof row === "object" && (row as { email?: string }).email) {
+        emailForAuth = String((row as { email: string }).email).toLowerCase();
+        resolvedKind = String((row as { kind?: string }).kind || resolvedKind || "user");
+      }
+    } catch {
+      /* optional */
     }
 
     let { data: signIn, error } = await client.auth.signInWithPassword({
-      email,
+      email: emailForAuth,
       password: signInPassword,
     });
 
-    // Retry student re-provision (password reset to matric) only with service role
     if ((error || !signIn?.session) && !looksLikeEmail(ident) && hasAdminKey() && schoolId) {
-      const provisioned = await provisionStudentLogin({
-        schoolId,
-        schoolCode,
-        identifier: ident,
-        password,
-      });
-      if (provisioned && "email" in provisioned) {
-        email = provisioned.email;
-        signInPassword = provisioned.password;
-        const retry = await client.auth.signInWithPassword({
-          email,
-          password: signInPassword,
+      try {
+        const provisioned = await provisionStudentLogin({
+          schoolId,
+          identifier: ident,
+          password,
         });
-        signIn = retry.data;
-        error = retry.error;
+        if (provisioned?.email && provisioned?.password) {
+          signInPassword = provisioned.password;
+          const retry = await client.auth.signInWithPassword({
+            email: provisioned.email,
+            password: signInPassword,
+          });
+          signIn = retry.data;
+          error = retry.error;
+        } else if (provisioned && "error" in provisioned && provisioned.error) {
+          return { error: String(provisioned.error) };
+        }
+      } catch (e) {
+        console.error("[login] provision retry failed", e);
       }
     }
 
@@ -243,11 +294,28 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       description: resolvedKind ? `User signed in (${resolvedKind})` : "User signed in",
     });
 
+    let primaryRole: string | null = null;
+    try {
+      const uid = signIn.user?.id;
+      if (uid && serviceKey) {
+        const admin = createClient(url, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
+        const list = (roles ?? []).map((r: { role: string }) => String(r.role).toLowerCase());
+        const priority = ["super_admin", "school_admin", "examination_officer", "teacher", "student"];
+        primaryRole = priority.find((r) => list.includes(r)) ?? list[0] ?? null;
+      }
+    } catch {
+      primaryRole = null;
+    }
+
     return {
       session: {
         access_token: signIn.session.access_token,
         refresh_token: signIn.session.refresh_token,
       },
+      role: primaryRole,
     };
   });
 
