@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useSessionUser } from "@/lib/session";
-import { isSyntheticStudentEmail } from "@/lib/login.server";
+import { isSyntheticStudentEmail } from "@/lib/student-email";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +27,7 @@ export function StudentEmailCapture() {
   async function save() {
     setError("");
     const value = email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+    if (!/^[\^\s@]+@[\^\s@]+\.[\^\s@]+$/.test(value)) {
       setError("Enter a valid email address.");
       return;
     }
@@ -48,7 +48,6 @@ export function StudentEmailCapture() {
           .update({ email: value } as never)
           .eq("auth_user_id", session!.userId),
       );
-      // Best-effort students.email if column exists
       updates.push(
         supabase
           .from("students")
