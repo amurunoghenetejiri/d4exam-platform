@@ -1,6 +1,7 @@
 /**
  * Server-only email helper (Resend).
  * RESEND_API_KEY on Vercel enables sending.
+ * Build-verified helper for school approval emails.
  */
 
 export type SendEmailResult = { ok: true; id?: string } | { ok: false; error: string };
