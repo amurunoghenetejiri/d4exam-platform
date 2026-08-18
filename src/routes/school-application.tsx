@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PublicLayout } from "@/components/layout/PublicLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,16 @@ export const Route = createFileRoute("/school-application")({
   }),
   component: Page,
 });
+
+const TRACK_KEY = "d4exam_school_application_track";
+const DRAFT_KEY = "d4exam_school_application_draft";
+
+function makeTrackingCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "D4";
+  for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
 
 const steps = ["Institution", "Contact Person", "Details", "Review"];
 
@@ -54,6 +64,7 @@ function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [refId, setRefId] = useState("");
+  const [trackingCode, setTrackingCode] = useState("");
 
   const [schoolName, setSchoolName] = useState("");
   const [schoolType, setSchoolType] = useState("university");
@@ -72,6 +83,74 @@ function Page() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const logoRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try {
+      const trackRaw = localStorage.getItem(TRACK_KEY);
+      if (trackRaw) {
+        const track = JSON.parse(trackRaw) as { id?: string; trackingCode?: string };
+        if (track.trackingCode) setTrackingCode(track.trackingCode);
+        if (track.id) setRefId(track.id);
+      }
+      const draftRaw = localStorage.getItem(DRAFT_KEY);
+      if (draftRaw && !trackRaw) {
+        const d = JSON.parse(draftRaw) as Record<string, string>;
+        if (d.schoolName) setSchoolName(d.schoolName);
+        if (d.schoolType) setSchoolType(d.schoolType);
+        if (d.country) setCountry(d.country);
+        if (d.state) setState(d.state);
+        if (d.city) setCity(d.city);
+        if (d.address) setAddress(d.address);
+        if (d.officialEmail) setOfficialEmail(d.officialEmail);
+        if (d.officialPhone) setOfficialPhone(d.officialPhone);
+        if (d.applicantName) setApplicantName(d.applicantName);
+        if (d.applicantEmail) setApplicantEmail(d.applicantEmail);
+        if (d.applicantPhone) setApplicantPhone(d.applicantPhone);
+        if (d.notes) setNotes(d.notes);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (refId) return;
+    try {
+      localStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({
+          schoolName,
+          schoolType,
+          country,
+          state,
+          city,
+          address,
+          officialEmail,
+          officialPhone,
+          applicantName,
+          applicantEmail,
+          applicantPhone,
+          notes,
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [
+    schoolName,
+    schoolType,
+    country,
+    state,
+    city,
+    address,
+    officialEmail,
+    officialPhone,
+    applicantName,
+    applicantEmail,
+    applicantPhone,
+    notes,
+    refId,
+  ]);
 
   function onLogoPick(f: File | null) {
     if (!f) return;
@@ -104,6 +183,7 @@ function Page() {
         logoUrl = null;
       }
 
+      const code = makeTrackingCode();
       const { data, error: insertError } = await supabase
         .from("school_applications")
         .insert({
@@ -116,20 +196,37 @@ function Page() {
           official_email: officialEmail.trim(),
           official_phone: officialPhone.trim() || null,
           applicant_name: applicantName.trim(),
-          applicant_email: applicantEmail.trim(),
+          applicant_email: applicantEmail.trim().toLowerCase(),
           applicant_phone: applicantPhone.trim() || null,
           review_notes: notes.trim() || null,
           status: "pending",
+          tracking_code: code,
           documents: logoUrl ? ({ logo_url: logoUrl } as never) : ({} as never),
-        })
-        .select("id")
+        } as never)
+        .select("id, tracking_code")
         .single();
 
       if (insertError) {
         setError(insertError.message || "Could not submit application. Please try again.");
         return;
       }
+      const savedCode = (data as { tracking_code?: string }).tracking_code || code;
       setRefId(data.id);
+      setTrackingCode(savedCode);
+      try {
+        localStorage.setItem(
+          TRACK_KEY,
+          JSON.stringify({
+            id: data.id,
+            trackingCode: savedCode,
+            email: applicantEmail.trim().toLowerCase(),
+            schoolName: schoolName.trim(),
+          }),
+        );
+        localStorage.removeItem(DRAFT_KEY);
+      } catch {
+        /* ignore */
+      }
       void notifySuperAdmins(schoolName.trim(), data.id);
     } catch (e) {
       setError((e as Error).message || "Could not submit application. Please try again.");
@@ -159,16 +256,19 @@ function Page() {
             <CheckCircle2 className="h-4 w-4 text-primary" />
             <AlertTitle>Application submitted</AlertTitle>
             <AlertDescription className="space-y-2">
+              <p>Your application was saved in our database. Keep your tracking code safe.</p>
               <p>
-                Your application was saved. Reference ID:{" "}
-                <strong className="break-all">{refId}</strong>
+                Tracking code:{" "}
+                <strong className="font-mono text-base tracking-wide">{trackingCode || refId}</strong>
               </p>
+              <p className="text-xs text-slate-600 break-all">Internal ID: {refId}</p>
               <p>
-                Super admins can review it under Applications. Track status with your applicant email on{" "}
+                Come back anytime on{" "}
                 <Link to="/application-status" className="font-semibold text-primary underline">
                   Application Status
-                </Link>
-                .
+                </Link>{" "}
+                with your email and tracking code. When approved, your school code and admin password
+                will appear there.
               </p>
             </AlertDescription>
           </Alert>
