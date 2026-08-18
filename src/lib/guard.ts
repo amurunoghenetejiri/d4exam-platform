@@ -27,11 +27,14 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     throw redirect({ to: "/login" });
   }
 
+  const isSuper = user.roles.includes("super_admin") || user.role === "super_admin";
+
   if (user.status === "suspended" || user.status === "deactivated" || user.status === "locked") {
     throw redirect({ to: "/login", search: { blocked: "1" } as never });
   }
 
-  if (user.status === "pending" || user.status === "invited") {
+  // Super admins must never be bounced by missing/pending profile status
+  if (!isSuper && (user.status === "pending" || user.status === "invited")) {
     throw redirect({ to: "/login", search: { pending: "1" } as never });
   }
 
