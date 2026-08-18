@@ -1150,6 +1150,9 @@ export type Database = {
           created_at: string
           documents: Json
           id: string
+          issued_admin_email: string | null
+          issued_admin_password: string | null
+          issued_school_code: string | null
           official_email: string
           official_phone: string | null
           review_notes: string | null
@@ -1159,6 +1162,7 @@ export type Database = {
           school_type: string | null
           state: string | null
           status: Database["public"]["Enums"]["application_status"]
+          tracking_code: string | null
           updated_at: string
         }
         Insert: {
@@ -1171,6 +1175,9 @@ export type Database = {
           created_at?: string
           documents?: Json
           id?: string
+          issued_admin_email?: string | null
+          issued_admin_password?: string | null
+          issued_school_code?: string | null
           official_email: string
           official_phone?: string | null
           review_notes?: string | null
@@ -1180,6 +1187,7 @@ export type Database = {
           school_type?: string | null
           state?: string | null
           status?: Database["public"]["Enums"]["application_status"]
+          tracking_code?: string | null
           updated_at?: string
         }
         Update: {
@@ -1192,6 +1200,9 @@ export type Database = {
           created_at?: string
           documents?: Json
           id?: string
+          issued_admin_email?: string | null
+          issued_admin_password?: string | null
+          issued_school_code?: string | null
           official_email?: string
           official_phone?: string | null
           review_notes?: string | null
@@ -1201,6 +1212,7 @@ export type Database = {
           school_type?: string | null
           state?: string | null
           status?: Database["public"]["Enums"]["application_status"]
+          tracking_code?: string | null
           updated_at?: string
         }
         Relationships: []
