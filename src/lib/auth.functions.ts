@@ -88,7 +88,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         password,
       });
 
-      // Force ensure auth user + super_admin role when service role is available
       if ((error || !signIn?.session || !signIn?.user) && serviceKey) {
         try {
           const admin = createClient(url, serviceKey, {
@@ -113,7 +112,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
           }
 
           if (authUserId) {
-            // Always sync password for this email on platform login path
             const { error: updErr } = await admin.auth.admin.updateUserById(authUserId, {
               password,
               email_confirm: true,
@@ -129,14 +127,12 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
             });
             if (createErr) {
               console.warn("[login] createUser", createErr.message);
-              // Maybe user exists but list missed them — try sign-in after a password update path fails
             } else if (created?.user?.id) {
               authUserId = created.user.id;
             }
           }
 
           if (authUserId) {
-            // Ensure super_admin role
             const { data: existingRole } = await admin
               .from("user_roles")
               .select("id")
@@ -151,7 +147,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
               });
             }
 
-            // Ensure profile
             const { data: existingProfile } = await admin
               .from("profiles")
               .select("id")
@@ -199,7 +194,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
 
       const uid = signIn.user.id;
 
-      // Always ensure super_admin after successful platform login
       if (serviceKey) {
         try {
           const admin = createClient(url, serviceKey, {
@@ -257,14 +251,64 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       return { error: "School code is required for school accounts." };
     }
 
-    const { data: school } = await client
-      .from("schools")
-      .select("id, school_code, status")
-      .eq("school_code", schoolCode)
-      .maybeSingle();
+    // Resolve school — anon cannot read schools (RLS is authenticated-only).
+    // Prefer service role, then flexible match.
+    let school: { id: string; school_code: string; status?: string } | null = null;
+
+    if (serviceKey) {
+      try {
+        const admin = createClient(url, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data: exact } = await admin
+          .from("schools")
+          .select("id, school_code, status")
+          .eq("school_code", schoolCode)
+          .maybeSingle();
+        if (exact?.id) {
+          school = exact as { id: string; school_code: string; status?: string };
+        } else {
+          // Case-insensitive / whitespace-tolerant fallback
+          const { data: all } = await admin
+            .from("schools")
+            .select("id, school_code, status")
+            .limit(500);
+          const hit = (all ?? []).find(
+            (s) => String(s.school_code || "").trim().toUpperCase() === schoolCode,
+          );
+          if (hit?.id) school = hit as { id: string; school_code: string; status?: string };
+        }
+      } catch (e) {
+        console.warn("[login] service-role school lookup failed", e);
+      }
+    }
+
+    // Anon fallback (works only if a public/login policy exists)
+    if (!school?.id) {
+      try {
+        const { data: exact } = await client
+          .from("schools")
+          .select("id, school_code, status")
+          .eq("school_code", schoolCode)
+          .maybeSingle();
+        if (exact?.id) school = exact as { id: string; school_code: string; status?: string };
+      } catch {
+        /* ignore */
+      }
+    }
 
     if (!school?.id) {
+      if (!serviceKey) {
+        return {
+          error:
+            "Could not verify school code. Server is missing SUPABASE_SERVICE_ROLE_KEY. Add it in Vercel environment variables.",
+        };
+      }
       return { error: "Invalid school code." };
+    }
+
+    if (school.status && String(school.status).toLowerCase() === "suspended") {
+      return { error: "This school account is suspended. Contact support." };
     }
 
     const schoolId = school.id as string;
@@ -291,6 +335,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       try {
         await provisionStudentLogin({
           schoolId,
+          schoolCode,
           identifier: ident,
           password,
         });
@@ -315,6 +360,41 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       /* optional */
     }
 
+    // Service-role identity resolve if RPC did not return an email
+    if ((!looksLikeEmail(emailForAuth) || emailForAuth === ident.toLowerCase()) && serviceKey && looksLikeEmail(ident) === false) {
+      try {
+        const admin = createClient(url, serviceKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        // Teachers / staff by email stored on profiles linked to this school
+        const { data: staffRoles } = await admin
+          .from("user_roles")
+          .select("user_id, role")
+          .eq("school_id", schoolId)
+          .limit(2000);
+        const userIds = [...new Set((staffRoles ?? []).map((r) => r.user_id as string))];
+        if (userIds.length) {
+          const { data: profiles } = await admin
+            .from("profiles")
+            .select("auth_user_id, email, full_name")
+            .in("auth_user_id", userIds)
+            .limit(2000);
+          const idLower = ident.toLowerCase();
+          const match = (profiles ?? []).find((p) => {
+            const em = String(p.email || "").toLowerCase();
+            const nm = String(p.full_name || "").toLowerCase();
+            return em === idLower || nm === idLower || nm.includes(idLower);
+          });
+          if (match?.email) {
+            emailForAuth = String(match.email).toLowerCase();
+            resolvedKind = resolvedKind || "staff";
+          }
+        }
+      } catch (e) {
+        console.warn("[login] staff identity fallback", e);
+      }
+    }
+
     let { data: signIn, error } = await client.auth.signInWithPassword({
       email: emailForAuth,
       password: signInPassword,
@@ -324,6 +404,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       try {
         const provisioned = await provisionStudentLogin({
           schoolId,
+          schoolCode,
           identifier: ident,
           password,
         });
