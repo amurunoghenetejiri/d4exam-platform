@@ -294,20 +294,63 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       description: resolvedKind ? `User signed in (${resolvedKind})` : "User signed in",
     });
 
+    const uid = signIn.user?.id ?? null;
+    const priority = ["super_admin", "school_admin", "examination_officer", "teacher", "student"];
     let primaryRole: string | null = null;
+
+    const pickRole = (roles: { role: string }[] | null | undefined) => {
+      const list = (roles ?? []).map((r) => String(r.role).toLowerCase().trim());
+      return priority.find((r) => list.includes(r)) ?? list[0] ?? null;
+    };
+
+    // 1) Prefer service-role lookup (bypasses RLS)
     try {
-      const uid = signIn.user?.id;
       if (uid && serviceKey) {
         const admin = createClient(url, serviceKey, {
           auth: { persistSession: false, autoRefreshToken: false },
         });
         const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
-        const list = (roles ?? []).map((r: { role: string }) => String(r.role).toLowerCase());
-        const priority = ["super_admin", "school_admin", "examination_officer", "teacher", "student"];
-        primaryRole = priority.find((r) => list.includes(r)) ?? list[0] ?? null;
+        primaryRole = pickRole(roles as { role: string }[] | null);
+
+        // Activate profile so requireRole does not bounce pending users back to /login
+        try {
+          await admin
+            .from("profiles")
+            .update({ status: "active" } as never)
+            .eq("auth_user_id", uid)
+            .in("status", ["pending", "invited", "inactive"]);
+        } catch {
+          /* ignore */
+        }
       }
-    } catch {
-      primaryRole = null;
+    } catch (e) {
+      console.warn("[login] service-role role lookup failed", e);
+    }
+
+    // 2) Fallback: query roles with the user's own JWT (works when SERVICE_ROLE is missing)
+    if (!primaryRole && uid && signIn.session?.access_token) {
+      try {
+        const authed = createClient(url, anonKey, {
+          global: { headers: { Authorization: `Bearer ${signIn.session.access_token}` } },
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data: roles } = await authed.from("user_roles").select("role").eq("user_id", uid);
+        primaryRole = pickRole(roles as { role: string }[] | null);
+      } catch (e) {
+        console.warn("[login] jwt role lookup failed", e);
+      }
+    }
+
+    if (!primaryRole) {
+      return {
+        session: {
+          access_token: signIn.session.access_token,
+          refresh_token: signIn.session.refresh_token,
+        },
+        role: null,
+        error:
+          "Signed in, but no role is assigned to this account yet. Ask your school admin to assign a role (school_admin, teacher, officer, or student).",
+      };
     }
 
     return {
