@@ -1,4 +1,3 @@
-/** BUILD_OK: useSchoolIdentity exported — do not remove */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -184,8 +183,6 @@ export async function uploadSchoolLogo(opts: {
         : "jpg";
   const path = `${opts.folder}/logo-${Date.now()}.${ext}`;
 
-  let storedUrl: string | null = null;
-  let storedPath: string | null = null;
   const buckets = ["school-logos", "public", "avatars"];
   for (const bucket of buckets) {
     try {
@@ -196,11 +193,7 @@ export async function uploadSchoolLogo(opts: {
       });
       if (upErr) continue;
       const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-      if (data?.publicUrl) {
-        storedUrl = data.publicUrl;
-        storedPath = `${bucket}/${path}`;
-        break;
-      }
+      if (data?.publicUrl) return { url: data.publicUrl, path: `${bucket}/${path}` };
     } catch {
       // try next bucket
     }
@@ -209,12 +202,10 @@ export async function uploadSchoolLogo(opts: {
   try {
     const dataUrl = await fileToCompressedDataUrl(opts.file);
     if (dataUrl.length > 900_000) {
-      if (storedUrl) return { url: storedUrl, path: storedPath || path };
       throw new Error("Logo is still too large after compression. Use a smaller image.");
     }
-    return { url: dataUrl, path: storedPath || "data-url" };
+    return { url: dataUrl, path: "data-url" };
   } catch (compressErr) {
-    if (storedUrl) return { url: storedUrl, path: storedPath || path };
     if (opts.file.size <= 400_000) {
       try {
         const raw = await fileToRawDataUrl(opts.file);
