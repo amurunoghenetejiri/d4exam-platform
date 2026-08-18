@@ -95,7 +95,14 @@ function Page() {
     setLoading(true);
     try {
       const folder = `applications/${Date.now()}`;
-      const { url: logoUrl } = await uploadSchoolLogo({ file: logoFile, folder });
+      let logoUrl: string | null = null;
+      try {
+        const uploaded = await uploadSchoolLogo({ file: logoFile, folder });
+        logoUrl = uploaded.url;
+      } catch (logoErr) {
+        console.warn("[school-application] logo upload failed:", logoErr);
+        logoUrl = null;
+      }
 
       const { data, error: insertError } = await supabase
         .from("school_applications")
@@ -113,7 +120,7 @@ function Page() {
           applicant_phone: applicantPhone.trim() || null,
           review_notes: notes.trim() || null,
           status: "pending",
-          documents: { logo_url: logoUrl } as never,
+          documents: logoUrl ? ({ logo_url: logoUrl } as never) : ({} as never),
         })
         .select("id")
         .single();
