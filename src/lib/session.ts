@@ -38,7 +38,6 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   const user = userData.user;
   if (!user) return null;
 
-  // Parallel: profile + roles at once
   const [profileByAuth, profileById, roleRes] = await Promise.all([
     supabase
       .from("profiles")
@@ -54,7 +53,31 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   ]);
 
   const profile = profileByAuth.data ?? profileById.data ?? null;
-  const roles = (roleRes.data ?? []).map((r) => r.role as AppRole);
+  let roles = (roleRes.data ?? []).map((r) => r.role as AppRole).filter(Boolean);
+
+  // SECURITY DEFINER fallback when user_roles SELECT is empty/blocked
+  if (!roles.includes("super_admin")) {
+    try {
+      const { data: isSuper } = await supabase.rpc("is_super_admin");
+      if (isSuper === true) {
+        roles = ["super_admin", ...roles.filter((r) => r !== "super_admin")];
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (roles.length === 0) {
+    try {
+      const { data: hasAny } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .limit(5);
+      if (hasAny?.length) roles = hasAny.map((r) => r.role as AppRole).filter(Boolean);
+    } catch {
+      /* ignore */
+    }
+  }
 
   let schoolName: string | null = null;
   let schoolCode: string | null = null;
@@ -131,7 +154,6 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
 
   const primaryRole = priority.find((r) => roles.includes(r)) ?? null;
 
-  // Super admin must never be stuck as "pending" when profile is missing/incomplete
   let status = (profile?.status as string | undefined) ?? "pending";
   if (primaryRole === "super_admin" && (status === "pending" || status === "invited" || !profile)) {
     status = "active";
