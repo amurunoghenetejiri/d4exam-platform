@@ -271,7 +271,7 @@ export async function notifyStudentOfficerWarning(opts: {
     link: "/student/examinations",
     entityType: "examination",
     entityId: opts.examId,
-    dedupeMinutes: 1,
+    dedupeMinutes: 30,
   });
 }
 
