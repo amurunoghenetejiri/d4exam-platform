@@ -87,6 +87,8 @@ function LoginPage() {
       setError("Enter your email / name / matric and password to continue.");
       return;
     }
+    // School code required only for non–super-admin school logins.
+    // Super admin: leave school code blank + use platform email.
     inFlight.current = true;
     setLoading(true);
     try {
@@ -115,11 +117,14 @@ function LoginPage() {
     } catch (err) {
       const detail = err instanceof Error ? err.message : "";
       console.error("[login] sign-in failed:", err);
-      setError(
-        detail
-          ? `Unable to sign in right now: ${detail}`
-          : "Unable to sign in right now. Check your connection and try again.",
-      );
+      // Avoid dumping raw Zod JSON to the user
+      const friendly =
+        detail.includes("schoolCode") || detail.includes("too_small")
+          ? "School code is required for school accounts. Super admins leave school code blank and sign in with email only."
+          : detail
+            ? `Unable to sign in right now: ${detail}`
+            : "Unable to sign in right now. Check your connection and try again.";
+      setError(friendly);
     } finally {
       inFlight.current = false;
       setLoading(false);
@@ -167,7 +172,7 @@ function LoginPage() {
               Welcome Back
             </h1>
             <p className="mt-1.5 text-sm text-slate-500">
-              Sign in with your school code and account details.
+              School users need a school code. Super admins leave it blank.
             </p>
           </div>
 
@@ -180,13 +185,14 @@ function LoginPage() {
           <form className="space-y-4" onSubmit={submit} noValidate>
             <div className="space-y-1.5">
               <Label htmlFor="school-code" className="text-sm font-semibold text-slate-700">
-                School code
+                School code{" "}
+                <span className="font-normal text-slate-400">(optional for super admin)</span>
               </Label>
               <Input
                 id="school-code"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                placeholder="Your school code"
+                placeholder="Leave blank if you are super admin"
                 className="h-11 rounded-lg border-slate-200 bg-slate-50/80 focus-visible:bg-white"
                 autoComplete="organization"
               />
