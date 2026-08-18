@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 function looksLikeEmail(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
@@ -19,6 +20,39 @@ function resolveServiceKey() {
     process.env["SB_SERVICE_ROLE_KEY"] ||
     ""
   );
+}
+
+function isNewSupabaseApiKey(value: string) {
+  return value.startsWith("sb_publishable_") || value.startsWith("sb_secret_");
+}
+
+/** Required for Lovable / new Supabase publishable keys (not JWTs). */
+function createSupabaseFetch(supabaseKey: string): typeof fetch {
+  return (input, init) => {
+    const headers = new Headers(
+      typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined,
+    );
+    if (init?.headers) {
+      new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+    }
+    if (isNewSupabaseApiKey(supabaseKey) && headers.get("Authorization") === `Bearer ${supabaseKey}`) {
+      headers.delete("Authorization");
+    }
+    headers.set("apikey", supabaseKey);
+    return fetch(input, { ...init, headers });
+  };
+}
+
+function makeClient(url: string, key: string, accessToken?: string): SupabaseClient {
+  return createClient(url, key, {
+    global: {
+      fetch: createSupabaseFetch(key),
+      ...(accessToken
+        ? { headers: { Authorization: `Bearer ${accessToken}` } }
+        : {}),
+    },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
 }
 
 const loginInputSchema = z.object({
@@ -71,17 +105,14 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       return { error: "Server configuration error. Contact support." };
     }
 
-    const { createClient } = await import("@supabase/supabase-js");
-    const client = createClient(url, anonKey, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    });
+    const client = makeClient(url, anonKey);
 
     const schoolCode = (data.schoolCode ?? "").trim().toUpperCase();
     const ident = data.identifier.trim();
     const password = data.password;
     const emailLower = looksLikeEmail(ident) ? ident.toLowerCase() : "";
 
-    // ---------- Platform super admin (blank school code + email) ----------
+    // ---------- Platform super admin ----------
     const isSuperCode =
       schoolCode === "" || schoolCode === "SUPER" || schoolCode === "PLATFORM";
     if (looksLikeEmail(ident) && isSuperCode) {
@@ -98,10 +129,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       let isSuper = false;
 
       try {
-        const authed = createClient(url, anonKey, {
-          global: { headers: { Authorization: `Bearer ${token}` } },
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
+        const authed = makeClient(url, anonKey, token);
         const { data: rpcSuper } = await authed.rpc("is_super_admin");
         if (rpcSuper === true) isSuper = true;
         if (!isSuper) {
@@ -125,9 +153,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
 
       if (!isSuper && serviceKey) {
         try {
-          const admin = createClient(url, serviceKey, {
-            auth: { persistSession: false, autoRefreshToken: false },
-          });
+          const admin = makeClient(url, serviceKey);
           const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
           isSuper = (roles ?? []).some(
             (r: { role: string }) => String(r.role).toLowerCase() === "super_admin",
@@ -163,7 +189,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       };
     }
 
-    // ---------- School users: admin, teacher, officer, student ----------
+    // ---------- School users ----------
     if (!schoolCode) {
       return { error: "School code is required for school accounts." };
     }
@@ -172,9 +198,10 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     let schoolStatus: string | null = null;
 
     try {
-      const { data: rpcSchool } = await client.rpc("resolve_school_for_login", {
+      const { data: rpcSchool, error: schoolErr } = await client.rpc("resolve_school_for_login", {
         _school_code: schoolCode,
       });
+      if (schoolErr) console.warn("[login] resolve_school_for_login", schoolErr.message);
       const row = Array.isArray(rpcSchool) ? rpcSchool[0] : rpcSchool;
       if (row && typeof row === "object" && (row as { id?: string }).id) {
         schoolId = String((row as { id: string }).id);
@@ -186,9 +213,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
 
     if (!schoolId && serviceKey) {
       try {
-        const admin = createClient(url, serviceKey, {
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
+        const admin = makeClient(url, serviceKey);
         const { data: exact } = await admin
           .from("schools")
           .select("id, status")
@@ -203,13 +228,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       }
     }
 
-    if (!schoolId) {
-      return {
-        error:
-          "Invalid school code. Run the latest SQL in Supabase (resolve_school_for_login) if this continues.",
-      };
-    }
-
+    // Soft-fail: still try identity + sign-in even if school row not resolved yet
     if (schoolStatus && schoolStatus.toLowerCase() === "suspended") {
       return { error: "This school account is suspended. Contact support." };
     }
@@ -222,10 +241,11 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     }
 
     try {
-      const { data: resolved } = await client.rpc("resolve_login_identity", {
+      const { data: resolved, error: idErr } = await client.rpc("resolve_login_identity", {
         _school_code: schoolCode,
         _identifier: ident,
       });
+      if (idErr) console.warn("[login] resolve_login_identity", idErr.message);
       const row = Array.isArray(resolved) ? resolved[0] : resolved;
       if (row && typeof row === "object") {
         if ((row as { kind?: string }).kind === "school_inactive") {
@@ -241,13 +261,19 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       /* optional */
     }
 
-    // Student synthetic email (matric@schoolcode.student.d4exam.local)
     if (!looksLikeEmail(ident)) {
       const synth = studentSyntheticEmail(schoolCode, ident);
       if (!candidateEmails.includes(synth)) candidateEmails.push(synth);
     }
 
-    // Optional provision when service role is present (creates auth for imported students)
+    // Only hard-fail school code when neither school nor identity resolved
+    if (!schoolId && candidateEmails.length === 0 && !looksLikeEmail(ident)) {
+      return {
+        error:
+          "Invalid school code or user not found. Check school code and matric / email / staff ID.",
+      };
+    }
+
     if (!looksLikeEmail(ident) && hasAdminKey() && schoolId) {
       try {
         const provisioned = await provisionStudentLogin({
@@ -292,7 +318,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       lastError = attempt.error?.message || "Invalid credentials";
     }
 
-    // Student provision retry
     if (!signIn?.session && !looksLikeEmail(ident) && hasAdminKey() && schoolId) {
       try {
         const provisioned = await provisionStudentLogin({
@@ -325,7 +350,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       return {
         error:
           lastError ||
-          "Invalid credentials. Use the password given at creation (staff/officer ID or matric for students).",
+          "Invalid credentials. Students: password is usually your matric number. Staff: password is your staff/officer ID.",
       };
     }
 
@@ -350,12 +375,8 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     };
 
     try {
-      const authed = createClient(url, anonKey, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
+      const authed = makeClient(url, anonKey, token);
 
-      // Preferred: SECURITY DEFINER get_my_roles
       try {
         const { data: myRoles } = await authed.rpc("get_my_roles");
         const list = Array.isArray(myRoles)
@@ -378,17 +399,14 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         if (rpcSuper === true) primaryRole = "super_admin";
       }
 
-      // Hint from resolve kind when role row is missing
       if (!primaryRole && resolvedKind) {
         const kindMap: Record<string, string> = {
           student: "student",
           teacher: "teacher",
           officer: "examination_officer",
           school_admin: "school_admin",
-          profile: "",
         };
-        const mapped = kindMap[resolvedKind];
-        if (mapped) primaryRole = mapped;
+        if (kindMap[resolvedKind]) primaryRole = kindMap[resolvedKind];
       }
     } catch (e) {
       console.warn("[login] role lookup failed", e);
@@ -396,15 +414,16 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
 
     if (!primaryRole && serviceKey) {
       try {
-        const admin = createClient(url, serviceKey, {
-          auth: { persistSession: false, autoRefreshToken: false },
-        });
+        const admin = makeClient(url, serviceKey);
         const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
         primaryRole = pickRole((roles ?? []).map((r: { role: string }) => String(r.role)));
       } catch {
         /* ignore */
       }
     }
+
+    // Kind hint when roles table empty
+    if (!primaryRole && resolvedKind === "student") primaryRole = "student";
 
     if (!primaryRole) {
       return {
