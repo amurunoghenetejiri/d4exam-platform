@@ -13,17 +13,36 @@ function generateTempPassword() {
   return out;
 }
 
+const loginInputSchema = z.object({
+  // Blank allowed for platform super_admin (email + password only).
+  // School users must still send a real school code.
+  schoolCode: z.preprocess(
+    (v) => (v == null ? "" : String(v).trim()),
+    z.string().max(32),
+  ),
+  identifier: z.preprocess(
+    (v) => (v == null ? "" : String(v).trim()),
+    z.string().min(1).max(120),
+  ),
+  password: z.preprocess(
+    (v) => (v == null ? "" : String(v)),
+    z.string().min(1).max(120),
+  ),
+});
+
 export const loginWithSchoolCode = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) =>
-    z
-      .object({
-        // Empty allowed for super_admin (email + password only)
-        schoolCode: z.string().trim().max(32).optional().default(""),
-        identifier: z.string().trim().min(1).max(120),
-        password: z.string().min(1).max(120),
-      })
-      .parse(data),
-  )
+  .inputValidator((data: unknown) => {
+    // TanStack may pass either the payload or { data: payload }
+    const raw =
+      data &&
+      typeof data === "object" &&
+      "data" in (data as object) &&
+      (data as { data: unknown }).data &&
+      typeof (data as { data: unknown }).data === "object"
+        ? (data as { data: unknown }).data
+        : data;
+    return loginInputSchema.parse(raw);
+  })
   .handler(async ({ data }) => {
     const { hasAdminKey, provisionStudentLogin, writeLoginAudit } = await import("@/lib/login.server");
     const url = process.env["SUPABASE_URL"] ?? process.env["VITE_SUPABASE_URL"];
@@ -60,7 +79,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         if (schoolCode === "") {
           return {
             error:
-              "School code is required for school accounts. Super admins may leave it blank with their platform email.",
+              "Invalid email or password. School accounts must enter a school code. Super admins leave school code blank.",
           };
         }
         return { error: error?.message ?? "Invalid credentials" };
