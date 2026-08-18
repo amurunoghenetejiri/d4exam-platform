@@ -12,10 +12,6 @@ type SchoolSubscription = {
 const schoolSubscriptions = new Map<string, SchoolSubscription>();
 let schoolChannelSequence = 0;
 
-/**
- * Share one fully-configured channel per school. A new hook only adds a local
- * listener; it never adds a postgres callback to an already-subscribed channel.
- */
 function subscribeToSchool(schoolId: string, listener: () => void) {
   let entry = schoolSubscriptions.get(schoolId);
 
@@ -52,8 +48,6 @@ function subscribeToSchool(schoolId: string, listener: () => void) {
     current.listeners.delete(listener);
     if (current.listeners.size > 0) return;
 
-    // Delay disposal by one task so React Strict Mode's effect replay can
-    // reacquire the existing subscription without racing removeChannel().
     current.cleanupTimer = setTimeout(() => {
       const latest = schoolSubscriptions.get(schoolId);
       if (latest !== current || latest.listeners.size > 0) return;
@@ -71,7 +65,6 @@ export type SchoolIdentity = {
   status: string;
 };
 
-/** Load school identity by id (or session school). */
 export function useSchoolIdentity(schoolId?: string | null) {
   const { data: session } = useSessionUser();
   const qc = useQueryClient();
@@ -121,36 +114,95 @@ export function useSchoolIdentity(schoolId?: string | null) {
   });
 }
 
-/** Validate logo file type and size. Returns an error message or null if OK. */
 export function validateLogoFile(file: File): string | null {
-  const ok = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
-  if (!ok.includes(file.type) && !/\.(png|jpe?g|webp)$/i.test(file.name)) {
+  const name = file.name.toLowerCase();
+  const type = (file.type || "").toLowerCase();
+  const okType =
+    type === "image/png" ||
+    type === "image/jpeg" ||
+    type === "image/jpg" ||
+    type === "image/webp" ||
+    type === "image/gif" ||
+    type === "";
+  const okExt = /\.(png|jpe?g|webp|gif)$/i.test(name);
+  if (!okType && !okExt) {
     return "Use a PNG, JPG, or WebP image.";
   }
+  if (/\.(heic|heif)$/i.test(name) || type.includes("heic") || type.includes("heif")) {
+    return "HEIC photos are not supported. Export as JPG or PNG first.";
+  }
   if (file.size > 2_500_000) return "Logo must be under 2.5 MB.";
+  if (file.size < 32) return "That file looks empty. Choose another logo.";
   return null;
 }
 
-async function fileToCompressedDataUrl(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  const max = 512;
-  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
-  const w = Math.max(1, Math.round(bitmap.width * scale));
-  const h = Math.max(1, Math.round(bitmap.height * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Could not process image");
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close();
-  return canvas.toDataURL("image/png");
+function loadImageElement(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read this image. Try a different PNG or JPG."));
+    };
+    img.src = url;
+  });
 }
 
-/**
- * Upload school logo. Tries Storage buckets first; falls back to compressed data URL
- * so branding works even without a configured bucket.
- */
+async function fileToCompressedDataUrl(file: File): Promise<string> {
+  const max = 512;
+  let w = 0;
+  let h = 0;
+  let draw: CanvasImageSource | null = null;
+  let bitmap: ImageBitmap | null = null;
+
+  try {
+    bitmap = await createImageBitmap(file);
+    w = bitmap.width;
+    h = bitmap.height;
+    draw = bitmap;
+  } catch {
+    const img = await loadImageElement(file);
+    w = img.naturalWidth || img.width;
+    h = img.naturalHeight || img.height;
+    draw = img;
+  }
+
+  if (!draw || w < 1 || h < 1) {
+    throw new Error("Could not read this image. Try a different PNG or JPG.");
+  }
+
+  const scale = Math.min(1, max / Math.max(w, h));
+  const cw = Math.max(1, Math.round(w * scale));
+  const ch = Math.max(1, Math.round(h * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not process image");
+  ctx.drawImage(draw, 0, 0, cw, ch);
+  if (bitmap) bitmap.close();
+
+  const preferPng = (file.type || "").includes("png") || file.name.toLowerCase().endsWith(".png");
+  return preferPng ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85);
+}
+
+function fileToRawDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const r = reader.result;
+      if (typeof r === "string" && r.startsWith("data:")) resolve(r);
+      else reject(new Error("Could not read file"));
+    };
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function uploadSchoolLogo(opts: {
   file: File;
   folder: string;
@@ -182,14 +234,34 @@ export async function uploadSchoolLogo(opts: {
     }
   }
 
-  const dataUrl = await fileToCompressedDataUrl(opts.file);
-  if (dataUrl.length > 900_000) {
-    throw new Error("Logo is still too large after compression. Use a smaller image.");
+  try {
+    const dataUrl = await fileToCompressedDataUrl(opts.file);
+    if (dataUrl.length > 900_000) {
+      throw new Error("Logo is still too large after compression. Use a smaller image.");
+    }
+    return { url: dataUrl, path: "data-url" };
+  } catch (compressErr) {
+    if (opts.file.size <= 400_000) {
+      try {
+        const raw = await fileToRawDataUrl(opts.file);
+        if (raw.length <= 900_000) return { url: raw, path: "data-url-raw" };
+      } catch {
+        /* ignore */
+      }
+    }
+    const msg =
+      compressErr instanceof Error
+        ? compressErr.message
+        : "Could not process this logo image.";
+    if (/decode|source image/i.test(msg)) {
+      throw new Error(
+        "This logo file cannot be read. Please use a clear PNG or JPG (not HEIC or a damaged file).",
+      );
+    }
+    throw new Error(msg);
   }
-  return { url: dataUrl, path: "data-url" };
 }
 
-/** Persist logo_url on schools row (RLS: can_manage_school). */
 export async function updateSchoolLogoUrl(schoolId: string, logoUrl: string) {
   const { error } = await supabase
     .from("schools")
@@ -198,7 +270,6 @@ export async function updateSchoolLogoUrl(schoolId: string, logoUrl: string) {
   if (error) throw new Error(error.message || "Could not save logo to school record");
 }
 
-/** Update school display name (RLS: can_manage_school). */
 export async function updateSchoolName(schoolId: string, name: string) {
   const trimmed = name.trim();
   if (trimmed.length < 2) throw new Error("School name must be at least 2 characters.");
