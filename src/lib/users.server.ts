@@ -25,31 +25,15 @@ function publicSupabaseEnv() {
 }
 
 /**
- * Create an auth user.
- * - Prefer service role (auto-confirms email) when available.
- * - On Lovable Cloud + Vercel, service role is often missing; fall back to public signUp
- *   (works when email confirmation is disabled, which is common for school apps).
+ * Create staff auth user WITHOUT service role (Lovable Cloud safe).
+ * Uses public signUp + publishable key only — never imports client.server.
  */
-async function createAuthUser(opts: {
+async function createStaffAuthUser(opts: {
   email: string;
   password: string;
   fullName: string;
   role: string;
 }): Promise<{ id: string }> {
-  if (hasServiceRoleKey()) {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
-      email: opts.email,
-      password: opts.password,
-      email_confirm: true,
-      user_metadata: { full_name: opts.fullName, role: opts.role },
-    });
-    if (error || !created.user) {
-      throw new Error(error?.message ?? "Could not create this user");
-    }
-    return { id: created.user.id };
-  }
-
   const { url, key } = publicSupabaseEnv();
   if (!url || !key) {
     throw new Error(
@@ -80,15 +64,10 @@ async function createAuthUser(opts: {
   }
   if (!data.user?.id) {
     throw new Error(
-      "Could not create auth user (no user returned). If email confirmation is required, disable it in Lovable Cloud Auth settings, or connect your own Supabase project and set SUPABASE_SERVICE_ROLE_KEY on Vercel.",
+      "Could not create auth user. If email confirmation is required, disable it in Lovable Cloud → Auth settings.",
     );
   }
   return { id: data.user.id };
-}
-
-async function adminDb(): Promise<SupabaseClient<Database>> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return supabaseAdmin as unknown as SupabaseClient<Database>;
 }
 
 export interface PersonInput {
@@ -142,21 +121,19 @@ export async function createPerson(
 
   const fullName = `${data.firstName} ${data.lastName}`.trim();
 
-  const authUser = await createAuthUser({
+  // Staff (teacher / officer) NEVER uses service role — works on Lovable Cloud + Vercel.
+  const authUser = await createStaffAuthUser({
     email: data.email,
     password,
     fullName,
     role: data.role,
   });
 
-  // Prefer service-role DB writer; otherwise use the signed-in school admin client (RLS).
-  const db: SupabaseClient<Database> = hasServiceRoleKey()
-    ? await adminDb()
-    : (opts?.db as SupabaseClient<Database>);
+  // Always write via school-admin session (RLS). Never import client.server here.
+  const db = opts?.db as SupabaseClient<Database> | undefined;
   if (!db) {
     throw new Error(
-      "Cannot write staff records: no service role key and no admin session client. " +
-        "On Lovable Cloud, create teacher/officer while signed in as school admin.",
+      "Cannot write staff records: no admin session. Sign in as school admin and try again.",
     );
   }
 
@@ -234,6 +211,7 @@ export async function createPerson(
  * - If student exists: UPDATE profile fields only. NEVER touch exams, scores, results, history.
  * - If student has auth: keep the same auth_user_id / password unless no account yet.
  * - If new: create auth + profile + student row once.
+ * Requires service role (student import). Teacher/officer create does not use this path.
  */
 export async function upsertStudent(
   schoolId: string,
@@ -253,7 +231,6 @@ export async function upsertStudent(
       ? emailRaw
       : studentSyntheticEmail(schoolId, matric);
 
-  // Find existing by matric (case-insensitive) within this school only
   const { data: existingList, error: findErr } = await supabaseAdmin
     .from("students")
     .select("id, profile_id, student_id, matric_number, full_name, status")
@@ -271,7 +248,6 @@ export async function upsertStudent(
     ) ?? null;
 
   if (existing) {
-    // UPDATE only — never delete, never reset exams/results
     const updatePayload: Record<string, unknown> = {
       full_name: fullName,
       student_id: identifier,
@@ -313,7 +289,6 @@ export async function upsertStudent(
     };
   }
 
-  // New student — need auth user
   const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
     email,
     password: matric,
@@ -394,7 +369,6 @@ export async function upsertStudent(
     .single();
 
   if (error) {
-    // race: someone else inserted
     if (/duplicate|unique/i.test(error.message)) {
       const { data: raced } = await supabaseAdmin
         .from("students")
