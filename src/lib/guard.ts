@@ -33,12 +33,18 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     throw redirect({ to: "/login", search: { blocked: "1" } as never });
   }
 
-  // Super admins must never be bounced by missing/pending profile status
-  if (!isSuper && (user.status === "pending" || user.status === "invited")) {
+  // Pending/invited: allow through when a real role is already assigned (login just activated session).
+  // Only bounce when there is no usable role at all.
+  if (
+    !isSuper &&
+    (user.status === "pending" || user.status === "invited") &&
+    !user.role &&
+    user.roles.length === 0
+  ) {
     throw redirect({ to: "/login", search: { pending: "1" } as never });
   }
 
-  const hasRole = allowed.some((r) => user!.roles.includes(r));
+  const hasRole = allowed.some((r) => user!.roles.includes(r) || user!.role === r);
   if (!hasRole) {
     throw redirect({ to: (user.role ? roleHome[user.role] : "/login") as never });
   }
