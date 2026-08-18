@@ -88,14 +88,16 @@ function Page() {
       ["student-result-ids"],
     ],
     Boolean(student?.studentId),
-    1500,
+    1200,
   );
 
   const examsQ = useQuery({
     queryKey: ["student-dashboard-exams", student?.schoolId, student?.courseIds?.join(",")],
     enabled: Boolean(student?.schoolId),
-    staleTime: 5_000,
+    staleTime: 2_000,
+    refetchInterval: 8_000,
     refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       let q = supabase
         .from("examinations")
@@ -105,7 +107,8 @@ function Page() {
         .eq("school_id", student!.schoolId)
         .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
         .order("scheduled_start", { ascending: true })
-        .limit(40);
+        .limit(80);
+      // Only filter by courses when student has assigned course ids
       if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
       const { data, error } = await q;
       if (error) throw error;
@@ -116,7 +119,8 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["student-dashboard-attempts", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 5_000,
+    staleTime: 2_000,
+    refetchInterval: 8_000,
     refetchOnMount: "always",
     queryFn: async () => {
       const { data, error } = await supabase
@@ -131,7 +135,8 @@ function Page() {
   const resultsQ = useQuery({
     queryKey: ["student-dashboard-results", student?.studentId],
     enabled: Boolean(student?.studentId),
-    staleTime: 5_000,
+    staleTime: 2_000,
+    refetchInterval: 10_000,
     refetchOnMount: "always",
     queryFn: async () => {
       const { data, error } = await supabase
@@ -150,7 +155,8 @@ function Page() {
   const notifsQ = useQuery({
     queryKey: ["student-dashboard-notifs", user?.userId],
     enabled: Boolean(user?.userId),
-    staleTime: 15_000,
+    staleTime: 5_000,
+    refetchInterval: 10_000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("notifications")
@@ -185,6 +191,11 @@ function Page() {
     return DONE_ATTEMPT.includes(st);
   }
 
+  /** In-progress attempt means they already started — not “ready to start” again. */
+  function isWriting(examId: string): boolean {
+    return String(attemptsByExam.get(examId) || "").toLowerCase() === "in_progress";
+  }
+
   const written = useMemo(() => {
     const ids = new Set<string>();
     for (const a of attemptsQ.data ?? []) {
@@ -199,6 +210,7 @@ function Page() {
     const up: ExamRow[] = [];
     for (const e of exams) {
       if (isStudentFinished(e.id)) continue;
+      if (isWriting(e.id)) continue; // already in session
       if (["completed", "closed"].includes(String(e.status).toLowerCase())) continue;
       const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
       if (avail === "available") live.push(e);

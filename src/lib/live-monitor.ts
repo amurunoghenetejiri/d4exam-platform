@@ -86,7 +86,10 @@ export function faceLabel(presence: MonitorPresence): string {
   return "Unknown";
 }
 
-/** Subtle glow — not over-glow. Green = clean, amber = minor, red = serious. */
+/**
+ * Borders: green = clean writing, amber = minor, red = serious,
+ * strong blue = submitted (officer can tell at a glance).
+ */
 export function severityBorderClass(sev: MonitorSeverity): string {
   switch (sev) {
     case "normal":
@@ -98,7 +101,7 @@ export function severityBorderClass(sev: MonitorSeverity): string {
     case "offline":
       return "border-slate-400/70 ring-1 ring-slate-400/20";
     case "completed":
-      return "border-sky-400/80 ring-1 ring-sky-300/40 shadow-[0_0_8px_rgba(56,189,248,0.25)]";
+      return "border-sky-500 ring-2 ring-sky-400/55 shadow-[0_0_14px_rgba(14,165,233,0.5)] bg-sky-50/40";
     default:
       return "border-slate-200";
   }
@@ -132,7 +135,7 @@ export function eventSeverity(eventType: string, severity?: string | null): "low
     t.includes("TERMINAT")
   )
     return "high";
-  if (t.includes("NO_FACE") || t.includes("FACE_NOT") || t.includes("FULLSCREEN") || t.includes("TAB") || t.includes("UNCLEAR"))
+  if (t.includes("NO_FACE") || t.includes("FACE_NOT") || t.includes("FULLSCREEN") || t.includes("TAB") || t.includes("UNCLEAR") || t.includes("SUBMIT"))
     return "medium";
   return "low";
 }
@@ -157,7 +160,7 @@ export function humanEventLabel(eventType: string, description?: string | null):
     CONNECTION_RESTORED: "Reconnected",
     MANUAL_SUBMIT: "Exam submitted",
     AUTO_SUBMIT: "Auto-submitted",
-    WARNING_SHOWN: "Warning shown",
+    WARNING_SHOWN: "Officer warning sent",
   };
   return map[t] ?? eventType.replaceAll("_", " ").toLowerCase();
 }
@@ -184,7 +187,6 @@ export function relativeTime(iso: string | null | undefined, now = Date.now()): 
   return new Date(iso).toLocaleString();
 }
 
-/** Map ExamCameraPip security event → integrity event type + severity */
 export function mapFaceSecurityEvent(kind: string, faceCount: number | null) {
   switch (kind) {
     case "ok":
