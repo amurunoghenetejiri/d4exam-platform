@@ -81,7 +81,7 @@ function Page() {
           description="School Admin must assign courses to your staff account under Teachers & Courses or Courses."
         />
       ) : (
-        <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-2 sm:gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {teacher.courses.map((c) => {
             const s = stats[c.id] ?? { exams: 0, questions: 0 };
             return (
@@ -90,51 +90,51 @@ function Page() {
                 to="/teacher/question-bank"
                 search={{ course: c.id }}
                 ariaLabel={`Open ${c.code} questions`}
-                className="p-3.5 sm:p-5"
+                className="p-2.5 sm:p-4 lg:p-5"
               >
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start justify-between gap-1.5 sm:gap-2">
                   <div className="min-w-0">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-primary sm:text-xs">{c.code}</p>
-                    <h2 className="mt-0.5 truncate text-[15px] font-extrabold leading-snug text-slate-900 sm:mt-1 sm:text-base">{c.name}</h2>
-                    <p className="mt-0.5 text-[11px] text-slate-500 sm:mt-1 sm:text-xs">{c.credit_units} units</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-primary sm:text-xs">{c.code}</p>
+                    <h2 className="mt-0 truncate text-[13px] font-extrabold leading-snug text-slate-900 sm:mt-1 sm:text-base">{c.name}</h2>
+                    <p className="mt-0 text-[10px] leading-tight text-slate-500 sm:mt-1 sm:text-xs">{c.credit_units} units</p>
                   </div>
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary sm:h-10 sm:w-10 sm:rounded-xl">
-                    <BookOpen className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary sm:h-10 sm:w-10 sm:rounded-xl">
+                    <BookOpen className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
                   </span>
                 </div>
 
-                <dl className="mt-3 grid grid-cols-2 gap-1.5 text-center sm:mt-4 sm:gap-2">
-                  <div className="rounded-lg bg-slate-50 px-2 py-1.5 sm:py-2">
-                    <dt className="text-[10px] font-semibold uppercase text-slate-500">Exams</dt>
-                    <dd className="text-sm font-bold text-slate-900">{s.exams}</dd>
+                <dl className="mt-2 grid grid-cols-2 gap-1 text-center sm:mt-4 sm:gap-2">
+                  <div className="rounded-md bg-slate-50 px-1.5 py-1 sm:rounded-lg sm:px-2 sm:py-2">
+                    <dt className="text-[9px] font-semibold uppercase text-slate-500 sm:text-[10px]">Exams</dt>
+                    <dd className="text-xs font-bold text-slate-900 sm:text-sm">{s.exams}</dd>
                   </div>
-                  <div className="rounded-lg bg-slate-50 px-2 py-1.5 sm:py-2">
-                    <dt className="text-[10px] font-semibold uppercase text-slate-500">Questions</dt>
-                    <dd className="text-sm font-bold text-slate-900">{s.questions}</dd>
+                  <div className="rounded-md bg-slate-50 px-1.5 py-1 sm:rounded-lg sm:px-2 sm:py-2">
+                    <dt className="text-[9px] font-semibold uppercase text-slate-500 sm:text-[10px]">Questions</dt>
+                    <dd className="text-xs font-bold text-slate-900 sm:text-sm">{s.questions}</dd>
                   </div>
                 </dl>
 
-                <div className="mt-3 flex flex-wrap gap-1.5 sm:mt-4 sm:gap-2">
+                <div className="mt-2 flex flex-wrap gap-1 sm:mt-4 sm:gap-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-8 px-2.5 text-xs font-semibold sm:h-9 sm:px-3 sm:text-sm"
+                    className="h-7 px-2 text-[11px] font-semibold sm:h-9 sm:px-3 sm:text-sm"
                     asChild
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Link to="/teacher/question-bank" search={{ course: c.id }}>
-                      <Layers className="mr-1 h-3.5 w-3.5" />
+                      <Layers className="mr-1 h-3 w-3 sm:h-3.5 sm:w-3.5" />
                       Questions
                     </Link>
                   </Button>
                   <Button
                     size="sm"
-                    className="h-8 px-2.5 text-xs font-semibold sm:h-9 sm:px-3 sm:text-sm"
+                    className="h-7 px-2 text-[11px] font-semibold sm:h-9 sm:px-3 sm:text-sm"
                     asChild
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Link to="/teacher/examinations" search={{ course: c.id }}>
-                      <FileText className="mr-1 h-3.5 w-3.5" />
+                      <FileText className="mr-1 h-3 w-3 sm:h-3.5 sm:w-3.5" />
                       Exams
                     </Link>
                   </Button>
