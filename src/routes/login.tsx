@@ -108,7 +108,6 @@ function LoginPage() {
       }
 
       if ("error" in result && result.error) {
-        // Auth succeeded but no role (or other soft error)
         setError(result.error);
         return;
       }
@@ -124,7 +123,6 @@ function LoginPage() {
         return;
       }
 
-      // Client fallback with short retries
       let user = await fetchSessionUser();
       for (let i = 0; i < 3 && !user?.role; i++) {
         await new Promise((r) => setTimeout(r, 200 * (i + 1)));
@@ -163,23 +161,15 @@ function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-[#0a1628]">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_rgba(37,99,235,0.18),_transparent_50%),radial-gradient(ellipse_at_bottom_left,_rgba(14,165,233,0.12),_transparent_45%)]" />
+    <div className="relative min-h-[100dvh] overflow-hidden bg-slate-50">
       <Watermark />
-
-      <div className="relative z-10 mx-auto grid min-h-dvh max-w-6xl lg:grid-cols-2">
-        {/* Brand panel */}
-        <div className="hidden flex-col justify-between p-10 text-white lg:flex">
+      <div className="relative mx-auto grid min-h-[100dvh] max-w-6xl lg:grid-cols-2">
+        <aside className="hidden flex-col justify-between bg-slate-900 px-10 py-12 text-white lg:flex">
           <div>
-            <Logo variant="full" className="h-10" />
-            <h1 className="mt-12 text-3xl font-extrabold leading-tight tracking-tight">
-              Examination platform
-              <br />
-              for modern schools
-            </h1>
-            <p className="mt-4 max-w-sm text-sm leading-relaxed text-slate-300">
-              Secure CBT, live monitoring, and results — built for students, teachers, officers and
-              administrators.
+            <Logo className="h-10 w-auto" />
+            <h2 className="mt-10 text-3xl font-extrabold tracking-tight">Welcome back</h2>
+            <p className="mt-3 max-w-sm text-sm leading-relaxed text-slate-300">
+              Sign in with your school code and credentials to access exams, results and admin tools.
             </p>
           </div>
           <ul className="space-y-4">
@@ -195,17 +185,16 @@ function LoginPage() {
               </li>
             ))}
           </ul>
-        </div>
+        </aside>
 
-        {/* Form panel */}
         <div className="flex items-center justify-center p-4 sm:p-8">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white p-6 shadow-2xl sm:p-8">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
             <div className="mb-6 text-center lg:hidden">
-              <Logo variant="full" className="mx-auto h-9" />
+              <Logo className="mx-auto h-9 w-auto" />
             </div>
-            <h2 className="text-xl font-extrabold text-slate-900">Sign in</h2>
+            <h1 className="text-xl font-extrabold text-slate-900">Sign in</h1>
             <p className="mt-1 text-sm text-slate-500">
-              Use your school code and account credentials.
+              School users need a school code. Super admins leave it blank.
             </p>
 
             {error ? (
@@ -216,22 +205,18 @@ function LoginPage() {
 
             <form onSubmit={submit} className="mt-6 space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="schoolCode" className="text-xs font-semibold text-slate-700">
-                  School code
-                </Label>
+                <Label htmlFor="schoolCode">School code (optional for super admin)</Label>
                 <Input
                   id="schoolCode"
                   autoComplete="organization"
-                  placeholder="e.g. D4UNI (leave blank for super admin)"
+                  placeholder="e.g. D4UNI"
                   value={code}
                   onChange={(e) => setCode(e.target.value.toUpperCase())}
                   className="h-11"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="identifier" className="text-xs font-semibold text-slate-700">
-                  Email / matric / staff ID
-                </Label>
+                <Label htmlFor="identifier">Email / matric / staff ID</Label>
                 <Input
                   id="identifier"
                   autoComplete="username"
@@ -243,9 +228,7 @@ function LoginPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="password" className="text-xs font-semibold text-slate-700">
-                  Password
-                </Label>
+                <Label htmlFor="password">Password</Label>
                 <div className="relative">
                   <Input
                     id="password"
@@ -268,15 +251,20 @@ function LoginPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="remember"
-                  checked={remember}
-                  onCheckedChange={(v) => setRemember(v === true)}
-                />
-                <label htmlFor="remember" className="text-xs text-slate-600">
-                  Remember this device
-                </label>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="remember"
+                    checked={remember}
+                    onCheckedChange={(v) => setRemember(v === true)}
+                  />
+                  <label htmlFor="remember" className="text-xs text-slate-600">
+                    Remember this device
+                  </label>
+                </div>
+                <Link to="/forgot-password" className="text-sm font-medium text-primary hover:underline">
+                  Forgot password?
+                </Link>
               </div>
 
               <Button type="submit" className="h-11 w-full font-semibold" disabled={loading}>
@@ -294,8 +282,8 @@ function LoginPage() {
 
             <p className="mt-6 text-center text-xs text-slate-500">
               New institution?{" "}
-              <Link to="/register" className="font-semibold text-primary hover:underline">
-                Register school
+              <Link to="/school-application" className="font-semibold text-primary hover:underline">
+                Apply for school
               </Link>
             </p>
           </div>
