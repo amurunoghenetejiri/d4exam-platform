@@ -1,4 +1,95 @@
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
+
+/** True when Vercel/Lovable has injected a service-role (or alias) key. */
+function hasServiceRoleKey(): boolean {
+  return Boolean(
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+      process.env["SUPABASE_SECRET_KEY"] ||
+      process.env["SUPABASE_SERVICE_KEY"] ||
+      process.env["SB_SERVICE_ROLE_KEY"],
+  );
+}
+
+function publicSupabaseEnv() {
+  const url =
+    process.env["SUPABASE_URL"] ||
+    process.env["VITE_SUPABASE_URL"] ||
+    process.env["NEXT_PUBLIC_SUPABASE_URL"];
+  const key =
+    process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+    process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+    process.env["SUPABASE_ANON_KEY"] ||
+    process.env["VITE_SUPABASE_ANON_KEY"];
+  return { url, key };
+}
+
+/**
+ * Create an auth user.
+ * - Prefer service role (auto-confirms email) when available.
+ * - On Lovable Cloud + Vercel, service role is often missing; fall back to public signUp
+ *   (works when email confirmation is disabled, which is common for school apps).
+ */
+async function createAuthUser(opts: {
+  email: string;
+  password: string;
+  fullName: string;
+  role: string;
+}): Promise<{ id: string }> {
+  if (hasServiceRoleKey()) {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: created, error } = await supabaseAdmin.auth.admin.createUser({
+      email: opts.email,
+      password: opts.password,
+      email_confirm: true,
+      user_metadata: { full_name: opts.fullName, role: opts.role },
+    });
+    if (error || !created.user) {
+      throw new Error(error?.message ?? "Could not create this user");
+    }
+    return { id: created.user.id };
+  }
+
+  const { url, key } = publicSupabaseEnv();
+  if (!url || !key) {
+    throw new Error(
+      "Missing SUPABASE_URL / publishable key on the server. Check Vercel env or Lovable .env (VITE_SUPABASE_*).",
+    );
+  }
+
+  const anon = createClient<Database>(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+
+  const { data, error } = await anon.auth.signUp({
+    email: opts.email,
+    password: opts.password,
+    options: {
+      data: { full_name: opts.fullName, role: opts.role },
+    },
+  });
+
+  if (error) {
+    const msg = error.message || "Could not create auth user";
+    if (/already|registered|exists/i.test(msg)) {
+      throw new Error(
+        `An account with email ${opts.email} already exists. Use a different email, or delete the existing auth user in Lovable Cloud → Users.`,
+      );
+    }
+    throw new Error(msg);
+  }
+  if (!data.user?.id) {
+    throw new Error(
+      "Could not create auth user (no user returned). If email confirmation is required, disable it in Lovable Cloud Auth settings, or connect your own Supabase project and set SUPABASE_SERVICE_ROLE_KEY on Vercel.",
+    );
+  }
+  return { id: data.user.id };
+}
+
+async function adminDb(): Promise<SupabaseClient<Database>> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin as unknown as SupabaseClient<Database>;
+}
 
 export interface PersonInput {
   role: "student" | "teacher" | "examination_officer";
@@ -33,7 +124,11 @@ function studentSyntheticEmail(schoolId: string, matric: string) {
  * - Students: password = matric / student ID (what they already know)
  * - Teachers / officers: password = staff ID / officer ID
  */
-export async function createPerson(schoolId: string, data: PersonInput): Promise<CreatePersonResult> {
+export async function createPerson(
+  schoolId: string,
+  data: PersonInput,
+  opts?: { db?: SupabaseClient<Database> },
+): Promise<CreatePersonResult> {
   if (data.role === "student") {
     return upsertStudent(schoolId, data);
   }
@@ -47,23 +142,28 @@ export async function createPerson(schoolId: string, data: PersonInput): Promise
 
   const fullName = `${data.firstName} ${data.lastName}`.trim();
 
-  const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
+  const authUser = await createAuthUser({
     email: data.email,
     password,
-    email_confirm: true,
-    user_metadata: {
-      full_name: fullName,
-      role: data.role,
-    },
+    fullName,
+    role: data.role,
   });
-  if (createError || !created.user) {
-    throw new Error(createError?.message ?? "Could not create this user");
+
+  // Prefer service-role DB writer; otherwise use the signed-in school admin client (RLS).
+  const db: SupabaseClient<Database> = hasServiceRoleKey()
+    ? await adminDb()
+    : (opts?.db as SupabaseClient<Database>);
+  if (!db) {
+    throw new Error(
+      "Cannot write staff records: no service role key and no admin session client. " +
+        "On Lovable Cloud, create teacher/officer while signed in as school admin.",
+    );
   }
 
-  const { data: profile, error: profileError } = await supabaseAdmin
+  const { data: profile, error: profileError } = await db
     .from("profiles")
     .insert({
-      auth_user_id: created.user.id,
+      auth_user_id: authUser.id,
       school_id: schoolId,
       first_name: data.firstName,
       last_name: data.lastName,
@@ -73,14 +173,17 @@ export async function createPerson(schoolId: string, data: PersonInput): Promise
     })
     .select("id")
     .single();
-  if (profileError || !profile) throw new Error(profileError?.message ?? "Could not create profile");
+  if (profileError || !profile) {
+    throw new Error(profileError?.message ?? "Could not create profile");
+  }
 
-  await supabaseAdmin
+  const { error: roleErr } = await db
     .from("user_roles")
-    .insert({ user_id: created.user.id, school_id: schoolId, role: data.role });
+    .insert({ user_id: authUser.id, school_id: schoolId, role: data.role });
+  if (roleErr) throw new Error(roleErr.message);
 
   if (data.role === "teacher") {
-    const { data: row, error } = await supabaseAdmin
+    const { data: row, error } = await db
       .from("teachers")
       .insert({
         profile_id: profile.id,
@@ -104,7 +207,7 @@ export async function createPerson(schoolId: string, data: PersonInput): Promise
     };
   }
 
-  const { data: row, error } = await supabaseAdmin
+  const { data: row, error } = await db
     .from("examination_officers")
     .insert({
       profile_id: profile.id,
@@ -136,6 +239,7 @@ export async function upsertStudent(
   schoolId: string,
   data: PersonInput,
 ): Promise<CreatePersonResult> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const matric = (data.matricNumber || data.identifier || "").trim();
   const identifier = (data.identifier || matric).trim();
   if (matric.length < 4) {
@@ -193,27 +297,14 @@ export async function upsertStudent(
           first_name: data.firstName,
           last_name: data.lastName,
           full_name: fullName,
-          // keep existing email if profile already has a real one
           updated_at: new Date().toISOString(),
         } as never)
         .eq("id", existing.profile_id);
     }
 
-    // Ensure auth role still linked — do not create a second auth user
-    let profileEmail = email;
-    if (existing.profile_id) {
-      const { data: prof } = await supabaseAdmin
-        .from("profiles")
-        .select("email, auth_user_id")
-        .eq("id", existing.profile_id)
-        .maybeSingle();
-      if (prof?.email) profileEmail = prof.email as string;
-      // Do NOT reset password on update — preserves credentials
-    }
-
     return {
       id: existing.id as string,
-      email: profileEmail,
+      email,
       password: matric,
       identifier,
       role: "student",
@@ -222,68 +313,38 @@ export async function upsertStudent(
     };
   }
 
-  // NEW student — create auth once
-  let authUserId: string | null = null;
-  let usedEmail = email;
-
+  // New student — need auth user
   const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
     email,
     password: matric,
     email_confirm: true,
-    user_metadata: {
-      full_name: fullName,
-      role: "student",
-    },
+    user_metadata: { full_name: fullName, role: "student" },
   });
 
-  if (createError || !created?.user) {
-    // Email may already exist (e.g. previous partial import) — link to it
-    const msg = (createError?.message || "").toLowerCase();
-    if (msg.includes("already") || msg.includes("registered") || msg.includes("exists")) {
-      const { data: listed } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-      const found = listed?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-      if (found) {
-        authUserId = found.id;
-        usedEmail = found.email || email;
-        // Keep existing password — do not overwrite unless needed for matric rule
-        // Only set password if we know this is a student synthetic account
-        if (usedEmail.includes("@student.d4exam.local")) {
-          await supabaseAdmin.auth.admin.updateUserById(found.id, { password: matric });
-        }
-      } else {
-        throw new Error(createError?.message ?? "Could not create student auth account");
+  let authUserId: string | null = created?.user?.id ?? null;
+  if (createError || !authUserId) {
+    const { data: listed } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const found = (listed?.users ?? []).find((u) => (u.email || "").toLowerCase() === email.toLowerCase());
+    if (found) {
+      authUserId = found.id;
+      try {
+        await supabaseAdmin.auth.admin.updateUserById(found.id, { password: matric });
+      } catch {
+        /* ignore */
       }
     } else {
-      throw new Error(createError?.message ?? "Could not create student auth account");
+      throw new Error(createError?.message ?? "Could not create student auth user");
     }
-  } else {
-    authUserId = created.user.id;
   }
 
-  if (!authUserId) throw new Error("Could not resolve student auth user");
-
-  // Profile: reuse if auth already has one
-  let profileId: string | null = null;
   const { data: existingProfile } = await supabaseAdmin
     .from("profiles")
     .select("id")
     .eq("auth_user_id", authUserId)
     .maybeSingle();
 
-  if (existingProfile?.id) {
-    profileId = existingProfile.id as string;
-    await supabaseAdmin
-      .from("profiles")
-      .update({
-        school_id: schoolId,
-        first_name: data.firstName,
-        last_name: data.lastName,
-        full_name: fullName,
-        email: usedEmail,
-        status: "active",
-      } as never)
-      .eq("id", profileId);
-  } else {
+  let profileId = existingProfile?.id as string | undefined;
+  if (!profileId) {
     const { data: profile, error: profileError } = await supabaseAdmin
       .from("profiles")
       .insert({
@@ -292,7 +353,7 @@ export async function upsertStudent(
         first_name: data.firstName,
         last_name: data.lastName,
         full_name: fullName,
-        email: usedEmail,
+        email,
         status: "active",
       })
       .select("id")
@@ -324,8 +385,8 @@ export async function upsertStudent(
       student_id: identifier,
       matric_number: matric,
       full_name: fullName,
-      department_id: data.departmentId ?? null,
       faculty_id: data.facultyId ?? null,
+      department_id: data.departmentId ?? null,
       level_id: data.levelId ?? null,
       status: "active",
     })
@@ -333,8 +394,8 @@ export async function upsertStudent(
     .single();
 
   if (error) {
-    // Race: unique constraint — treat as update
-    if (/unique|duplicate/i.test(error.message)) {
+    // race: someone else inserted
+    if (/duplicate|unique/i.test(error.message)) {
       const { data: raced } = await supabaseAdmin
         .from("students")
         .select("id")
@@ -342,20 +403,9 @@ export async function upsertStudent(
         .ilike("matric_number", matric)
         .maybeSingle();
       if (raced?.id) {
-        await supabaseAdmin
-          .from("students")
-          .update({
-            full_name: fullName,
-            student_id: identifier,
-            profile_id: profileId,
-            faculty_id: data.facultyId ?? null,
-            department_id: data.departmentId ?? null,
-            level_id: data.levelId ?? null,
-          } as never)
-          .eq("id", raced.id);
         return {
           id: raced.id as string,
-          email: usedEmail,
+          email,
           password: matric,
           identifier,
           role: "student",
@@ -369,7 +419,7 @@ export async function upsertStudent(
 
   return {
     id: row.id as string,
-    email: usedEmail,
+    email,
     password: matric,
     identifier,
     role: "student",
