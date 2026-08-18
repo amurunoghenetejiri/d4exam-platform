@@ -55,7 +55,21 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   const profile = profileByAuth.data ?? profileById.data ?? null;
   let roles = (roleRes.data ?? []).map((r) => r.role as AppRole).filter(Boolean);
 
-  // SECURITY DEFINER fallback when user_roles SELECT is empty/blocked
+  // SECURITY DEFINER: get_my_roles + is_super_admin (works even if RLS is strict)
+  if (roles.length === 0) {
+    try {
+      const { data: myRoles } = await supabase.rpc("get_my_roles");
+      if (Array.isArray(myRoles) && myRoles.length) {
+        roles = myRoles
+          .map((r: { role?: string } | string) =>
+            (typeof r === "string" ? r : String((r as { role?: string }).role || "")) as AppRole,
+          )
+          .filter(Boolean);
+      }
+    } catch {
+      /* ignore until migration applied */
+    }
+  }
   if (!roles.includes("super_admin")) {
     try {
       const { data: isSuper } = await supabase.rpc("is_super_admin");
