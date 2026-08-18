@@ -112,7 +112,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     const password = data.password;
     const emailLower = looksLikeEmail(ident) ? ident.toLowerCase() : "";
 
-    // ---------- Platform super admin ----------
     const isSuperCode =
       schoolCode === "" || schoolCode === "SUPER" || schoolCode === "PLATFORM";
     if (looksLikeEmail(ident) && isSuperCode) {
@@ -189,7 +188,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       };
     }
 
-    // ---------- School users ----------
     if (!schoolCode) {
       return { error: "School code is required for school accounts." };
     }
@@ -228,7 +226,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       }
     }
 
-    // Soft-fail: still try identity + sign-in even if school row not resolved yet
     if (schoolStatus && schoolStatus.toLowerCase() === "suspended") {
       return { error: "This school account is suspended. Contact support." };
     }
@@ -266,7 +263,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       if (!candidateEmails.includes(synth)) candidateEmails.push(synth);
     }
 
-    // Only hard-fail school code when neither school nor identity resolved
     if (!schoolId && candidateEmails.length === 0 && !looksLikeEmail(ident)) {
       return {
         error:
@@ -422,7 +418,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       }
     }
 
-    // Kind hint when roles table empty
     if (!primaryRole && resolvedKind === "student") primaryRole = "student";
 
     if (!primaryRole) {
@@ -446,6 +441,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     };
   });
 
+// BUILD_EXPORT_GUARD: login.tsx imports this name
 export const signInWithSchoolCode = loginWithSchoolCode;
 
 export {
