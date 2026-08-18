@@ -249,11 +249,7 @@ function Page() {
 
       void notifySuperAdmins(schoolName.trim(), data.id);
       try {
-        void notifySuperAdminsOfApplication({
-          applicationId: data.id as string,
-          schoolName: schoolName.trim(),
-          trackingCode: savedCode,
-        } as never);
+        void notifySuperAdminsOfApplication(schoolName.trim(), data.id as string, savedCode);
       } catch {
         /* best-effort */
       }
