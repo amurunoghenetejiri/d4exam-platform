@@ -67,10 +67,11 @@ export async function sendSchoolApprovalEmail(params: {
   officialEmail?: string | null;
   phone?: string | null;
 }): Promise<SendEmailResult> {
-  const appUrl = (process.env["APP_URL"] || process.env["VITE_APP_URL"] || "https://platform.vercel.app").replace(
-    /\/$/,
-    "",
-  );
+  const appUrl = (
+    process.env["APP_URL"] ||
+    process.env["VITE_APP_URL"] ||
+    "https://platform.vercel.app"
+  ).replace(/\/$/, "");
   const loginUrl = `${appUrl}/login`;
 
   const subject = `Your school is approved on D4EXAM — ${params.schoolName}`;
@@ -80,17 +81,23 @@ export async function sendSchoolApprovalEmail(params: {
     ``,
     `Congratulations! Your school application has been approved on D4EXAM.`,
     ``,
+    `=== Your school profile ===`,
     `School name: ${params.schoolName}`,
     `School code: ${params.schoolCode}`,
-    `School admin name: ${params.applicantName}`,
+    `Admin name: ${params.applicantName}`,
     `Login email: ${params.adminEmail}`,
     `Temporary password: ${params.adminPassword}`,
     params.phone ? `Phone: ${params.phone}` : null,
     params.officialEmail ? `Official school email: ${params.officialEmail}` : null,
     ``,
-    `Sign in: ${loginUrl}`,
-    `Use your school code, email, and the temporary password above.`,
-    `Please change your password after first login.`,
+    `=== How to sign in ===`,
+    `1. Open ${loginUrl}`,
+    `2. Enter school code: ${params.schoolCode}`,
+    `3. Enter email: ${params.adminEmail}`,
+    `4. Enter the temporary password above`,
+    `5. Change your password after first login`,
+    ``,
+    `Keep this email private. Do not share your password.`,
     ``,
     `— D4EXAM Team`,
   ]
@@ -101,13 +108,13 @@ export async function sendSchoolApprovalEmail(params: {
   <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 560px; margin: 0 auto; color: #0f172a; line-height: 1.5;">
     <h1 style="font-size: 20px; margin-bottom: 8px;">Your school is approved</h1>
     <p>Hello <strong>${escapeHtml(params.applicantName)}</strong>,</p>
-    <p>Congratulations! Your school application has been <strong>approved</strong> on D4EXAM. Your school space is ready.</p>
+    <p>Congratulations! Your school application has been <strong>approved</strong> on D4EXAM. Your school space and admin profile are ready.</p>
     <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px;">
       <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc; width: 40%;"><strong>School name</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.schoolName)}</td></tr>
-      <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>School code</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; font-family: monospace; font-size: 16px;"><strong>${escapeHtml(params.schoolCode)}</strong></td></tr>
+      <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>School code</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; font-family: ui-monospace, monospace; font-size: 16px;"><strong>${escapeHtml(params.schoolCode)}</strong></td></tr>
       <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Admin name</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.applicantName)}</td></tr>
       <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Login email</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.adminEmail)}</td></tr>
-      <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Temporary password</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; font-family: monospace;">${escapeHtml(params.adminPassword)}</td></tr>
+      <tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Temporary password</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; font-family: ui-monospace, monospace;">${escapeHtml(params.adminPassword)}</td></tr>
       ${params.phone ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Phone</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.phone)}</td></tr>` : ""}
       ${params.officialEmail ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0; background: #f8fafc;"><strong>Official school email</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${escapeHtml(params.officialEmail)}</td></tr>` : ""}
     </table>
@@ -127,7 +134,7 @@ export async function sendSchoolApprovalEmail(params: {
 }
 
 function escapeHtml(s: string) {
-  return s
+  return String(s)
     .replace(/&/g, "&")
     .replace(/</g, "<")
     .replace(/>/g, ">")
