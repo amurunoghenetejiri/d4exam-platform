@@ -139,6 +139,7 @@ export function scoreObjectiveAnswers(
     options: string[];
     /** Original A–D option texts before any shuffle. Used to resolve letter keys. */
     originalOptions?: string[];
+    marks?: number | null;
   }[],
   answers: Record<string, number>,
 ) {

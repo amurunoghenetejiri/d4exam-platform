@@ -16,6 +16,7 @@ import { Route as ApplicationStatusRouteImport } from './routes/application-stat
 import { Route as FeaturesRouteImport } from './routes/features'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as NotificationGalleryRouteImport } from './routes/notification-gallery'
 import { Route as OfficerRouteImport } from './routes/officer'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as PrivacyRouteImport } from './routes/privacy'
@@ -128,6 +129,11 @@ const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotificationGalleryRoute = NotificationGalleryRouteImport.update({
+  id: '/notification-gallery',
+  path: '/notification-gallery',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OfficerRoute = OfficerRouteImport.update({
@@ -529,6 +535,7 @@ export interface FileRoutesByFullPath {
   '/features': typeof FeaturesRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/notification-gallery': typeof NotificationGalleryRoute
   '/officer': typeof OfficerRouteWithChildren
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
@@ -615,6 +622,7 @@ export interface FileRoutesByTo {
   '/features': typeof FeaturesRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/notification-gallery': typeof NotificationGalleryRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
@@ -698,6 +706,7 @@ export interface FileRoutesById {
   '/features': typeof FeaturesRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
+  '/notification-gallery': typeof NotificationGalleryRoute
   '/officer': typeof OfficerRouteWithChildren
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
@@ -787,6 +796,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/forgot-password'
     | '/login'
+    | '/notification-gallery'
     | '/officer'
     | '/pricing'
     | '/privacy'
@@ -873,6 +883,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/forgot-password'
     | '/login'
+    | '/notification-gallery'
     | '/pricing'
     | '/privacy'
     | '/reset-password'
@@ -955,6 +966,7 @@ export interface FileRouteTypes {
     | '/features'
     | '/forgot-password'
     | '/login'
+    | '/notification-gallery'
     | '/officer'
     | '/pricing'
     | '/privacy'
@@ -1043,6 +1055,7 @@ export interface RootRouteChildren {
   FeaturesRoute: typeof FeaturesRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
+  NotificationGalleryRoute: typeof NotificationGalleryRoute
   OfficerRoute: typeof OfficerRouteWithChildren
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
@@ -1104,6 +1117,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/notification-gallery': {
+      id: '/notification-gallery'
+      path: '/notification-gallery'
+      fullPath: '/notification-gallery'
+      preLoaderRoute: typeof NotificationGalleryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/officer': {
@@ -1863,6 +1883,7 @@ const rootRouteChildren: RootRouteChildren = {
   FeaturesRoute: FeaturesRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
+  NotificationGalleryRoute: NotificationGalleryRoute,
   OfficerRoute: OfficerRouteWithChildren,
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
