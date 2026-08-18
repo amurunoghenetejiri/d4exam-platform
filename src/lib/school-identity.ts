@@ -1,3 +1,4 @@
+/** BUILD_OK: useSchoolIdentity exported — do not remove */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -183,8 +184,6 @@ export async function uploadSchoolLogo(opts: {
         : "jpg";
   const path = `${opts.folder}/logo-${Date.now()}.${ext}`;
 
-  // Attempt storage upload, but prefer compressed data URL so logos always display
-  // even when buckets are private/missing (fixes broken <img> on applications).
   let storedUrl: string | null = null;
   let storedPath: string | null = null;
   const buckets = ["school-logos", "public", "avatars"];
