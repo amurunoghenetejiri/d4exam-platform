@@ -224,20 +224,8 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       /* optional RPC */
     }
 
-    if (!looksLikeEmail(ident) && hasAdminKey()) {
-      try {
-        const provisioned = await provisionStudentLogin({
-          schoolId,
-          identifier: ident,
-          password,
-        });
-        if (provisioned?.email) {
-          // use provisioned path on retry below if needed
-        }
-      } catch (e) {
-        console.error("[login] SUPABASE_SERVICE_ROLE_KEY missing — student provisioning skipped.");
-      }
-    }
+
+
 
     let emailForAuth = looksLikeEmail(ident) ? ident.toLowerCase() : ident;
 
@@ -265,10 +253,14 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       try {
         const provisioned = await provisionStudentLogin({
           schoolId,
+          schoolCode,
           identifier: ident,
           password,
         });
-        if (provisioned?.email && provisioned?.password) {
+        if (provisioned && "error" in provisioned && provisioned.error) {
+          return { error: String(provisioned.error) };
+        }
+        if (provisioned && "email" in provisioned && provisioned.email) {
           signInPassword = provisioned.password;
           const retry = await client.auth.signInWithPassword({
             email: provisioned.email,
@@ -276,8 +268,6 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
           });
           signIn = retry.data;
           error = retry.error;
-        } else if (provisioned && "error" in provisioned && provisioned.error) {
-          return { error: String(provisioned.error) };
         }
       } catch (e) {
         console.error("[login] provision retry failed", e);
