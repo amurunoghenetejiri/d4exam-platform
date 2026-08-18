@@ -78,7 +78,7 @@ function friendlyStatus(status: string) {
     };
   }
   return {
-    title: "Pending approval",
+    title: "Submitted",
     tone: "text-slate-800 bg-slate-50 border-slate-200",
     icon: Clock,
     message:
@@ -198,9 +198,11 @@ function Page() {
     try {
       const result = await setPasswordFn({
         data: {
-          email: email.trim().toLowerCase(),
-          trackingCode: refId.trim(),
+          email: (app.applicant_email || email).trim().toLowerCase(),
+          trackingCode: (app.tracking_code || refId).trim(),
           password: pwd,
+          applicationId: app.id,
+          adminEmail: (app.issued_admin_email || app.applicant_email || email).trim().toLowerCase(),
         },
       });
       if (result && "error" in result && result.error) {
@@ -232,7 +234,7 @@ function Page() {
           </p>
         </div>
 
-        <form onSubmit={check} className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <form onSubmit={check} className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="space-y-1.5">
             <Label htmlFor="email">Applicant email</Label>
             <Input
@@ -240,9 +242,9 @@ function Page() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@school.edu"
               className="h-11"
               required
+              autoComplete="email"
             />
           </div>
           <div className="space-y-1.5">
@@ -251,16 +253,12 @@ function Page() {
               id="ref"
               value={refId}
               onChange={(e) => setRefId(e.target.value)}
-              placeholder="Shown after you applied"
-              className="h-11"
+              className="h-11 font-mono"
               required
+              placeholder="e.g. D4-XXXXXX"
             />
           </div>
-          {error ? (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          ) : null}
+          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
           <Button type="submit" className="h-11 w-full font-semibold" disabled={loading}>
             {loading ? (
               <>
@@ -272,133 +270,121 @@ function Page() {
           </Button>
         </form>
 
-        {rows && rows.length > 0 && (
-          <ul className="space-y-4">
-            {rows.map((r) => {
-              const info = friendlyStatus(r.status);
-              const Icon = info.icon;
-              const approved = String(r.status).toLowerCase() === "approved";
-              const schoolCode = r.issued_school_code;
-              const adminEmail = r.issued_admin_email || r.applicant_email;
+        {rows?.map((r) => {
+          const meta = friendlyStatus(r.status);
+          const Icon = meta.icon;
+          const approved = r.status.toLowerCase() === "approved";
+          const schoolCode = r.issued_school_code;
+          const adminEmail = r.issued_admin_email || r.applicant_email;
 
-              return (
-                <li key={r.id} className={`rounded-2xl border p-5 shadow-sm ${info.tone}`}>
-                  <div className="flex items-start gap-3">
-                    <Icon className="mt-0.5 h-5 w-5 shrink-0" />
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <div>
-                        <p className="text-lg font-extrabold">{r.school_name}</p>
-                        <p className="text-sm font-semibold">{info.title}</p>
-                      </div>
-                      <p className="text-sm leading-relaxed">{info.message}</p>
+          return (
+            <div
+              key={r.id}
+              className={`space-y-3 rounded-2xl border p-5 ${meta.tone}`}
+            >
+              <div className="flex items-start gap-2">
+                <Icon className="mt-0.5 h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-bold">{r.school_name}</p>
+                  <p className="text-sm font-semibold">{meta.title}</p>
+                  <p className="mt-1 text-sm opacity-90">{meta.message}</p>
+                </div>
+              </div>
 
-                      {r.review_notes ? (
-                        <p className="rounded-lg border border-black/5 bg-white/70 px-3 py-2 text-sm">
-                          <span className="font-semibold">Message from reviewer: </span>
-                          {r.review_notes}
-                        </p>
-                      ) : null}
+              {r.review_notes ? (
+                <p className="rounded-lg border border-black/5 bg-white/60 px-3 py-2 text-sm">
+                  <span className="font-semibold">Note: </span>
+                  {r.review_notes}
+                </p>
+              ) : null}
 
-                      {approved && schoolCode && (
-                        <div className="space-y-3 rounded-xl border border-emerald-200 bg-white p-4 text-slate-800">
-                          <p className="text-sm font-bold text-emerald-900">Your school is ready</p>
-                          <ul className="space-y-1 text-sm">
-                            <li>
-                              <span className="text-slate-500">School code:</span>{" "}
-                              <strong className="font-mono">{schoolCode}</strong>
-                            </li>
-                            <li>
-                              <span className="text-slate-500">Admin email:</span>{" "}
-                              <strong>{adminEmail}</strong>
-                            </li>
-                          </ul>
-
-                          {pwdOk ? (
-                            <Alert className="border-emerald-300 bg-emerald-50">
-                              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                              <AlertTitle className="text-emerald-900">Password saved</AlertTitle>
-                              <AlertDescription className="text-emerald-900">
-                                Sign in with school code{" "}
-                                <strong className="font-mono">{pwdOk.schoolCode}</strong>, email{" "}
-                                <strong>{pwdOk.adminEmail}</strong>, and the password you just set.
-                                <div className="mt-3">
-                                  <Button
-                                    type="button"
-                                    className="h-10 font-semibold"
-                                    onClick={() => navigate({ to: "/login" })}
-                                  >
-                                    Go to login
-                                  </Button>
-                                </div>
-                              </AlertDescription>
-                            </Alert>
-                          ) : (
-                            <div className="space-y-3 border-t border-emerald-100 pt-3">
-                              <p className="text-sm font-semibold text-slate-800">
-                                Create your login password
-                              </p>
-                              <div className="space-y-1.5">
-                                <Label htmlFor={`pwd-${r.id}`}>New password</Label>
-                                <Input
-                                  id={`pwd-${r.id}`}
-                                  type="password"
-                                  value={pwd}
-                                  onChange={(e) => setPwd(e.target.value)}
-                                  className="h-11"
-                                  autoComplete="new-password"
-                                  placeholder="At least 8 characters"
-                                />
-                              </div>
-                              <div className="space-y-1.5">
-                                <Label htmlFor={`pwd2-${r.id}`}>Confirm password</Label>
-                                <Input
-                                  id={`pwd2-${r.id}`}
-                                  type="password"
-                                  value={pwd2}
-                                  onChange={(e) => setPwd2(e.target.value)}
-                                  className="h-11"
-                                  autoComplete="new-password"
-                                />
-                              </div>
-                              {pwdError ? <p className="text-sm text-rose-600">{pwdError}</p> : null}
-                              <Button
-                                type="button"
-                                className="h-11 w-full font-semibold"
-                                disabled={pwdBusy}
-                                onClick={() => void confirmPassword(r)}
-                              >
-                                {pwdBusy ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving…
-                                  </>
-                                ) : (
-                                  "Confirm password"
-                                )}
-                              </Button>
-                              <p className="text-xs text-slate-500">
-                                After you confirm, go to the login page and open your school admin
-                                dashboard.
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {approved && !schoolCode && (
-                        <p className="text-sm">
-                          Approval is recorded. Your school login details are being prepared — refresh
-                          this page in a moment.
-                        </p>
-                      )}
-                    </div>
+              {approved && schoolCode && (
+                <div className="space-y-3 rounded-xl border border-emerald-200 bg-white p-4 text-slate-800">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Your school is ready</p>
+                    <p className="mt-1 text-sm">
+                      School code: <strong className="font-mono">{schoolCode}</strong>
+                      <br />
+                      Admin email: <strong>{adminEmail}</strong>
+                    </p>
                   </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
 
-        <p className="text-center text-xs text-slate-500">
+                  {pwdOk ? (
+                    <Alert className="border-emerald-200 bg-emerald-50">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-700" />
+                      <AlertTitle>Password saved</AlertTitle>
+                      <AlertDescription className="mt-2 space-y-2 text-sm">
+                        <p>
+                          Sign in with school code <strong className="font-mono">{pwdOk.schoolCode}</strong>,
+                          email <strong>{pwdOk.adminEmail}</strong>, and the password you just set.
+                        </p>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <Button asChild className="font-semibold">
+                            <Link to="/login">Go to login</Link>
+                          </Button>
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <div className="space-y-3 border-t border-emerald-100 pt-3">
+                      <p className="text-sm font-semibold text-slate-800">Create your login password</p>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`pwd-${r.id}`}>New password</Label>
+                        <Input
+                          id={`pwd-${r.id}`}
+                          type="password"
+                          value={pwd}
+                          onChange={(e) => setPwd(e.target.value)}
+                          className="h-11"
+                          autoComplete="new-password"
+                          placeholder="At least 8 characters"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`pwd2-${r.id}`}>Confirm password</Label>
+                        <Input
+                          id={`pwd2-${r.id}`}
+                          type="password"
+                          value={pwd2}
+                          onChange={(e) => setPwd2(e.target.value)}
+                          className="h-11"
+                          autoComplete="new-password"
+                        />
+                      </div>
+                      {pwdError ? <p className="text-sm text-rose-600">{pwdError}</p> : null}
+                      <Button
+                        type="button"
+                        className="h-11 w-full font-semibold"
+                        disabled={pwdBusy}
+                        onClick={() => void confirmPassword(r)}
+                      >
+                        {pwdBusy ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Saving…
+                          </>
+                        ) : (
+                          "Confirm password"
+                        )}
+                      </Button>
+                      <p className="text-xs text-slate-500">
+                        After you confirm, go to the login page and open your school admin dashboard.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {approved && !schoolCode && (
+                <p className="text-sm">
+                  Approval is recorded. Your school login details are being prepared — refresh this page in a
+                  moment.
+                </p>
+              )}
+            </div>
+          );
+        })}
+
+        <p className="text-center text-sm text-slate-500">
           Need to apply?{" "}
           <Link to="/school-application" className="font-semibold text-primary hover:underline">
             Start a school application
