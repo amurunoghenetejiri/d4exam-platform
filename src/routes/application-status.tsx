@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { CheckCircle2, Loader2, Clock, Info, XCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { setApprovedSchoolAdminPassword } from "@/lib/auth.school-admin.functions";
+import { setApprovedSchoolAdminPassword } from "@/lib/application-password.functions";
 
 export const Route = createFileRoute("/application-status")({
   head: () => ({
@@ -112,7 +112,6 @@ function Page() {
     }
   }, []);
 
-  // Live updates while this page is open
   useEffect(() => {
     if (!rows?.length) return;
     const ids = rows.map((r) => r.id);
@@ -125,9 +124,7 @@ function Page() {
           const next = payload.new as AppRow | undefined;
           if (!next?.id) return;
           setRows((prev) =>
-            prev
-              ? prev.map((r) => (r.id === next.id ? { ...r, ...next } : r))
-              : prev,
+            prev ? prev.map((r) => (r.id === next.id ? { ...r, ...next } : r)) : prev,
           );
         },
       )
@@ -285,10 +282,7 @@ function Page() {
               const adminEmail = r.issued_admin_email || r.applicant_email;
 
               return (
-                <li
-                  key={r.id}
-                  className={`rounded-2xl border p-5 shadow-sm ${info.tone}`}
-                >
+                <li key={r.id} className={`rounded-2xl border p-5 shadow-sm ${info.tone}`}>
                   <div className="flex items-start gap-3">
                     <Icon className="mt-0.5 h-5 w-5 shrink-0" />
                     <div className="min-w-0 flex-1 space-y-2">
@@ -324,8 +318,9 @@ function Page() {
                               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                               <AlertTitle className="text-emerald-900">Password saved</AlertTitle>
                               <AlertDescription className="text-emerald-900">
-                                Sign in with school code <strong className="font-mono">{pwdOk.schoolCode}</strong>,
-                                email <strong>{pwdOk.adminEmail}</strong>, and the password you just set.
+                                Sign in with school code{" "}
+                                <strong className="font-mono">{pwdOk.schoolCode}</strong>, email{" "}
+                                <strong>{pwdOk.adminEmail}</strong>, and the password you just set.
                                 <div className="mt-3">
                                   <Button
                                     type="button"
@@ -365,9 +360,7 @@ function Page() {
                                   autoComplete="new-password"
                                 />
                               </div>
-                              {pwdError ? (
-                                <p className="text-sm text-rose-600">{pwdError}</p>
-                              ) : null}
+                              {pwdError ? <p className="text-sm text-rose-600">{pwdError}</p> : null}
                               <Button
                                 type="button"
                                 className="h-11 w-full font-semibold"
@@ -383,7 +376,7 @@ function Page() {
                                 )}
                               </Button>
                               <p className="text-xs text-slate-500">
-                                After you confirm, you will go to the login page and open your school admin
+                                After you confirm, go to the login page and open your school admin
                                 dashboard.
                               </p>
                             </div>
@@ -393,8 +386,8 @@ function Page() {
 
                       {approved && !schoolCode && (
                         <p className="text-sm">
-                          Approval is recorded. Your school login details are being prepared — refresh this
-                          page in a moment.
+                          Approval is recorded. Your school login details are being prepared — refresh
+                          this page in a moment.
                         </p>
                       )}
                     </div>
