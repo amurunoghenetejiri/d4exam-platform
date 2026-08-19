@@ -90,12 +90,11 @@ async function loadProgrammeCourses(
     for (const c of tagged ?? []) addCourse(c);
   }
 
-  {
+  if (byId.size === 0) {
     let q = supabase
       .from("courses")
       .select("id, code, name, semester_id, level_id")
       .eq("school_id", schoolId)
-      .is("department_id", null)
       .eq("status", "active");
     if (levelId) {
       q = q.or(`level_id.eq.${levelId},level_id.is.null`);
@@ -178,13 +177,14 @@ export function useStudentContext() {
     queryFn: async (): Promise<StudentContext | null> => {
       if (!session?.profileId || !session.schoolId) return null;
 
+      const studentSelect =
+        "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, status, departments(name), faculties(name), levels(name), profiles(full_name, email)";
+
       let student: Record<string, unknown> | null = null;
 
       const { data: byProfile, error: sErr } = await supabase
         .from("students")
-        .select(
-          "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, full_name, status, departments(name), faculties(name), levels(name)",
-        )
+        .select(studentSelect)
         .eq("profile_id", session.profileId)
         .eq("school_id", session.schoolId)
         .maybeSingle();
@@ -195,9 +195,7 @@ export function useStudentContext() {
       if (!student && session.identifier) {
         const { data: byMatric } = await supabase
           .from("students")
-          .select(
-            "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, full_name, status, departments(name), faculties(name), levels(name)",
-          )
+          .select(studentSelect)
           .eq("school_id", session.schoolId)
           .ilike("matric_number", session.identifier)
           .limit(1)
@@ -205,7 +203,51 @@ export function useStudentContext() {
         student = (byMatric as Record<string, unknown> | null) ?? null;
       }
 
+      if (!student && session.identifier) {
+        const { data: bySid } = await supabase
+          .from("students")
+          .select(studentSelect)
+          .eq("school_id", session.schoolId)
+          .ilike("student_id", session.identifier)
+          .limit(1)
+          .maybeSingle();
+        student = (bySid as Record<string, unknown> | null) ?? null;
+      }
+
+      if (!student && session.email) {
+        const emailLocal = session.email.split("@")[0] || "";
+        const norm = emailLocal.replace(/[^a-z0-9]/gi, "").toLowerCase();
+        if (norm.length >= 6) {
+          const { data: candidates } = await supabase
+            .from("students")
+            .select(studentSelect)
+            .eq("school_id", session.schoolId)
+            .limit(2000);
+          const rows = (candidates ?? []) as Record<string, unknown>[];
+          student =
+            rows.find((s) => {
+              const m = String(s.matric_number || s.student_id || "")
+                .replace(/[^a-z0-9]/gi, "")
+                .toLowerCase();
+              return m && (m === norm || norm.includes(m) || m.includes(norm));
+            }) ?? null;
+        }
+      }
+
       if (!student) return null;
+
+      if (!student.profile_id && session.profileId) {
+        try {
+          await supabase
+            .from("students")
+            .update({ profile_id: session.profileId } as never)
+            .eq("id", student.id as string)
+            .eq("school_id", session.schoolId);
+          student.profile_id = session.profileId;
+        } catch {
+          /* ignore */
+        }
+      }
 
       const [term, linksRes] = await Promise.all([
         loadActiveSessionSemester(session.schoolId),
@@ -248,7 +290,11 @@ export function useStudentContext() {
           (student.matric_number as string | null) ?? (student.student_id as string | null) ?? null,
         schoolId: student.school_id as string,
         profileId: (student.profile_id as string | null) ?? session.profileId,
-        fullName: (student.full_name as string | null) || session.fullName,
+        fullName:
+          ((student.profiles as { full_name?: string } | null)?.full_name as string | null) ||
+          session.fullName ||
+          (student.matric_number as string | null) ||
+          "",
         email: session.email,
         schoolName: session.schoolName,
         departmentId: (student.department_id as string | null) ?? null,
@@ -298,28 +344,23 @@ export function examAvailability(
   status: string,
   scheduledStart: string | null,
   scheduledEnd: string | null,
-): "available" | "upcoming" | "missed" | "closed" {
+): "available" | "upcoming" | "ended" | "blocked" {
   const s = status.toLowerCase();
-  if (s === "closed" || s === "completed" || s === "cancelled") return "closed";
+  if (s === "closed" || s === "completed" || s === "cancelled") return "ended";
+  if (s === "ongoing") return "available";
+  if (!["approved", "scheduled", "published"].includes(s)) return "blocked";
   const now = Date.now();
-  if (scheduledEnd && new Date(scheduledEnd).getTime() < now) return "missed";
+  if (scheduledEnd && new Date(scheduledEnd).getTime() < now) return "ended";
   if (scheduledStart && new Date(scheduledStart).getTime() > now) return "upcoming";
-  if (canStartExam(status, scheduledStart, scheduledEnd)) return "available";
-  return "closed";
+  return "available";
 }
 
 export function formatExamWindow(start: string | null, end: string | null): string {
-  if (!start && !end) return "Open when approved";
-  const fmt = (iso: string) => {
-    try {
-      return new Date(iso).toLocaleString(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      });
-    } catch {
-      return iso;
-    }
-  };
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
   if (start && end) return `${fmt(start)} – ${fmt(end)}`;
   if (start) return `From ${fmt(start)}`;
   return `Until ${fmt(end!)}`;
