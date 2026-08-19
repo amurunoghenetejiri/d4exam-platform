@@ -1,10 +1,6 @@
 name: Restore full CBT session
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/restore-cbt.yml'
-      - 'DEPLOY_TRIGGER.txt'
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -14,25 +10,5 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Restore full CBT and apply notify/bell fixes
-        run: |
-          set -euo pipefail
-          GOOD=b5f003bdda6571d294fe187dc3eefdfd91895204
-          git show "$GOOD:src/components/cbt/CbtExamSession.impl.tsx" > src/components/cbt/CbtExamSession.impl.tsx
-          echo "Restored CBT lines: $(wc -l < src/components/cbt/CbtExamSession.impl.tsx)"
-
-          # Slightly larger notification bell
-          sed -i 's/Bell className="h-5 w-5 text-slate-600"/Bell className="h-6 w-6 text-slate-600"/' src/components/layout/AppShell.tsx || true
-          sed -i 's/absolute right-1 top-1 flex h-4 min-w-4/absolute right-0.5 top-0.5 flex h-[18px] min-w-[18px]/' src/components/layout/AppShell.tsx || true
-          sed -i 's/text-\[9px\] font-bold/text-[10px] font-bold/' src/components/layout/AppShell.tsx || true
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "fix(cbt+notify): restore full CBT from b5f003b + larger notification bell"
-            git push origin HEAD:main
-          fi
+      - name: noop
+        run: echo "CBT already restored on main"
