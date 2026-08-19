@@ -13,22 +13,21 @@ export type LiveCamFramePayload = {
   attemptId: string;
   studentId: string;
   examId: string;
-  frame: string; // data:image/jpeg;base64,...
+  frame: string;
   ts: number;
   faceStatus?: string;
   cameraActive?: boolean;
 };
 
 export const LIVE_CAM_EVENT = "frame";
-/** ~2 fps — stable on mobile without flooding Realtime */
-export const LIVE_CAM_FRAME_INTERVAL_MS = 900;
-export const LIVE_CAM_STALE_MS = 6_000;
+/** ~1.5 fps — clearer tiles without flooding Realtime */
+export const LIVE_CAM_FRAME_INTERVAL_MS = 650;
+export const LIVE_CAM_STALE_MS = 5_000;
 
 export function liveCamChannelName(schoolId: string): string {
   return `live-cam:${schoolId}`;
 }
 
-/** Persistent elements so we do not create/destroy video every frame (major lag source). */
 let sharedVideo: HTMLVideoElement | null = null;
 let sharedCanvas: HTMLCanvasElement | null = null;
 
@@ -62,7 +61,6 @@ function getSharedCanvas(): HTMLCanvasElement | null {
   return sharedCanvas;
 }
 
-/** Capture a small JPEG data-URL from an active MediaStream (for broadcast). */
 export async function captureJpegFromStream(
   stream: MediaStream,
   opts?: { maxWidth?: number; quality?: number },
@@ -71,14 +69,13 @@ export async function captureJpegFromStream(
   const tracks = stream.getVideoTracks();
   if (!tracks.some((t) => t.readyState === "live" && t.enabled !== false)) return null;
 
-  const maxWidth = opts?.maxWidth ?? 240;
-  const quality = opts?.quality ?? 0.38;
+  const maxWidth = opts?.maxWidth ?? 360;
+  const quality = opts?.quality ?? 0.52;
 
   const video = getSharedVideo();
   const canvas = getSharedCanvas();
   if (!video || !canvas) return null;
 
-  // Only re-bind when stream identity changes
   if (video.srcObject !== stream) {
     video.srcObject = stream;
     try {
@@ -135,10 +132,6 @@ export type LiveCamPublisher = {
   stop: () => void;
 };
 
-/**
- * Publish camera frames while the exam is active.
- * Call stop() when the exam ends or the camera is closed — streaming stops immediately.
- */
 export function startLiveCamPublisher(opts: {
   schoolId: string;
   attemptId: string;
@@ -182,7 +175,6 @@ export function startLiveCamPublisher(opts: {
         faceStatus: meta.faceStatus,
         cameraActive: meta.cameraActive !== false,
       };
-      // fire-and-forget — do not await ack (keeps student timer smooth)
       void channel.send({
         type: "broadcast",
         event: LIVE_CAM_EVENT,
@@ -214,7 +206,6 @@ export function startLiveCamPublisher(opts: {
         void supabase.removeChannel(channel);
         channel = null;
       }
-      // Detach stream from shared video so camera can fully stop
       if (sharedVideo && sharedVideo.srcObject) {
         try {
           sharedVideo.srcObject = null;
@@ -230,28 +221,34 @@ export type LiveCamSubscriber = {
   stop: () => void;
 };
 
-/**
- * Officer side: receive near-live frames for a school.
- * onFrame is called for each broadcast; UI should drop frames when attempt is no longer in progress.
- */
-export function startLiveCamSubscriber(opts: {
-  schoolId: string;
-  onFrame: (payload: LiveCamFramePayload) => void;
-}): LiveCamSubscriber {
+/** Accepts either ({ schoolId, onFrame }) or (schoolId, onFrame) for call-site compatibility. */
+export function startLiveCamSubscriber(
+  optsOrSchoolId:
+    | { schoolId: string; onFrame: (payload: LiveCamFramePayload) => void }
+    | string,
+  onFrameMaybe?: (payload: LiveCamFramePayload) => void,
+): LiveCamSubscriber {
+  const opts =
+    typeof optsOrSchoolId === "string"
+      ? { schoolId: optsOrSchoolId, onFrame: onFrameMaybe! }
+      : optsOrSchoolId;
+
   const channelName = liveCamChannelName(opts.schoolId);
   const channel = supabase.channel(channelName, {
     config: { broadcast: { self: false } },
   });
 
-  // Drop super-stale frames so UI does not jump backward in time
   let lastTsByAttempt = new Map<string, number>();
 
   channel.on("broadcast", { event: LIVE_CAM_EVENT }, ({ payload }) => {
-    const p = payload as LiveCamFramePayload;
-    if (!p?.attemptId || !p?.frame) return;
-    const prev = lastTsByAttempt.get(p.attemptId) ?? 0;
-    if (p.ts && p.ts < prev - 500) return; // ignore out-of-order old frames
-    if (p.ts) lastTsByAttempt.set(p.attemptId, p.ts);
+    const raw = payload as LiveCamFramePayload & { attempt_id?: string };
+    if (!raw?.frame) return;
+    const attemptId = raw.attemptId || raw.attempt_id || "";
+    if (!attemptId) return;
+    const p: LiveCamFramePayload = { ...raw, attemptId };
+    const prev = lastTsByAttempt.get(attemptId) ?? 0;
+    if (p.ts && p.ts < prev - 500) return;
+    if (p.ts) lastTsByAttempt.set(attemptId, p.ts);
     opts.onFrame(p);
   });
 
