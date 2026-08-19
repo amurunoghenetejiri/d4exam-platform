@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { PageHeader, SectionCard, StatusBadge, EmptyState, NavCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { GraduationCap, Users, BookOpen, FileText, Bell } from "lucide-react";
-import { useCount, useRows } from "@/lib/queries";
+import { useRows } from "@/lib/queries";
 import { useSessionUser } from "@/lib/session";
+import { getSchoolDashboardCounts } from "@/lib/student.server";
 
 export const Route = createFileRoute("/admin/")({
   head: () => ({
@@ -31,10 +33,20 @@ function Page() {
   const schoolId = user?.schoolId ?? null;
   const enabled = Boolean(schoolId);
 
-  const students = useCount("students", schoolId ? [{ column: "school_id", value: schoolId }] : [], enabled);
-  const teachers = useCount("teachers", schoolId ? [{ column: "school_id", value: schoolId }] : [], enabled);
-  const courses = useCount("courses", schoolId ? [{ column: "school_id", value: schoolId }] : [], enabled);
-  const exams = useCount("examinations", schoolId ? [{ column: "school_id", value: schoolId }] : [], enabled);
+  const countsQ = useQuery({
+    queryKey: ["school-dashboard-counts", schoolId],
+    enabled,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      if (!schoolId) return { students: 0, teachers: 0, courses: 0, examinations: 0 };
+      return getSchoolDashboardCounts({ data: { schoolId } });
+    },
+  });
+  const students = { isLoading: countsQ.isLoading, data: countsQ.data?.students };
+  const teachers = { isLoading: countsQ.isLoading, data: countsQ.data?.teachers };
+  const courses = { isLoading: countsQ.isLoading, data: countsQ.data?.courses };
+  const exams = { isLoading: countsQ.isLoading, data: countsQ.data?.examinations };
 
   const todayExams = useRows<Exam>({
     table: "examinations",
