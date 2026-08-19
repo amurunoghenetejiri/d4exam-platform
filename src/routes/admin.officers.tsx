@@ -7,7 +7,7 @@ import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/d
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createSchoolUser } from "@/lib/auth.functions";
+import { createSchoolUser } from "@/lib/auth.school-admin.functions";
 import { useSessionUser } from "@/lib/session";
 import { useRows } from "@/lib/queries";
 import { toast } from "sonner";
