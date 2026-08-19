@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/select";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/students")({
   head: () => ({
@@ -27,7 +26,7 @@ type StudentRow = {
   id: string;
   student_id: string;
   matric_number: string | null;
-  full_name: string | null;
+  full_name?: string | null;
   status: string;
   faculty_id: string | null;
   department_id: string | null;
@@ -41,7 +40,8 @@ type StudentRow = {
 function displayName(s: StudentRow) {
   const fromStudent = (s.full_name || "").trim();
   const fromProfile = (s.profiles?.full_name || "").trim();
-  const name = fromStudent || fromProfile;
+  // Production has no students.full_name — prefer profiles.full_name
+  const name = fromProfile || fromStudent;
   if (name && name.toLowerCase() !== "student" && name.toLowerCase() !== "student student") {
     return name;
   }
@@ -55,7 +55,6 @@ function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
   const schoolCode = user?.schoolCode ?? "";
-  const qc = useQueryClient();
 
   const [search, setSearch] = useState("");
   const [facultyFilter, setFacultyFilter] = useState<string>("all");
@@ -70,13 +69,13 @@ function Page() {
     staleTime: 60_000,
     queryFn: async () => {
       const pageSize = 1000;
-      const selectFull = `id, student_id, matric_number, full_name, status,
+      const selectFull = `id, student_id, matric_number, status,
            faculty_id, department_id, level_id,
            profiles(full_name, email),
            faculties(name, code),
            departments(name, code),
            levels(name, code)`;
-      const selectBasic = `id, student_id, matric_number, full_name, status,
+      const selectBasic = `id, student_id, matric_number, status,
            faculty_id, department_id, level_id,
            profiles(full_name, email)`;
 
@@ -88,7 +87,7 @@ function Page() {
             .from("students")
             .select(select)
             .eq("school_id", schoolId!)
-            .order("full_name", { ascending: true })
+            .order("matric_number", { ascending: true })
             .range(from, from + pageSize - 1);
           if (error) throw error;
           const chunk = (data ?? []) as StudentRow[];
@@ -108,7 +107,7 @@ function Page() {
         } catch {
           const { data, error } = await supabase
             .from("students")
-            .select("id, student_id, matric_number, full_name, status, profiles(full_name, email)")
+            .select("id, student_id, matric_number, status, profiles(full_name, email)")
             .eq("school_id", schoolId!)
             .limit(5000);
           if (error) throw error;
