@@ -24,9 +24,21 @@ function publicSupabaseEnv() {
   return { url, key };
 }
 
+function serviceRoleKey(): string {
+  return (
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["SUPABASE_SECRET_KEY"] ||
+    process.env["SUPABASE_SERVICE_KEY"] ||
+    process.env["SB_SERVICE_ROLE_KEY"] ||
+    ""
+  );
+}
+
 /**
- * Create staff auth user WITHOUT service role (Lovable Cloud safe).
- * Uses public signUp + publishable key only — never imports client.server.
+ * Create staff auth user.
+ * Prefer Admin API (service role) so we never send confirmation emails and
+ * never hit "email rate limit exceeded". Falls back to public signUp only
+ * when no service role key is configured.
  */
 async function createStaffAuthUser(opts: {
   email: string;
@@ -35,9 +47,67 @@ async function createStaffAuthUser(opts: {
   role: string;
 }): Promise<{ id: string }> {
   const { url, key } = publicSupabaseEnv();
-  if (!url || !key) {
+  if (!url) {
     throw new Error(
-      "Missing SUPABASE_URL / publishable key on the server. Check Vercel env or Lovable .env (VITE_SUPABASE_*).",
+      "Missing SUPABASE_URL on the server. Check Vercel env (SUPABASE_URL / VITE_SUPABASE_URL).",
+    );
+  }
+
+  const service = serviceRoleKey();
+  const email = opts.email.trim().toLowerCase();
+
+  // Preferred path: admin.createUser — no email sent, no rate limit on mail
+  if (service) {
+    const admin = createClient<Database>(url, service, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+
+    let existingId: string | null = null;
+    try {
+      for (let page = 1; page <= 5 && !existingId; page++) {
+        const { data: listed } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+        const found = listed?.users?.find((u) => (u.email || "").toLowerCase() === email);
+        if (found?.id) existingId = found.id;
+        if (!listed?.users?.length || listed.users.length < 200) break;
+      }
+    } catch {
+      /* continue to create */
+    }
+
+    if (existingId) {
+      const { error: updErr } = await admin.auth.admin.updateUserById(existingId, {
+        password: opts.password,
+        email_confirm: true,
+        user_metadata: { full_name: opts.fullName, role: opts.role },
+      });
+      if (updErr) {
+        throw new Error(updErr.message || "Could not update existing login for this email.");
+      }
+      return { id: existingId };
+    }
+
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email,
+      password: opts.password,
+      email_confirm: true,
+      user_metadata: { full_name: opts.fullName, role: opts.role },
+    });
+    if (createErr || !created.user?.id) {
+      const msg = createErr?.message || "Could not create auth user";
+      if (/already|registered|exists/i.test(msg)) {
+        throw new Error(
+          `An account with email ${email} already exists. Try a different email, or reuse the same Officer/Staff ID password after checking Auth users.`,
+        );
+      }
+      throw new Error(msg);
+    }
+    return { id: created.user.id };
+  }
+
+  // Fallback: public signUp (may hit email rate limits if Confirm email is on)
+  if (!key) {
+    throw new Error(
+      "Missing publishable key and service role key. Add SUPABASE_SERVICE_ROLE_KEY on Vercel (recommended) so officer/teacher create does not send emails.",
     );
   }
 
@@ -46,7 +116,7 @@ async function createStaffAuthUser(opts: {
   });
 
   const { data, error } = await anon.auth.signUp({
-    email: opts.email,
+    email,
     password: opts.password,
     options: {
       data: { full_name: opts.fullName, role: opts.role },
@@ -55,16 +125,21 @@ async function createStaffAuthUser(opts: {
 
   if (error) {
     const msg = error.message || "Could not create auth user";
+    if (/rate limit|email rate/i.test(msg)) {
+      throw new Error(
+        "Email rate limit exceeded. Add SUPABASE_SERVICE_ROLE_KEY on Vercel so staff accounts are created without sending emails, or wait a few minutes and try again. Also disable Confirm email in Supabase Auth settings.",
+      );
+    }
     if (/already|registered|exists/i.test(msg)) {
       throw new Error(
-        `An account with email ${opts.email} already exists. Use a different email, or delete the existing auth user in Lovable Cloud → Users.`,
+        `An account with email ${email} already exists. Use a different email, or delete the existing auth user in Supabase → Authentication → Users.`,
       );
     }
     throw new Error(msg);
   }
   if (!data.user?.id) {
     throw new Error(
-      "Could not create auth user. If email confirmation is required, disable it in Lovable Cloud → Auth settings.",
+      "Could not create auth user. Disable Confirm email in Supabase Auth, or add SUPABASE_SERVICE_ROLE_KEY on Vercel.",
     );
   }
   return { id: data.user.id };
@@ -121,7 +196,7 @@ export async function createPerson(
 
   const fullName = `${data.firstName} ${data.lastName}`.trim();
 
-  // Staff (teacher / officer) NEVER uses service role — works on Lovable Cloud + Vercel.
+  // Staff auth: Admin API when service role is set (avoids email rate limits).
   const authUser = await createStaffAuthUser({
     email: data.email,
     password,
@@ -208,10 +283,7 @@ export async function createPerson(
 
 /**
  * Upsert a student by school_id + matric_number.
- * - If student exists: UPDATE profile fields only. NEVER touch exams, scores, results, history.
- * - If student has auth: keep the same auth_user_id / password unless no account yet.
- * - If new: create auth + profile + student row once.
- * Requires service role (student import). Teacher/officer create does not use this path.
+ * Requires service role (student import).
  */
 export async function upsertStudent(
   schoolId: string,
