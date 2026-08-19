@@ -38,10 +38,17 @@ export function parsePresence(metadata: Record<string, unknown> | null | undefin
     faceRaw === "ok" || faceRaw === "none" || faceRaw === "multi" || faceRaw === "unclear" || faceRaw === "unavailable"
       ? faceRaw
       : "unknown";
+  // Explicit false (tab hidden / paused) must win — do not infer active from face alone
+  const camExplicitOff =
+    m.cameraActive === false ||
+    m.camera_active === false ||
+    m.tabHidden === true ||
+    m.tab_hidden === true;
   const cam =
-    m.cameraActive === true ||
-    m.camera_active === true ||
-    (faceStatus !== "unavailable" && faceStatus !== "unknown" && m.cameraActive !== false);
+    !camExplicitOff &&
+    (m.cameraActive === true ||
+      m.camera_active === true ||
+      (faceStatus !== "unavailable" && faceStatus !== "unknown"));
 
   return {
     cameraActive: Boolean(cam),
@@ -86,10 +93,6 @@ export function faceLabel(presence: MonitorPresence): string {
   return "Unknown";
 }
 
-/**
- * Borders: green = clean writing, amber = minor, red = serious,
- * strong blue = submitted (officer can tell at a glance).
- */
 export function severityBorderClass(sev: MonitorSeverity): string {
   switch (sev) {
     case "normal":
