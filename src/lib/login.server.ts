@@ -1,5 +1,5 @@
 // Server-only helpers for the login flow.
-// Service role required to provision auth for students listed under Admin → Students.
+// Works with production schema: students has NO full_name column (names live on profiles only).
 
 export function hasAdminKey() {
   return Boolean(
@@ -9,28 +9,6 @@ export function hasAdminKey() {
         process.env["SUPABASE_SERVICE_KEY"] ||
         process.env["SB_SERVICE_ROLE_KEY"]),
   );
-}
-
-function normalizeName(s: string) {
-  return s.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function nameTokens(s: string) {
-  return normalizeName(s)
-    .split(" ")
-    .map((t) => t.replace(/[^a-z0-9']/g, ""))
-    .filter((t) => t.length >= 2);
-}
-
-function nameMatches(fullName: string | null | undefined, identifier: string): boolean {
-  const want = nameTokens(identifier);
-  if (want.length === 0) return false;
-  const have = nameTokens(fullName || "");
-  if (have.length === 0) return false;
-  const tokenHit = (w: string) => have.some((h) => h === w || h.startsWith(w) || w.startsWith(h));
-  if (want.every(tokenHit)) return true;
-  if (normalizeName(fullName || "") === normalizeName(identifier)) return true;
-  return false;
 }
 
 function normalizeMatric(s: string) {
@@ -43,6 +21,7 @@ function matricMatches(stored: string, password: string) {
   return a.length > 0 && a === b;
 }
 
+/** All historical synthetic email formats used across import/login versions. */
 export function studentAuthEmailCandidates(opts: {
   schoolId: string;
   schoolCode: string;
@@ -72,13 +51,18 @@ type StudentLookupRow = {
   id: string;
   student_id: string;
   matric_number: string | null;
-  full_name: string | null;
   status: string;
   profile_id: string | null;
 };
 
-const STUDENT_COLS = "id, student_id, matric_number, full_name, status, profile_id";
+// Production schema: no full_name on students
+const STUDENT_COLS = "id, student_id, matric_number, status, profile_id";
 
+/**
+ * Student login: school code + (matric OR any identifier) + password = matric.
+ * Finds student by matric/student_id (password or identifier).
+ * Names are optional — production DB has no students.full_name.
+ */
 export async function provisionStudentLogin(params: {
   schoolId: string;
   schoolCode: string;
@@ -102,57 +86,54 @@ export async function provisionStudentLogin(params: {
 
   let student: StudentLookupRow | null = null;
 
-  {
-    const { data: list } = await supabaseAdmin
-      .from("students")
-      .select(STUDENT_COLS)
-      .eq("school_id", schoolId)
-      .limit(3000);
-    const rows = (list ?? []) as StudentLookupRow[];
-    const idNorm = normalizeMatric(identifier);
-    const idLower = identifier.toLowerCase();
-    const passNorm = normalizeMatric(password);
+  // Load students for this school (in-memory match so slashes never break filters)
+  const { data: list, error: listErr } = await supabaseAdmin
+    .from("students")
+    .select(STUDENT_COLS)
+    .eq("school_id", schoolId)
+    .limit(5000);
 
-    student =
-      rows.find((s) => {
-        const m = (s.matric_number || "").trim();
-        const sid = (s.student_id || "").trim();
-        return (
-          m.toLowerCase() === idLower ||
-          sid.toLowerCase() === idLower ||
-          (idNorm.length >= 4 && (normalizeMatric(m) === idNorm || normalizeMatric(sid) === idNorm))
-        );
-      }) ?? null;
+  if (listErr) {
+    console.error("[provisionStudentLogin] students select failed:", listErr.message);
+    return { error: "Could not look up students. Contact support." };
+  }
 
-    if (!student && nameTokens(identifier).length >= 1) {
-      const matches = rows.filter((s) => nameMatches(s.full_name, identifier));
-      if (matches.length === 1) {
-        student = matches[0]!;
-      } else if (matches.length > 1) {
-        student =
-          matches.find(
-            (s) =>
-              matricMatches(s.matric_number || "", password) ||
-              matricMatches(s.student_id || "", password),
-          ) ?? null;
-      }
-    }
+  const rows = (list ?? []) as StudentLookupRow[];
+  const idNorm = normalizeMatric(identifier);
+  const passNorm = normalizeMatric(password);
+  const idLower = identifier.toLowerCase();
 
-    if (!student && passNorm.length >= 4) {
-      const byPass = rows.filter(
-        (s) =>
-          matricMatches(s.matric_number || "", password) ||
-          matricMatches(s.student_id || "", password),
+  // 1) Identifier is matric / student_id
+  student =
+    rows.find((s) => {
+      const m = (s.matric_number || "").trim();
+      const sid = (s.student_id || "").trim();
+      return (
+        m.toLowerCase() === idLower ||
+        sid.toLowerCase() === idLower ||
+        (idNorm.length >= 4 && (normalizeMatric(m) === idNorm || normalizeMatric(sid) === idNorm))
       );
-      if (byPass.length === 1) {
-        student = byPass[0]!;
-      } else if (byPass.length > 1 && nameTokens(identifier).length >= 1) {
-        student = byPass.find((s) => nameMatches(s.full_name, identifier)) ?? null;
-      }
+    }) ?? null;
+
+  // 2) Password is the matric — find student by password (works when user types name as identifier)
+  if (!student && passNorm.length >= 4) {
+    const byPass = rows.filter(
+      (s) =>
+        matricMatches(s.matric_number || "", password) ||
+        matricMatches(s.student_id || "", password),
+    );
+    if (byPass.length === 1) {
+      student = byPass[0]!;
+    } else if (byPass.length > 1) {
+      student =
+        byPass.find((s) => (s.matric_number || "").trim().toLowerCase() === password.toLowerCase()) ??
+        byPass[0] ??
+        null;
     }
   }
 
   if (!student) return null;
+
   if (String(student.status || "").toLowerCase() === "suspended") {
     return { error: "This student account is suspended. Contact your school." };
   }
@@ -160,12 +141,16 @@ export async function provisionStudentLogin(params: {
   const matric = (student.matric_number || student.student_id || "").trim();
   if (!matric) return null;
 
+  // Password must equal matric (slash/case ignored)
   if (!matricMatches(matric, password) && !matricMatches(student.student_id || "", password)) {
     return null;
   }
 
   const candidates = studentAuthEmailCandidates({ schoolId, schoolCode, matric });
-  const fullName = (student.full_name || identifier).trim();
+  let fullName = identifier;
+  if (matricMatches(identifier, matric) || normalizeMatric(identifier) === normalizeMatric(matric)) {
+    fullName = matric;
+  }
 
   let authUserId: string | null = null;
   let workingEmail = candidates[0]!;
@@ -180,6 +165,8 @@ export async function provisionStudentLogin(params: {
       authUserId = profile.auth_user_id as string;
       const stored = ((profile.email as string) || "").trim().toLowerCase();
       if (stored) workingEmail = stored;
+      const pn = ((profile.full_name as string) || "").trim();
+      if (pn) fullName = pn;
       try {
         await supabaseAdmin.auth.admin.updateUserById(authUserId, {
           password: password,
@@ -187,20 +174,6 @@ export async function provisionStudentLogin(params: {
         });
       } catch {
         /* ignore */
-      }
-      if (fullName && fullName.toLowerCase() !== "student") {
-        try {
-          await supabaseAdmin
-            .from("profiles")
-            .update({ full_name: fullName } as never)
-            .eq("id", student.profile_id);
-          await supabaseAdmin
-            .from("students")
-            .update({ full_name: fullName } as never)
-            .eq("id", student.id);
-        } catch {
-          /* ignore */
-        }
       }
       return { email: workingEmail, password: password };
     }
@@ -222,7 +195,7 @@ export async function provisionStudentLogin(params: {
       if (users.length < 200) break;
     }
   } catch {
-    /* continue */
+    /* continue to create */
   }
 
   if (authUserId) {
@@ -323,7 +296,6 @@ export async function provisionStudentLogin(params: {
     .update({
       profile_id: profileId,
       status: "active",
-      full_name: fullName || undefined,
     } as never)
     .eq("id", student.id);
 
