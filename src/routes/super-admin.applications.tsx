@@ -6,7 +6,7 @@ import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/d
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useRows } from "@/lib/queries";
-import { reviewSchoolApplication } from "@/lib/auth.functions";
+import { reviewSchoolApplication } from "@/lib/auth.school-admin.functions";
 import { toast } from "sonner";
 import { Copy, Loader2 } from "lucide-react";
 

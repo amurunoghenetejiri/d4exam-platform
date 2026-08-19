@@ -6,7 +6,7 @@ import { PageHeader, SectionCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createSchoolUser, importStudents } from "@/lib/auth.functions";
+import { createSchoolUser, importStudents } from "@/lib/auth.school-admin.functions";
 import { useSessionUser } from "@/lib/session";
 import { toast } from "sonner";
 import { Loader2, Upload, Download } from "lucide-react";
@@ -28,7 +28,6 @@ type ParsedRow = {
 };
 
 function parseCsv(text: string): ParsedRow[] {
-  // Strip BOM (Excel often adds \uFEFF)
   const cleaned = text.replace(/^\uFEFF/, "");
   const lines = cleaned
     .replace(/\r\n/g, "\n")
@@ -92,16 +91,13 @@ function parseCsv(text: string): ParsedRow[] {
       firstName = firstName || parts[0] || "";
       lastName = lastName || parts.slice(1).join(" ") || "Student";
     }
-    // Fallback to first two columns if headers did not match
     if (!firstName && cols[0]) firstName = cols[0];
     if (!lastName && cols[1]) lastName = cols[1];
 
     const email = (iEmail >= 0 ? cols[iEmail] : "") || "";
     let identifier = (iId >= 0 ? cols[iId] : "") || "";
     let matricNumber = (iMatric >= 0 ? cols[iMatric] : "") || "";
-    // If neither matched by header, try common column positions
     if (!identifier && !matricNumber) {
-      // typical: first,last,email,student_id,matric
       if (cols[3]) identifier = cols[3];
       if (cols[4]) matricNumber = cols[4];
       if (!identifier && cols.length === 4 && cols[3]) identifier = cols[3];
@@ -109,7 +105,6 @@ function parseCsv(text: string): ParsedRow[] {
     identifier = (identifier || matricNumber).trim();
     matricNumber = (matricNumber || identifier).trim();
 
-    // Skip completely empty rows
     if (!firstName.trim() && !lastName.trim() && !identifier && !matricNumber) continue;
 
     rows.push({
@@ -118,7 +113,7 @@ function parseCsv(text: string): ParsedRow[] {
       email: email.trim().toLowerCase(),
       identifier,
       matricNumber,
-      rowNumber: r + 1, // 1-indexed file line (header is line 1)
+      rowNumber: r + 1,
     });
   }
   return rows;
@@ -231,7 +226,6 @@ function Page() {
       toast.success(
         `Import complete: ${res.created} new · ${res.updated} updated · ${res.failed} invalid of ${total}`,
       );
-      // Clear preview only after successful full run so user can retry failures
       if (res.failed === 0) setPreview([]);
       else toast.message(`${res.failed} row(s) need attention — download error report below`);
       await qc.invalidateQueries({ queryKey: ["admin-all-students"] });
