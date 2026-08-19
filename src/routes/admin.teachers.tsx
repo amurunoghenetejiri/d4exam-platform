@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { createSchoolUser } from "@/lib/auth.functions";
+import { createSchoolUser } from "@/lib/auth.school-admin.functions";
 import { useSessionUser } from "@/lib/session";
 import { useRows } from "@/lib/queries";
 import { supabase } from "@/integrations/supabase/client";
