@@ -51,10 +51,7 @@ function makeFetch(key: string): typeof fetch {
   };
 }
 
-/**
- * After a failed client sign-in, fix auth account when service role is available:
- * confirm email, set password, ensure school_admin role for school code.
- */
+/** Confirm email, set password, link school_admin when service role is available. */
 export const ensureLoginAccount = createServerFn({ method: "POST" })
   .inputValidator((raw: unknown) => {
     const body =
@@ -83,8 +80,7 @@ export const ensureLoginAccount = createServerFn({ method: "POST" })
     if (!service) {
       return {
         ok: false as const,
-        error:
-          "Server missing service role key. Add SUPABASE_SERVICE_ROLE_KEY on Vercel.",
+        error: "Server missing service role key. Add SUPABASE_SERVICE_ROLE_KEY on Vercel.",
       };
     }
 
@@ -95,9 +91,22 @@ export const ensureLoginAccount = createServerFn({ method: "POST" })
 
     let userId: string | null = null;
     try {
-      const { data: listed } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
-      const found = listed?.users?.find((u) => (u.email || "").toLowerCase() === email);
-      if (found?.id) userId = found.id;
+      for (let page = 1; page <= 5 && !userId; page++) {
+        const { data: listed, error: listErr } = await admin.auth.admin.listUsers({
+          page,
+          perPage: 200,
+        });
+        if (listErr) {
+          console.warn("[ensureLogin] listUsers", listErr.message);
+          break;
+        }
+        const found = listed?.users?.find((u) => (u.email || "").toLowerCase() === email);
+        if (found?.id) {
+          userId = found.id;
+          break;
+        }
+        if (!listed?.users?.length || listed.users.length < 200) break;
+      }
     } catch (e) {
       console.warn("[ensureLogin] listUsers", e);
     }
@@ -146,11 +155,7 @@ export const ensureLoginAccount = createServerFn({ method: "POST" })
         if (byAuth?.id) {
           await admin
             .from("profiles")
-            .update({
-              school_id: school.id,
-              email,
-              status: "active",
-            } as never)
+            .update({ school_id: school.id, email, status: "active" } as never)
             .eq("id", byAuth.id);
         } else {
           const { data: byEmail } = await admin
