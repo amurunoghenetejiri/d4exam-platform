@@ -183,29 +183,42 @@ export async function uploadSchoolLogo(opts: {
         : "jpg";
   const path = `${opts.folder}/logo-${Date.now()}.${ext}`;
 
-  const buckets = ["school-logos", "public", "avatars"];
-  for (const bucket of buckets) {
-    try {
-      const { error: upErr } = await supabase.storage.from(bucket).upload(path, opts.file, {
-        cacheControl: "3600",
-        upsert: true,
-        contentType: opts.file.type || `image/${ext}`,
-      });
-      if (upErr) continue;
-      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-      if (data?.publicUrl) return { url: data.publicUrl, path: `${bucket}/${path}` };
-    } catch {
-      // try next bucket
-    }
-  }
-
+  // Prefer compressed data URL so logos always display (storage public URLs often break).
   try {
     const dataUrl = await fileToCompressedDataUrl(opts.file);
     if (dataUrl.length > 900_000) {
       throw new Error("Logo is still too large after compression. Use a smaller image.");
     }
+    const buckets = ["school-logos", "public", "avatars"];
+    for (const bucket of buckets) {
+      try {
+        await supabase.storage.from(bucket).upload(path, opts.file, {
+          cacheControl: "3600",
+          upsert: true,
+          contentType: opts.file.type || `image/${ext}`,
+        });
+        break;
+      } catch {
+        /* try next */
+      }
+    }
     return { url: dataUrl, path: "data-url" };
   } catch (compressErr) {
+    const buckets = ["school-logos", "public", "avatars"];
+    for (const bucket of buckets) {
+      try {
+        const { error: upErr } = await supabase.storage.from(bucket).upload(path, opts.file, {
+          cacheControl: "3600",
+          upsert: true,
+          contentType: opts.file.type || `image/${ext}`,
+        });
+        if (upErr) continue;
+        const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+        if (data?.publicUrl) return { url: data.publicUrl, path: `${bucket}/${path}` };
+      } catch {
+        /* try next */
+      }
+    }
     if (opts.file.size <= 400_000) {
       try {
         const raw = await fileToRawDataUrl(opts.file);
