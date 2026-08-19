@@ -55,7 +55,6 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   const profile = profileByAuth.data ?? profileById.data ?? null;
   let roles = (roleRes.data ?? []).map((r) => r.role as AppRole).filter(Boolean);
 
-  // SECURITY DEFINER: get_my_roles + is_super_admin (works even if RLS is strict)
   if (roles.length === 0) {
     try {
       const { data: myRoles } = await supabase.rpc("get_my_roles");
@@ -126,6 +125,33 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
             .eq("profile_id", profile.id)
             .maybeSingle();
           identifier = s?.matric_number ?? s?.student_id ?? null;
+          if (!identifier && profile.email) {
+            const local = String(profile.email).split("@")[0] || "";
+            if (local.length >= 6 && profile.school_id) {
+              const { data: byGuess } = await supabase
+                .from("students")
+                .select("id, matric_number, student_id")
+                .eq("school_id", profile.school_id)
+                .limit(3000);
+              const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+              const target = norm(local);
+              const hit = (byGuess ?? []).find((row) => {
+                const m = norm(String(row.matric_number || row.student_id || ""));
+                return m && (m === target || target.includes(m) || m.includes(target));
+              });
+              if (hit) {
+                identifier = hit.matric_number ?? hit.student_id ?? null;
+                try {
+                  await supabase
+                    .from("students")
+                    .update({ profile_id: profile.id } as never)
+                    .eq("id", hit.id);
+                } catch {
+                  /* ignore */
+                }
+              }
+            }
+          }
           identifierLabel = "Matric number";
         })(),
       );
