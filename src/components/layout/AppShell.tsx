@@ -179,10 +179,10 @@ function NotificationBell({ to, unread }: { to: string; unread: number }) {
     >
       <Link to={to as string} preload="intent">
         <span className={cn("inline-flex", hasUnread && "bell-ring")}>
-          <Bell className="h-5 w-5 text-slate-600" aria-hidden />
+          <Bell className="h-6 w-6 text-slate-600" aria-hidden />
         </span>
         {hasUnread ? (
-          <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white shadow-sm">
+          <span className="absolute right-0.5 top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
             {label}
           </span>
         ) : null}
