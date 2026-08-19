@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 function isNewSupabaseApiKey(value: string) {
   return value.startsWith("sb_publishable_") || value.startsWith("sb_secret_");
@@ -22,37 +22,144 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
   };
 }
 
-function publicEnv() {
-  const url =
+function envUrl() {
+  return (
     process.env["SUPABASE_URL"] ||
     process.env["VITE_SUPABASE_URL"] ||
     process.env["NEXT_PUBLIC_SUPABASE_URL"] ||
-    "";
-  const key =
+    ""
+  );
+}
+
+function envPublishableKey() {
+  return (
     process.env["SUPABASE_PUBLISHABLE_KEY"] ||
     process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
     process.env["SUPABASE_ANON_KEY"] ||
     process.env["VITE_SUPABASE_ANON_KEY"] ||
-    "";
-  return { url, key };
+    ""
+  );
 }
 
-/**
- * Applicant sets password after approval — NO service role.
- * Uses auth.signUp (anon) + claim_approved_school_admin SECURITY DEFINER RPC.
- */
+function envServiceKey() {
+  return (
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["SUPABASE_SECRET_KEY"] ||
+    process.env["SUPABASE_SERVICE_KEY"] ||
+    process.env["SB_SERVICE_ROLE_KEY"] ||
+    ""
+  );
+}
+
+function makeClient(key: string): SupabaseClient {
+  return createClient(envUrl(), key, {
+    global: { fetch: createSupabaseFetch(key) },
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
+
+type AppRow = {
+  id: string;
+  status: string;
+  applicant_email: string;
+  issued_school_code: string | null;
+  issued_admin_email: string | null;
+  school_name: string | null;
+  tracking_code?: string | null;
+};
+
+const payloadSchema = z.object({
+  email: z.string().trim().email().max(255),
+  trackingCode: z.string().trim().min(4).max(64),
+  password: z.string().min(8).max(120),
+  applicationId: z.string().uuid().optional().nullable(),
+  adminEmail: z.string().trim().email().max(255).optional().nullable(),
+});
+
+async function findApplication(
+  client: SupabaseClient,
+  opts: {
+    email: string;
+    code: string;
+    applicationId: string | null;
+    adminEmailHint: string;
+  },
+): Promise<AppRow | null> {
+  const emailsToTry = [...new Set([opts.email, opts.adminEmailHint].filter(Boolean))];
+
+  if (opts.applicationId) {
+    const { data } = await client
+      .from("school_applications")
+      .select(
+        "id, status, applicant_email, issued_school_code, issued_admin_email, school_name, tracking_code",
+      )
+      .eq("id", opts.applicationId)
+      .maybeSingle();
+    if (data?.id) return data as AppRow;
+  }
+
+  for (const em of emailsToTry) {
+    try {
+      const { data: rpcRows } = await client.rpc("lookup_school_application_for_setup", {
+        _email: em,
+        _tracking_code: opts.code,
+      });
+      const row = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+      if (row && typeof row === "object" && (row as AppRow).id) return row as AppRow;
+    } catch {
+      /* RPC may not exist */
+    }
+  }
+
+  {
+    const { data: rows } = await client
+      .from("school_applications")
+      .select(
+        "id, status, applicant_email, issued_school_code, issued_admin_email, school_name, tracking_code",
+      )
+      .ilike("tracking_code", opts.code)
+      .limit(15);
+    const list = (rows ?? []) as AppRow[];
+    const matched = list.find((r) => {
+      const a = (r.applicant_email || "").trim().toLowerCase();
+      const i = (r.issued_admin_email || "").trim().toLowerCase();
+      return emailsToTry.includes(a) || emailsToTry.includes(i);
+    });
+    if (matched) return matched;
+    if (list.length === 1) return list[0];
+  }
+
+  const collected: AppRow[] = [];
+  for (const em of emailsToTry) {
+    for (const col of ["applicant_email", "issued_admin_email"] as const) {
+      const { data } = await client
+        .from("school_applications")
+        .select(
+          "id, status, applicant_email, issued_school_code, issued_admin_email, school_name, tracking_code",
+        )
+        .ilike(col, em)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(5);
+      for (const row of (data ?? []) as AppRow[]) {
+        if (row?.id && !collected.some((x) => x.id === row.id)) collected.push(row);
+      }
+    }
+  }
+  return (
+    collected.find((r) => (r.tracking_code || "").toLowerCase() === opts.code.toLowerCase()) ??
+    (collected.length === 1 ? collected[0] : null)
+  );
+}
+
 export const setApprovedSchoolAdminPassword = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) =>
-    z
-      .object({
-        email: z.string().trim().email().max(255),
-        trackingCode: z.string().trim().min(4).max(64),
-        password: z.string().min(8).max(120),
-        applicationId: z.string().uuid().optional(),
-        adminEmail: z.string().trim().email().max(255).optional(),
-      })
-      .parse(data),
-  )
+  .inputValidator((raw: unknown) => {
+    const body =
+      raw && typeof raw === "object" && "data" in (raw as object)
+        ? (raw as { data: unknown }).data
+        : raw;
+    return payloadSchema.parse(body);
+  })
   .handler(async ({ data }) => {
     const email = data.email.trim().toLowerCase();
     const code = data.trackingCode.trim();
@@ -60,104 +167,22 @@ export const setApprovedSchoolAdminPassword = createServerFn({ method: "POST" })
     const applicationId = data.applicationId?.trim() || null;
     const adminEmailHint = (data.adminEmail || email).trim().toLowerCase();
 
-    const { url, key } = publicEnv();
-    if (!url || !key) {
+    const url = envUrl();
+    const publishable = envPublishableKey();
+    const service = envServiceKey();
+    if (!url || !publishable) {
       return { error: "Server configuration error. Contact support." };
     }
 
-    const client = createClient(url, key, {
-      global: { fetch: createSupabaseFetch(key) },
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    const db = makeClient(service || publishable);
+    const authClient = makeClient(publishable);
+
+    const app = await findApplication(db, {
+      email,
+      code,
+      applicationId,
+      adminEmailHint,
     });
-
-    type AppRow = {
-      id: string;
-      status: string;
-      applicant_email: string;
-      issued_school_code: string | null;
-      issued_admin_email: string | null;
-      school_name: string | null;
-      tracking_code?: string | null;
-    };
-    let app: AppRow | null = null;
-
-    const emailsToTry = [...new Set([email, adminEmailHint].filter(Boolean))];
-
-    for (const em of emailsToTry) {
-      if (app) break;
-      try {
-        const { data: rpcRows } = await client.rpc("lookup_school_application_for_setup", {
-          _email: em,
-          _tracking_code: code,
-        });
-        const row = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
-        if (row && typeof row === "object" && (row as AppRow).id) {
-          app = row as AppRow;
-        }
-      } catch {
-        /* RPC may not exist yet */
-      }
-    }
-
-    if (!app && applicationId) {
-      const { data: byId } = await client
-        .from("school_applications")
-        .select(
-          "id, status, applicant_email, issued_school_code, issued_admin_email, school_name, tracking_code",
-        )
-        .eq("id", applicationId)
-        .maybeSingle();
-      if (byId?.id) app = byId as AppRow;
-    }
-
-    if (!app) {
-      const { data: rows } = await client
-        .from("school_applications")
-        .select(
-          "id, status, applicant_email, issued_school_code, issued_admin_email, school_name, tracking_code",
-        )
-        .ilike("tracking_code", code)
-        .limit(10);
-      const list = (rows ?? []) as AppRow[];
-      app =
-        list.find((r) => {
-          const a = (r.applicant_email || "").trim().toLowerCase();
-          const i = (r.issued_admin_email || "").trim().toLowerCase();
-          return emailsToTry.includes(a) || emailsToTry.includes(i);
-        }) ??
-        list[0] ??
-        null;
-    }
-
-    if (!app) {
-      const collected: AppRow[] = [];
-      for (const em of emailsToTry) {
-        const { data: a } = await client
-          .from("school_applications")
-          .select(
-            "id, status, applicant_email, issued_school_code, issued_admin_email, school_name, tracking_code",
-          )
-          .ilike("applicant_email", em)
-          .eq("status", "approved")
-          .order("created_at", { ascending: false })
-          .limit(5);
-        const { data: b } = await client
-          .from("school_applications")
-          .select(
-            "id, status, applicant_email, issued_school_code, issued_admin_email, school_name, tracking_code",
-          )
-          .ilike("issued_admin_email", em)
-          .eq("status", "approved")
-          .order("created_at", { ascending: false })
-          .limit(5);
-        for (const row of [...(a ?? []), ...(b ?? [])] as AppRow[]) {
-          if (row?.id && !collected.some((x) => x.id === row.id)) collected.push(row);
-        }
-      }
-      app =
-        collected.find((r) => (r.tracking_code || "").toLowerCase() === code.toLowerCase()) ??
-        (collected.length === 1 ? collected[0] : null);
-    }
 
     if (!app) {
       return {
@@ -182,7 +207,7 @@ export const setApprovedSchoolAdminPassword = createServerFn({ method: "POST" })
       };
     }
 
-    const { data: signedUp, error: signUpErr } = await client.auth.signUp({
+    const { data: signedUp, error: signUpErr } = await authClient.auth.signUp({
       email: adminEmail,
       password,
       options: {
@@ -199,7 +224,7 @@ export const setApprovedSchoolAdminPassword = createServerFn({ method: "POST" })
     if (signUpErr || !userId) {
       const msg = (signUpErr?.message || "").toLowerCase();
       if (/already|registered|exists/i.test(msg) || !userId) {
-        const { data: signedIn, error: inErr } = await client.auth.signInWithPassword({
+        const { data: signedIn, error: inErr } = await authClient.auth.signInWithPassword({
           email: adminEmail,
           password,
         });
@@ -223,18 +248,21 @@ export const setApprovedSchoolAdminPassword = createServerFn({ method: "POST" })
     ];
     let claimErr: { message?: string } | null = null;
     let claimed: unknown = null;
+
     for (const claimEmail of claimEmails) {
-      const res = await client.rpc("claim_approved_school_admin", {
+      const res = await db.rpc("claim_approved_school_admin", {
         _tracking_code: claimCode,
         _email: claimEmail,
         _user_id: userId,
       });
       claimed = res.data;
       claimErr = res.error;
-      if (!claimErr) break;
-      const claimRowEarly = Array.isArray(claimed) ? claimed[0] : claimed;
-      if (claimRowEarly && typeof claimRowEarly === "object" && (claimRowEarly as { ok?: boolean }).ok) {
-        claimErr = null;
+      if (!claimErr) {
+        const row = Array.isArray(claimed) ? claimed[0] : claimed;
+        if (row && typeof row === "object" && (row as { ok?: boolean }).ok === false) {
+          claimErr = { message: String((row as { error?: string }).error || "Claim failed") };
+          continue;
+        }
         break;
       }
     }
