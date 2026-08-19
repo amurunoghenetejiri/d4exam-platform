@@ -22,20 +22,12 @@ function nameTokens(s: string) {
     .filter((t) => t.length >= 2);
 }
 
-/**
- * Flexible name login: student may type any subset of their registered name parts,
- * in any order (first only, last only, first+middle, last+first, full name, etc.).
- * Every entered token must appear in the stored full name (fuzzy startsWith allowed).
- */
 function nameMatches(fullName: string | null | undefined, identifier: string): boolean {
   const want = nameTokens(identifier);
   if (want.length === 0) return false;
   const have = nameTokens(fullName || "");
   if (have.length === 0) return false;
-
-  const tokenHit = (w: string) =>
-    have.some((h) => h === w || h.startsWith(w) || w.startsWith(h));
-
+  const tokenHit = (w: string) => have.some((h) => h === w || h.startsWith(w) || w.startsWith(h));
   if (want.every(tokenHit)) return true;
   if (normalizeName(fullName || "") === normalizeName(identifier)) return true;
   return false;
@@ -51,7 +43,6 @@ function matricMatches(stored: string, password: string) {
   return a.length > 0 && a === b;
 }
 
-/** All historical synthetic email formats used across import/login versions. */
 export function studentAuthEmailCandidates(opts: {
   schoolId: string;
   schoolCode: string;
@@ -63,29 +54,13 @@ export function studentAuthEmailCandidates(opts: {
   const safeCode = opts.schoolCode.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
   const safeSchool = opts.schoolId.replace(/-/g, "").slice(0, 12);
   const out = [
-    // login.server format (school code host)
     `${safeMatric}@${safeCode || "school"}.student.d4exam.local`,
-    // users.server / import format (school id host)
     `${safeMatric}.${safeSchool}@student.d4exam.local`,
-    // older placeholder formats
     `${safeMatricDot}@placeholder.local`,
     `${safeMatric.replace(/-/g, ".")}@placeholder.local`,
     `${safeMatric}@placeholder.local`,
   ];
-  // de-dupe preserve order
   return out.filter((e, i) => e && out.indexOf(e) === i);
-}
-
-export function isSyntheticStudentEmail(email: string | null | undefined): boolean {
-  if (!email) return true;
-  const e = email.trim().toLowerCase();
-  if (!e) return true;
-  return (
-    e.endsWith(".student.d4exam.local") ||
-    e.endsWith("@placeholder.local") ||
-    e.includes(".student.d4exam.local") ||
-    e.includes("@student.d4exam.local")
-  );
 }
 
 export type ProvisionResult =
@@ -104,11 +79,6 @@ type StudentLookupRow = {
 
 const STUDENT_COLS = "id, student_id, matric_number, full_name, status, profile_id";
 
-/**
- * Student is on Admin → Students with matric + full name.
- * Login: school code + (any name parts OR matric) + password = exact matric.
- * Provisions auth user once; password always kept aligned with matric.
- */
 export async function provisionStudentLogin(params: {
   schoolId: string;
   schoolCode: string;
@@ -132,16 +102,16 @@ export async function provisionStudentLogin(params: {
 
   let student: StudentLookupRow | null = null;
 
-  // 1) Exact matric / student_id match (in-memory so slashes/spaces never break PostgREST filters)
   {
     const { data: list } = await supabaseAdmin
       .from("students")
       .select(STUDENT_COLS)
       .eq("school_id", schoolId)
-      .limit(2000);
+      .limit(3000);
     const rows = (list ?? []) as StudentLookupRow[];
     const idNorm = normalizeMatric(identifier);
     const idLower = identifier.toLowerCase();
+    const passNorm = normalizeMatric(password);
 
     student =
       rows.find((s) => {
@@ -154,7 +124,6 @@ export async function provisionStudentLogin(params: {
         );
       }) ?? null;
 
-    // 2) Name-based match; password must equal that student's matric
     if (!student && nameTokens(identifier).length >= 1) {
       const matches = rows.filter((s) => nameMatches(s.full_name, identifier));
       if (matches.length === 1) {
@@ -169,8 +138,7 @@ export async function provisionStudentLogin(params: {
       }
     }
 
-    // 3) Password looks like a matric — find student by password-as-matric, then verify name if provided
-    if (!student && normalizeMatric(password).length >= 4) {
+    if (!student && passNorm.length >= 4) {
       const byPass = rows.filter(
         (s) =>
           matricMatches(s.matric_number || "", password) ||
@@ -192,7 +160,6 @@ export async function provisionStudentLogin(params: {
   const matric = (student.matric_number || student.student_id || "").trim();
   if (!matric) return null;
 
-  // Password rule: must equal matric (or student_id) — slash differences ignored
   if (!matricMatches(matric, password) && !matricMatches(student.student_id || "", password)) {
     return null;
   }
@@ -203,7 +170,6 @@ export async function provisionStudentLogin(params: {
   let authUserId: string | null = null;
   let workingEmail = candidates[0]!;
 
-  // Prefer linked profile's auth user
   if (student.profile_id) {
     const { data: profile } = await supabaseAdmin
       .from("profiles")
@@ -216,13 +182,12 @@ export async function provisionStudentLogin(params: {
       if (stored) workingEmail = stored;
       try {
         await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-          password: matric,
+          password: password,
           email_confirm: true,
         });
       } catch {
         /* ignore */
       }
-      // Ensure full_name is stored for list display
       if (fullName && fullName.toLowerCase() !== "student") {
         try {
           await supabaseAdmin
@@ -237,11 +202,10 @@ export async function provisionStudentLogin(params: {
           /* ignore */
         }
       }
-      return { email: workingEmail, password: matric };
+      return { email: workingEmail, password: password };
     }
   }
 
-  // Search auth users by any known synthetic email
   try {
     for (let page = 1; page <= 8 && !authUserId; page++) {
       const { data: listed } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
@@ -258,13 +222,13 @@ export async function provisionStudentLogin(params: {
       if (users.length < 200) break;
     }
   } catch {
-    /* continue to create */
+    /* continue */
   }
 
   if (authUserId) {
     try {
       await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-        password: matric,
+        password: password,
         email_confirm: true,
         user_metadata: { full_name: fullName, role: "student", school_code: schoolCode },
       });
@@ -272,14 +236,13 @@ export async function provisionStudentLogin(params: {
       /* ignore */
     }
   } else {
-    // Create with the import-compatible format first (users.server style)
     const preferred =
       candidates.find((c) => c.includes("@student.d4exam.local") && c.includes(".")) ||
       candidates[0]!;
     workingEmail = preferred;
     const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
       email: preferred,
-      password: matric,
+      password: password,
       email_confirm: true,
       user_metadata: {
         full_name: fullName,
@@ -288,13 +251,12 @@ export async function provisionStudentLogin(params: {
       },
     });
     if (createError || !created?.user) {
-      // Try other candidates
       let createdOk = false;
       for (const em of candidates) {
         if (em === preferred) continue;
         const { data: c2, error: e2 } = await supabaseAdmin.auth.admin.createUser({
           email: em,
-          password: matric,
+          password: password,
           email_confirm: true,
           user_metadata: { full_name: fullName, role: "student", school_code: schoolCode },
         });
@@ -321,7 +283,6 @@ export async function provisionStudentLogin(params: {
 
   if (!authUserId) return { error: "Could not resolve auth user." };
 
-  // Link profile
   const { data: existingProfile } = await supabaseAdmin
     .from("profiles")
     .select("id")
@@ -381,7 +342,7 @@ export async function provisionStudentLogin(params: {
     });
   }
 
-  return { email: workingEmail, password: matric };
+  return { email: workingEmail, password: password };
 }
 
 export async function writeLoginAudit(params: {
