@@ -150,13 +150,55 @@ export async function listAdminUserIds(schoolId: string): Promise<string[]> {
 export async function studentIdsToAuthUserIds(studentIds: string[]): Promise<string[]> {
   if (!studentIds.length) return [];
   try {
-    const { data: students } = await supabase.from("students").select("id, profile_id").in("id", studentIds);
+    const { data: students } = await supabase
+      .from("students")
+      .select("id, profile_id, auth_user_id")
+      .in("id", studentIds);
+    const direct = (students ?? [])
+      .map((s) => (s as { auth_user_id?: string | null }).auth_user_id)
+      .filter(Boolean) as string[];
+    if (direct.length) return [...new Set(direct)];
+
     const profileIds = [...new Set((students ?? []).map((s) => s.profile_id).filter(Boolean))] as string[];
     if (!profileIds.length) return [];
-    const { data: profiles } = await supabase.from("profiles").select("id, auth_user_id").in("id", profileIds);
-    const fromAuth = (profiles ?? []).map((p) => p.auth_user_id).filter(Boolean) as string[];
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, auth_user_id")
+      .in("id", profileIds);
+    const fromAuth = (profiles ?? [])
+      .map((p) => (p as { auth_user_id?: string | null }).auth_user_id)
+      .filter(Boolean) as string[];
     if (fromAuth.length) return [...new Set(fromAuth)];
     return [...new Set(profileIds)];
+  } catch {
+    return [];
+  }
+}
+
+/** Resolve teacher auth user ids for a school. */
+export async function listTeacherUserIds(schoolId: string): Promise<string[]> {
+  try {
+    const { data: roles } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("school_id", schoolId)
+      .eq("role", "teacher");
+    const fromRoles = [...new Set((roles ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
+    if (fromRoles.length) return fromRoles;
+
+    const { data: teachers } = await supabase
+      .from("teachers")
+      .select("profile_id, auth_user_id")
+      .eq("school_id", schoolId)
+      .limit(500);
+    const direct = (teachers ?? [])
+      .map((t) => (t as { auth_user_id?: string | null }).auth_user_id)
+      .filter(Boolean) as string[];
+    if (direct.length) return [...new Set(direct)];
+    const profileIds = [...new Set((teachers ?? []).map((t) => (t as { profile_id?: string | null }).profile_id).filter(Boolean))] as string[];
+    if (!profileIds.length) return [];
+    const { data: profiles } = await supabase.from("profiles").select("auth_user_id").in("id", profileIds);
+    return [...new Set((profiles ?? []).map((p) => (p as { auth_user_id?: string | null }).auth_user_id).filter(Boolean) as string[])];
   } catch {
     return [];
   }
@@ -365,7 +407,6 @@ export async function notifyStudentResultTerminated(opts: {
   });
 }
 
-/** Notify every examination officer that a teacher submitted an exam for review. */
 export async function notifyOfficersExamSubmitted(opts: {
   schoolId: string;
   teacherName: string;
@@ -393,7 +434,6 @@ export async function notifyOfficersExamSubmitted(opts: {
   );
 }
 
-/** Notify teacher after officer decision. */
 export async function notifyTeacherExamDecision(opts: {
   teacherUserId: string;
   schoolId?: string | null;
@@ -435,7 +475,6 @@ export async function notifyTeacherExamDecision(opts: {
   });
 }
 
-/** Notify eligible students when officer approves / schedules an exam. */
 export async function notifyStudentsExamApproved(opts: {
   schoolId: string;
   examId: string;
@@ -453,11 +492,7 @@ export async function notifyStudentsExamApproved(opts: {
         .eq("id", opts.courseId)
         .maybeSingle();
 
-      let q = supabase
-        .from("students")
-        .select("id")
-        .eq("school_id", opts.schoolId)
-        .limit(2000);
+      let q = supabase.from("students").select("id").eq("school_id", opts.schoolId).limit(2000);
       const dept = (course as { department_id?: string | null } | null)?.department_id;
       const level = (course as { level_id?: string | null } | null)?.level_id;
       if (dept) q = q.eq("department_id", dept);
