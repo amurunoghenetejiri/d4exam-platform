@@ -1,7 +1,9 @@
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchSessionUser, roleHome } from "@/lib/session";
+import { ensureLoginAccount } from "@/lib/ensure-login.functions";
 
 import {
   Eye,
@@ -65,6 +67,7 @@ const features = [
 
 function LoginPage() {
   const navigate = useNavigate();
+  const ensureLoginFn = useServerFn(ensureLoginAccount);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -132,10 +135,36 @@ function LoginPage() {
         break;
       }
 
+      // Recover accounts with unconfirmed email or password set after school approval
+      if (!signedIn && looksEmail) {
+        try {
+          const fixed = await ensureLoginFn({
+            data: {
+              email: ident.toLowerCase(),
+              password: pass,
+              schoolCode: schoolCode || null,
+            },
+          });
+          if (fixed && "ok" in fixed && fixed.ok) {
+            const { data, error: authErr } = await supabase.auth.signInWithPassword({
+              email: ident.toLowerCase(),
+              password: pass,
+            });
+            if (!authErr && data.session) {
+              signedIn = true;
+            } else if (authErr) {
+              lastMsg = authErr.message || lastMsg;
+            }
+          }
+        } catch {
+          /* keep lastMsg */
+        }
+      }
+
       if (!signedIn) {
         setError(
-          lastMsg ||
-            "Invalid login credentials. Check email/matric, password, and school code (leave school code blank for super admin).",
+          (lastMsg || "Invalid login credentials.") +
+            " Check email, password, and school code. For school admin use the password from application status.",
         );
         return;
       }
@@ -179,7 +208,7 @@ function LoginPage() {
           /* ignore */
         }
         setError(
-          "Signed in, but no dashboard role was found for this account. Ask your admin to assign a role, or run the super-admin SQL if this is the platform owner.",
+          "Signed in, but no dashboard role was found for this account. Ask your admin to assign a role.",
         );
         return;
       }
