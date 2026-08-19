@@ -1,1 +1,1 @@
-redeploy 20260819192500 officer results profiles + live-monitor restored — force green
+redeploy 20260819184500 restore full CBT session + notify harden + bigger bell
