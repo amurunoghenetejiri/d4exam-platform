@@ -1,1 +1,1 @@
-SEE_ARTIFACT_teacher.question-bank.BULK.tsx
+RESTORE_FROM_tmp_tqbank_push
