@@ -1,0 +1,55 @@
+name: Restore full CBT session
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'DEPLOY_TRIGGER.txt'
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore CbtExamSession.impl from last good commit
+        run: |
+          set -e
+          GOOD=b5f003bdda6571d294fe187dc3eefdfd91895204
+          git show "$GOOD:src/components/cbt/CbtExamSession.impl.tsx" > src/components/cbt/CbtExamSession.impl.tsx
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          s = p.read_text()
+          if 'decodeOptionsFromJson' not in s:
+              old = '''function decodeOptions(explanation: string | null): string[] {
+  if (!explanation) return [];
+  const optLine = explanation.split("\\n").find((l) => l.startsWith("OPTIONS::"));
+  if (!optLine) return [];
+  const body = optLine.slice("OPTIONS::".length);
+  const map: Record[str, str] = {};
+  for (const part of body.split("|")) {
+    const eq = part.indexOf("=");
+    if (eq > 0) map[part.slice(0, eq).trim().toUpperCase()] = part.slice(eq + 1);
+  }
+  return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
+}'''
+              # Use simpler in-place patch for questions select and decode call
+              s = s.replace(
+                  'let opts = decodeOptions(q.explanation);',
+                  'let opts = decodeOptions(q.explanation as string | null);'
+              )
+              p.write_text(s)
+              print('light patch applied')
+          print('lines', len(p.read_text().splitlines()))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(cbt): restore full CbtExamSession.impl from b5f003b"
+            git push
+          fi

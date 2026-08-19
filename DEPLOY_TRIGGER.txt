@@ -1,1 +1,1 @@
-redeploy 20260819185500 CBT exam gate restored - full session pending complete push
+redeploy 20260819190000 trigger CBT restore workflow
