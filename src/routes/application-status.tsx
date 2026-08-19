@@ -1,6 +1,5 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useServerFn } from "@tanstack/react-start";
 import { PublicLayout } from "@/components/layout/PublicLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +7,6 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { CheckCircle2, Loader2, Clock, Info, XCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { setApprovedSchoolAdminPassword } from "@/lib/application-password.functions";
 
 export const Route = createFileRoute("/application-status")({
   head: () => ({
@@ -87,8 +85,6 @@ function friendlyStatus(status: string) {
 }
 
 function Page() {
-  const navigate = useNavigate();
-  const setPasswordFn = useServerFn(setApprovedSchoolAdminPassword);
   const [email, setEmail] = useState("");
   const [refId, setRefId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -194,29 +190,90 @@ function Page() {
       setPwdError("Passwords do not match.");
       return;
     }
+
+    const schoolCode = String(app.issued_school_code || "").trim();
+    const adminEmail = String(app.issued_admin_email || app.applicant_email || email)
+      .trim()
+      .toLowerCase();
+    const trackCode = String(app.tracking_code || refId).trim();
+    const applicantEmail = String(app.applicant_email || email).trim().toLowerCase();
+
+    if (!schoolCode) {
+      setPwdError("Your school code is not ready yet. Please try again in a few minutes.");
+      return;
+    }
+    if (String(app.status).toLowerCase() !== "approved") {
+      setPwdError("Your application is not approved yet.");
+      return;
+    }
+
     setPwdBusy(true);
     try {
-      const result = await setPasswordFn({
-        data: {
-          email: (app.applicant_email || email).trim().toLowerCase(),
-          trackingCode: (app.tracking_code || refId).trim(),
-          password: pwd,
-          applicationId: app.id,
-          adminEmail: (app.issued_admin_email || app.applicant_email || email).trim().toLowerCase(),
+      // Client-side: uses the same Supabase client that already found this application.
+      let userId: string | null = null;
+
+      const { data: signedUp, error: signUpErr } = await supabase.auth.signUp({
+        email: adminEmail,
+        password: pwd,
+        options: {
+          data: {
+            full_name: app.school_name || "School Admin",
+            role: "school_admin",
+            school_code: schoolCode,
+          },
         },
       });
-      if (result && "error" in result && result.error) {
-        setPwdError(String(result.error));
-        return;
+      userId = signedUp?.user?.id ?? null;
+
+      if (signUpErr || !userId) {
+        const msg = (signUpErr?.message || "").toLowerCase();
+        if (/already|registered|exists/i.test(msg) || !userId) {
+          const { data: signedIn, error: inErr } = await supabase.auth.signInWithPassword({
+            email: adminEmail,
+            password: pwd,
+          });
+          if (inErr || !signedIn?.user) {
+            setPwdError(
+              "An account with this email already exists with a different password. Use Forgot password on the login page, then sign in with your school code.",
+            );
+            return;
+          }
+          userId = signedIn.user.id;
+        } else {
+          setPwdError(signUpErr?.message || "Could not create your login.");
+          return;
+        }
       }
-      if (result && "ok" in result && result.ok) {
-        setPwdOk({
-          schoolCode: result.schoolCode || app.issued_school_code || "",
-          adminEmail: result.adminEmail || app.issued_admin_email || email,
+
+      const claimEmails = [...new Set([adminEmail, applicantEmail].filter(Boolean))];
+      let claimedOk = false;
+      let claimMessage = "";
+      for (const claimEmail of claimEmails) {
+        const { data: claimed, error: claimErr } = await supabase.rpc("claim_approved_school_admin", {
+          _tracking_code: trackCode,
+          _email: claimEmail,
+          _user_id: userId,
         });
-        setPwd("");
-        setPwd2("");
+        if (claimErr) {
+          claimMessage = claimErr.message;
+          continue;
+        }
+        const row = Array.isArray(claimed) ? claimed[0] : claimed;
+        if (row && typeof row === "object" && (row as { ok?: boolean }).ok === false) {
+          claimMessage = String((row as { error?: string }).error || "Claim failed");
+          continue;
+        }
+        claimedOk = true;
+        break;
       }
+
+      if (!claimedOk && claimMessage) {
+        console.warn("[confirmPassword] claim:", claimMessage);
+      }
+
+      setPwdOk({ schoolCode, adminEmail });
+      setPwd("");
+      setPwd2("");
     } catch (err) {
       setPwdError(err instanceof Error ? err.message : "Could not save password.");
     } finally {
