@@ -1,11 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpen, FileText, Layers } from "lucide-react";
-import { PageHeader, SectionCard, EmptyState, NavCard } from "@/components/dashboard/kit";
+import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { useTeacherContext } from "@/lib/teacher";
 import { supabase } from "@/integrations/supabase/client";
-import { shortDisplayName } from "@/lib/utils";
+import { shortDisplayName, cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/teacher/courses")({
   head: () => ({
@@ -85,12 +85,11 @@ function Page() {
           {teacher.courses.map((c) => {
             const s = stats[c.id] ?? { exams: 0, questions: 0 };
             return (
-              <NavCard
+              <div
                 key={c.id}
-                to="/teacher/question-bank"
-                search={{ course: c.id }}
-                ariaLabel={`Open ${c.code} questions`}
-                className="p-2.5 sm:p-4 lg:p-5"
+                className={cn(
+                  "rounded-xl border border-slate-200/90 bg-white p-2.5 text-left shadow-sm sm:rounded-2xl sm:p-4 lg:p-5",
+                )}
               >
                 <div className="flex items-start justify-between gap-1.5 sm:gap-2">
                   <div className="min-w-0">
@@ -120,7 +119,6 @@ function Page() {
                     variant="outline"
                     className="h-7 px-2 text-[11px] font-semibold sm:h-9 sm:px-3 sm:text-sm"
                     asChild
-                    onClick={(e) => e.stopPropagation()}
                   >
                     <Link to="/teacher/question-bank" search={{ course: c.id }}>
                       <Layers className="mr-1 h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -131,7 +129,6 @@ function Page() {
                     size="sm"
                     className="h-7 px-2 text-[11px] font-semibold sm:h-9 sm:px-3 sm:text-sm"
                     asChild
-                    onClick={(e) => e.stopPropagation()}
                   >
                     <Link to="/teacher/examinations" search={{ course: c.id }}>
                       <FileText className="mr-1 h-3 w-3 sm:h-3.5 sm:w-3.5" />
@@ -139,7 +136,7 @@ function Page() {
                     </Link>
                   </Button>
                 </div>
-              </NavCard>
+              </div>
             );
           })}
         </div>
@@ -147,7 +144,7 @@ function Page() {
 
       <SectionCard className="mt-6" title="Assignment rule">
         <p className="text-sm text-slate-600">
-          Tap a course card (or <strong>Questions</strong>) to open that course’s question bank only.
+          Use <strong>Questions</strong> to open that course’s question bank.
           Use <strong>Exams</strong> to manage examinations for the same course.
         </p>
       </SectionCard>
