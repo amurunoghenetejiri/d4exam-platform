@@ -309,7 +309,6 @@ function Page() {
       if (filterSem !== "all" && filterSem !== "active" && c.semester_id !== filterSem) return false;
       if (filterDept !== "all") {
         const ids = deptIdsForCourse(c);
-        // "All departments" courses match every filter
         if (ids.length === 0) return true;
         if (!ids.includes(filterDept)) return false;
       }
@@ -328,7 +327,6 @@ function Page() {
   const [pendingTeachers, setPendingTeachers] = useState<Set<string> | null>(null);
   const effectiveAssigned = pendingTeachers ?? assignedTeacherIds;
 
-  // Create form
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [units, setUnits] = useState("3");
@@ -341,7 +339,6 @@ function Page() {
   const [assignBusy, setAssignBusy] = useState(false);
   const [showMore, setShowMore] = useState(false);
 
-  // Edit panel dept multi-select
   const [editDeptSelected, setEditDeptSelected] = useState<Set<string>>(new Set());
   const [editAllDepts, setEditAllDepts] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
@@ -371,12 +368,9 @@ function Page() {
     semesterIdForOffer: string | null,
   ) {
     if (!schoolId) return;
-    // Replace offerings for this course
     await supabase.from("course_offerings").delete().eq("course_id", courseId).eq("school_id", schoolId);
 
-    const level =
-      levelIdForOffer || levels[0]?.id || null;
-    // course_offerings.level_id is required — skip multi-offer if no level available
+    const level = levelIdForOffer || levels[0]?.id || null;
     if (!level || departmentIds.length <= 1) return;
 
     const rows = departmentIds.map((department_id) => ({
@@ -387,7 +381,12 @@ function Page() {
       semester_id: semesterIdForOffer,
       status: "active",
     }));
-    const { error } = await supabase.from("course_offerings").insert(rows as never);
+    let { error } = await supabase.from("course_offerings").insert(rows as never);
+    if (error && /semester_id|schema cache/i.test(String(error.message || ""))) {
+      const slim = rows.map(({ semester_id: _s, ...r }) => r);
+      const res2 = await supabase.from("course_offerings").insert(slim as never);
+      error = res2.error;
+    }
     if (error) console.warn("course_offerings", error);
   }
 
@@ -421,13 +420,26 @@ function Page() {
       if (levelId) payload.level_id = levelId;
       if (sem) payload.semester_id = sem;
 
-      const { data, error } = await supabase
-        .from("courses")
-        .insert(payload as never)
-        .select("id")
-        .single();
+      let data: { id: string } | null = null;
+      let error: { message?: string; code?: string } | null = null;
+      {
+        const res = await supabase.from("courses").insert(payload as never).select("id").single();
+        data = res.data as { id: string } | null;
+        error = res.error as { message?: string; code?: string } | null;
+      }
+      if (error && /semester_id|level_id|schema cache/i.test(String(error.message || ""))) {
+        const slim = { ...payload };
+        delete slim.semester_id;
+        delete slim.level_id;
+        const res2 = await supabase.from("courses").insert(slim as never).select("id").single();
+        if (res2.error) throw res2.error;
+        data = res2.data as { id: string };
+        error = null;
+        toast.message("Course saved. Run semester_id migration in Supabase for full semester support.");
+      }
       if (error) throw error;
-      const courseId = String((data as { id: string }).id);
+      if (!data?.id) throw new Error("Could not create course");
+      const courseId = String(data.id);
       if (ids.length > 1) {
         await syncOfferings(courseId, ids, levelId || null, sem);
       }
@@ -474,7 +486,6 @@ function Page() {
         selectedCourse.level_id,
         selectedCourse.semester_id,
       );
-      // Clear offerings when "all departments" or single primary only
       if (ids.length <= 1) {
         await supabase
           .from("course_offerings")
@@ -501,7 +512,13 @@ function Page() {
         .update({ semester_id, updated_at: new Date().toISOString() } as never)
         .eq("id", courseId)
         .eq("school_id", schoolId);
-      if (error) throw error;
+      if (error) {
+        if (/semester_id|schema cache/i.test(String(error.message || ""))) {
+          toast.error("Semester column missing in database. Run the semester_id SQL in Supabase (SQL Editor).");
+          return;
+        }
+        throw error;
+      }
       toast.success("Semester updated");
       await coursesQ.refetch();
       await qc.invalidateQueries({ queryKey: ["student-context"] });
