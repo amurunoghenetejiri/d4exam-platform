@@ -1,2 +1,1 @@
-Redeploy trigger 2026-08-18T23:34:24Z — school-identity useSchoolIdentity restored
-Build must use commit 7e668ff or newer.
+Redeploy 2026-08-19T00:08Z confirm-password fix 2c06f4e
