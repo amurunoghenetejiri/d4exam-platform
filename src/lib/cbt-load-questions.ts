@@ -1,6 +1,6 @@
 /**
  * Load & prepare CBT questions for a student paper.
- * Tries exam_questions first, then course bank. Robust against schema/RLS quirks.
+ * Tries exam_questions first (two-step, RLS-safe), then course bank.
  */
 import { supabase } from "@/integrations/supabase/client";
 import { parseQuestionOptions } from "@/lib/question-options";
@@ -40,37 +40,75 @@ function decodeOptionsLegacy(explanation: string | null): string[] {
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
+/** Two-step load: exam_questions ids first, then questions by id (avoids nested RLS failures). */
 async function loadFromExamQuestions(examId: string): Promise<RawQ[]> {
   try {
-    const { data, error } = await supabase
+    const linkRes = await supabase
       .from("exam_questions")
-      .select(
-        "question_id, marks, question_order, questions(id, question_text, question_type, marks, correct_answer, explanation, options, status)",
-      )
+      .select("question_id, marks, question_order")
       .eq("exam_id", examId)
       .order("question_order", { ascending: true })
       .limit(300);
-    if (error) {
-      const res2 = await supabase
+
+    if (linkRes.error) {
+      console.warn("[cbt] exam_questions link", linkRes.error.message);
+      const nested = await supabase
         .from("exam_questions")
         .select(
-          "question_id, marks, question_order, questions(id, question_text, question_type, marks, correct_answer, explanation, status)",
+          "question_id, marks, question_order, questions(id, question_text, question_type, marks, correct_answer, explanation, options, status)",
         )
         .eq("exam_id", examId)
         .order("question_order", { ascending: true })
         .limit(300);
-      if (res2.error || !res2.data?.length) {
-        console.warn("[cbt] exam_questions", error.message, res2.error?.message);
-        return [];
+      if (nested.error || !nested.data?.length) {
+        const nested2 = await supabase
+          .from("exam_questions")
+          .select(
+            "question_id, marks, question_order, questions(id, question_text, question_type, marks, correct_answer, explanation, status)",
+          )
+          .eq("exam_id", examId)
+          .order("question_order", { ascending: true })
+          .limit(300);
+        if (nested2.error || !nested2.data?.length) return [];
+        return mapExamQuestionRows(nested2.data as never);
       }
-      return mapExamQuestionRows(res2.data as never);
+      return mapExamQuestionRows(nested.data as never);
     }
-    if (!data?.length) return [];
-    return mapExamQuestionRows(data as never);
+
+    const links = (linkRes.data ?? []).filter((r) => r.question_id);
+    if (!links.length) return [];
+
+    const ids = links.map((r) => String(r.question_id));
+    const marksById = new Map(links.map((r) => [String(r.question_id), r.marks]));
+    const orderById = new Map(links.map((r, i) => [String(r.question_id), r.question_order ?? i]));
+
+    const qRows = await fetchQuestionsByIds(ids);
+    if (!qRows.length) return [];
+
+    qRows.sort((a, b) => (orderById.get(a.id) ?? 0) - (orderById.get(b.id) ?? 0));
+    return qRows.map((q) => ({
+      ...q,
+      marks: marksById.get(q.id) ?? q.marks ?? 1,
+    }));
   } catch (e) {
     console.warn("[cbt] exam_questions exception", e);
     return [];
   }
+}
+
+async function fetchQuestionsByIds(ids: string[]): Promise<RawQ[]> {
+  if (!ids.length) return [];
+  const selectFull =
+    "id, question_text, question_type, marks, correct_answer, explanation, options, status";
+  const selectSlim =
+    "id, question_text, question_type, marks, correct_answer, explanation, status";
+
+  for (const cols of [selectFull, selectSlim]) {
+    const { data, error } = await supabase.from("questions").select(cols).in("id", ids).limit(300);
+    if (!error && data?.length) return data as never;
+    if (error) console.warn("[cbt] questions by id", error.message);
+  }
+  return [];
 }
 
 function mapExamQuestionRows(
@@ -101,7 +139,7 @@ export async function loadExamQuestionBank(opts: {
   schoolId?: string | null;
   examId?: string | null;
 }): Promise<RawQ[]> {
-  const courseId = opts.courseId;
+  const courseId = opts.courseId ? String(opts.courseId) : "";
   const schoolId = opts.schoolId ? String(opts.schoolId) : null;
   const examId = opts.examId ? String(opts.examId) : null;
 
@@ -109,6 +147,8 @@ export async function loadExamQuestionBank(opts: {
     const linked = await loadFromExamQuestions(examId);
     if (linked.length) return linked;
   }
+
+  if (!courseId) return [];
 
   const selectFull =
     "id, question_text, question_type, marks, correct_answer, explanation, options, school_id, status, course_id";
@@ -158,6 +198,57 @@ export async function loadExamQuestionBank(opts: {
     if (rows.length) return rows;
   }
   return [];
+}
+
+/** Attach all active course-bank questions to an exam if none linked yet. */
+export async function ensureExamQuestionsLinked(opts: {
+  examId: string;
+  courseId: string;
+  schoolId: string;
+  maxQuestions?: number | null;
+}): Promise<number> {
+  const { examId, courseId, schoolId } = opts;
+  if (!examId || !courseId) return 0;
+
+  const existing = await supabase
+    .from("exam_questions")
+    .select("question_id")
+    .eq("exam_id", examId)
+    .limit(1);
+  if (!existing.error && (existing.data?.length ?? 0) > 0) return 0;
+
+  let qs: { id: string; marks: number | null }[] | null = null;
+  for (const statuses of [["active", "approved"], ["active", "approved", "pending"], null] as (string[] | null)[]) {
+    let q = supabase
+      .from("questions")
+      .select("id, marks")
+      .eq("course_id", courseId)
+      .eq("school_id", schoolId)
+      .order("created_at", { ascending: true })
+      .limit(300);
+    if (statuses) q = q.in("status", statuses);
+    const res = await q;
+    if (!res.error && res.data?.length) {
+      qs = res.data as never;
+      break;
+    }
+  }
+  if (!qs?.length) return 0;
+
+  const limit = opts.maxQuestions && opts.maxQuestions > 0 ? opts.maxQuestions : qs.length;
+  const picked = qs.slice(0, Math.min(limit, qs.length));
+  const rows = picked.map((q, i) => ({
+    exam_id: examId,
+    question_id: q.id,
+    marks: q.marks ?? 1,
+    question_order: i + 1,
+  }));
+  const { error } = await supabase.from("exam_questions").insert(rows as never);
+  if (error) {
+    console.warn("[cbt] ensureExamQuestionsLinked", error.message);
+    return 0;
+  }
+  return rows.length;
 }
 
 export function prepareStudentPaper(
