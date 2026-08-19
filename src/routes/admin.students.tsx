@@ -39,7 +39,14 @@ type StudentRow = {
 };
 
 function displayName(s: StudentRow) {
-  return (s.full_name || s.profiles?.full_name || "").trim() || "—";
+  const fromStudent = (s.full_name || "").trim();
+  const fromProfile = (s.profiles?.full_name || "").trim();
+  const name = fromStudent || fromProfile;
+  if (name && name.toLowerCase() !== "student" && name.toLowerCase() !== "student student") {
+    return name;
+  }
+  if (name) return name;
+  return s.matric_number || s.student_id || "—";
 }
 
 type SortKey = "name" | "matric" | "level";
@@ -62,137 +69,137 @@ function Page() {
     enabled: Boolean(schoolId),
     staleTime: 60_000,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("students")
-        .select(
-          `id, student_id, matric_number, full_name, status,
+      const pageSize = 1000;
+      const selectFull = `id, student_id, matric_number, full_name, status,
            faculty_id, department_id, level_id,
            profiles(full_name, email),
            faculties(name, code),
            departments(name, code),
-           levels(name, code)`,
-        )
-        .eq("school_id", schoolId!)
-        .limit(300);
+           levels(name, code)`;
+      const selectBasic = `id, student_id, matric_number, full_name, status,
+           faculty_id, department_id, level_id,
+           profiles(full_name, email)`;
 
-      if (error) {
-        const { data: d2, error: e2 } = await supabase
-          .from("students")
-          .select(
-            `id, student_id, matric_number, status,
-             faculty_id, department_id, level_id,
-             profiles(full_name, email),
-             faculties(name, code),
-             departments(name, code),
-             levels(name, code)`,
-          )
-          .eq("school_id", schoolId!)
-          .limit(300);
-        if (e2) throw e2;
-        return ((d2 ?? []) as StudentRow[]).map((s) => ({ ...s, full_name: null }));
+      async function loadAll(select: string) {
+        const all: StudentRow[] = [];
+        let from = 0;
+        for (;;) {
+          const { data, error } = await supabase
+            .from("students")
+            .select(select)
+            .eq("school_id", schoolId!)
+            .order("full_name", { ascending: true })
+            .range(from, from + pageSize - 1);
+          if (error) throw error;
+          const chunk = (data ?? []) as StudentRow[];
+          all.push(...chunk);
+          if (chunk.length < pageSize) break;
+          from += pageSize;
+          if (from > 20000) break;
+        }
+        return all;
       }
-      return (data ?? []) as StudentRow[];
+
+      try {
+        return await loadAll(selectFull);
+      } catch {
+        try {
+          return await loadAll(selectBasic);
+        } catch {
+          const { data, error } = await supabase
+            .from("students")
+            .select("id, student_id, matric_number, full_name, status, profiles(full_name, email)")
+            .eq("school_id", schoolId!)
+            .limit(5000);
+          if (error) throw error;
+          return (data ?? []) as StudentRow[];
+        }
+      }
     },
   });
 
   const facultiesQ = useQuery({
     queryKey: ["admin-filter-faculties", schoolId],
     enabled: Boolean(schoolId),
-    staleTime: 5 * 60_000,
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("faculties")
         .select("id, name")
         .eq("school_id", schoolId!)
         .order("name");
-      return (data ?? []) as { id: string; name: string }[];
+      if (error) throw error;
+      return data ?? [];
     },
   });
 
   const deptsQ = useQuery({
     queryKey: ["admin-filter-depts", schoolId, facultyFilter],
     enabled: Boolean(schoolId),
-    staleTime: 5 * 60_000,
     queryFn: async () => {
-      let q = supabase
-        .from("departments")
-        .select("id, name, faculty_id")
-        .eq("school_id", schoolId!)
-        .order("name");
+      let q = supabase.from("departments").select("id, name, faculty_id").eq("school_id", schoolId!);
       if (facultyFilter !== "all") q = q.eq("faculty_id", facultyFilter);
-      const { data } = await q;
-      return (data ?? []) as { id: string; name: string; faculty_id: string | null }[];
+      const { data, error } = await q.order("name");
+      if (error) throw error;
+      return data ?? [];
     },
   });
 
   const levelsQ = useQuery({
     queryKey: ["admin-filter-levels", schoolId],
     enabled: Boolean(schoolId),
-    staleTime: 5 * 60_000,
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("levels")
         .select("id, name")
         .eq("school_id", schoolId!)
         .order("name");
-      return (data ?? []) as { id: string; name: string }[];
+      if (error) throw error;
+      return data ?? [];
     },
   });
 
   const rows = useMemo(() => {
-    const all = listQ.data ?? [];
+    let list = [...(listQ.data ?? [])];
     const q = search.trim().toLowerCase();
-    const filtered = all.filter((s) => {
-      if (facultyFilter !== "all" && s.faculty_id !== facultyFilter) return false;
-      if (deptFilter !== "all" && s.department_id !== deptFilter) return false;
-      if (levelFilter !== "all" && s.level_id !== levelFilter) return false;
-      if (statusFilter !== "all" && s.status !== statusFilter) return false;
-      if (!q) return true;
-      const hay = [
-        displayName(s),
-        s.matric_number ?? "",
-        s.student_id,
-        s.faculties?.name ?? "",
-        s.departments?.name ?? "",
-        s.levels?.name ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
-    });
-
-    filtered.sort((a, b) => {
+    if (q) {
+      list = list.filter((s) =>
+        [displayName(s), s.matric_number ?? "", s.student_id ?? ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(q),
+      );
+    }
+    if (facultyFilter !== "all") list = list.filter((s) => s.faculty_id === facultyFilter);
+    if (deptFilter !== "all") list = list.filter((s) => s.department_id === deptFilter);
+    if (levelFilter !== "all") list = list.filter((s) => s.level_id === levelFilter);
+    if (statusFilter !== "all") list = list.filter((s) => s.status === statusFilter);
+    list.sort((a, b) => {
       if (sortBy === "matric") {
-        const ma = (a.matric_number || a.student_id || "").toLowerCase();
-        const mb = (b.matric_number || b.student_id || "").toLowerCase();
-        return ma.localeCompare(mb, undefined, { sensitivity: "base" });
+        return (a.matric_number || a.student_id || "").localeCompare(
+          b.matric_number || b.student_id || "",
+          undefined,
+          { sensitivity: "base" },
+        );
       }
       if (sortBy === "level") {
-        const la = (a.levels?.name || "").toLowerCase();
-        const lb = (b.levels?.name || "").toLowerCase();
-        if (la !== lb) return la.localeCompare(lb, undefined, { sensitivity: "base" });
+        return (a.levels?.name || "").localeCompare(b.levels?.name || "", undefined, {
+          sensitivity: "base",
+        });
       }
       return displayName(a).localeCompare(displayName(b), undefined, { sensitivity: "base" });
     });
-
-    return filtered;
+    return list;
   }, [listQ.data, search, facultyFilter, deptFilter, levelFilter, statusFilter, sortBy]);
 
-  async function toggleStatus(s: StudentRow) {
-    if (!schoolId) return;
-    const next = s.status === "suspended" ? "active" : "suspended";
+  async function setStatus(id: string, status: string) {
     try {
-      const { error } = await supabase
-        .from("students")
-        .update({ status: next } as never)
-        .eq("id", s.id)
-        .eq("school_id", schoolId);
+      const { error } = await supabase.from("students").update({ status } as never).eq("id", id);
       if (error) throw error;
-      toast.success(next === "active" ? "Student unsuspended" : "Student suspended");
-      await listQ.refetch();
+      toast.success(status === "suspended" ? "Student suspended" : "Student reactivated");
+      await qc.invalidateQueries({ queryKey: ["admin-all-students"] });
       await qc.invalidateQueries({ queryKey: ["struct-students"] });
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error((e as Error).message || "Could not update status");
     }
   }
 
@@ -200,50 +207,35 @@ function Page() {
     <>
       <PageHeader
         title="Students"
-        description="Students in your school (up to 300 loaded; use search/filters). Sorted A–Z by name."
+        description="All students in your school. Import CSV or add one at a time."
         actions={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" className="font-semibold" asChild>
-              <Link to="/admin/student-import">Import students</Link>
-            </Button>
-            <Button variant="outline" className="font-semibold" asChild>
-              <Link to="/admin/structure">Academic Structure</Link>
-            </Button>
-          </div>
+          <Button asChild className="font-semibold">
+            <Link to="/admin/student-import">Import students</Link>
+          </Button>
         }
       />
 
-      <SectionCard title="Login reminder">
-        <p className="text-sm text-slate-700">
+      <SectionCard className="space-y-3">
+        <p className="text-sm text-slate-600">
           School code: <strong>{schoolCode || "—"}</strong> · Username: email or matric · Password:{" "}
           <strong>their matric / student ID</strong>
         </p>
-      </SectionCard>
-
-      <SectionCard className="mt-6" title={`Students (${rows.length})`}>
-        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
+        <div className="flex flex-wrap gap-2">
           <div className="relative min-w-[200px] flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
-              className="pl-9"
+              className="h-10 pl-9"
               placeholder="Search name or matric…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-
-          <Select
-            value={facultyFilter}
-            onValueChange={(v) => {
-              setFacultyFilter(v);
-              setDeptFilter("all");
-            }}
-          >
-            <SelectTrigger className="w-full sm:w-[180px]">
-              <SelectValue placeholder="College" />
+          <Select value={facultyFilter} onValueChange={setFacultyFilter}>
+            <SelectTrigger className="h-10 w-[160px]">
+              <SelectValue placeholder="Faculty" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All colleges</SelectItem>
+              <SelectItem value="all">All faculties</SelectItem>
               {(facultiesQ.data ?? []).map((f) => (
                 <SelectItem key={f.id} value={f.id}>
                   {f.name}
@@ -251,9 +243,8 @@ function Page() {
               ))}
             </SelectContent>
           </Select>
-
           <Select value={deptFilter} onValueChange={setDeptFilter}>
-            <SelectTrigger className="w-full sm:w-[180px]">
+            <SelectTrigger className="h-10 w-[160px]">
               <SelectValue placeholder="Department" />
             </SelectTrigger>
             <SelectContent>
@@ -265,9 +256,8 @@ function Page() {
               ))}
             </SelectContent>
           </Select>
-
           <Select value={levelFilter} onValueChange={setLevelFilter}>
-            <SelectTrigger className="w-full sm:w-[150px]">
+            <SelectTrigger className="h-10 w-[140px]">
               <SelectValue placeholder="Level" />
             </SelectTrigger>
             <SelectContent>
@@ -279,25 +269,22 @@ function Page() {
               ))}
             </SelectContent>
           </Select>
-
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-[140px]">
+            <SelectTrigger className="h-10 w-[130px]">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All status</SelectItem>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="suspended">Suspended</SelectItem>
-              <SelectItem value="invited">Invited</SelectItem>
             </SelectContent>
           </Select>
-
           <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
-            <SelectTrigger className="w-full sm:w-[160px]">
-              <SelectValue placeholder="Sort by" />
+            <SelectTrigger className="h-10 w-[140px]">
+              <SelectValue placeholder="Sort" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="name">Name (A–Z)</SelectItem>
+              <SelectItem value="name">Name</SelectItem>
               <SelectItem value="matric">Matric number</SelectItem>
               <SelectItem value="level">Level</SelectItem>
             </SelectContent>
@@ -313,10 +300,11 @@ function Page() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-left text-sm">
+            <p className="mb-2 text-xs text-slate-500">{rows.length} student(s)</p>
+            <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                  <th className="py-2 pr-3">SN</th>
+                  <th className="py-2 pr-3">#</th>
                   <th className="py-2 pr-3">Full name</th>
                   <th className="py-2 pr-3">Matric</th>
                   <th className="py-2 pr-3">College</th>
@@ -343,29 +331,32 @@ function Page() {
                       <td className="py-2.5">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Button size="sm" variant="outline" className="h-8 gap-1 text-xs font-semibold" asChild>
-                            <a href={`/admin/student/${s.id}`}>
+                            <Link to="/admin/student/$id" params={{ id: s.id }}>
                               <Eye className="h-3.5 w-3.5 text-primary" />
                               View
-                            </a>
+                            </Link>
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 gap-1 text-xs font-semibold"
-                            onClick={() => void toggleStatus(s)}
-                          >
-                            {suspended ? (
-                              <>
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                                Unsuspend
-                              </>
-                            ) : (
-                              <>
-                                <Ban className="h-3.5 w-3.5" />
-                                Suspend
-                              </>
-                            )}
-                          </Button>
+                          {suspended ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 gap-1 text-xs font-semibold"
+                              onClick={() => void setStatus(s.id, "active")}
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                              Activate
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 gap-1 text-xs font-semibold text-rose-700"
+                              onClick={() => void setStatus(s.id, "suspended")}
+                            >
+                              <Ban className="h-3.5 w-3.5" />
+                              Suspend
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
