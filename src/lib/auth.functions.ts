@@ -72,17 +72,23 @@ const loginInputSchema = z.object({
 
 export const loginWithSchoolCode = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => {
-    const raw =
-      data &&
-      typeof data === "object" &&
-      "data" in (data as object) &&
-      (data as { data: unknown }).data &&
-      typeof (data as { data: unknown }).data === "object"
-        ? (data as { data: unknown }).data
-        : data;
-    return loginInputSchema.parse(raw);
+    try {
+      const raw =
+        data &&
+        typeof data === "object" &&
+        "data" in (data as object) &&
+        (data as { data: unknown }).data &&
+        typeof (data as { data: unknown }).data === "object"
+          ? (data as { data: unknown }).data
+          : data;
+      return loginInputSchema.parse(raw);
+    } catch {
+      // Never throw HTML 500 from validation — return empty fields so handler can respond cleanly
+      return { schoolCode: "", identifier: "", password: "" };
+    }
   })
   .handler(async ({ data }) => {
+    try {
     const loginServer = await import("@/lib/login.server").catch(() => null);
     const hasAdminKey = loginServer?.hasAdminKey ?? (() => false);
     const provisionStudentLogin =
@@ -108,8 +114,11 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
     const client = makeClient(url, anonKey);
 
     const schoolCode = (data.schoolCode ?? "").trim().toUpperCase();
-    const ident = data.identifier.trim();
-    const password = data.password;
+    const ident = (data.identifier || "").trim();
+    const password = data.password || "";
+    if (!ident || !password) {
+      return { error: "Enter your email / matric / staff ID and password." };
+    }
     const emailLower = looksLikeEmail(ident) ? ident.toLowerCase() : "";
 
     const isSuperCode =
@@ -439,6 +448,15 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       },
       role: primaryRole,
     };
+    } catch (e) {
+      console.error("[login] unhandled", e);
+      const msg = e instanceof Error ? e.message : "Unable to sign in right now.";
+      // Never leak HTML error pages to the client
+      if (typeof msg === "string" && (msg.includes("<!doctype") || msg.includes("<html") || msg.length > 400)) {
+        return { error: "Unable to sign in right now. Please try again in a moment." };
+      }
+      return { error: msg || "Unable to sign in right now. Please try again." };
+    }
   });
 
 // BUILD_EXPORT_GUARD: login.tsx imports this name
