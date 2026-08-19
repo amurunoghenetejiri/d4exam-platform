@@ -66,6 +66,31 @@ const features = [
   },
 ];
 
+/** Never show HTML error pages in the login alert. */
+function friendlyLoginError(raw: unknown): string {
+  const msg = raw instanceof Error ? raw.message : String(raw ?? "");
+  if (!msg) return "Unable to sign in. Please try again.";
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes("<!doctype") ||
+    lower.includes("<html") ||
+    lower.includes("this page didn't load") ||
+    lower.includes("something went wrong on our end") ||
+    msg.length > 280
+  ) {
+    return "Unable to sign in right now. Please try again in a moment.";
+  }
+  const cleaned = msg.replace(/^Unable to sign in right now:\s*/i, "").trim();
+  if (
+    cleaned.toLowerCase().includes("<!doctype") ||
+    cleaned.toLowerCase().includes("<html") ||
+    cleaned.length > 280
+  ) {
+    return "Unable to sign in right now. Please try again in a moment.";
+  }
+  return cleaned || msg;
+}
+
 function LoginPage() {
   const navigate = useNavigate();
   const loginFn = useServerFn(signInWithSchoolCode);
@@ -79,6 +104,41 @@ function LoginPage() {
   const [remember, setRemember] = useState(false);
   const inFlight = useRef(false);
 
+  async function goHomeAfterSession() {
+    let user = await fetchSessionUser();
+    for (let i = 0; i < 5 && !user?.role; i++) {
+      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
+      user = await fetchSessionUser();
+    }
+    if (user?.role && user.role in roleHome) {
+      navigate({ to: roleHome[user.role] as never });
+      return true;
+    }
+    try {
+      const { data: myRoles } = await supabase.rpc("get_my_roles");
+      const list = Array.isArray(myRoles)
+        ? myRoles.map((r: { role?: string } | string) =>
+            typeof r === "string" ? r : String((r as { role?: string }).role || ""),
+          )
+        : [];
+      const priority = [
+        "super_admin",
+        "school_admin",
+        "examination_officer",
+        "teacher",
+        "student",
+      ] as const;
+      const found = priority.find((r) => list.map((x) => x.toLowerCase()).includes(r));
+      if (found && found in roleHome) {
+        navigate({ to: roleHome[found] as never });
+        return true;
+      }
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (inFlight.current || loading) return;
@@ -89,88 +149,67 @@ function LoginPage() {
     }
     inFlight.current = true;
     setLoading(true);
+    let lastServerMsg = "";
     try {
       const schoolCode = code.trim().toUpperCase();
       const ident = identifier.trim();
       const pass = password;
       const looksEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ident);
 
-      // 1) Full server login — students, teachers, officers, school admin, super admin
-      const result = await loginFn({
-        data: {
-          schoolCode: schoolCode || "",
-          identifier: ident,
-          password: pass,
-        },
-      });
-
-      if (result && "session" in result && result.session?.access_token) {
-        const { error: sessErr } = await supabase.auth.setSession({
-          access_token: result.session.access_token,
-          refresh_token: result.session.refresh_token,
+      // 1) Server login — never let a crash stop client fallbacks
+      try {
+        const result = await loginFn({
+          data: {
+            schoolCode: schoolCode || "",
+            identifier: ident,
+            password: pass,
+          },
         });
-        if (!sessErr) {
-          if (result.role && result.role in roleHome) {
-            navigate({ to: roleHome[result.role as keyof typeof roleHome] as never });
-            return;
-          }
-          let user = await fetchSessionUser();
-          for (let i = 0; i < 4 && !user?.role; i++) {
-            await new Promise((r) => setTimeout(r, 150 * (i + 1)));
-            user = await fetchSessionUser();
-          }
-          if (user?.role && user.role in roleHome) {
-            navigate({ to: roleHome[user.role] as never });
-            return;
-          }
-          if (result.error) {
-            setError(String(result.error));
-            return;
+        if (result && "session" in result && result.session?.access_token) {
+          const { error: sessErr } = await supabase.auth.setSession({
+            access_token: result.session.access_token,
+            refresh_token: result.session.refresh_token,
+          });
+          if (!sessErr) {
+            if (result.role && result.role in roleHome) {
+              navigate({ to: roleHome[result.role as keyof typeof roleHome] as never });
+              return;
+            }
+            if (await goHomeAfterSession()) return;
           }
         }
+        if (result && "error" in result && result.error) {
+          lastServerMsg = String(result.error);
+        }
+      } catch (serverErr) {
+        console.warn("[login] server fn failed, trying client fallback", serverErr);
+        lastServerMsg = friendlyLoginError(serverErr);
       }
 
-      // 2) Direct client sign-in (email)
-      if (looksEmail) {
+      // 2) Direct client sign-in (teachers, officers, admins with email; students with synthetic)
+      const emailsToTry: string[] = [];
+      if (looksEmail) emailsToTry.push(ident.toLowerCase());
+      if (!looksEmail && schoolCode) {
+        const safeMatric = ident.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const safeCode = schoolCode.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+        emailsToTry.push(
+          `${safeMatric}@${safeCode || "school"}.student.d4exam.local`,
+          `${ident.replace(/[^a-z0-9]+/gi, ".").toLowerCase()}@placeholder.local`,
+        );
+      }
+
+      for (const email of emailsToTry) {
         const { data, error: authErr } = await supabase.auth.signInWithPassword({
-          email: ident.toLowerCase(),
+          email,
           password: pass,
         });
         if (!authErr && data.session) {
-          let user = await fetchSessionUser();
-          for (let i = 0; i < 4 && !user?.role; i++) {
-            await new Promise((r) => setTimeout(r, 150 * (i + 1)));
-            user = await fetchSessionUser();
-          }
-          if (user?.role && user.role in roleHome) {
-            navigate({ to: roleHome[user.role] as never });
-            return;
-          }
-          try {
-            const { data: myRoles } = await supabase.rpc("get_my_roles");
-            const list = Array.isArray(myRoles)
-              ? myRoles.map((r: { role?: string } | string) =>
-                  typeof r === "string" ? r : String((r as { role?: string }).role || ""),
-                )
-              : [];
-            const priority = [
-              "super_admin",
-              "school_admin",
-              "examination_officer",
-              "teacher",
-              "student",
-            ];
-            const found = priority.find((r) => list.map((x) => x.toLowerCase()).includes(r));
-            if (found && found in roleHome) {
-              navigate({ to: roleHome[found as keyof typeof roleHome] as never });
-              return;
-            }
-          } catch {
-            /* ignore */
-          }
+          if (await goHomeAfterSession()) return;
         }
+      }
 
-        // 3) Recover unconfirmed / school-admin password (needs service role on server)
+      // 3) Recover unconfirmed account (email only)
+      if (looksEmail) {
         try {
           const fixed = await ensureLoginFn({
             data: {
@@ -185,15 +224,7 @@ function LoginPage() {
               password: pass,
             });
             if (!againErr && again.session) {
-              let user = await fetchSessionUser();
-              for (let i = 0; i < 4 && !user?.role; i++) {
-                await new Promise((r) => setTimeout(r, 150 * (i + 1)));
-                user = await fetchSessionUser();
-              }
-              if (user?.role && user.role in roleHome) {
-                navigate({ to: roleHome[user.role] as never });
-                return;
-              }
+              if (await goHomeAfterSession()) return;
               navigate({ to: roleHome.school_admin as never });
               return;
             }
@@ -203,17 +234,16 @@ function LoginPage() {
         }
       }
 
-      const serverMsg =
-        result && "error" in result && result.error
-          ? String(result.error)
-          : "Invalid login credentials.";
+      const msg = friendlyLoginError(lastServerMsg || "Invalid login credentials.");
       setError(
-        serverMsg +
-          " Check school code, email/matric/staff ID, and password. Students: password is usually your matric number.",
+        msg +
+          (msg.toLowerCase().includes("unable to sign in right now")
+            ? ""
+            : " Check school code, email/matric/staff ID, and password. Students: password is usually your matric number."),
       );
     } catch (err) {
       console.error("[login] sign-in failed:", err);
-      setError(err instanceof Error ? err.message : "Unable to sign in. Please try again.");
+      setError(friendlyLoginError(err));
     } finally {
       setLoading(false);
       inFlight.current = false;
