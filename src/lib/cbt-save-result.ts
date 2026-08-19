@@ -20,6 +20,28 @@ function decodeOptionsFromExplanation(explanation: string | null | undefined): s
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
+function decodeOptionsFromJson(options: unknown): string[] {
+  if (!options) return [];
+  let arr: unknown = options;
+  if (typeof options === "string") {
+    try {
+      arr = JSON.parse(options);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(arr)) return [];
+  const byKey: Record<string, string> = {};
+  for (const item of arr) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const key = String(o.key ?? o.option_key ?? "").trim().toUpperCase();
+    const text = String(o.text ?? o.option_text ?? "").trim();
+    if (key && text) byKey[key] = text;
+  }
+  return ["A", "B", "C", "D", "E", "F"].map((k) => byKey[k]).filter(Boolean) as string[];
+}
+
 /**
  * Score answers and upsert into public.results.
  * Always re-resolves the correct option TEXT from the DB (original A–D order)
@@ -46,17 +68,18 @@ export async function saveCbtResult(input: {
   const qIds = input.questions.map((q) => q.id).filter(Boolean);
   const bankById = new Map<
     string,
-    { correct_answer: string | null; explanation: string | null; marks: number | null }
+    { correct_answer: string | null; options?: unknown; explanation: string | null; marks: number | null }
   >();
   if (qIds.length) {
     const { data: bankRows } = await supabase
       .from("questions")
-      .select("id, correct_answer, explanation, marks")
+      .select("id, correct_answer, options, marks")
       .in("id", qIds);
     for (const row of bankRows ?? []) {
       bankById.set(String((row as { id: string }).id), {
         correct_answer: (row as { correct_answer: string | null }).correct_answer,
-        explanation: (row as { explanation: string | null }).explanation,
+        options: (row as { options?: unknown }).options,
+        explanation: null as string | null,
         marks: (row as { marks: number | null }).marks,
       });
     }
@@ -65,7 +88,11 @@ export async function saveCbtResult(input: {
   const questionsForScore = input.questions.map((q) => {
     const bank = bankById.get(q.id);
     const correctAnswer = bank?.correct_answer ?? q.correct_answer;
-    const originalOpts = decodeOptionsFromExplanation(bank?.explanation);
+    const originalOpts = (() => {
+      const fromJson = decodeOptionsFromJson(bank?.options);
+      if (fromJson.length) return fromJson;
+      return decodeOptionsFromExplanation(bank?.explanation);
+    })();
     const originals = originalOpts.length
       ? originalOpts
       : q.originalOptions?.length
@@ -108,7 +135,6 @@ export async function saveCbtResult(input: {
   const releasedAt = publishNow ? new Date().toISOString() : null;
 
   const submittedAt = new Date().toISOString();
-  // Always stamp updated_at so officer live-monitor recent-done query finds this row
   const attemptPatch = {
     status,
     submitted_at: submittedAt,
@@ -213,7 +239,6 @@ export async function saveCbtResult(input: {
     resultId = upsert.data?.id as string | undefined;
   }
 
-  // Officer notification: result held until release (skip if already published)
   if (!error && input.schoolId && !publishNow) {
     void notifyOfficersStudentResultPending({
       schoolId: input.schoolId,
@@ -224,7 +249,6 @@ export async function saveCbtResult(input: {
     });
   }
 
-  // Auto-complete examination when every attempt has finished
   if (!error && input.schoolId) {
     try {
       const { data: attempts } = await supabase
