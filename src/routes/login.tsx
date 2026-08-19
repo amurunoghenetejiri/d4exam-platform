@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchSessionUser, roleHome } from "@/lib/session";
+import { signInWithSchoolCode } from "@/lib/auth.functions";
 import { ensureLoginAccount } from "@/lib/ensure-login.functions";
 
 import {
@@ -67,6 +68,7 @@ const features = [
 
 function LoginPage() {
   const navigate = useNavigate();
+  const loginFn = useServerFn(signInWithSchoolCode);
   const ensureLoginFn = useServerFn(ensureLoginAccount);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -93,50 +95,82 @@ function LoginPage() {
       const pass = password;
       const looksEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ident);
 
-      const emails: string[] = [];
-      if (looksEmail) emails.push(ident.toLowerCase());
+      // 1) Full server login — students, teachers, officers, school admin, super admin
+      const result = await loginFn({
+        data: {
+          schoolCode: schoolCode || "",
+          identifier: ident,
+          password: pass,
+        },
+      });
 
-      if (schoolCode && !looksEmail) {
-        try {
-          const { data: resolved } = await supabase.rpc("resolve_login_identity", {
-            _school_code: schoolCode,
-            _identifier: ident,
-          });
-          const row = Array.isArray(resolved) ? resolved[0] : resolved;
-          if (row && typeof row === "object" && (row as { email?: string }).email) {
-            emails.push(String((row as { email: string }).email).toLowerCase());
+      if (result && "session" in result && result.session?.access_token) {
+        const { error: sessErr } = await supabase.auth.setSession({
+          access_token: result.session.access_token,
+          refresh_token: result.session.refresh_token,
+        });
+        if (!sessErr) {
+          if (result.role && result.role in roleHome) {
+            navigate({ to: roleHome[result.role as keyof typeof roleHome] as never });
+            return;
           }
-        } catch {
-          /* optional */
+          let user = await fetchSessionUser();
+          for (let i = 0; i < 4 && !user?.role; i++) {
+            await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+            user = await fetchSessionUser();
+          }
+          if (user?.role && user.role in roleHome) {
+            navigate({ to: roleHome[user.role] as never });
+            return;
+          }
+          if (result.error) {
+            setError(String(result.error));
+            return;
+          }
         }
-        const safeMatric = ident.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        const safeCode = schoolCode.toLowerCase().replace(/[^a-z0-9]+/g, "");
-        emails.push(`${safeMatric}@${safeCode || "school"}.student.d4exam.local`);
       }
 
-      if (emails.length === 0) {
-        setError("Enter a valid email, or school code plus matric / staff ID.");
-        return;
-      }
-
-      let lastMsg = "Invalid login credentials";
-      let signedIn = false;
-
-      for (const email of emails) {
+      // 2) Direct client sign-in (email)
+      if (looksEmail) {
         const { data, error: authErr } = await supabase.auth.signInWithPassword({
-          email,
+          email: ident.toLowerCase(),
           password: pass,
         });
-        if (authErr || !data.session) {
-          lastMsg = authErr?.message || lastMsg;
-          continue;
+        if (!authErr && data.session) {
+          let user = await fetchSessionUser();
+          for (let i = 0; i < 4 && !user?.role; i++) {
+            await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+            user = await fetchSessionUser();
+          }
+          if (user?.role && user.role in roleHome) {
+            navigate({ to: roleHome[user.role] as never });
+            return;
+          }
+          try {
+            const { data: myRoles } = await supabase.rpc("get_my_roles");
+            const list = Array.isArray(myRoles)
+              ? myRoles.map((r: { role?: string } | string) =>
+                  typeof r === "string" ? r : String((r as { role?: string }).role || ""),
+                )
+              : [];
+            const priority = [
+              "super_admin",
+              "school_admin",
+              "examination_officer",
+              "teacher",
+              "student",
+            ];
+            const found = priority.find((r) => list.map((x) => x.toLowerCase()).includes(r));
+            if (found && found in roleHome) {
+              navigate({ to: roleHome[found as keyof typeof roleHome] as never });
+              return;
+            }
+          } catch {
+            /* ignore */
+          }
         }
-        signedIn = true;
-        break;
-      }
 
-      // Recover accounts with unconfirmed email or password set after school approval
-      if (!signedIn && looksEmail) {
+        // 3) Recover unconfirmed / school-admin password (needs service role on server)
         try {
           const fixed = await ensureLoginFn({
             data: {
@@ -146,74 +180,37 @@ function LoginPage() {
             },
           });
           if (fixed && "ok" in fixed && fixed.ok) {
-            const { data, error: authErr } = await supabase.auth.signInWithPassword({
+            const { data: again, error: againErr } = await supabase.auth.signInWithPassword({
               email: ident.toLowerCase(),
               password: pass,
             });
-            if (!authErr && data.session) {
-              signedIn = true;
-            } else if (authErr) {
-              lastMsg = authErr.message || lastMsg;
+            if (!againErr && again.session) {
+              let user = await fetchSessionUser();
+              for (let i = 0; i < 4 && !user?.role; i++) {
+                await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+                user = await fetchSessionUser();
+              }
+              if (user?.role && user.role in roleHome) {
+                navigate({ to: roleHome[user.role] as never });
+                return;
+              }
+              navigate({ to: roleHome.school_admin as never });
+              return;
             }
           }
         } catch {
-          /* keep lastMsg */
-        }
-      }
-
-      if (!signedIn) {
-        setError(
-          (lastMsg || "Invalid login credentials.") +
-            " Check email, password, and school code. For school admin use the password from application status.",
-        );
-        return;
-      }
-
-      let user = await fetchSessionUser();
-      for (let i = 0; i < 4 && !user?.role; i++) {
-        await new Promise((r) => setTimeout(r, 150 * (i + 1)));
-        user = await fetchSessionUser();
-      }
-
-      if (!user?.role) {
-        try {
-          const { data: isSuper } = await supabase.rpc("is_super_admin");
-          if (isSuper === true) {
-            navigate({ to: roleHome.super_admin as never });
-            return;
-          }
-        } catch {
           /* ignore */
         }
-        try {
-          const { data: myRoles } = await supabase.rpc("get_my_roles");
-          const list = Array.isArray(myRoles)
-            ? myRoles.map((r: { role?: string } | string) =>
-                typeof r === "string" ? r : String((r as { role?: string }).role || ""),
-              )
-            : [];
-          const priority = [
-            "super_admin",
-            "school_admin",
-            "examination_officer",
-            "teacher",
-            "student",
-          ];
-          const found = priority.find((r) => list.map((x) => x.toLowerCase()).includes(r));
-          if (found && found in roleHome) {
-            navigate({ to: roleHome[found as keyof typeof roleHome] as never });
-            return;
-          }
-        } catch {
-          /* ignore */
-        }
-        setError(
-          "Signed in, but no dashboard role was found for this account. Ask your admin to assign a role.",
-        );
-        return;
       }
 
-      navigate({ to: roleHome[user.role] as never });
+      const serverMsg =
+        result && "error" in result && result.error
+          ? String(result.error)
+          : "Invalid login credentials.";
+      setError(
+        serverMsg +
+          " Check school code, email/matric/staff ID, and password. Students: password is usually your matric number.",
+      );
     } catch (err) {
       console.error("[login] sign-in failed:", err);
       setError(err instanceof Error ? err.message : "Unable to sign in. Please try again.");
