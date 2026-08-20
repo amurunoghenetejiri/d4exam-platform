@@ -50,7 +50,6 @@ export function parsePresence(metadata: unknown): MonitorPresence {
     faceRaw === "ok" || faceRaw === "none" || faceRaw === "multi" || faceRaw === "unclear" || faceRaw === "unavailable"
       ? faceRaw
       : "unknown";
-  // Explicit false (tab hidden / paused) must win — do not infer active from face alone
   const camExplicitOff =
     m.cameraActive === false ||
     m.camera_active === false ||
@@ -177,7 +176,9 @@ export function humanEventLabel(eventType: string | null | undefined, descriptio
     AUTO_SUBMIT: "Auto-submitted",
     WARNING_SHOWN: "Officer warning sent",
   };
-  return map[t] ?? eventType.replaceAll("_", " ").toLowerCase();
+  if (map[t]) return map[t];
+  const raw = String(eventType || "event").replaceAll("_", " ").toLowerCase();
+  return raw || "Event";
 }
 
 export function formatDuration(sec: number | null | undefined): string {
