@@ -439,10 +439,15 @@ export function ExamCameraPip({
 
   if (!enabled) return null;
 
+  // Prefer real stream liveness — never show false "Camera blocked"
+  const reallyLive = streamIsLive(stream) || streamIsLive(externalStream) || streamIsLive(ownStreamRef.current);
+  const effectiveConn: CamConnState =
+    reallyLive && camConn !== "reconnecting" ? "active" : camConn === "reconnecting" ? "reconnecting" : reallyLive ? "active" : camConn;
+
   const faceLabel =
-    camConn === "reconnecting"
+    effectiveConn === "reconnecting"
       ? "Reconnecting camera…"
-      : camConn === "unavailable"
+      : effectiveConn === "unavailable"
         ? "Camera not available"
         : faceStatus === "multi"
           ? "Multiple faces"
@@ -451,15 +456,15 @@ export function ExamCameraPip({
             : faceStatus === "ok"
               ? "Monitoring · 1 face"
               : faceStatus === "unavailable"
-                ? camConn === "active"
-                  ? "Face check off"
-                  : "Camera blocked"
+                ? faceDetection
+                  ? "Face check starting…"
+                  : "Camera active"
                 : "Face unclear";
 
   const statusDot =
-    camConn === "active"
+    effectiveConn === "active"
       ? "bg-emerald-400"
-      : camConn === "reconnecting"
+      : effectiveConn === "reconnecting"
         ? "bg-amber-400"
         : "bg-red-500";
 
@@ -486,9 +491,9 @@ export function ExamCameraPip({
         <span className={cn("h-2 w-2 shrink-0 rounded-full", statusDot)} aria-hidden />
         <GripVertical className="h-3.5 w-3.5 text-white/80" />
         <span className="text-[10px] font-semibold text-white/90">
-          {camConn === "active"
+          {effectiveConn === "active"
             ? "Camera active"
-            : camConn === "reconnecting"
+            : effectiveConn === "reconnecting"
               ? "Reconnecting…"
               : "Camera off"}
         </span>
