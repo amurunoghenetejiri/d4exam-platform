@@ -1,12 +1,9 @@
-Redeploy 2026-08-20T18:42Z WAT
+Redeploy 2026-08-20T19:50Z WAT
 
-Correct production URL: https://d4exam-platform.vercel.app
-Do NOT use platform.vercel.app (that domain is not this project).
+Stability: officer live-monitor + results + student results
+- Soft error boundaries (page never blanks entire portal)
+- useRows/useCount/useUnreadNotificationCount never throw
+- school-identity query never throws
+- Safe queryFn already on live-monitor + OfficerResultsPage
 
-Latest fixes on main:
-- officer live-monitor: queryFn never throws (empty data + console.warn)
-- officer results: queryFn never throws + multi-select fallback
-- student results: already safe
-- face PIP: immediate detection on Start Exam
-
-GitHub CI Status is green. Intermediate Vercel builds may show Cancelled when several commits push quickly — only the latest production deploy matters.
+Use: https://d4exam-platform.vercel.app

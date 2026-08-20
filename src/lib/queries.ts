@@ -25,7 +25,10 @@ export function useRows<T = Record<string, unknown>>(opts: {
       if (order) q = q.order(order.column, { ascending: order.ascending ?? true });
       if (limit) q = q.limit(limit);
       const { data, error } = await q;
-      if (error) throw error;
+      if (error) {
+        console.warn(`[useRows] ${table}`, error);
+        return [] as T[];
+      }
       return (data ?? []) as T[];
     },
   });
@@ -44,7 +47,10 @@ export function useCount(table: string, filters: Filter[] = [], enabled = true) 
         q = q.eq(f.column, f.value as never);
       }
       const { count, error } = await q;
-      if (error) throw error;
+      if (error) {
+        console.warn(`[useCount] ${table}`, error);
+        return 0;
+      }
       return count ?? 0;
     },
   });
@@ -65,7 +71,10 @@ export function useUnreadNotificationCount(userId: string | null | undefined) {
         .select("*", { count: "exact", head: true })
         .eq("recipient_user_id", userId)
         .is("read_at", null);
-      if (error) throw error;
+      if (error) {
+        console.warn("[useUnreadNotificationCount]", error);
+        return 0;
+      }
       return count ?? 0;
     },
   });
