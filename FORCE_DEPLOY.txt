@@ -1,1 +1,5 @@
-force production redeploy 2026-08-20T07:50Z — results nav, student names primary, haptics light/multi/officer, officer warning toast
+force production redeploy 2026-08-20T07:10Z
+1. View Results -> /student/results/$id
+2. Officer live-monitor shows student NAME first (matric second)
+3. Haptics: light (no-face), strong (multi), longest (officer warning + toast)
+4. studentName written into exam_attempts.metadata on start + heartbeat
