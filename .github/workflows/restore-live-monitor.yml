@@ -17,50 +17,21 @@ jobs:
       - name: Restore officer live-monitor from good commit
         run: |
           set -e
-          GOOD=262010a5ba08e5db49f41b8d23000da89faffe54
-          git show "$GOOD:src/routes/officer.live-monitor.tsx" > /tmp/lm.tsx
-          # Inject nameFromMetadata preference
-          python3 << 'PY'
-          from pathlib import Path
-          p = Path('/tmp/lm.tsx')
-          t = p.read_text()
-          old = '''function studentDisplayName(a: AttemptRow): string {
-            return (
-              a.students?.full_name ||
-              a.students?.profiles?.full_name ||
-              a.students?.matric_number ||
-              a.students?.student_id ||
-              "Student"
-            );
-          }'''
-          # normalize whitespace for match
-          import re
-          pat = re.compile(r'function studentDisplayName\(a: AttemptRow\): string \{[\s\S]*?\n\}', re.M)
-          new = '''function nameFromMetadata(meta: unknown): string {
-            if (!meta || typeof meta !== "object") return "";
-            const m = meta as Record<string, unknown>;
-            return String(m.studentName || m.full_name || m.student_name || "").trim();
-          }
-
-          function studentDisplayName(a: AttemptRow): string {
-            const fromMeta = nameFromMetadata(a.metadata);
-            if (fromMeta) return fromMeta;
-            const fromStudent = String(a.students?.full_name || "").trim();
-            if (fromStudent) return fromStudent;
-            const fromProfile = String(a.students?.profiles?.full_name || "").trim();
-            if (fromProfile) return fromProfile;
-            return a.students?.matric_number || a.students?.student_id || "Student";
-          }'''
-          t2, n = pat.subn(new, t, count=1)
-          print('replacements', n)
-          Path('src/routes/officer.live-monitor.tsx').write_text(t2 if n else t)
-          PY
+          GOOD=0c3987c
+          git show "$GOOD:src/routes/officer.live-monitor.tsx" > src/routes/officer.live-monitor.tsx
+          wc -l src/routes/officer.live-monitor.tsx
+          head -3 src/routes/officer.live-monitor.tsx
+          # Ensure not PLACEHOLDER
+          if grep -q '^SEE_FILE\|^PLACEHOLDER' src/routes/officer.live-monitor.tsx; then
+            echo "Restore failed"
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/routes/officer.live-monitor.tsx
           if git diff --cached --quiet; then
             echo "No changes"
           else
-            git commit -m "fix(officer): restore full live-monitor + student name primary"
+            git commit -m "fix(officer): restore full live-monitor after PLACEHOLDER wipe"
             git push
           fi
