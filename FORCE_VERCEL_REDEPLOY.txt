@@ -6,3 +6,5 @@ Face PIP fix (commits 78dcc89 + 7d910ae):
 - Status shows: Monitoring · 1 face / Multiple faces / Face not seen / Face unclear
 - MediaPipe load has 8s timeout so engine never hangs forever
 - Tick interval 900ms for responsive updates
+
+# Page stability fix 2026-08-20T18:21Z
