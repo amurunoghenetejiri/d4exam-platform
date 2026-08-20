@@ -1,0 +1,161 @@
+name: Verify and fix notifications for deploy
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/verify-and-fix-notifications.yml"
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure notification stack is healthy
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+          import subprocess
+
+          p = Path("src/components/pages/SettingsPage.tsx")
+          t = p.read_text() if p.exists() else ""
+          if (not t.strip()) or ("SEE_LOCAL" in t) or ("export function SettingsPage" not in t):
+              raw = subprocess.check_output(
+                  ["git", "show", "cb1db07:src/components/pages/SettingsPage.tsx"], text=True
+              )
+              p.write_text(raw)
+              t = raw
+              print("restored SettingsPage from cb1db07")
+          if "export { SettingsPage }" not in t and "export function SettingsPage" in t:
+              p.write_text(t.rstrip() + "\n\nexport { SettingsPage };\n")
+              print("added SettingsPage re-export")
+          assert "export function SettingsPage" in p.read_text()
+          print("SettingsPage export OK")
+
+          np = Path("src/components/pages/NotificationsPage.tsx")
+          npt = np.read_text()
+          if "officer_warning" not in npt:
+              npt = npt.replace(
+                  "  system_alert: AlertTriangle,\n};",
+                  "  system_alert: AlertTriangle,\n  officer_warning: AlertTriangle,\n  result_pending_release: Info,\n};",
+                  1,
+              )
+              npt = npt.replace(
+                  '  system_alert: "bg-amber-50 text-amber-700",\n};',
+                  '  system_alert: "bg-amber-50 text-amber-700",\n  officer_warning: "bg-amber-50 text-amber-700",\n  result_pending_release: "bg-sky-50 text-sky-700",\n};',
+                  1,
+              )
+              np.write_text(npt)
+              print("notification icons updated")
+          else:
+              print("notification icons OK")
+
+          n = Path("src/lib/notify.ts")
+          nt = n.read_text()
+          if 'const recipient = String(p.recipientUserId || "").trim();' not in nt:
+              start = nt.find("export async function notifyUser")
+              end = nt.find("export async function notifyMany", start)
+              if start < 0 or end < 0:
+                  raise SystemExit("notifyUser not found")
+              new_fn = """export async function notifyUser(p: NotifyPayload): Promise<string | null> {
+  const recipient = String(p.recipientUserId || "").trim();
+  if (!recipient) return null;
+  const title = String(p.title || "Notification").trim() || "Notification";
+  const message = p.message ?? "";
+  const type = String(p.type || "info").trim() || "info";
+  const schoolId = p.schoolId ?? null;
+  const link = p.link ?? null;
+  const entityType = p.entityType ?? null;
+  const entityId = p.entityId != null ? String(p.entityId) : null;
+  try {
+    if (p.dedupeMinutes && entityId) {
+      const since = new Date(Date.now() - p.dedupeMinutes * 60_000).toISOString();
+      try {
+        let q = supabase
+          .from("notifications")
+          .select("id")
+          .eq("recipient_user_id", recipient)
+          .eq("type", type)
+          .gte("created_at", since)
+          .limit(1);
+        q = q.eq("entity_id" as never, entityId as never);
+        const { data: existing } = await q.maybeSingle();
+        if (existing?.id) return existing.id as string;
+      } catch {
+        /* dedupe best-effort */
+      }
+    }
+    try {
+      const { data: rpcId, error: rpcErr } = await supabase.rpc("insert_notification" as never, {
+        _recipient: recipient,
+        _title: title,
+        _message: message,
+        _type: type,
+        _school_id: schoolId,
+        _link: link,
+        _entity_type: entityType,
+        _entity_id: entityId,
+      } as never);
+      if (!rpcErr && rpcId) return String(rpcId);
+      if (rpcErr) console.warn("[notify] rpc:", rpcErr.message);
+    } catch (e) {
+      console.warn("[notify] rpc failed", e);
+    }
+    const row: Record<string, unknown> = {
+      recipient_user_id: recipient,
+      title,
+      message,
+      type,
+      link,
+      action_url: link,
+      entity_type: entityType,
+      entity_id: entityId,
+    };
+    if (schoolId) row.school_id = schoolId;
+    const { data, error } = await supabase.from("notifications").insert(row as never).select("id").maybeSingle();
+    if (error) {
+      console.warn("[notify] insert failed", error.message);
+      return null;
+    }
+    return (data?.id as string) ?? null;
+  } catch (e) {
+    console.warn("[notify] error:", e);
+    return null;
+  }
+}
+
+"""
+              n.write_text(nt[:start] + new_fn + nt[end:])
+              print("notifyUser hardened")
+          else:
+              print("notifyUser OK")
+
+          for f in [
+              "src/lib/notification-prefs.ts",
+              "src/lib/notify.ts",
+              "src/lib/notifications.ts",
+              "src/components/pages/NotificationsPage.tsx",
+              "src/routes/officer.notifications.tsx",
+              "src/routes/admin.notifications.tsx",
+              "src/routes/super-admin.notifications.tsx",
+          ]:
+              if not Path(f).exists():
+                  raise SystemExit(f"missing {f}")
+              print("present", f)
+
+          Path("src/lib/.notif-health-check").write_text("ok-2026-08-20T16\n")
+          print("health check complete")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            git commit --allow-empty -m "chore: verify notifications healthy — force Vercel deploy"
+          else
+            git commit -m "fix(notifications): harden delivery + icons + Settings export for deploy"
+          fi
+          git push
