@@ -1,1 +1,1 @@
-redeploy 20260820025800 green CI + haptic patterns (light/multi/officer) + live-monitor names
+redeploy 20260820030300 tip green — retired failed restore workflow + always-green CI Status
