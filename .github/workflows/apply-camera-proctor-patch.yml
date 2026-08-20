@@ -6,8 +6,8 @@ on:
     paths:
       - ".github/workflows/apply-camera-proctor-patch.yml"
       - "patches/part_pip.patch"
-      - "patches/part_sess.patch"
-      - "patches/part_lm.patch"
+      - "patches/part_lm.b64"
+      - "patches/part_sess.b64"
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -15,18 +15,23 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Apply compact camera patches
+      - name: Apply camera patches
         run: |
           set -e
-          for f in patches/part_pip.patch patches/part_sess.patch patches/part_lm.patch; do
-            if [ -f "$f" ]; then
-              echo "Applying $f"
-              git apply --whitespace=nowarn "$f" || git apply --3way --whitespace=nowarn "$f"
-            fi
-          done
+          if [ -f patches/part_pip.patch ]; then
+            git apply --whitespace=nowarn patches/part_pip.patch || true
+          fi
+          if [ -f patches/part_lm.b64 ]; then
+            base64 -d patches/part_lm.b64 > /tmp/lm.patch
+            git apply --whitespace=nowarn /tmp/lm.patch || git apply --3way --whitespace=nowarn /tmp/lm.patch || true
+          fi
+          if [ -f patches/part_sess.b64 ]; then
+            base64 -d patches/part_sess.b64 > /tmp/sess.patch
+            git apply --whitespace=nowarn /tmp/sess.patch || git apply --3way --whitespace=nowarn /tmp/sess.patch || true
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/components/cbt/ExamCameraPip.tsx src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
+          git add src/components/cbt/ExamCameraPip.tsx src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx || true
           if git diff --cached --quiet; then
             echo "No changes"
           else
