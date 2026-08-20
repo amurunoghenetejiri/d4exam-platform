@@ -15,50 +15,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 30
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Restore CbtExamSession from last good commit and patch studentName
+      - name: Restore from known good commit and patch
+        env:
+          GOOD: "51e7e541902ce4ed77058fbaf3498c7283c4b06c"
         run: |
-          set -e
-          # Last known good full session (before placeholder)
-          GOOD_SHA=$(git log --all --pretty=format:%H -- src/components/cbt/CbtExamSession.impl.tsx | while read s; do
-            sz=$(git cat-file -s "$s:src/components/cbt/CbtExamSession.impl.tsx" 2>/dev/null || echo 0)
-            if [ "$sz" -gt 20000 ]; then echo "$s"; break; fi
-          done)
-          echo "Using good SHA: $GOOD_SHA"
-          git show "$GOOD_SHA:src/components/cbt/CbtExamSession.impl.tsx" > src/components/cbt/CbtExamSession.impl.tsx
-          python3 << 'PY'
-          from pathlib import Path
-          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
-          t = p.read_text(encoding="utf-8")
-          old = "metadata: { cameraActive: needCam, lastSeenAt: new Date().toISOString(), videoStreaming: needCam },"
-          new = """metadata: {
-              cameraActive: needCam,
-              lastSeenAt: new Date().toISOString(),
-              videoStreaming: needCam,
-              studentName: String(student.fullName || "").trim() || null,
-              matric: String(student.matric || "").trim() || null,
-            },"""
-          if old in t:
-              t = t.replace(old, new, 1)
-              print("patched begin metadata")
-          needle = "const payload = {\n        cameraActive:"
-          insert = """const payload = {
-        studentName: String(student?.fullName || "").trim() || null,
-        matric: String(student?.matric || "").trim() || null,
-        cameraActive:"""
-          if needle in t and "studentName: String(student?.fullName" not in t:
-              t = t.replace(needle, insert, 1)
-              print("patched presence")
-          p.write_text(t, encoding="utf-8")
-          print("size", p.stat().st_size)
-          assert p.stat().st_size > 20000, "file still too small"
-          assert "PLACEHOLDER" not in t
-          PY
-      - name: Commit
+          set -eux
+          git show "${GOOD}:src/components/cbt/CbtExamSession.impl.tsx" > src/components/cbt/CbtExamSession.impl.tsx
+          wc -c src/components/cbt/CbtExamSession.impl.tsx
+          python3 -c "
+from pathlib import Path
+p = Path('src/components/cbt/CbtExamSession.impl.tsx')
+t = p.read_text(encoding='utf-8')
+assert 'PLACEHOLDER' not in t and len(t) > 20000
+old = 'metadata: { cameraActive: needCam, lastSeenAt: new Date().toISOString(), videoStreaming: needCam },'
+new = '''metadata: {
+            cameraActive: needCam,
+            lastSeenAt: new Date().toISOString(),
+            videoStreaming: needCam,
+            studentName: String(student.fullName || \"\").trim() || null,
+            matric: String(student.matric || \"\").trim() || null,
+          },'''
+if old in t:
+    t = t.replace(old, new, 1)
+    print('patched begin')
+needle = 'const payload = {\\n        cameraActive:'
+# fix: use real newline
+needle = 'const payload = {\n        cameraActive:'
+insert = 'const payload = {\n        studentName: String(student?.fullName || \"\").trim() || null,\n        matric: String(student?.matric || \"\").trim() || null,\n        cameraActive:'
+if needle in t and 'studentName: String(student?.fullName' not in t:
+    t = t.replace(needle, insert, 1)
+    print('patched presence')
+p.write_text(t, encoding='utf-8')
+print('final', p.stat().st_size)
+"
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/components/cbt/CbtExamSession.impl.tsx
-          git commit -m "fix: restore full CbtExamSession + studentName in attempt metadata for officer names" || echo "no change"
-          git push
+          git status
+          git commit -m "fix: restore full CbtExamSession + studentName in attempt metadata" || exit 0
+          git push origin HEAD:main
