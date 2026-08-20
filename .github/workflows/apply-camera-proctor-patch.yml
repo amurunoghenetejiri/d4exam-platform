@@ -1,1 +1,32 @@
-TRIGGER_PLACEHOLDER_SEE_NEXT
+name: Apply camera proctoring patch
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/apply-camera-proctor-patch.yml"
+      - "patches/camera_proctor_fix.patch"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: |
+          set -e
+          if [ ! -f patches/camera_proctor_fix.patch ]; then
+            echo "missing patch"
+            exit 1
+          fi
+          git apply --whitespace=nowarn patches/camera_proctor_fix.patch
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/ExamCameraPip.tsx src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(cbt): camera lifecycle, false blocked status, officer LIVE/RECONNECTING/OFFLINE"
+            git push
+          fi
