@@ -7,8 +7,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import type { RealtimeChannel } from "@/supabase/supabase-js";
-import type { RealtimeChannel as RC } from "@supabase/supabase-js";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export type LiveCamFramePayload = {
   attemptId: string;
@@ -156,7 +155,7 @@ export function startLiveCamPublisher(opts: {
 }): LiveCamPublisher {
   const intervalMs = opts.intervalMs ?? LIVE_CAM_FRAME_INTERVAL_MS;
   let stopped = false;
-  let channel: RC | null = null;
+  let channel: RealtimeChannel | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let publishing = false;
   let consecutiveFails = 0;
