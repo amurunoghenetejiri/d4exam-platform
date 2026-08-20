@@ -1,6 +1,7 @@
 /**
  * Load & prepare CBT questions for a student paper.
  * Priority: RPC (bypasses RLS) → exam_questions → course bank.
+ * Always enriches options/explanation when missing so students never see "Option A".
  */
 import { supabase } from "@/integrations/supabase/client";
 import { parseQuestionOptions } from "@/lib/question-options";
@@ -40,6 +41,15 @@ function decodeOptionsLegacy(explanation: string | null): string[] {
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
+function hasUsableOptions(q: RawQ): boolean {
+  if (q.options != null) {
+    if (Array.isArray(q.options) && q.options.length > 0) return true;
+    if (typeof q.options === "string" && q.options.trim().length > 2) return true;
+  }
+  if (q.explanation && q.explanation.includes("OPTIONS::")) return true;
+  return false;
+}
+
 function normalizeRows(data: unknown): RawQ[] {
   if (!Array.isArray(data)) return [];
   const out: RawQ[] = [];
@@ -62,6 +72,30 @@ function normalizeRows(data: unknown): RawQ[] {
   return out;
 }
 
+/** Fill options/explanation from questions table when RPC/link rows omit them. */
+async function enrichMissingOptions(rows: RawQ[]): Promise<RawQ[]> {
+  if (!rows.length) return rows;
+  const needIds = rows.filter((q) => !hasUsableOptions(q)).map((q) => q.id);
+  if (!needIds.length) return rows;
+  const full = await fetchQuestionsByIds(needIds);
+  if (!full.length) return rows;
+  const byId = new Map(full.map((q) => [q.id, q]));
+  return rows.map((q) => {
+    if (hasUsableOptions(q)) return q;
+    const f = byId.get(q.id);
+    if (!f) return q;
+    return {
+      ...q,
+      options: f.options ?? q.options,
+      explanation: f.explanation ?? q.explanation,
+      correct_answer: q.correct_answer ?? f.correct_answer,
+      question_type: q.question_type ?? f.question_type,
+      question_text: q.question_text || f.question_text,
+      marks: q.marks ?? f.marks,
+    };
+  });
+}
+
 async function loadViaRpc(examId: string, courseId: string | null, schoolId: string | null): Promise<RawQ[]> {
   try {
     const { data, error } = await supabase.rpc("get_cbt_exam_questions", {
@@ -74,7 +108,7 @@ async function loadViaRpc(examId: string, courseId: string | null, schoolId: str
       return [];
     }
     const rows = Array.isArray(data) ? data : [];
-    return normalizeRows(rows);
+    return enrichMissingOptions(normalizeRows(rows));
   } catch (e) {
     console.warn("[cbt] rpc exception", e);
     return [];
@@ -231,9 +265,7 @@ export function prepareStudentPaper(
       if (!optionTexts.length && String(q.question_type || "").toLowerCase().includes("true")) {
         optionTexts = ["True", "False"];
       }
-      if (!optionTexts.length && q.question_text) {
-        optionTexts = ["Option A", "Option B", "Option C", "Option D"];
-      }
+      // Never invent "Option A/B/C/D" — leave empty if bank has no real texts
       const originalOptions = [...optionTexts];
       const correctOptionText = resolveCorrectOptionText(q.correct_answer, originalOptions);
       const text = String(q.question_text || "").trim() || "Question";

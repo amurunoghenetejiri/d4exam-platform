@@ -26,12 +26,12 @@ import {
   severityBadgeClass,
   severityBorderClass,
   severityFromPresence,
-  type MonitorSeverity,
 } from "@/lib/live-monitor";
 import {
   isLiveCamFrameFresh,
   startLiveCamSubscriber,
   type LiveCamFramePayload,
+  type LiveCamSubscriber,
 } from "@/lib/live-video";
 
 export const Route = createFileRoute("/officer/live-monitor")({
@@ -79,7 +79,7 @@ function Page() {
   const [frames, setFrames] = useState<Record<string, FrameEntry>>({});
   const [now, setNow] = useState(() => Date.now());
   const [busyId, setBusyId] = useState<string | null>(null);
-  const unsubRef = useRef<(() => void) | null>(null);
+  const unsubRef = useRef<LiveCamSubscriber | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 5000);
@@ -187,7 +187,11 @@ function Page() {
 
   useEffect(() => {
     if (!schoolId) return;
-    unsubRef.current?.();
+    try {
+      unsubRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
     unsubRef.current = startLiveCamSubscriber(schoolId, (payload: LiveCamFramePayload) => {
       const attemptId = payload?.attemptId || (payload as { attempt_id?: string })?.attempt_id;
       if (!attemptId || !payload?.frame) return;
@@ -197,7 +201,11 @@ function Page() {
       }));
     });
     return () => {
-      unsubRef.current?.();
+      try {
+        unsubRef.current?.stop();
+      } catch {
+        /* ignore */
+      }
       unsubRef.current = null;
     };
   }, [schoolId]);
@@ -373,6 +381,7 @@ function Page() {
           </ul>
         </div>
       )}
+      {selectedId ? null : null}
     </>
   );
 }
