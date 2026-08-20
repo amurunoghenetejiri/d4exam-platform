@@ -1,2 +1,7 @@
-redeploy after CbtExamSession restore (09d6009)
-exports: CbtExamPage + vibration keepalive
+Redeploy trigger 2026-08-20T18:22Z WAT
+CbtExamSession.impl.tsx on main has:
+  export function CbtExamPage()
+  export { CbtExamPage as CbtExamSession }
+Haptic: primeHaptics + startHapticKeepAlive on exam start, stopHapticKeepAlive on shutdown
+faceDetection={Boolean(security.faceDetection || security.requireCamera)}
+Previous failed build was commit 9f7c42e (PLACEHOLDER only) — that is fixed on main.
