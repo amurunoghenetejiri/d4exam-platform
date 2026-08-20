@@ -1,0 +1,128 @@
+name: Soft error boundaries live-monitor
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/soft-error-live-monitor.yml"
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add soft error to live-monitor + student results
+        run: |
+          set -e
+          python3 <<'PY'
+          from pathlib import Path
+
+          # live-monitor
+          p = Path("src/routes/officer.live-monitor.tsx")
+          t = p.read_text()
+          assert "PLACEHOLDER" not in t and len(t) > 10000
+          if "LiveMonitorSoftError" not in t:
+            old = '''export const Route = createFileRoute("/officer/live-monitor")({
+  head: () => ({ meta: [{ title: "Live Monitoring — D4EXAM" }] }),
+  component: Page,
+});'''
+            new = '''function LiveMonitorSoftError({ error, reset }: { error: Error; reset: () => void }) {
+  console.error("[officer/live-monitor]", error);
+  return (
+    <div className="mx-auto flex min-h-[40vh] max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
+      <p className="text-base font-bold text-slate-900">Live monitor could not load</p>
+      <p className="text-sm text-slate-500">Retry or open Results. Your session is still active.</p>
+      <div className="flex flex-wrap justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => reset()}
+          className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+        >
+          Try again
+        </button>
+        <a
+          href="/officer"
+          className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800"
+        >
+          Officer home
+        </a>
+        <a
+          href="/officer/results"
+          className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800"
+        >
+          Results
+        </a>
+      </div>
+    </div>
+  );
+}
+
+export const Route = createFileRoute("/officer/live-monitor")({
+  head: () => ({ meta: [{ title: "Live Monitoring — D4EXAM" }] }),
+  component: Page,
+  errorComponent: LiveMonitorSoftError,
+});'''
+            if old not in t:
+              raise SystemExit("live-monitor route block not found")
+            t = t.replace(old, new, 1)
+            p.write_text(t)
+            print("live-monitor patched")
+          else:
+            print("live-monitor already has SoftError")
+
+          # student results
+          sp = Path("src/routes/student.results.tsx")
+          st = sp.read_text()
+          if "StudentResultsSoftError" not in st:
+            sold = '''export const Route = createFileRoute("/student/results")({
+  head: () => ({ meta: [{ title: "My Results — D4EXAM" }] }),
+  component: Page,
+});'''
+            snew = '''function StudentResultsSoftError({ error, reset }: { error: Error; reset: () => void }) {
+  console.error("[student/results]", error);
+  return (
+    <div className="mx-auto flex min-h-[40vh] max-w-md flex-col items-center justify-center gap-3 px-4 text-center">
+      <p className="text-base font-bold text-slate-900">Results could not load</p>
+      <p className="text-sm text-slate-500">Retry or go back to your dashboard.</p>
+      <div className="flex flex-wrap justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => reset()}
+          className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+        >
+          Try again
+        </button>
+        <a
+          href="/student"
+          className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-800"
+        >
+          Student home
+        </a>
+      </div>
+    </div>
+  );
+}
+
+export const Route = createFileRoute("/student/results")({
+  head: () => ({ meta: [{ title: "My Results — D4EXAM" }] }),
+  component: Page,
+  errorComponent: StudentResultsSoftError,
+});'''
+            if sold not in st:
+              raise SystemExit("student results route block not found")
+            sp.write_text(st.replace(sold, snew, 1))
+            print("student results patched")
+          else:
+            print("student results already has SoftError")
+          PY
+          git config user.name "restore-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/routes/officer.live-monitor.tsx src/routes/student.results.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix: soft error boundaries on live-monitor and student results"
+            git push
+          fi
