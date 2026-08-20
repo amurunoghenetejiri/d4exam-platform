@@ -1,14 +1,16 @@
 name: Restore full CBT session
+
+# Retired — CBT is already restored on main.
+# Manual only; always succeeds so it never shows red.
 on:
   workflow_dispatch:
+
 jobs:
   restore:
+    name: Already restored
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: noop
-        run: echo "CBT already restored on main"
+      - name: No-op success
+        run: |
+          echo "CBT session already on main. This workflow is retired."
+          echo "Status: success"
