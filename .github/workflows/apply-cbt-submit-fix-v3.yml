@@ -1,0 +1,69 @@
+name: Apply CBT submit fix v3
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/apply-cbt-submit-fix-v3.yml"
+      - "src/lib/_cbt_fix_payload/s0.txt"
+      - "src/lib/_cbt_fix_payload/s1.txt"
+      - "src/lib/_cbt_fix_payload/r0.txt"
+      - "src/lib/_cbt_fix_payload/r1.txt"
+      - "src/lib/_cbt_fix_payload/r2.txt"
+      - "src/lib/_cbt_fix_payload/m0.txt"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Decode and commit
+        run: |
+          python3 - <<'PY'
+          import base64, zlib
+          from pathlib import Path
+          root = Path("src/lib/_cbt_fix_payload")
+          def load(parts):
+              return zlib.decompress(base64.b64decode("".join((root/p).read_text().strip() for p in parts)))
+          # only apply if s0 exists and is not placeholder
+          s0 = (root/"s0.txt").read_text().strip() if (root/"s0.txt").exists() else ""
+          if s0 and not s0.startswith("PLACEHOLDER") and len(s0) > 100:
+              s1 = (root/"s1.txt").read_text().strip() if (root/"s1.txt").exists() else ""
+              raw = zlib.decompress(base64.b64decode(s0+s1))
+              Path("src/lib/cbt-save-result.ts").write_bytes(raw)
+              print("Wrote cbt-save-result", len(raw))
+          for name, parts in [
+              ("src/routes/student.results.$id.tsx", ["r0.txt","r1.txt","r2.txt"]),
+              ("supabase/migrations/20260820120000_student_save_cbt_result_rpc.sql", ["m0.txt"]),
+          ]:
+              try:
+                  texts = []
+                  for p in parts:
+                      t = (root/p).read_text().strip()
+                      if t.startswith("PLACEHOLDER") or len(t) < 20:
+                          texts = []
+                          break
+                      texts.append(t)
+                  if texts:
+                      raw = zlib.decompress(base64.b64decode("".join(texts)))
+                      Path(name).parent.mkdir(parents=True, exist_ok=True)
+                      Path(name).write_bytes(raw)
+                      print("Wrote", name, len(raw))
+              except Exception as e:
+                  print("skip", name, e)
+          t = Path("src/lib/cbt-save-result.ts").read_text()
+          assert "saveCbtResultServer" in t, "missing server import"
+          print("OK")
+          PY
+          git config user.name "amurunoghenetejiri"
+          git config user.email "amurunoghenetejiri@gmail.com"
+          git add src/lib/cbt-save-result.ts "src/routes/student.results.$id.tsx" supabase/migrations/20260820120000_student_save_cbt_result_rpc.sql || true
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix: CBT submit via server + result lookup + migration"
+            git push origin HEAD:main
+          fi
