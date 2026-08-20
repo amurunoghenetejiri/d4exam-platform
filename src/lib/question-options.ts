@@ -27,29 +27,86 @@ export function parseQuestionOptions(input: {
 }
 
 function normalizeJsonOptions(raw: unknown): QuestionOption[] {
-  if (!raw) return [];
+  if (raw == null) return [];
   if (typeof raw === "string") {
+    const s = raw.trim();
+    if (!s) return [];
     try {
-      return normalizeJsonOptions(JSON.parse(raw));
+      return normalizeJsonOptions(JSON.parse(s));
     } catch {
+      // plain "A=text|B=text" style
+      if (s.includes("=") && (s.includes("|") || s.includes(";"))) {
+        return decodeOptionsFromExplanation(`OPTIONS::${s}`);
+      }
       return [];
     }
   }
-  if (!Array.isArray(raw)) return [];
-  const out: QuestionOption[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const o = item as Record<string, unknown>;
-    const key = String(o.key ?? o.option_key ?? "").trim().toUpperCase();
-    const text = String(o.text ?? o.option_text ?? "").trim();
-    if (!key || !text) continue;
-    out.push({
-      key,
-      text,
-      is_correct: Boolean(o.is_correct),
-    });
+  if (Array.isArray(raw)) {
+    const out: QuestionOption[] = [];
+    let autoKey = 0;
+    for (const item of raw) {
+      if (item == null) continue;
+      if (typeof item === "string") {
+        const text = item.trim();
+        if (!text) continue;
+        const key = String.fromCharCode(65 + autoKey);
+        autoKey += 1;
+        out.push({ key, text });
+        continue;
+      }
+      if (typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      let key = String(o.key ?? o.option_key ?? o.label ?? o.id ?? "").trim().toUpperCase();
+      const text = String(
+        o.text ?? o.option_text ?? o.option ?? o.value ?? o.content ?? o.name ?? "",
+      ).trim();
+      if (!text) continue;
+      if (!key || key.length > 3) {
+        key = String.fromCharCode(65 + autoKey);
+        autoKey += 1;
+      }
+      out.push({
+        key,
+        text,
+        is_correct: Boolean(o.is_correct ?? o.isCorrect ?? o.correct),
+      });
+    }
+    return out;
   }
-  return out;
+  // Object map forms: { A: "text", B: "text" } or { a: { text: "..." } }
+  if (typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (!keys.length) return [];
+    const out: QuestionOption[] = [];
+    const preferred = ["A", "B", "C", "D", "E", "F"];
+    const ordered = [
+      ...preferred.filter((k) => keys.some((x) => x.toUpperCase() === k)),
+      ...keys.filter((k) => !preferred.includes(k.toUpperCase())),
+    ];
+    for (const k of ordered) {
+      const v = o[k];
+      if (v == null) continue;
+      if (typeof v === "string") {
+        const text = v.trim();
+        if (text) out.push({ key: k.toUpperCase().slice(0, 1) || "A", text });
+        continue;
+      }
+      if (typeof v === "object") {
+        const vo = v as Record<string, unknown>;
+        const text = String(vo.text ?? vo.option_text ?? vo.option ?? vo.value ?? "").trim();
+        if (text) {
+          out.push({
+            key: String(vo.key ?? k).toUpperCase().slice(0, 1) || k.toUpperCase().slice(0, 1),
+            text,
+            is_correct: Boolean(vo.is_correct ?? vo.isCorrect),
+          });
+        }
+      }
+    }
+    return out;
+  }
+  return [];
 }
 
 export function decodeOptionsFromExplanation(explanation: string | null): QuestionOption[] {
@@ -158,7 +215,6 @@ export function scoreObjectiveAnswers(
     }
     const expected = (q.correct_answer || "").trim().toUpperCase();
     const given = ans.toUpperCase();
-    // Accept key (A/B/C/D) or full option text
     let match = expected && given === expected;
     if (!match && q.options?.length) {
       const correctOpt = q.options.find((o) => o.is_correct || o.key === expected);

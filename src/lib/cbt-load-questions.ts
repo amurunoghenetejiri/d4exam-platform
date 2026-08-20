@@ -1,7 +1,7 @@
 /**
  * Load & prepare CBT questions for a student paper.
- * Priority: RPC (bypasses RLS) → exam_questions → course bank.
- * Always enriches options/explanation when missing so students never see "Option A".
+ * Priority: RPC → exam_questions → course bank.
+ * Always merges real option texts from questions.options, explanation, and question_options.
  */
 import { supabase } from "@/integrations/supabase/client";
 import { parseQuestionOptions } from "@/lib/question-options";
@@ -41,11 +41,12 @@ function decodeOptionsLegacy(explanation: string | null): string[] {
   return ["A", "B", "C", "D"].map((k) => map[k]).filter(Boolean) as string[];
 }
 
+function optionTextCount(options: unknown): number {
+  return parseQuestionOptions({ options }).length;
+}
+
 function hasUsableOptions(q: RawQ): boolean {
-  if (q.options != null) {
-    if (Array.isArray(q.options) && q.options.length > 0) return true;
-    if (typeof q.options === "string" && q.options.trim().length > 2) return true;
-  }
+  if (optionTextCount(q.options) > 0) return true;
   if (q.explanation && q.explanation.includes("OPTIONS::")) return true;
   return false;
 }
@@ -56,6 +57,7 @@ function normalizeRows(data: unknown): RawQ[] {
   for (const row of data) {
     if (!row || typeof row !== "object") continue;
     const r = row as Record<string, unknown>;
+    // RPC may return nested json already
     const id = r.id != null ? String(r.id) : "";
     const text = r.question_text != null ? String(r.question_text) : "";
     if (!id) continue;
@@ -72,28 +74,84 @@ function normalizeRows(data: unknown): RawQ[] {
   return out;
 }
 
-/** Fill options/explanation from questions table when RPC/link rows omit them. */
+function mergeRaw(base: RawQ, extra: RawQ): RawQ {
+  return {
+    id: base.id,
+    question_text: base.question_text || extra.question_text,
+    question_type: base.question_type ?? extra.question_type,
+    marks: base.marks ?? extra.marks,
+    correct_answer: base.correct_answer ?? extra.correct_answer,
+    explanation: hasUsableOptions(base) ? base.explanation : extra.explanation ?? base.explanation,
+    options: hasUsableOptions(base) ? base.options : extra.options ?? base.options,
+  };
+}
+
+/** Load option rows from question_options table (legacy / alternate storage). */
+async function fetchOptionsFromQuestionOptionsTable(
+  ids: string[],
+): Promise<Map<string, { key: string; text: string; is_correct?: boolean }[]>> {
+  const map = new Map<string, { key: string; text: string; is_correct?: boolean }[]>();
+  if (!ids.length) return map;
+  for (const cols of [
+    "question_id, option_text, is_correct, option_key, sort_order",
+    "question_id, option_text, is_correct, key, sort_order",
+    "question_id, option_text, is_correct, sort_order",
+    "question_id, option_text, is_correct",
+    "question_id, option_text",
+  ]) {
+    const { data, error } = await supabase.from("question_options").select(cols).in("question_id", ids).limit(2000);
+    if (error) {
+      console.warn("[cbt] question_options", error.message);
+      continue;
+    }
+    if (!data?.length) continue;
+    for (const row of data) {
+      const r = row as Record<string, unknown>;
+      const qid = String(r.question_id ?? "");
+      const text = String(r.option_text ?? "").trim();
+      if (!qid || !text) continue;
+      const keyRaw = String(r.option_key ?? r.key ?? "").trim().toUpperCase();
+      const list = map.get(qid) ?? [];
+      const key = keyRaw || String.fromCharCode(65 + list.length);
+      list.push({ key, text, is_correct: Boolean(r.is_correct) });
+      map.set(qid, list);
+    }
+    if (map.size) break;
+  }
+  return map;
+}
+
 async function enrichMissingOptions(rows: RawQ[]): Promise<RawQ[]> {
   if (!rows.length) return rows;
   const needIds = rows.filter((q) => !hasUsableOptions(q)).map((q) => q.id);
-  if (!needIds.length) return rows;
-  const full = await fetchQuestionsByIds(needIds);
-  if (!full.length) return rows;
-  const byId = new Map(full.map((q) => [q.id, q]));
-  return rows.map((q) => {
-    if (hasUsableOptions(q)) return q;
-    const f = byId.get(q.id);
-    if (!f) return q;
-    return {
-      ...q,
-      options: f.options ?? q.options,
-      explanation: f.explanation ?? q.explanation,
-      correct_answer: q.correct_answer ?? f.correct_answer,
-      question_type: q.question_type ?? f.question_type,
-      question_text: q.question_text || f.question_text,
-      marks: q.marks ?? f.marks,
-    };
-  });
+  let next = rows;
+
+  if (needIds.length) {
+    const full = await fetchQuestionsByIds(needIds);
+    if (full.length) {
+      const byId = new Map(full.map((q) => [q.id, q]));
+      next = next.map((q) => {
+        if (hasUsableOptions(q)) return q;
+        const f = byId.get(q.id);
+        return f ? mergeRaw(q, f) : q;
+      });
+    }
+  }
+
+  const stillNeed = next.filter((q) => !hasUsableOptions(q)).map((q) => q.id);
+  if (stillNeed.length) {
+    const fromTable = await fetchOptionsFromQuestionOptionsTable(stillNeed);
+    if (fromTable.size) {
+      next = next.map((q) => {
+        if (hasUsableOptions(q)) return q;
+        const opts = fromTable.get(q.id);
+        if (!opts?.length) return q;
+        return { ...q, options: opts };
+      });
+    }
+  }
+
+  return next;
 }
 
 async function loadViaRpc(examId: string, courseId: string | null, schoolId: string | null): Promise<RawQ[]> {
@@ -107,6 +165,7 @@ async function loadViaRpc(examId: string, courseId: string | null, schoolId: str
       console.warn("[cbt] get_cbt_exam_questions rpc", error.message);
       return [];
     }
+    // data may be array of json objects
     const rows = Array.isArray(data) ? data : [];
     return enrichMissingOptions(normalizeRows(rows));
   } catch (e) {
@@ -134,8 +193,9 @@ async function loadFromExamQuestions(examId: string): Promise<RawQ[]> {
     const orderById = new Map(links.map((r, i) => [String(r.question_id), r.question_order ?? i]));
     const qRows = await fetchQuestionsByIds(ids);
     if (!qRows.length) return [];
-    qRows.sort((a, b) => (orderById.get(a.id) ?? 0) - (orderById.get(b.id) ?? 0));
-    return qRows.map((q) => ({ ...q, marks: marksById.get(q.id) ?? q.marks ?? 1 }));
+    const enriched = await enrichMissingOptions(qRows);
+    enriched.sort((a, b) => (orderById.get(a.id) ?? 0) - (orderById.get(b.id) ?? 0));
+    return enriched.map((q) => ({ ...q, marks: marksById.get(q.id) ?? q.marks ?? 1 }));
   } catch (e) {
     console.warn("[cbt] exam_questions exception", e);
     return [];
@@ -144,6 +204,7 @@ async function loadFromExamQuestions(examId: string): Promise<RawQ[]> {
 
 async function fetchQuestionsByIds(ids: string[]): Promise<RawQ[]> {
   if (!ids.length) return [];
+  // Prefer selecting options; fall back if column missing
   for (const cols of [
     "id, question_text, question_type, marks, correct_answer, explanation, options, status",
     "id, question_text, question_type, marks, correct_answer, explanation, status",
@@ -177,7 +238,7 @@ async function loadFromCourseBank(courseId: string, schoolId: string | null): Pr
           continue;
         }
         const rows = normalizeRows(data);
-        if (rows.length) return rows;
+        if (rows.length) return enrichMissingOptions(rows);
       }
     }
   }
@@ -192,19 +253,45 @@ export async function loadExamQuestionBank(opts: {
   const courseId = opts.courseId ? String(opts.courseId) : "";
   const schoolId = opts.schoolId ? String(opts.schoolId) : null;
   const examId = opts.examId ? String(opts.examId) : null;
+
+  let rows: RawQ[] = [];
+
   if (examId) {
-    const viaRpc = await loadViaRpc(examId, courseId || null, schoolId);
-    if (viaRpc.length) return viaRpc;
+    rows = await loadViaRpc(examId, courseId || null, schoolId);
   }
-  if (examId) {
+
+  // If RPC gave questions but no options, merge from exam_questions path
+  if (examId && (!rows.length || rows.some((r) => !hasUsableOptions(r)))) {
     const linked = await loadFromExamQuestions(examId);
-    if (linked.length) return linked;
+    if (linked.length) {
+      if (!rows.length) {
+        rows = linked;
+      } else {
+        const byId = new Map(linked.map((q) => [q.id, q]));
+        rows = rows.map((q) => {
+          if (hasUsableOptions(q)) return q;
+          const f = byId.get(q.id);
+          return f ? mergeRaw(q, f) : q;
+        });
+      }
+    }
   }
-  if (courseId) {
+
+  if (!rows.length && courseId) {
+    rows = await loadFromCourseBank(courseId, schoolId);
+  } else if (rows.length && rows.some((r) => !hasUsableOptions(r)) && courseId) {
     const bank = await loadFromCourseBank(courseId, schoolId);
-    if (bank.length) return bank;
+    if (bank.length) {
+      const byId = new Map(bank.map((q) => [q.id, q]));
+      rows = rows.map((q) => {
+        if (hasUsableOptions(q)) return q;
+        const f = byId.get(q.id);
+        return f ? mergeRaw(q, f) : q;
+      });
+    }
   }
-  return [];
+
+  return enrichMissingOptions(rows);
 }
 
 export async function ensureExamQuestionsLinked(opts: {
@@ -219,7 +306,13 @@ export async function ensureExamQuestionsLinked(opts: {
   if (!existing.error && (existing.data?.length ?? 0) > 0) return 0;
   let qs: { id: string; marks: number | null }[] | null = null;
   for (const statuses of [["active", "approved"], ["active", "approved", "pending"], null] as (string[] | null)[]) {
-    let q = supabase.from("questions").select("id, marks").eq("course_id", courseId).eq("school_id", schoolId).order("created_at", { ascending: true }).limit(300);
+    let q = supabase
+      .from("questions")
+      .select("id, marks")
+      .eq("course_id", courseId)
+      .eq("school_id", schoolId)
+      .order("created_at", { ascending: true })
+      .limit(300);
     if (statuses) q = q.in("status", statuses);
     const res = await q;
     if (!res.error && res.data?.length) {
@@ -234,7 +327,12 @@ export async function ensureExamQuestionsLinked(opts: {
   if (!qs?.length) return 0;
   const limit = opts.maxQuestions && opts.maxQuestions > 0 ? opts.maxQuestions : qs.length;
   const picked = qs.slice(0, Math.min(limit, qs.length));
-  const rows = picked.map((q, i) => ({ exam_id: examId, question_id: q.id, marks: q.marks ?? 1, question_order: i + 1 }));
+  const rows = picked.map((q, i) => ({
+    exam_id: examId,
+    question_id: q.id,
+    marks: q.marks ?? 1,
+    question_order: i + 1,
+  }));
   const { error } = await supabase.from("exam_questions").insert(rows as never);
   if (error) {
     console.warn("[cbt] ensureExamQuestionsLinked", error.message);
@@ -265,7 +363,6 @@ export function prepareStudentPaper(
       if (!optionTexts.length && String(q.question_type || "").toLowerCase().includes("true")) {
         optionTexts = ["True", "False"];
       }
-      // Never invent "Option A/B/C/D" — leave empty if bank has no real texts
       const originalOptions = [...optionTexts];
       const correctOptionText = resolveCorrectOptionText(q.correct_answer, originalOptions);
       const text = String(q.question_text || "").trim() || "Question";
