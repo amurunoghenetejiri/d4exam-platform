@@ -1,0 +1,2 @@
+redeploy after CbtExamSession restore (09d6009)
+exports: CbtExamPage + vibration keepalive
