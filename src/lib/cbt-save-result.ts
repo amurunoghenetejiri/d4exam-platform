@@ -31,14 +31,22 @@ function decodeOptionsFromJson(options: unknown): string[] {
   }
   if (!Array.isArray(arr)) return [];
   const byKey: Record<string, string> = {};
+  const ordered: string[] = [];
   for (const item of arr) {
+    if (typeof item === "string") {
+      const text = item.trim();
+      if (text) ordered.push(text);
+      continue;
+    }
     if (!item || typeof item !== "object") continue;
     const o = item as Record<string, unknown>;
     const key = String(o.key ?? o.option_key ?? "").trim().toUpperCase();
-    const text = String(o.text ?? o.option_text ?? "").trim();
+    const text = String(o.text ?? o.option_text ?? o.option ?? "").trim();
     if (key && text) byKey[key] = text;
+    else if (text) ordered.push(text);
   }
-  return ["A", "B", "C", "D", "E", "F"].map((k) => byKey[k]).filter(Boolean) as string[];
+  const fromKeys = ["A", "B", "C", "D", "E", "F"].map((k) => byKey[k]).filter(Boolean) as string[];
+  return fromKeys.length ? fromKeys : ordered;
 }
 
 export async function saveCbtResult(input: {
@@ -65,17 +73,26 @@ export async function saveCbtResult(input: {
     { correct_answer: string | null; options?: unknown; explanation: string | null; marks: number | null }
   >();
   if (qIds.length) {
-    const { data: bankRows } = await supabase
-      .from("questions")
-      .select("id, correct_answer, options, marks, explanation")
-      .in("id", qIds);
-    for (const row of bankRows ?? []) {
-      bankById.set(String((row as { id: string }).id), {
-        correct_answer: (row as { correct_answer: string | null }).correct_answer,
-        options: (row as { options?: unknown }).options,
-        explanation: (row as { explanation?: string | null }).explanation ?? null,
-        marks: (row as { marks: number | null }).marks,
-      });
+    // explanation column may not exist on all deployments — try with then without
+    for (const cols of [
+      "id, correct_answer, options, marks",
+      "id, correct_answer, options, marks, explanation",
+      "id, correct_answer, marks",
+    ]) {
+      const { data: bankRows, error } = await supabase.from("questions").select(cols).in("id", qIds);
+      if (error) {
+        console.warn("[cbt-save] questions bank select", error.message);
+        continue;
+      }
+      for (const row of bankRows ?? []) {
+        bankById.set(String((row as { id: string }).id), {
+          correct_answer: (row as { correct_answer: string | null }).correct_answer,
+          options: (row as { options?: unknown }).options,
+          explanation: (row as { explanation?: string | null }).explanation ?? null,
+          marks: (row as { marks: number | null }).marks,
+        });
+      }
+      if (bankById.size) break;
     }
   }
 
@@ -231,6 +248,17 @@ export async function saveCbtResult(input: {
     }
   } else {
     resultId = upsert.data?.id as string | undefined;
+  }
+
+  // Final fallback: re-read by exam+student
+  if (!resultId && !error) {
+    const { data: again } = await supabase
+      .from("results")
+      .select("id")
+      .eq("exam_id", input.examId)
+      .eq("student_id", input.studentId)
+      .maybeSingle();
+    resultId = (again?.id as string) ?? undefined;
   }
 
   if (!error && input.schoolId && !publishNow) {
