@@ -1,1 +1,44 @@
-PLACEHOLDER
+name: Restore CbtExamSession now
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/restore-cbt-session-now.yml"
+      - "src/components/cbt/_restore/*"
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode and write CbtExamSession.impl.tsx
+        run: |
+          python3 - <<'PY'
+          import base64, zlib
+          from pathlib import Path
+          b64 = Path("src/components/cbt/_restore/z0.txt").read_text() + Path("src/components/cbt/_restore/z1.txt").read_text()
+          raw = zlib.decompress(base64.b64decode(b64))
+          path = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          path.write_bytes(raw)
+          text = raw.decode()
+          assert "studentName" in text
+          assert "hapticOfficerWarning" in text
+          assert "goToResult" in text
+          assert "PLACEHOLDER" not in text
+          print("Restored", len(raw), "bytes OK")
+          PY
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix: restore full CbtExamSession — studentName, haptics, View Results"
+            git push
+          fi
