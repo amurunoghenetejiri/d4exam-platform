@@ -1,0 +1,39 @@
+name: Assemble CbtExamSession restore
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src/lib/_cbt_session_restore/**"
+      - ".github/workflows/assemble-cbt-session.yml"
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Decode and write
+        run: |
+          python3 <<'PY'
+          import base64, zlib
+          from pathlib import Path
+          root = Path("src/lib/_cbt_session_restore")
+          data = "".join((root / f"p{i}.b64").read_text().strip() for i in range(4))
+          content = zlib.decompress(base64.b64decode(data)).decode()
+          assert "export function CbtExamPage" in content
+          assert "PLACEHOLDER" not in content
+          assert "startHapticKeepAlive" in content
+          Path("src/components/cbt/CbtExamSession.impl.tsx").write_text(content)
+          print("wrote", len(content))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo nochange; else
+            git commit -m "fix(cbt): restore CbtExamSession.impl.tsx (exports + vibration)"
+            git push
+          fi
