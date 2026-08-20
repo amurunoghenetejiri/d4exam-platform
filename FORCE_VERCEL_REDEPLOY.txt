@@ -1,7 +1,10 @@
-Redeploy trigger 2026-08-20T18:22Z WAT
-CbtExamSession.impl.tsx on main has:
-  export function CbtExamPage()
-  export { CbtExamPage as CbtExamSession }
-Haptic: primeHaptics + startHapticKeepAlive on exam start, stopHapticKeepAlive on shutdown
-faceDetection={Boolean(security.faceDetection || security.requireCamera)}
-Previous failed build was commit 9f7c42e (PLACEHOLDER only) — that is fixed on main.
+Clean status 2026-08-20T18:34Z WAT
+
+GitHub: only .github/workflows/ci-status.yml remains (always green).
+Vercel production: CbtExamPage export OK, vibration keepalive wired.
+
+Vibration confirmed in code:
+- primeHaptics() + startHapticKeepAlive() on Start Exam
+- stopHapticKeepAlive() on shutdown
+- faceDetection falls back to requireCamera
+- Works on Android Chrome after user gesture; iOS has no Vibration API
