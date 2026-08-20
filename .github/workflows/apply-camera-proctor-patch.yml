@@ -5,9 +5,9 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/apply-camera-proctor-patch.yml"
-      - "patches/part_1.patch"
-      - "patches/part_2.patch"
-      - "patches/part_3_live.patch"
+      - "patches/part_pip.patch"
+      - "patches/part_sess.patch"
+      - "patches/part_lm.patch"
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -15,10 +15,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Apply patch parts
+      - name: Apply compact camera patches
         run: |
           set -e
-          for f in patches/part_1.patch patches/part_2.patch patches/part_3_live.patch; do
+          for f in patches/part_pip.patch patches/part_sess.patch patches/part_lm.patch; do
             if [ -f "$f" ]; then
               echo "Applying $f"
               git apply --whitespace=nowarn "$f" || git apply --3way --whitespace=nowarn "$f"
