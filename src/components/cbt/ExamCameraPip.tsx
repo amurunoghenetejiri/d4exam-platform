@@ -19,7 +19,9 @@ function haptic(kind: SecurityAlertKind) {
   fireHaptic(map[kind]);
 }
 
-const ALERT_COOLDOWN_MS = 2500;
+const ALERT_COOLDOWN_MS = 1800;
+const FACE_TICK_MS = 900;
+const ENGINE_TIMEOUT_MS = 4000;
 
 const ALERT_COPY: Record<
   SecurityAlertKind,
@@ -107,7 +109,10 @@ export function ExamCameraPip({
   onNeedRef.current = onNeedReconnect;
 
   const [pos, setPos] = useState({ left: 4, top: 4 });
-  const [faceStatus, setFaceStatus] = useState<FaceState>("unavailable");
+  // Start as unclear when face detection is on so we never sit on "Face check starting…"
+  const [faceStatus, setFaceStatus] = useState<FaceState>(
+    faceDetection ? "unclear" : "unavailable",
+  );
   const [stream, setStream] = useState<MediaStream | null>(externalStream ?? null);
   const [camConn, setCamConn] = useState<CamConnState>(
     externalStream ? "active" : enabled ? "reconnecting" : "unavailable",
@@ -191,6 +196,9 @@ export function ExamCameraPip({
     if (externalStream) {
       setStream(externalStream);
       setCamConn(streamIsLive(externalStream) ? "active" : "unavailable");
+      if (faceDetection && streamIsLive(externalStream)) {
+        setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
+      }
       return;
     }
     if (!enabled) {
@@ -208,7 +216,7 @@ export function ExamCameraPip({
       stopStream(ownStreamRef.current);
       ownStreamRef.current = null;
     };
-  }, [enabled, externalStream, acquireOwnCamera]);
+  }, [enabled, externalStream, acquireOwnCamera, faceDetection]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -323,15 +331,23 @@ export function ExamCameraPip({
     }
   }, [stream]);
 
+  // Face detection: start immediately when camera is live — never stick on "starting"
   useEffect(() => {
     if (!stream || !faceDetection || !enabled) {
-      setFaceStatus(stream && enabled ? "unclear" : "unavailable");
+      setFaceStatus(stream && enabled ? (faceDetection ? "unclear" : "ok") : "unavailable");
       return;
     }
+
+    // Camera is live — show monitoring state right away (not "starting")
+    setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
+    lastStateRef.current = lastStateRef.current === "unavailable" ? "unclear" : lastStateRef.current;
+
     let cancelled = false;
     let timer: number | undefined;
+    let engineReady = false;
 
     const applyState = (next: FaceState, faceCount: number | null) => {
+      if (cancelled) return;
       const prev = lastStateRef.current;
       setFaceStatus(next);
       lastStateRef.current = next;
@@ -344,6 +360,9 @@ export function ExamCameraPip({
         return;
       }
 
+      // Only escalate after engine is actually running detections
+      if (!engineReady) return;
+
       faceWarnRef.current += 1;
       if (next === "none") fireAlert("none", faceCount);
       else if (next === "multi") fireAlert("multi", faceCount);
@@ -354,10 +373,22 @@ export function ExamCameraPip({
     };
 
     const tick = async () => {
-      if (cancelled || !videoRef.current || !faceEngineRef.current) return;
+      if (cancelled) return;
+      const video = videoRef.current;
+      const engine = faceEngineRef.current;
+      if (!video || !engine) {
+        if (!cancelled) timer = window.setTimeout(() => void tick(), FACE_TICK_MS);
+        return;
+      }
+      // Wait until video has real frames
+      if (video.readyState < 2 || video.videoWidth === 0) {
+        if (!cancelled) timer = window.setTimeout(() => void tick(), 400);
+        return;
+      }
       try {
-        const n = await faceEngineRef.current.count(videoRef.current);
+        const n = await engine.count(video);
         if (cancelled) return;
+        engineReady = true;
         if (n == null) {
           applyState("unclear", null);
         } else if (n <= 0) {
@@ -370,12 +401,20 @@ export function ExamCameraPip({
       } catch {
         if (!cancelled) applyState("unclear", null);
       }
-      if (!cancelled) timer = window.setTimeout(() => void tick(), 1800);
+      if (!cancelled) timer = window.setTimeout(() => void tick(), FACE_TICK_MS);
     };
 
     void (async () => {
+      // Soft timeout: if model load is slow, keep showing "Face unclear" not "starting"
+      const timeoutId = window.setTimeout(() => {
+        if (!cancelled && !faceEngineRef.current) {
+          setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
+        }
+      }, ENGINE_TIMEOUT_MS);
+
       try {
         const engine = await createFaceEngine();
+        window.clearTimeout(timeoutId);
         if (cancelled) {
           engine?.close();
           return;
@@ -385,9 +424,11 @@ export function ExamCameraPip({
           return;
         }
         faceEngineRef.current = engine;
+        // First detection ASAP
         void tick();
       } catch {
-        setFaceStatus("unclear");
+        window.clearTimeout(timeoutId);
+        if (!cancelled) setFaceStatus("unclear");
       }
     })();
 
@@ -440,22 +481,35 @@ export function ExamCameraPip({
   if (!enabled) return null;
 
   // Prefer real stream liveness — never show false "Camera blocked"
-  const reallyLive = streamIsLive(stream) || streamIsLive(externalStream) || streamIsLive(ownStreamRef.current);
+  const reallyLive =
+    streamIsLive(stream) || streamIsLive(externalStream) || streamIsLive(ownStreamRef.current);
   const effectiveConn: CamConnState =
-    reallyLive && camConn !== "reconnecting" ? "active" : camConn === "reconnecting" ? "reconnecting" : reallyLive ? "active" : camConn;
+    reallyLive && camConn !== "reconnecting"
+      ? "active"
+      : camConn === "reconnecting"
+        ? "reconnecting"
+        : reallyLive
+          ? "active"
+          : camConn;
+
+  // When camera is active, never leave the banner on "Face check starting…"
+  const displayFaceStatus: FaceState =
+    effectiveConn === "active" && faceStatus === "unavailable" && faceDetection
+      ? "unclear"
+      : faceStatus;
 
   const faceLabel =
     effectiveConn === "reconnecting"
       ? "Reconnecting camera…"
       : effectiveConn === "unavailable"
         ? "Camera not available"
-        : faceStatus === "multi"
+        : displayFaceStatus === "multi"
           ? "Multiple faces"
-          : faceStatus === "none"
+          : displayFaceStatus === "none"
             ? "Face not seen"
-            : faceStatus === "ok"
+            : displayFaceStatus === "ok"
               ? "Monitoring · 1 face"
-              : faceStatus === "unavailable"
+              : displayFaceStatus === "unavailable"
                 ? faceDetection
                   ? "Face check starting…"
                   : "Camera active"
@@ -516,11 +570,11 @@ export function ExamCameraPip({
           "px-2 py-1 text-center text-[10px] font-bold text-white",
           camConn === "reconnecting" && "bg-amber-600",
           camConn === "unavailable" && "bg-red-700",
-          camConn === "active" && faceStatus === "multi" && "bg-red-600",
-          camConn === "active" && faceStatus === "none" && "bg-amber-600",
-          camConn === "active" && faceStatus === "unclear" && "bg-amber-500",
-          camConn === "active" && faceStatus === "ok" && "bg-emerald-600",
-          camConn === "active" && faceStatus === "unavailable" && "bg-red-700",
+          camConn === "active" && displayFaceStatus === "multi" && "bg-red-600",
+          camConn === "active" && displayFaceStatus === "none" && "bg-amber-600",
+          camConn === "active" && displayFaceStatus === "unclear" && "bg-amber-500",
+          camConn === "active" && displayFaceStatus === "ok" && "bg-emerald-600",
+          camConn === "active" && displayFaceStatus === "unavailable" && "bg-amber-500",
         )}
       >
         {faceLabel}
