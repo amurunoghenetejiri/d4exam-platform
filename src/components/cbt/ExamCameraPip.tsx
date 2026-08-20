@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { haptic as fireHaptic, type HapticKind } from "@/lib/haptic";
+import { haptic as fireHaptic, refreshHapticUnlock, type HapticKind } from "@/lib/haptic";
 import { createFaceEngine, type FaceEngine } from "@/lib/face-detector";
 import { toast } from "sonner";
 
@@ -116,6 +116,7 @@ export function ExamCameraPip({
 
     // Vibration first so it does not depend on toast rendering
     try {
+      refreshHapticUnlock();
       haptic(kind);
     } catch {
       /* ignore */
