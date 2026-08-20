@@ -393,7 +393,7 @@ function Page() {
   });
 
   const liveExams = (examsQ.data ?? []).filter((e) => e.status === "ongoing");
-  const events = eventsQ.data ?? [];
+  const events = Array.isArray(eventsQ.data) ? eventsQ.data : [];
   const now = Date.now();
 
   const cards = useMemo(() => {
@@ -481,7 +481,7 @@ function Page() {
   const alerts = useMemo(() => {
     return events
       .filter((e) => {
-        const t = e.event_type.toUpperCase();
+        const t = String(e.event_type || "").toUpperCase();
         return (
           t.includes("FACE") ||
           t.includes("CAMERA") ||
