@@ -417,7 +417,12 @@ function Page() {
         const hasLiveVideo = !isDone && Boolean(frame && isLiveCamFrameFresh(frame.ts, now));
         const bars = isDone ? 0 : signalBars(frame?.ts, presence.lastSeenAt, now);
         const activity = lastActivityMs(presence.lastSeenAt, a);
-        return { a, presence, sev, name, matric, course, title, frame, hasLiveVideo, bars, isDone, activity };
+        let videoStatus: "live" | "reconnecting" | "offline" | "done" = "offline";
+        if (isDone) videoStatus = "done";
+        else if (hasLiveVideo) videoStatus = "live";
+        else if (isOnline(presence.lastSeenAt, now) || presence.cameraActive) videoStatus = "reconnecting";
+        else videoStatus = "offline";
+        return { a, presence, sev, name, matric, course, title, frame, hasLiveVideo, bars, isDone, activity, videoStatus };
       })
       .filter((c) => {
         if (c.isDone) {
@@ -792,8 +797,8 @@ function Page() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="relative aspect-video bg-slate-900">
-              {selected.hasLiveVideo && selected.frame?.src ? (
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white shadow-sm"><div className="relative mx-auto aspect-square w-full max-w-[min(100%,420px)] bg-slate-900">
+              {selected.videoStatus === "live" && selected.frame?.src ? (
                 <>
                   <img
                     src={selected.frame.src}
@@ -815,11 +820,13 @@ function Page() {
               ) : (
                 <>
                   <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold text-white">
-                    {selected.isDone
+                    {selected.videoStatus === "done"
                       ? doneStatusLabel(selected.a.status).toUpperCase()
-                      : selected.presence.cameraActive
-                        ? "WAITING FOR VIDEO"
-                        : "CAMERA OFF"}
+                      : selected.videoStatus === "reconnecting"
+                        ? "RECONNECTING"
+                        : selected.videoStatus === "live"
+                          ? "LIVE"
+                          : "OFFLINE"}
                   </div>
                   <div className="absolute right-2 top-2 flex items-center gap-1.5 rounded-full bg-black/55 px-2 py-1">
                     <SignalBars bars={selected.bars} />
@@ -845,7 +852,7 @@ function Page() {
                   </div>
                 </>
               )}
-            </div>
+            </div></div>
             <div className="grid grid-cols-2 gap-2 border-b border-slate-100 p-3 text-sm sm:p-4">
               <Info label="Course" value={selected.course} />
               <Info label="Exam" value={selected.title} />
