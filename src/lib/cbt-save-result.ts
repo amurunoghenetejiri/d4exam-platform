@@ -3,12 +3,11 @@ import { scoreObjectiveAnswers, resolveCorrectOptionText } from "@/lib/cbt-secur
 import { friendlyError } from "@/lib/friendly-error";
 import { notifyOfficersStudentResultPending } from "@/lib/notify";
 import type { ResultVisibility } from "@/types";
+import { saveCbtResultServer } from "@/lib/cbt-save-result.server";
 
 function decodeOptionsFromExplanation(explanation: string | null | undefined): string[] {
   if (!explanation) return [];
-  const optLine = String(explanation)
-    .split("\n")
-    .find((l) => l.startsWith("OPTIONS::"));
+  const optLine = String(explanation).split("\n").find((l) => l.startsWith("OPTIONS::"));
   if (!optLine) return [];
   const body = optLine.slice("OPTIONS::".length);
   const map: Record<string, string> = {};
@@ -23,11 +22,7 @@ function decodeOptionsFromJson(options: unknown): string[] {
   if (!options) return [];
   let arr: unknown = options;
   if (typeof options === "string") {
-    try {
-      arr = JSON.parse(options);
-    } catch {
-      return [];
-    }
+    try { arr = JSON.parse(options); } catch { return []; }
   }
   if (!Array.isArray(arr)) return [];
   const byKey: Record<string, string> = {};
@@ -68,22 +63,11 @@ export async function saveCbtResult(input: {
   resultVisibility?: ResultVisibility | string | null;
 }) {
   const qIds = input.questions.map((q) => q.id).filter(Boolean);
-  const bankById = new Map<
-    string,
-    { correct_answer: string | null; options?: unknown; explanation: string | null; marks: number | null }
-  >();
+  const bankById = new Map<string, { correct_answer: string | null; options?: unknown; explanation: string | null; marks: number | null }>();
   if (qIds.length) {
-    // explanation column may not exist on all deployments — try with then without
-    for (const cols of [
-      "id, correct_answer, options, marks",
-      "id, correct_answer, options, marks, explanation",
-      "id, correct_answer, marks",
-    ]) {
+    for (const cols of ["id, correct_answer, options, marks", "id, correct_answer, options, marks, explanation", "id, correct_answer, marks"]) {
       const { data: bankRows, error } = await supabase.from("questions").select(cols).in("id", qIds);
-      if (error) {
-        console.warn("[cbt-save] questions bank select", error.message);
-        continue;
-      }
+      if (error) { console.warn("[cbt-save] questions bank select", error.message); continue; }
       for (const row of bankRows ?? []) {
         bankById.set(String((row as { id: string }).id), {
           correct_answer: (row as { correct_answer: string | null }).correct_answer,
@@ -99,16 +83,8 @@ export async function saveCbtResult(input: {
   const questionsForScore = input.questions.map((q) => {
     const bank = bankById.get(q.id);
     const correctAnswer = bank?.correct_answer ?? q.correct_answer;
-    const originalOpts = (() => {
-      const fromJson = decodeOptionsFromJson(bank?.options);
-      if (fromJson.length) return fromJson;
-      return decodeOptionsFromExplanation(bank?.explanation);
-    })();
-    const originals = originalOpts.length
-      ? originalOpts
-      : q.originalOptions?.length
-        ? q.originalOptions
-        : [];
+    const fromJson = decodeOptionsFromJson(bank?.options);
+    const originals = fromJson.length ? fromJson : decodeOptionsFromExplanation(bank?.explanation).length ? decodeOptionsFromExplanation(bank?.explanation) : (q.originalOptions?.length ? q.originalOptions : []);
     const correctOptionText =
       q.correctOptionText ||
       (originals.length ? resolveCorrectOptionText(correctAnswer, originals) : null) ||
@@ -125,140 +101,88 @@ export async function saveCbtResult(input: {
   });
 
   const scored = scoreObjectiveAnswers(questionsForScore, input.answers);
-
   const status = input.terminated ? "terminated" : "submitted";
   const secStatus = input.terminated || input.faceWarned ? "flagged" : "pending";
-
-  const vis = String(input.resultVisibility || "after_officer_release")
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-  const immediateAliases = new Set([
-    "immediate",
-    "immediately",
-    "immediately_after_submit",
-    "release_immediately",
-    "release_immediately_after_exam",
-    "after_submit",
-  ]);
-  const publishNow =
-    immediateAliases.has(vis) && !input.terminated && secStatus !== "flagged";
+  const vis = String(input.resultVisibility || "after_officer_release").toLowerCase().replace(/[\s-]+/g, "_");
+  const immediateAliases = new Set(["immediate", "immediately", "immediately_after_submit", "release_immediately", "release_immediately_after_exam", "after_submit"]);
+  const publishNow = immediateAliases.has(vis) && !input.terminated && secStatus !== "flagged";
   const resultStatus = publishNow ? "published" : "pending";
   const releasedAt = publishNow ? new Date().toISOString() : null;
-
-  const submittedAt = new Date().toISOString();
-  const attemptPatch = {
-    status,
-    submitted_at: submittedAt,
-    updated_at: submittedAt,
-    score: scored.totalScore,
-    max_score: scored.maxMarks,
-    answers: input.answers,
-  } as never;
-
-  if (input.attemptId) {
-    const { error: attErr } = await supabase
-      .from("exam_attempts")
-      .update(attemptPatch)
-      .eq("id", input.attemptId);
-    if (attErr) {
-      console.warn("exam_attempts update by id", attErr);
-      await supabase
-        .from("exam_attempts")
-        .update(attemptPatch)
-        .eq("exam_id", input.examId)
-        .eq("student_id", input.studentId)
-        .eq("status", "in_progress");
-    }
-  } else {
-    await supabase
-      .from("exam_attempts")
-      .update(attemptPatch)
-      .eq("exam_id", input.examId)
-      .eq("student_id", input.studentId)
-      .eq("status", "in_progress");
-  }
-
-  const payload = {
-    exam_id: input.examId,
-    student_id: input.studentId,
-    school_id: input.schoolId,
-    attempt_id: input.attemptId,
-    total_score: scored.totalScore,
-    max_score: scored.maxMarks,
-    objective_score: scored.totalScore,
-    percentage: scored.percentage,
-    grade: scored.grade,
-    pass_fail: scored.passFail,
-    correct_count: scored.correct,
-    wrong_count: scored.wrong,
-    unanswered_count: scored.unanswered,
-    status: resultStatus,
-    security_review_status: secStatus,
-    released_at: releasedAt,
-  };
 
   let resultId: string | undefined;
   let error: { message?: string } | null = null;
 
-  const upsert = await supabase
-    .from("results")
-    .upsert(payload as never, { onConflict: "exam_id,student_id" })
-    .select("id")
-    .maybeSingle();
-
-  if (upsert.error) {
-    const existing = await supabase
-      .from("results")
-      .select("id")
-      .eq("exam_id", input.examId)
-      .eq("student_id", input.studentId)
-      .maybeSingle();
-
-    if (existing.data?.id) {
-      const upd = await supabase
-        .from("results")
-        .update({
-          attempt_id: input.attemptId,
-          total_score: scored.totalScore,
-          max_score: scored.maxMarks,
-          objective_score: scored.totalScore,
-          percentage: scored.percentage,
-          grade: scored.grade,
-          pass_fail: scored.passFail,
-          correct_count: scored.correct,
-          wrong_count: scored.wrong,
-          unanswered_count: scored.unanswered,
-          status: resultStatus,
-          security_review_status: secStatus,
-          released_at: releasedAt,
-        } as never)
-        .eq("id", existing.data.id)
-        .select("id")
-        .maybeSingle();
-      error = upd.error;
-      resultId = upd.data?.id as string | undefined;
-    } else {
-      const ins = await supabase
-        .from("results")
-        .insert(payload as never)
-        .select("id")
-        .maybeSingle();
-      error = ins.error;
-      resultId = ins.data?.id as string | undefined;
+  // Preferred: server (service role) — bypasses RLS after ownership check
+  try {
+    const serverRes = await saveCbtResultServer({
+      data: {
+        examId: input.examId,
+        studentId: input.studentId,
+        schoolId: input.schoolId,
+        attemptId: input.attemptId,
+        totalScore: scored.totalScore,
+        maxScore: scored.maxMarks,
+        percentage: scored.percentage,
+        grade: scored.grade,
+        passFail: scored.passFail,
+        correctCount: scored.correct,
+        wrongCount: scored.wrong,
+        unansweredCount: scored.unanswered,
+        resultStatus,
+        securityReviewStatus: secStatus,
+        releasedAt,
+        answers: input.answers,
+        attemptStatus: (status === "terminated" ? "terminated" : "submitted") as "submitted" | "terminated" | "flagged",
+      },
+    });
+    if (serverRes?.resultId) {
+      resultId = serverRes.resultId;
+      error = null;
+    } else if (serverRes?.error) {
+      error = { message: serverRes.error };
     }
-  } else {
-    resultId = upsert.data?.id as string | undefined;
+  } catch (e) {
+    console.warn("saveCbtResultServer threw", e);
   }
 
-  // Final fallback: re-read by exam+student
-  if (!resultId && !error) {
-    const { data: again } = await supabase
-      .from("results")
-      .select("id")
-      .eq("exam_id", input.examId)
-      .eq("student_id", input.studentId)
-      .maybeSingle();
+  // Fallback: client upsert (needs student INSERT policy on results)
+  if (!resultId) {
+    const payload = {
+      exam_id: input.examId,
+      student_id: input.studentId,
+      school_id: input.schoolId,
+      attempt_id: input.attemptId,
+      total_score: scored.totalScore,
+      max_score: scored.maxMarks,
+      objective_score: scored.totalScore,
+      percentage: scored.percentage,
+      grade: scored.grade,
+      pass_fail: scored.passFail,
+      correct_count: scored.correct,
+      wrong_count: scored.wrong,
+      unanswered_count: scored.unanswered,
+      status: resultStatus,
+      security_review_status: secStatus,
+      released_at: releasedAt,
+    };
+    const upsert = await supabase.from("results").upsert(payload as never, { onConflict: "exam_id,student_id" }).select("id").maybeSingle();
+    if (!upsert.error) {
+      resultId = upsert.data?.id as string | undefined;
+      error = null;
+    } else {
+      error = upsert.error;
+      const ins = await supabase.from("results").insert(payload as never).select("id").maybeSingle();
+      if (!ins.error) {
+        resultId = ins.data?.id as string | undefined;
+        error = null;
+      }
+    }
+  }
+
+  if (!resultId) {
+    const { data: again } = await supabase.from("results").select("id").eq("exam_id", input.examId).eq("student_id", input.studentId).maybeSingle();
     resultId = (again?.id as string) ?? undefined;
+    if (resultId) error = null;
   }
 
   if (!error && input.schoolId && !publishNow) {
@@ -269,34 +193,6 @@ export async function saveCbtResult(input: {
       resultId: resultId ?? null,
       published: false,
     });
-  }
-
-  if (!error && input.schoolId) {
-    try {
-      const { data: attempts } = await supabase
-        .from("exam_attempts")
-        .select("id, status")
-        .eq("exam_id", input.examId)
-        .eq("school_id", input.schoolId);
-      const list = attempts ?? [];
-      if (list.length > 0) {
-        const done = list.filter((a) =>
-          ["submitted", "completed", "finished", "graded", "marked", "terminated", "flagged"].includes(
-            String((a as { status: string }).status || "").toLowerCase(),
-          ),
-        );
-        if (done.length === list.length) {
-          await supabase
-            .from("examinations")
-            .update({ status: "completed" } as never)
-            .eq("id", input.examId)
-            .eq("school_id", input.schoolId)
-            .neq("status", "completed");
-        }
-      }
-    } catch (e) {
-      console.warn("auto-complete exam", e);
-    }
   }
 
   return {
