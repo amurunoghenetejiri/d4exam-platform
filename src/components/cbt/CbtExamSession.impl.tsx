@@ -69,6 +69,7 @@ export function CbtExamPage() {
   const [mediaBusy, setMediaBusy] = useState(false);
   const [resultId, setResultId] = useState<string | null>(null);
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
+  const [camPubEpoch, setCamPubEpoch] = useState(0);
   const [fsGate, setFsGate] = useState(false);
   const attemptIdRef = useRef<string | null>(null);
   const facePresenceRef = useRef<{ faceStatus: string; faceCount: number | null; cameraActive: boolean }>({
@@ -125,6 +126,45 @@ export function CbtExamPage() {
     liveCamPublisherRef.current?.stop();
     liveCamPublisherRef.current = null;
   }, []);
+
+
+  const streamHasLiveVideo = useCallback((stream: MediaStream | null | undefined) => {
+    if (!stream) return false;
+    return stream.getVideoTracks().some((tr) => tr.readyState === "live" && tr.enabled !== false);
+  }, []);
+
+  const reconnectCamera = useCallback(async () => {
+    if (!security.requireCamera) return;
+    if (doneRef.current || !startedRef.current) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    if (streamHasLiveVideo(mediaStreamRef.current)) {
+      const s = mediaStreamRef.current!;
+      for (const tr of s.getVideoTracks()) {
+        try { tr.enabled = true; } catch { /* ignore */ }
+      }
+      setLiveStream(s);
+      facePresenceRef.current = { ...facePresenceRef.current, cameraActive: true };
+      return;
+    }
+    try {
+      const needMic = Boolean(security.requireMicrophone);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: needMic,
+      });
+      stopMediaStream(mediaStreamRef.current);
+      mediaStreamRef.current = stream;
+      setLiveStream(stream);
+      facePresenceRef.current = {
+        ...facePresenceRef.current,
+        cameraActive: true,
+        faceStatus: facePresenceRef.current.faceStatus === "unavailable" ? "unclear" : facePresenceRef.current.faceStatus,
+      };
+    } catch {
+      facePresenceRef.current = { ...facePresenceRef.current, cameraActive: false, faceStatus: "unavailable" };
+      setLiveStream(null);
+    }
+  }, [security.requireCamera, security.requireMicrophone, streamHasLiveVideo]);
 
   const shutdownMedia = useCallback(() => {
     stopLiveCamStream();
@@ -352,14 +392,25 @@ export function CbtExamPage() {
         facePresenceRef.current = { ...facePresenceRef.current, cameraActive: false, faceStatus: "unavailable" };
         return;
       }
-      setTracksEnabled(true);
-      facePresenceRef.current = { ...facePresenceRef.current, cameraActive: true };
-      const stream = mediaStreamRef.current;
-      if (stream) setLiveStream(stream);
+      void (async () => {
+        await reconnectCamera();
+        const s = mediaStreamRef.current;
+        if (s && streamHasLiveVideo(s)) {
+          setLiveStream(s);
+          facePresenceRef.current = { ...facePresenceRef.current, cameraActive: true };
+        }
+        setCamPubEpoch((n) => n + 1);
+      })();
     };
     document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [previewMode, started, done, security.requireCamera, liveStream, stopLiveCamStream]);
+    window.addEventListener("focus", onVis);
+    window.addEventListener("pageshow", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+      window.removeEventListener("pageshow", onVis);
+    };
+  }, [previewMode, started, done, security.requireCamera, liveStream, stopLiveCamStream, reconnectCamera, streamHasLiveVideo]);
 
   useEffect(() => {
     if (previewMode || !started || done) return;
@@ -840,7 +891,14 @@ export function CbtExamPage() {
         </section>
       </div>
       {started && !done && security.requireCamera && (
-        <ExamCameraPip enabled={started && !done} faceDetection={Boolean(security.faceDetection)} maxFaceWarnings={security.maxFaceWarnings ?? 3} stream={liveStream} onSecurityEvent={onFaceSecurityEvent} />
+        <ExamCameraPip
+          enabled={started && !done}
+          faceDetection={Boolean(security.faceDetection)}
+          maxFaceWarnings={security.maxFaceWarnings ?? 3}
+          stream={liveStream}
+          onSecurityEvent={onFaceSecurityEvent}
+          onNeedReconnect={() => { void reconnectCamera(); }}
+        />
       )}
       {fsGate && security.fullscreen && started && !done && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
