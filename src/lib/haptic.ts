@@ -41,11 +41,10 @@ let lastAt = 0;
 
 export function canVibrate(): boolean {
   try {
-    return (
-      typeof window !== "undefined" &&
-      typeof navigator !== "undefined" &&
-      typeof navigator.vibrate === "function"
-    );
+    if (typeof window === "undefined") return false;
+    const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
+    const win = window as Window & { navigator?: Navigator; vibrate?: (p: number | number[]) => boolean };
+    return typeof nav?.vibrate === "function" || typeof win?.vibrate === "function";
   } catch {
     return false;
   }
@@ -63,11 +62,13 @@ function clearTimers() {
 }
 
 function vibrateRaw(arg: number | number[]): boolean {
-  if (!canVibrate()) return false;
   try {
     const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
-    if (typeof nav.vibrate !== "function") return false;
-    const result = nav.vibrate(arg);
+    const win = window as Window & { vibrate?: (p: number | number[]) => boolean };
+    const fn = (typeof nav?.vibrate === "function" ? nav.vibrate.bind(nav) : null)
+      || (typeof win?.vibrate === "function" ? win.vibrate.bind(win) : null);
+    if (!fn) return false;
+    const result = fn(arg);
     return result !== false;
   } catch {
     return false;
@@ -77,7 +78,7 @@ function vibrateRaw(arg: number | number[]): boolean {
 function pulseTrain(ons: number[], gap: number) {
   let delay = 0;
   for (const ms of ons) {
-    const pulse = Math.max(60, ms);
+    const pulse = Math.max(80, ms);
     const d = delay;
     const id = window.setTimeout(() => {
       vibrateRaw(pulse);
@@ -134,7 +135,7 @@ export function startHapticKeepAlive() {
     } catch {
       /* ignore */
     }
-  }, 12_000);
+  }, 8_000);
 }
 
 export function stopHapticKeepAlive() {
