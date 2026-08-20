@@ -1,8 +1,12 @@
-force production redeploy 2026-08-20T08:15Z
+force production redeploy 2026-08-20T08:30Z
 
-CONFIRMED ON MAIN:
-1. View Results -> /student/results/$id (examinations + post-exam button)
-2. Officer live-monitor: student NAME first, matric second (from attempt.metadata.studentName)
-3. Haptics: light (no-face/unclear), strong (multi/camera blocked), longest (officer warning + toast in exam)
-4. studentName + matric written into exam_attempts.metadata on Start Exam + presence heartbeat
-5. CbtExamSession.impl.tsx fully restored (not placeholder)
+CBT SUBMIT FIX:
+1. saveCbtResultServer (service role) — ownership check + upsert result + mark attempt submitted
+2. saveCbtResult client prefers server path (bypasses RLS permission error)
+3. Migration 20260820120000 — student results INSERT/UPDATE/SELECT policies
+4. View Results + no rewrite depend on successful save + attempt status submitted
+
+IMPORTANT: Run migration SQL in Supabase SQL Editor if policies not yet applied:
+  supabase/migrations/20260820120000_student_save_cbt_result_rpc.sql
+
+Ensure Vercel env has SUPABASE_SERVICE_ROLE_KEY (server save path).
