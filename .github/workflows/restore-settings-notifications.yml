@@ -1,0 +1,16 @@
+name: Restore SettingsPage notifications fix
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/restore-settings-notifications.yml"
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder then full restore via next commits
+        run: echo pending
