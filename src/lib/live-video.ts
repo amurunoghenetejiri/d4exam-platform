@@ -7,7 +7,8 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { RealtimeChannel } from "@/supabase/supabase-js";
+import type { RealtimeChannel as RC } from "@supabase/supabase-js";
 
 export type LiveCamFramePayload = {
   attemptId: string;
@@ -78,20 +79,32 @@ export async function captureJpegFromStream(
 
   if (video.srcObject !== stream) {
     video.srcObject = stream;
+  }
+  try {
+    if (video.paused) await video.play();
+  } catch {
+    return null;
+  }
+  if (!video.videoWidth) {
+    await new Promise<void>((resolve) => {
+      const onMeta = () => {
+        video.removeEventListener("loadedmetadata", onMeta);
+        resolve();
+      };
+      video.addEventListener("loadedmetadata", onMeta);
+      window.setTimeout(() => resolve(), 300);
+    });
+  }
+
+  // Stale/frozen track: currentTime not advancing — rebind and try again
+  const t0 = video.currentTime;
+  await new Promise((r) => window.setTimeout(r, 40));
+  if (video.readyState >= 2 && video.currentTime === t0 && !video.paused) {
     try {
+      video.srcObject = stream;
       await video.play();
     } catch {
       return null;
-    }
-    if (!video.videoWidth) {
-      await new Promise<void>((resolve) => {
-        const onMeta = () => {
-          video.removeEventListener("loadedmetadata", onMeta);
-          resolve();
-        };
-        video.addEventListener("loadedmetadata", onMeta);
-        window.setTimeout(() => resolve(), 250);
-      });
     }
   }
 
@@ -143,7 +156,7 @@ export function startLiveCamPublisher(opts: {
 }): LiveCamPublisher {
   const intervalMs = opts.intervalMs ?? LIVE_CAM_FRAME_INTERVAL_MS;
   let stopped = false;
-  let channel: RealtimeChannel | null = null;
+  let channel: RC | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let publishing = false;
   let consecutiveFails = 0;
