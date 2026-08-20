@@ -1,1 +1,1 @@
-PLACEHOLDER_WILL_FAIL
+SEE_FILE:/tmp/good_cbt_patched.tsx
