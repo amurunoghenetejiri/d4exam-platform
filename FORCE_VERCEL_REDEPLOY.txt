@@ -1,10 +1,8 @@
-Redeploy 2026-08-20T18:59Z WAT
+Redeploy 2026-08-20T18:26Z WAT
 
-Face PIP fix (commits 78dcc89 + 7d910ae):
-- Detection starts immediately when Start Exam is clicked
-- No more stuck "Face check starting…" while camera is live
-- Status shows: Monitoring · 1 face / Multiple faces / Face not seen / Face unclear
-- MediaPipe load has 8s timeout so engine never hangs forever
-- Tick interval 900ms for responsive updates
+Page stability:
+- officer/live-monitor: queryFn never throws (returns [] + console.warn)
+- officer/results: queryFn never throws + multi-select fallback for joins
+- student/results: already safe
 
-# Page stability fix 2026-08-20T18:21Z
+UI/UX unchanged.
