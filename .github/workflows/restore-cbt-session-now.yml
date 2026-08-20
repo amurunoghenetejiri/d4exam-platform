@@ -1,44 +1,67 @@
 name: Restore CbtExamSession now
-
 on:
   workflow_dispatch:
   push:
     paths:
       - ".github/workflows/restore-cbt-session-now.yml"
-      - "src/components/cbt/_restore/*"
-
 permissions:
   contents: write
-
 jobs:
   restore:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Decode and write CbtExamSession.impl.tsx
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - name: Restore from good commit and patch vibration
         run: |
-          python3 - <<'PY'
-          import base64, zlib
+          set -e
+          # Last known good full file (before accidental PLACEHOLDER)
+          git show 4bb14611c6d0beceb6f0f2d63ef65fc36c47573d:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
+          python3 <<'PY'
           from pathlib import Path
-          b64 = Path("src/components/cbt/_restore/z0.txt").read_text() + Path("src/components/cbt/_restore/z1.txt").read_text()
-          raw = zlib.decompress(base64.b64decode(b64))
-          path = Path("src/components/cbt/CbtExamSession.impl.tsx")
-          path.write_bytes(raw)
-          text = raw.decode()
-          assert "studentName" in text
-          assert "hapticOfficerWarning" in text
-          assert "goToResult" in text
-          assert "PLACEHOLDER" not in text
-          print("Restored", len(raw), "bytes OK")
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          assert "PLACEHOLDER" not in t or len(t) > 1000
+          assert "export function CbtExamPage" in t
+          a = 'import { hapticOfficerWarning, haptic as fireHaptic, primeHaptics, refreshHapticUnlock } from "@/lib/haptic";'
+          b = 'import { hapticOfficerWarning, haptic as fireHaptic, primeHaptics, refreshHapticUnlock, startHapticKeepAlive, stopHapticKeepAlive } from "@/lib/haptic";'
+          if a in t:
+              t = t.replace(a, b, 1)
+          a = "faceDetection={Boolean(security.faceDetection)}"
+          b = "faceDetection={Boolean(security.faceDetection || security.requireCamera)}"
+          if a in t:
+              t = t.replace(a, b, 1)
+          a = "try { primeHaptics(); } catch { /* ignore */ }"
+          b = "try { primeHaptics(); startHapticKeepAlive(); } catch { /* ignore */ }"
+          if a in t and "startHapticKeepAlive()" not in t:
+              t = t.replace(a, b, 1)
+          a = """  const shutdownMedia = useCallback(() => {
+    stopLiveCamStream();
+    stopMediaStream(mediaStreamRef.current);
+    mediaStreamRef.current = null;
+    setLiveStream(null);
+  }, [stopLiveCamStream]);"""
+          b = """  const shutdownMedia = useCallback(() => {
+    try { stopHapticKeepAlive(); } catch { /* ignore */ }
+    stopLiveCamStream();
+    stopMediaStream(mediaStreamRef.current);
+    mediaStreamRef.current = null;
+    setLiveStream(null);
+  }, [stopLiveCamStream]);"""
+          if "stopHapticKeepAlive()" not in t and a in t:
+              t = t.replace(a, b, 1)
+          p.write_text(t)
+          print("ok", len(t), "keepalive", "startHapticKeepAlive" in t)
           PY
-      - name: Commit if changed
+      - name: Commit restore
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/components/cbt/CbtExamSession.impl.tsx
-          if git diff --cached --quiet; then
-            echo "No changes"
-          else
-            git commit -m "fix: restore full CbtExamSession — studentName, haptics, View Results"
+          git status
+          if git diff --cached --quiet; then echo "no change"; else
+            git commit -m "fix(cbt): restore session + vibration keepalive + faceDetection"
             git push
           fi
