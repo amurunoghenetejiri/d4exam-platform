@@ -1,13 +1,13 @@
 /**
  * CBT exam vibration (motor only — no sound).
  *
- * Android Chrome supports navigator.vibrate.
- * iOS Safari generally does not — calls are no-ops there.
+ * Android Chrome: navigator.vibrate works after a user gesture.
+ * iOS Safari: no Vibration API — calls are no-ops (expected).
  *
- * Intensity:
- *   light (none/unclear)  → short soft pulses
- *   multi / camera_blocked → strong repeated pulses
- *   officer_warning       → longest / strongest (multi-wave)
+ * Levels:
+ *   light (none / unclear)     → soft short pulses
+ *   multi / camera_blocked     → strong repeated pulses
+ *   officer_warning            → longest / strongest
  */
 
 export type HapticKind =
@@ -21,31 +21,32 @@ export type HapticKind =
   | "light"
   | "strong";
 
-/** [on, off, on, off, …] milliseconds */
+/** [on, off, on, off, …] ms — keep on-pulses >= 50ms (many devices ignore shorter). */
 const PATTERNS: Record<HapticKind, number[]> = {
-  // Short buzz when student taps Start Exam
-  start: [120, 50, 160],
+  start: [150, 60, 180],
 
-  // Light warning — face not seen (soft, not aggressive)
-  none: [40, 50, 45, 50, 50],
-  unclear: [35, 45, 40, 45, 45],
-  light: [40, 50, 45],
+  // Light — face not seen / unclear
+  none: [55, 70, 60, 70, 65],
+  unclear: [50, 65, 55, 65, 60],
+  light: [55, 70, 60],
 
-  // Multiple faces — strong / loud haptic
-  multi: [100, 50, 120, 50, 140, 60, 160],
-  strong: [100, 50, 120, 50, 140, 60, 160],
-  camera_blocked: [90, 45, 110, 45, 130, 55, 150],
+  // Strong — multiple faces / camera blocked
+  multi: [120, 55, 140, 55, 160, 60, 180, 60, 200],
+  strong: [120, 55, 140, 55, 160, 60, 180, 60, 200],
+  camera_blocked: [110, 50, 130, 50, 150, 55, 170, 55, 190],
 
-  tab_switch: [60, 40, 80],
+  tab_switch: [80, 50, 100],
 
   // Officer warning — longest and strongest
   officer_warning: [
-    140, 60, 160, 60, 180, 70, 200, 80, 220, 90, 250, 100, 280,
+    160, 55, 180, 55, 200, 60, 220, 60, 240, 70, 260, 70, 280, 80, 300,
   ],
 };
 
 let primed = false;
 let timers: number[] = [];
+let lastKind: HapticKind | null = null;
+let lastAt = 0;
 
 export function canVibrate(): boolean {
   try {
@@ -73,106 +74,128 @@ function clearTimers() {
 function vibrateRaw(arg: number | number[]): boolean {
   if (!canVibrate()) return false;
   try {
-    const result = navigator.vibrate(arg);
+    // Some WebViews return undefined instead of true — treat as success
+    const result = navigator.vibrate(arg as VibratePattern);
     return result !== false;
   } catch {
     return false;
   }
 }
 
-/** Fire a list of single pulses with gaps (fallback when full patterns are ignored). */
+/** Schedule single pulses with gaps (works when array patterns are ignored). */
 function pulseTrain(ons: number[], gap: number) {
   let delay = 0;
   for (const ms of ons) {
     const d = delay;
+    const pulse = Math.max(50, ms);
     const id = window.setTimeout(() => {
-      vibrateRaw(ms);
+      vibrateRaw(pulse);
     }, d);
     timers.push(id);
-    delay += ms + gap;
+    delay += pulse + gap;
   }
 }
 
 function extractOns(pattern: number[]): number[] {
   const ons: number[] = [];
   for (let i = 0; i < pattern.length; i += 2) {
-    ons.push(pattern[i]!);
+    ons.push(Math.max(50, pattern[i]!));
   }
   return ons;
 }
 
 /**
- * Call from a user gesture (Start exam / touch).
- * Unlocks vibration on strict browsers and buzzes on start.
+ * Call from a user gesture (Start exam button / first touch).
+ * Required to unlock vibration on strict Android browsers.
  */
 export function primeHaptics() {
   primed = true;
   clearTimers();
-  vibrateRaw(0);
+  // Tiny unlock pulse then start pattern
+  vibrateRaw(1);
   const pattern = PATTERNS.start;
-  const ok = vibrateRaw(pattern);
-  if (!ok) {
-    pulseTrain(extractOns(pattern), 60);
-  }
-  const id = window.setTimeout(() => {
+  const id0 = window.setTimeout(() => {
+    const ok = vibrateRaw(pattern);
+    if (!ok) pulseTrain(extractOns(pattern), 55);
+  }, 16);
+  timers.push(id0);
+  // Second attempt — some devices need a delayed call after gesture
+  const id1 = window.setTimeout(() => {
     vibrateRaw(pattern);
-  }, 100);
-  timers.push(id);
+  }, 120);
+  timers.push(id1);
 }
 
-/** Keep activation alive while the student taps the exam UI. */
+/** Keep unlock alive while the student interacts with the exam UI. */
 export function refreshHapticUnlock() {
   primed = true;
-  vibrateRaw(1);
-  const id = window.setTimeout(() => vibrateRaw(0), 12);
-  timers.push(id);
+  if (!canVibrate()) return;
+  try {
+    // Minimal non-zero pulse keeps the "user activation" chain alive on some WebViews
+    navigator.vibrate(1);
+    const id = window.setTimeout(() => {
+      try {
+        navigator.vibrate(0);
+      } catch {
+        /* ignore */
+      }
+    }, 18);
+    timers.push(id);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function haptic(kind: HapticKind) {
   if (typeof window === "undefined") return;
+  if (!canVibrate()) return;
 
+  // Soft de-dupe: same light kind within 1.2s is skipped (avoids spam)
+  const now = Date.now();
+  const isLight = kind === "none" || kind === "unclear" || kind === "light";
+  if (isLight && lastKind === kind && now - lastAt < 1200) return;
+  lastKind = kind;
+  lastAt = now;
+
+  primed = true;
   const pattern = PATTERNS[kind] ?? PATTERNS.none;
   const ons = extractOns(pattern);
 
   clearTimers();
-  vibrateRaw(0);
 
-  // Primary full pattern
+  // Do NOT cancel with vibrate(0) immediately before — races on some Android devices.
+  // Primary pattern
   let ok = vibrateRaw(pattern);
 
-  // Immediate retry (some Android WebViews need a second call)
+  // Always also schedule a pulse-train — more reliable on cheap Android WebViews
+  const idPulse = window.setTimeout(() => {
+    pulseTrain(ons, isLight ? 60 : 50);
+  }, 40);
+  timers.push(idPulse);
+
+  // Retry full pattern once
   const idRetry = window.setTimeout(() => {
-    if (!ok) ok = vibrateRaw(pattern);
-  }, 35);
+    vibrateRaw(pattern);
+  }, 90);
   timers.push(idRetry);
 
-  // Fallback pulse train
-  const idFb = window.setTimeout(() => {
-    if (!ok) pulseTrain(ons, 70);
-  }, 70);
-  timers.push(idFb);
-
-  // Officer warning: extend the motor much longer (2–3 extra waves)
   if (kind === "officer_warning") {
+    // Extend motor ~5–6 seconds total
     timers.push(
-      window.setTimeout(() => vibrateRaw([180, 70, 200, 70, 240]), 900),
-      window.setTimeout(() => vibrateRaw([200, 80, 240, 80, 280]), 2200),
-      window.setTimeout(() => pulseTrain([180, 220, 260], 90), 80),
-      window.setTimeout(() => vibrateRaw([220, 90, 280]), 4000),
+      window.setTimeout(() => vibrateRaw([180, 60, 200, 60, 240, 70, 280]), 700),
+      window.setTimeout(() => pulseTrain([180, 220, 260, 300], 70), 50),
+      window.setTimeout(() => vibrateRaw([200, 70, 240, 70, 280, 80, 320]), 2000),
+      window.setTimeout(() => vibrateRaw([220, 80, 280, 80, 320]), 3800),
+      window.setTimeout(() => pulseTrain([200, 250, 300], 80), 4500),
     );
   }
 
-  // Multi-face: sustained strong
-  if (kind === "multi" || kind === "strong") {
+  if (kind === "multi" || kind === "strong" || kind === "camera_blocked") {
     timers.push(
-      window.setTimeout(() => vibrateRaw([120, 50, 140, 50, 160]), 900),
-      window.setTimeout(() => pulseTrain([100, 130, 150], 80), 70),
+      window.setTimeout(() => vibrateRaw([130, 50, 150, 50, 180, 55, 200]), 600),
+      window.setTimeout(() => pulseTrain([120, 150, 180], 55), 50),
+      window.setTimeout(() => vibrateRaw([140, 55, 170, 55, 200]), 1600),
     );
-  }
-
-  // No-face / light: short soft only (no long follow-up)
-  if (kind === "none" || kind === "unclear" || kind === "light") {
-    timers.push(window.setTimeout(() => pulseTrain([40, 45, 50], 55), 60));
   }
 }
 
