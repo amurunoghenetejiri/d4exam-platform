@@ -100,7 +100,10 @@ export function useSchoolIdentity(schoolId?: string | null) {
         .select("id, name, school_code, logo_url, status")
         .eq("id", id)
         .maybeSingle();
-      if (error) throw error;
+      if (error) {
+        console.warn("[school-identity]", error);
+        return null;
+      }
       if (!data) return null;
       return {
         id: data.id as string,
