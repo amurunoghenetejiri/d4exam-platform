@@ -1,0 +1,3 @@
+redeploy-2026-08-20-settings-export-ok
+SettingsPage exports SettingsPage correctly after cb1db07.
+Do not deploy commit 4af190f (broken placeholder).
