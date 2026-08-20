@@ -1,10 +1,9 @@
-Redeploy 2026-08-20T19:00Z WAT
+Redeploy 2026-08-20T20:50Z WAT
 
-Stability stack on main:
-- officer soft error boundary (portal never fully blanks)
-- officer/results soft error boundary
-- queries.ts never throws (rows/count/unread)
-- school-identity never throws
-- live-monitor + OfficerResultsPage safe queryFn (no throw)
+Root cause fixed:
+- humanEventLabel / eventSeverity no longer crash on null event_type
+- parsePresence accepts unknown/string metadata safely
+- officer approvals list query never throws
+- live-monitor event filters use String(event_type)
 
-Production URL: https://d4exam-platform.vercel.app
+URL: https://d4exam-platform.vercel.app
