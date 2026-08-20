@@ -52,7 +52,10 @@ function ResultsList() {
         )
         .eq("student_id", student.studentId)
         .order("created_at", { ascending: false });
-      if (error) throw error;
+      if (error) {
+        console.warn("[student-results]", error);
+        return [] as ResultRow[];
+      }
       return (data ?? []) as ResultRow[];
     },
   });
