@@ -1,9 +1,10 @@
-Redeploy 2026-08-20T19:50Z WAT
+Redeploy 2026-08-20T19:00Z WAT
 
-Stability: officer live-monitor + results + student results
-- Soft error boundaries (page never blanks entire portal)
-- useRows/useCount/useUnreadNotificationCount never throw
-- school-identity query never throws
-- Safe queryFn already on live-monitor + OfficerResultsPage
+Stability stack on main:
+- officer soft error boundary (portal never fully blanks)
+- officer/results soft error boundary
+- queries.ts never throws (rows/count/unread)
+- school-identity never throws
+- live-monitor + OfficerResultsPage safe queryFn (no throw)
 
-Use: https://d4exam-platform.vercel.app
+Production URL: https://d4exam-platform.vercel.app
