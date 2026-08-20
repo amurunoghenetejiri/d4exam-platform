@@ -7,7 +7,8 @@ on:
       - ".github/workflows/apply-camera-proctor-patch.yml"
       - "patches/part_pip.patch"
       - "patches/part_lm.b64"
-      - "patches/part_sess.b64"
+      - "patches/part_sess_a.b64"
+      - "patches/part_sess_b.b64"
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -19,14 +20,17 @@ jobs:
         run: |
           set -e
           if [ -f patches/part_pip.patch ]; then
+            echo "apply pip"
             git apply --whitespace=nowarn patches/part_pip.patch || true
           fi
           if [ -f patches/part_lm.b64 ]; then
+            echo "apply lm"
             base64 -d patches/part_lm.b64 > /tmp/lm.patch
             git apply --whitespace=nowarn /tmp/lm.patch || git apply --3way --whitespace=nowarn /tmp/lm.patch || true
           fi
-          if [ -f patches/part_sess.b64 ]; then
-            base64 -d patches/part_sess.b64 > /tmp/sess.patch
+          if [ -f patches/part_sess_a.b64 ] && [ -f patches/part_sess_b.b64 ]; then
+            echo "apply sess"
+            cat patches/part_sess_a.b64 patches/part_sess_b.b64 | base64 -d > /tmp/sess.patch
             git apply --whitespace=nowarn /tmp/sess.patch || git apply --3way --whitespace=nowarn /tmp/sess.patch || true
           fi
           git config user.name "github-actions[bot]"
