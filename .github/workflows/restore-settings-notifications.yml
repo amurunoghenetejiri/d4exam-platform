@@ -12,5 +12,51 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Placeholder then full restore via next commits
-        run: echo pending
+        with:
+          fetch-depth: 0
+      - name: Restore SettingsPage then apply prefs
+        run: |
+          set -e
+          git show 4a59a9a01f97cea9d524daa74c7abe124e4c0e0a:src/components/pages/SettingsPage.tsx > src/components/pages/SettingsPage.tsx
+          python3 << 'PY2'
+          from pathlib import Path
+          p = Path("src/components/pages/SettingsPage.tsx")
+          t = p.read_text()
+          if "notification-prefs" in t:
+              print("already patched")
+              raise SystemExit(0)
+          old_i = """import { useSessionUser, signOut } from \"@/lib/session\";"""
+          new_i = """import { useSessionUser, signOut } from \"@/lib/session\";\nimport {\n  DEFAULT_NOTIFICATION_PREFS,\n  loadNotificationPrefs,\n  saveNotificationPrefs,\n  type NotificationPrefs,\n} from \"@/lib/notification-prefs\";"""
+          if old_i not in t:
+              raise SystemExit("import anchor missing")
+          t = t.replace(old_i, new_i, 1)
+          old_fn = """export function SettingsPage({ scope }: { scope: string }) {\n  const [saving, setSaving] = useState(false);\n  const scopeLower = (scope || \"\").toLowerCase();\n  const isSchoolAdmin =\n    scopeLower.includes(\"school admin\") ||\n    scopeLower.includes(\"admin\") ||\n    scopeLower === \"school\";\n"""
+          new_fn = """export function SettingsPage({ scope }: { scope: string }) {\n  const { data: session } = useSessionUser();\n  const [saving, setSaving] = useState(false);\n  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({ ...DEFAULT_NOTIFICATION_PREFS });\n  const [compactTables, setCompactTables] = useState(false);\n  const [reducedMotion, setReducedMotion] = useState(false);\n  const scopeLower = (scope || \"\").toLowerCase();\n  const isSchoolAdmin =\n    scopeLower.includes(\"school admin\") ||\n    scopeLower.includes(\"admin\") ||\n    scopeLower === \"school\";\n\n  useEffect(() => {\n    if (!session?.userId) return;\n    setNotifPrefs(loadNotificationPrefs(session.userId));\n    try {\n      setCompactTables(localStorage.getItem(`d4exam_pref_compact:${session.userId}`) === \"1\");\n      setReducedMotion(localStorage.getItem(`d4exam_pref_reduced:${session.userId}`) === \"1\");\n    } catch { /* ignore */ }\n  }, [session?.userId]);\n\n  function savePrefs() {\n    setSaving(true);\n    try {\n      if (session?.userId) {\n        saveNotificationPrefs(session.userId, notifPrefs);\n        try {\n          localStorage.setItem(`d4exam_pref_compact:${session.userId}`, compactTables ? \"1\" : \"0\");\n          localStorage.setItem(`d4exam_pref_reduced:${session.userId}`, reducedMotion ? \"1\" : \"0\");\n        } catch { /* ignore */ }\n      }\n      toast.success(\"Notification and display preferences saved.\");\n    } catch {\n      toast.error(\"Could not save preferences on this device.\");\n    } finally {\n      setSaving(false);\n    }\n  }\n"""
+          if old_fn not in t:
+              raise SystemExit("fn anchor missing")
+          t = t.replace(old_fn, new_fn, 1)
+          old_toggles = """            <ToggleRow id=\"compact\" label=\"Compact tables\" hint=\"Reduce row height on data tables\" />\n            <ToggleRow id=\"reduced\" label=\"Reduced motion\" hint=\"Minimise interface animation\" />\n          </div>\n        </SectionCard>\n\n        <SectionCard title=\"Notifications\" description=\"Choose what you get alerted about\">\n          <div className=\"space-y-4\">\n            <ToggleRow id=\"n1\" label=\"Examination reminders\" defaultChecked hint=\"24 hours before\" />\n            <ToggleRow id=\"n2\" label=\"Result publications\" defaultChecked />\n            <ToggleRow id=\"n3\" label=\"Integrity alerts\" defaultChecked />\n            <ToggleRow id=\"n4\" label=\"Product announcements\" />\n          </div>\n        </SectionCard>\n"""
+          new_toggles = """            <ToggleRow id=\"compact\" label=\"Compact tables\" hint=\"Reduce row height on data tables\" checked={compactTables} onCheckedChange={setCompactTables} />\n            <ToggleRow id=\"reduced\" label=\"Reduced motion\" hint=\"Minimise interface animation\" checked={reducedMotion} onCheckedChange={setReducedMotion} />\n          </div>\n        </SectionCard>\n\n        <SectionCard title=\"Notifications\" description=\"Choose what you get alerted about\">\n          <div className=\"space-y-4\">\n            <ToggleRow id=\"n1\" label=\"Examination reminders\" hint=\"24 hours before\" checked={notifPrefs.examReminders} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, examReminders: v }))} />\n            <ToggleRow id=\"n2\" label=\"Result publications\" checked={notifPrefs.resultPublications} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, resultPublications: v }))} />\n            <ToggleRow id=\"n3\" label=\"Integrity alerts\" checked={notifPrefs.integrityAlerts} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, integrityAlerts: v }))} />\n            <ToggleRow id=\"n4\" label=\"Product announcements\" checked={notifPrefs.productAnnouncements} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, productAnnouncements: v }))} />\n          </div>\n        </SectionCard>\n"""
+          if old_toggles not in t:
+              raise SystemExit("toggles anchor missing")
+          t = t.replace(old_toggles, new_toggles, 1)
+          old_btn = """            <Button\n              disabled={saving}\n              onClick={() => {\n                setSaving(true);\n                setTimeout(() => {\n                  setSaving(false);\n                  toast.success(\"Preferences noted (password change requires auth setup).\");\n                }, 600);\n              }}\n            >\n              {saving ? \"Saving…\" : \"Save preferences\"}\n            </Button>\n"""
+          new_btn = """            <Button disabled={saving} onClick={() => savePrefs()}>\n              {saving ? \"Saving…\" : \"Save preferences\"}\n            </Button>\n"""
+          if old_btn not in t:
+              raise SystemExit("button anchor missing")
+          t = t.replace(old_btn, new_btn, 1)
+          old_tr = """function ToggleRow({\n  id,\n  label,\n  hint,\n  defaultChecked,\n}: {\n  id: string;\n  label: string;\n  hint?: string;\n  defaultChecked?: boolean;\n}) {\n  return (\n    <div className=\"flex items-start justify-between gap-4\">\n      <div className=\"min-w-0\">\n        <Label htmlFor={id} className=\"text-sm font-medium\">\n          {label}\n        </Label>\n        {hint && <p className=\"mt-0.5 text-xs text-muted-foreground\">{hint}</p>}\n      </div>\n      <Switch id={id} defaultChecked={defaultChecked} />\n    </div>\n  );\n}\n"""
+          new_tr = """function ToggleRow({\n  id,\n  label,\n  hint,\n  defaultChecked,\n  checked,\n  onCheckedChange,\n}: {\n  id: string;\n  label: string;\n  hint?: string;\n  defaultChecked?: boolean;\n  checked?: boolean;\n  onCheckedChange?: (value: boolean) => void;\n}) {\n  const controlled = typeof checked === \"boolean\";\n  return (\n    <div className=\"flex items-start justify-between gap-4\">\n      <div className=\"min-w-0\">\n        <Label htmlFor={id} className=\"text-sm font-medium\">\n          {label}\n        </Label>\n        {hint && <p className=\"mt-0.5 text-xs text-muted-foreground\">{hint}</p>}\n      </div>\n      {controlled ? (\n        <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />\n      ) : (\n        <Switch id={id} defaultChecked={defaultChecked} />\n      )}\n    </div>\n  );\n}\n"""
+          if old_tr not in t:
+              raise SystemExit("ToggleRow anchor missing")
+          t = t.replace(old_tr, new_tr, 1)
+          p.write_text(t)
+          print("patched ok", len(t))
+          PY2
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/pages/SettingsPage.tsx
+          if git diff --cached --quiet; then echo no changes; else
+            git commit -m "fix(notifications): Settings toggles save preferences"
+            git push
+          fi
