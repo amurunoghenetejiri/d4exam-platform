@@ -1,5 +1,8 @@
-force production redeploy 2026-08-20T07:10Z
-1. View Results -> /student/results/$id
-2. Officer live-monitor shows student NAME first (matric second)
-3. Haptics: light (no-face), strong (multi), longest (officer warning + toast)
-4. studentName written into exam_attempts.metadata on start + heartbeat
+force production redeploy 2026-08-20T08:15Z
+
+CONFIRMED ON MAIN:
+1. View Results -> /student/results/$id (examinations + post-exam button)
+2. Officer live-monitor: student NAME first, matric second (from attempt.metadata.studentName)
+3. Haptics: light (no-face/unclear), strong (multi/camera blocked), longest (officer warning + toast in exam)
+4. studentName + matric written into exam_attempts.metadata on Start Exam + presence heartbeat
+5. CbtExamSession.impl.tsx fully restored (not placeholder)
