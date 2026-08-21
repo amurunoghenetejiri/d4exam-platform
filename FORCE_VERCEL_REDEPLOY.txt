@@ -1,9 +1,6 @@
-Redeploy 2026-08-20T20:50Z WAT
+Redeploy 2026-08-21T09:12Z WAT
 
-Root cause fixed:
-- humanEventLabel / eventSeverity no longer crash on null event_type
-- parsePresence accepts unknown/string metadata safely
-- officer approvals list query never throws
-- live-monitor event filters use String(event_type)
+Restored officer.approvals.tsx and officer.live-monitor.tsx (full working files).
+Safe queryFn + null-safe event labels already in place.
 
 URL: https://d4exam-platform.vercel.app
