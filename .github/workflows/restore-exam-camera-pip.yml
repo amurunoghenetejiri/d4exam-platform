@@ -1,0 +1,90 @@
+name: Restore ExamCameraPip
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-exam-camera-pip.yml'
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore and patch ExamCameraPip + session haptics
+        run: |
+          set -e
+          git show e8353858aefdb9b2ccde4a9f3b643e96c3349c39:src/components/cbt/ExamCameraPip.tsx > src/components/cbt/ExamCameraPip.tsx
+          python3 << 'PY'
+          from pathlib import Path
+          t = Path('src/components/cbt/ExamCameraPip.tsx').read_text()
+          assert 'PLACEHOLDER' not in t
+          t = t.replace('const FACE_TICK_MS = 900;', 'const FACE_TICK_MS = 500;')
+          t = t.replace('const ENGINE_TIMEOUT_MS = 4000;', 'const ENGINE_TIMEOUT_MS = 6000;')
+          old_h = """function haptic(kind: SecurityAlertKind) {
+  const map: Record<SecurityAlertKind, HapticKind> = {
+    none: \"none\",
+    unclear: \"unclear\",
+    multi: \"multi\",
+    camera_blocked: \"camera_blocked\",
+  };
+  fireHaptic(map[kind]);
+}"""
+          new_h = """function haptic(kind: SecurityAlertKind) {
+  if (kind === \"none\") fireHaptic(\"none\");
+  else if (kind === \"multi\") fireHaptic(\"multi\");
+}"""
+          if old_h in t:
+            t = t.replace(old_h, new_h)
+          old_branch = """if (next === \"ok\") {
+        faceWarnRef.current = Math.max(0, faceWarnRef.current - 1);
+        if (prev !== \"ok\") {
+          onSecRef.current?.({ kind: \"ok\", faceCount, at: new Date().toISOString() });
+        }
+        return;
+      }"""
+          new_branch = """if (next === \"ok\") {
+        setFaceStatus(\"ok\");
+        lastStateRef.current = \"ok\";
+        faceWarnRef.current = Math.max(0, faceWarnRef.current - 1);
+        if (prev !== \"ok\") {
+          onSecRef.current?.({ kind: \"ok\", faceCount, at: new Date().toISOString() });
+        }
+        return;
+      }"""
+          if old_branch in t:
+            t = t.replace(old_branch, new_branch)
+          t = t.replace('else if (next === \"unclear\") fireAlert(\"unclear\", faceCount);\n', '')
+          Path('src/components/cbt/ExamCameraPip.tsx').write_text(t)
+          print('pip restored', Path('src/components/cbt/ExamCameraPip.tsx').stat().st_size)
+
+          s = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          st = s.read_text()
+          st = st.replace(
+            'import { hapticOfficerWarning, haptic as fireHaptic, primeHaptics, refreshHapticUnlock, startHapticKeepAlive, stopHapticKeepAlive } from \"@/lib/haptic\";',
+            'import { hapticOfficerWarning, hapticExamStart, haptic as fireHaptic, primeHaptics, refreshHapticUnlock, startHapticKeepAlive, stopHapticKeepAlive } from \"@/lib/haptic\";',
+          )
+          st = st.replace('      fireHaptic(\"tab_switch\");\n', '')
+          st = st.replace(
+            'try { primeHaptics(); startHapticKeepAlive(); } catch { /* ignore */ }',
+            'try { primeHaptics(); } catch { /* ignore */ }',
+          )
+          if 'hapticExamStart()' not in st:
+            st = st.replace(
+              '      setSeconds((examQ.data?.duration_minutes ?? 60) * 60);\n      setStarted(true);\n      setIndex(0);',
+              '      setSeconds((examQ.data?.duration_minutes ?? 60) * 60);\n      setStarted(true);\n      setIndex(0);\n      try { hapticExamStart(); } catch { /* ignore */ }',
+            )
+          s.write_text(st)
+          print('session', 'hapticExamStart()' in st)
+          assert 'PLACEHOLDER' not in Path('src/components/cbt/ExamCameraPip.tsx').read_text()
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/cbt/ExamCameraPip.tsx src/components/cbt/CbtExamSession.impl.tsx
+          git commit -m "fix(cbt): restore camera pip + face ok + limited haptics" || echo nothing
+          git push || echo push failed
