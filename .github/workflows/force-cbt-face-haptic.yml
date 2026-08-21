@@ -1,0 +1,137 @@
+name: force-cbt-face-haptic
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/force-cbt-face-haptic.yml'
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch face detection reliability in place
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          # ===== face-detector.ts =====
+          fd = Path('src/lib/face-detector.ts')
+          t = fd.read_text()
+          t = t.replace('const MIN_DETECTION_CONFIDENCE = 0.32;', 'const MIN_DETECTION_CONFIDENCE = 0.22;')
+          t = t.replace('const MIN_DETECTION_CONFIDENCE = 0.3;', 'const MIN_DETECTION_CONFIDENCE = 0.22;')
+          t = t.replace('const MIN_DETECTION_CONFIDENCE = 0.28;', 'const MIN_DETECTION_CONFIDENCE = 0.22;')
+          t = t.replace('const MEDIAPIPE_LOAD_TIMEOUT_MS = 10_000;', 'const MEDIAPIPE_LOAD_TIMEOUT_MS = 12_000;')
+
+          # Native first on desktop, MediaPipe first on mobile
+          t2, n = re.subn(
+              r'export async function createFaceEngine\(\): Promise<FaceEngine \| null> \{[\s\S]*?return null;\n\}',
+              '''export async function createFaceEngine(): Promise<FaceEngine | null> {
+  const native = createNative();
+  const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
+  if (native && mp) {
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    if (isMobile) return makeHybrid(mp, native);
+    return makeHybrid(native, mp);
+  }
+  if (native) return native;
+  if (mp) return mp;
+  return null;
+}''',
+              t,
+              count=1,
+          )
+          print('createFaceEngine rewrite', n)
+          t = t2 if n else t
+          fd.write_text(t)
+          print('face-detector', fd.stat().st_size, 'conf', '0.22' in t)
+
+          # ===== haptic.ts officer pattern =====
+          hp = Path('src/lib/haptic.ts')
+          h = hp.read_text()
+          h = h.replace(
+              '180, 50, 200, 50, 220, 55, 250, 55, 280, 60, 300, 60, 320, 70, 350, 70, 400',
+              '220, 40, 260, 40, 300, 45, 340, 45, 380, 50, 420, 50, 460, 55, 500, 55, 550',
+          )
+          hp.write_text(h)
+
+          # ===== ExamCameraPip.tsx =====
+          p = Path('src/components/cbt/ExamCameraPip.tsx')
+          x = p.read_text()
+          x = x.replace('const FACE_TICK_MS = 900;', 'const FACE_TICK_MS = 550;')
+          x = x.replace('const FACE_TICK_MS = 800;', 'const FACE_TICK_MS = 550;')
+          x = x.replace('const ENGINE_TIMEOUT_MS = 4000;', 'const ENGINE_TIMEOUT_MS = 8000;')
+
+          x2, n2 = re.subn(
+              r'function haptic\(kind: SecurityAlertKind\) \{[\s\S]*?fireHaptic\(map\[kind\]\);\n\}',
+              '''function haptic(kind: SecurityAlertKind) {
+  // Vibration only for: no face, multiple faces (start exam + officer warning are elsewhere)
+  if (kind === "unclear" || kind === "camera_blocked") return;
+  if (kind === "none") fireHaptic("none");
+  else if (kind === "multi") fireHaptic("multi");
+}''',
+              x,
+              count=1,
+          )
+          print('haptic filter rewrite', n2)
+          x = x2 if n2 else x
+
+          if 'nullStreak' not in x:
+              x = x.replace('let engineReady = false;', 'let engineReady = false;\n    let nullStreak = 0;')
+              old_tick = '''        if (n == null) {
+          applyState("unclear", null);
+        } else if (n <= 0) {
+          applyState("none", 0);
+        } else if (n > 1) {
+          applyState("multi", n);
+        } else {
+          applyState("ok", 1);
+        }
+      } catch {
+        if (!cancelled) applyState("unclear", null);
+      }'''
+              new_tick = '''        if (n == null) {
+          nullStreak += 1;
+          if (nullStreak >= 3) applyState("unclear", null);
+        } else if (n <= 0) {
+          nullStreak = 0;
+          applyState("none", 0);
+        } else if (n > 1) {
+          nullStreak = 0;
+          applyState("multi", n);
+        } else {
+          nullStreak = 0;
+          applyState("ok", 1);
+        }
+      } catch {
+        nullStreak += 1;
+        if (!cancelled && nullStreak >= 3) applyState("unclear", null);
+      }'''
+              if old_tick in x:
+                  x = x.replace(old_tick, new_tick)
+                  print('nullStreak tick ok')
+              else:
+                  print('tick pattern miss')
+
+          # Don't fireAlert for unclear / unavailable
+          x = x.replace(
+              'else if (next === "unclear") fireAlert("unclear", faceCount);\n      else if (next === "unavailable") {\n        fireAlert("unclear", faceCount);\n      }',
+              '// unclear: label only — no toast/haptic',
+          )
+          p.write_text(x)
+          print('ExamCameraPip', p.stat().st_size, 'nullStreak', 'nullStreak' in x)
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/face-detector.ts src/lib/haptic.ts src/components/cbt/ExamCameraPip.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m 'fix(cbt): face not stuck unclear + vibrate only start/none/multi/officer'
+            git push
+          fi
