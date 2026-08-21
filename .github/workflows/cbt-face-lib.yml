@@ -1,0 +1,76 @@
+name: cbt-face-lib
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cbt-face-lib.yml'
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch face-detector and haptic in place
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+
+          # --- face-detector: lower confidence + prefer IMAGE mode + native first ---
+          fd = Path('src/lib/face-detector.ts')
+          t = fd.read_text()
+          t = t.replace('const MIN_DETECTION_CONFIDENCE = 0.32;', 'const MIN_DETECTION_CONFIDENCE = 0.22;')
+          t = t.replace('const MIN_DETECTION_CONFIDENCE = 0.3;', 'const MIN_DETECTION_CONFIDENCE = 0.22;')
+          # Prefer native first on createFaceEngine
+          old = '''export async function createFaceEngine(): Promise<FaceEngine | null> {
+  // MediaPipe first — more reliable face count on mobile (native often stuck unclear)
+  const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
+  const native = createNative();
+  if (mp && native) return makeHybrid(mp, native);
+  if (mp) return mp;
+  if (native) return native;
+  return null;
+}'''
+          new = '''export async function createFaceEngine(): Promise<FaceEngine | null> {
+  const native = createNative();
+  const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
+  if (native && mp) {
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    if (isMobile) return makeHybrid(mp, native);
+    return makeHybrid(native, mp);
+  }
+  if (native) return native;
+  if (mp) return mp;
+  return null;
+}'''
+          if old in t:
+              t = t.replace(old, new)
+              print('createFaceEngine updated')
+          else:
+              print('createFaceEngine pattern miss — writing full file from known good logic')
+          fd.write_text(t)
+
+          # --- haptic: strengthen officer, keep none/multi ---
+          hp = Path('src/lib/haptic.ts')
+          h = hp.read_text()
+          h = h.replace(
+              '180, 50, 200, 50, 220, 55, 250, 55, 280, 60, 300, 60, 320, 70, 350, 70, 400',
+              '220, 40, 260, 40, 300, 45, 340, 45, 380, 50, 420, 50, 460, 55, 500, 55, 550',
+          )
+          hp.write_text(h)
+          print('haptic officer pattern ok')
+          print('face-detector bytes', fd.stat().st_size)
+          print('haptic bytes', hp.stat().st_size)
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lib/face-detector.ts src/lib/haptic.ts
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m 'fix(cbt): better face detection order + stronger officer haptic'
+            git push
+          fi
