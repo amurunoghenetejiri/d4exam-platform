@@ -1,27 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GripVertical } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { GripHorizontal } from "lucide-react";
 import { haptic as fireHaptic, refreshHapticUnlock, type HapticKind } from "@/lib/haptic";
 import { createFaceEngine, type FaceEngine } from "@/lib/face-detector";
-import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 type FaceState = "ok" | "none" | "multi" | "unclear" | "unavailable";
 type CamConnState = "active" | "reconnecting" | "unavailable";
 type SecurityAlertKind = "none" | "multi" | "unclear" | "camera_blocked";
 
 function haptic(kind: SecurityAlertKind) {
-  const map: Record<SecurityAlertKind, HapticKind> = {
-    none: "none",
-    unclear: "unclear",
-    multi: "multi",
-    camera_blocked: "camera_blocked",
-  };
-  fireHaptic(map[kind]);
+  // Vibration only for: no face, multiple faces (start exam + officer warning are elsewhere)
+  if (kind === "unclear" || kind === "camera_blocked") return;
+  if (kind === "none") fireHaptic("none");
+  else if (kind === "multi") fireHaptic("multi");
 }
 
 const ALERT_COOLDOWN_MS = 1800;
-const FACE_TICK_MS = 900;
-const ENGINE_TIMEOUT_MS = 4000;
+const FACE_TICK_MS = 550;
+const ENGINE_TIMEOUT_MS = 8000;
 
 const ALERT_COPY: Record<
   SecurityAlertKind,
@@ -86,7 +83,6 @@ export function ExamCameraPip({
   maxFaceWarnings?: number;
   stream?: MediaStream | null;
   onSecurityEvent?: (event: FaceSecurityEvent) => void;
-  /** Parent owns stream — called when tracks die so parent can re-acquire getUserMedia once */
   onNeedReconnect?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -109,7 +105,6 @@ export function ExamCameraPip({
   onNeedRef.current = onNeedReconnect;
 
   const [pos, setPos] = useState({ left: 4, top: 4 });
-  // Start as unclear when face detection is on so we never sit on "Face check starting…"
   const [faceStatus, setFaceStatus] = useState<FaceState>(
     faceDetection ? "unclear" : "unavailable",
   );
@@ -180,11 +175,6 @@ export function ExamCameraPip({
         setCamConn("unavailable");
         setFaceStatus("unavailable");
         fireAlert("camera_blocked", null);
-        toast.error("Camera not available. Please allow camera access to continue the exam.", {
-          id: "cbt-cam-permission",
-          duration: 5000,
-          className: "cbt-exam-toast",
-        });
       } finally {
         acquiringRef.current = false;
       }
@@ -194,9 +184,11 @@ export function ExamCameraPip({
 
   useEffect(() => {
     if (externalStream) {
+      stopStream(ownStreamRef.current);
+      ownStreamRef.current = null;
       setStream(externalStream);
-      setCamConn(streamIsLive(externalStream) ? "active" : "unavailable");
-      if (faceDetection && streamIsLive(externalStream)) {
+      if (streamIsLive(externalStream)) {
+        setCamConn("active");
         setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
       }
       return;
@@ -278,21 +270,18 @@ export function ExamCameraPip({
     const tracks = stream.getVideoTracks();
     const onEnded = () => {
       setCamConn("reconnecting");
-      setFaceStatus("unclear");
-      if (externalStream) {
-        onNeedRef.current?.();
-      } else {
-        void acquireOwnCamera("reconnect");
-      }
+      if (externalStream) onNeedRef.current?.();
+      else void acquireOwnCamera("reconnect");
     };
     const onMute = () => {
-      const v = videoRef.current;
-      if (v) void v.play().catch(() => {});
+      if (!streamIsLive(stream)) {
+        setCamConn("reconnecting");
+        if (externalStream) onNeedRef.current?.();
+        else void acquireOwnCamera("reconnect");
+      }
     };
     const onUnmute = () => {
-      setCamConn((c) => (c === "reconnecting" ? "active" : c));
-      const v = videoRef.current;
-      if (v) void v.play().catch(() => {});
+      if (streamIsLive(stream)) setCamConn("active");
     };
     for (const tr of tracks) {
       tr.addEventListener("ended", onEnded);
@@ -331,20 +320,20 @@ export function ExamCameraPip({
     }
   }, [stream]);
 
-  // Face detection: start immediately when camera is live — never stick on "starting"
+  // Face detection: start immediately when camera is live
   useEffect(() => {
     if (!stream || !faceDetection || !enabled) {
       setFaceStatus(stream && enabled ? (faceDetection ? "unclear" : "ok") : "unavailable");
       return;
     }
 
-    // Camera is live — show monitoring state right away (not "starting")
     setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
     lastStateRef.current = lastStateRef.current === "unavailable" ? "unclear" : lastStateRef.current;
 
     let cancelled = false;
     let timer: number | undefined;
     let engineReady = false;
+    let nullStreak = 0;
 
     const applyState = (next: FaceState, faceCount: number | null) => {
       if (cancelled) return;
@@ -360,16 +349,14 @@ export function ExamCameraPip({
         return;
       }
 
-      // Only escalate after engine is actually running detections
       if (!engineReady) return;
+
+      // unclear: label only — no toast/haptic
+      if (next === "unclear" || next === "unavailable") return;
 
       faceWarnRef.current += 1;
       if (next === "none") fireAlert("none", faceCount);
       else if (next === "multi") fireAlert("multi", faceCount);
-      else if (next === "unclear") fireAlert("unclear", faceCount);
-      else if (next === "unavailable") {
-        fireAlert("unclear", faceCount);
-      }
     };
 
     const tick = async () => {
@@ -380,9 +367,8 @@ export function ExamCameraPip({
         if (!cancelled) timer = window.setTimeout(() => void tick(), FACE_TICK_MS);
         return;
       }
-      // Wait until video has real frames
       if (video.readyState < 2 || video.videoWidth === 0) {
-        if (!cancelled) timer = window.setTimeout(() => void tick(), 400);
+        if (!cancelled) timer = window.setTimeout(() => void tick(), 280);
         return;
       }
       try {
@@ -390,22 +376,26 @@ export function ExamCameraPip({
         if (cancelled) return;
         engineReady = true;
         if (n == null) {
-          applyState("unclear", null);
+          nullStreak += 1;
+          if (nullStreak >= 3) applyState("unclear", null);
         } else if (n <= 0) {
+          nullStreak = 0;
           applyState("none", 0);
         } else if (n > 1) {
+          nullStreak = 0;
           applyState("multi", n);
         } else {
+          nullStreak = 0;
           applyState("ok", 1);
         }
       } catch {
-        if (!cancelled) applyState("unclear", null);
+        nullStreak += 1;
+        if (!cancelled && nullStreak >= 3) applyState("unclear", null);
       }
       if (!cancelled) timer = window.setTimeout(() => void tick(), FACE_TICK_MS);
     };
 
     void (async () => {
-      // Soft timeout: if model load is slow, keep showing "Face unclear" not "starting"
       const timeoutId = window.setTimeout(() => {
         if (!cancelled && !faceEngineRef.current) {
           setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
@@ -424,7 +414,6 @@ export function ExamCameraPip({
           return;
         }
         faceEngineRef.current = engine;
-        // First detection ASAP
         void tick();
       } catch {
         window.clearTimeout(timeoutId);
@@ -480,7 +469,6 @@ export function ExamCameraPip({
 
   if (!enabled) return null;
 
-  // Prefer real stream liveness — never show false "Camera blocked"
   const reallyLive =
     streamIsLive(stream) || streamIsLive(externalStream) || streamIsLive(ownStreamRef.current);
   const effectiveConn: CamConnState =
@@ -492,7 +480,6 @@ export function ExamCameraPip({
           ? "active"
           : camConn;
 
-  // When camera is active, never leave the banner on "Face check starting…"
   const displayFaceStatus: FaceState =
     effectiveConn === "active" && faceStatus === "unavailable" && faceDetection
       ? "unclear"
@@ -517,67 +504,63 @@ export function ExamCameraPip({
 
   const statusDot =
     effectiveConn === "active"
-      ? "bg-emerald-400"
+      ? displayFaceStatus === "ok"
+        ? "bg-emerald-400"
+        : displayFaceStatus === "multi" || displayFaceStatus === "none"
+          ? "bg-red-400"
+          : "bg-amber-400"
       : effectiveConn === "reconnecting"
-        ? "bg-amber-400"
-        : "bg-red-500";
+        ? "bg-amber-400 animate-pulse"
+        : "bg-slate-400";
 
   return (
     <div
       data-exam-pip
-      className="fixed z-[100] w-[120px] touch-none overflow-hidden rounded-xl border-2 border-white/80 bg-black shadow-2xl sm:w-[148px]"
+      className={cn(
+        "fixed z-[80] w-[132px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[150px]",
+        dragging && "cursor-grabbing",
+      )}
       style={{ left: pos.left, top: pos.top }}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-        dragState.current = {
-          pointerId: e.pointerId,
-          startX: e.clientX,
-          startY: e.clientY,
-          originLeft: pos.left,
-          originTop: pos.top,
-        };
-        setDragging(true);
-      }}
     >
-      <div className="flex cursor-grab items-center gap-1 bg-black/80 px-2 py-1.5 active:cursor-grabbing">
-        <span className={cn("h-2 w-2 shrink-0 rounded-full", statusDot)} aria-hidden />
-        <GripVertical className="h-3.5 w-3.5 text-white/80" />
-        <span className="text-[10px] font-semibold text-white/90">
-          {effectiveConn === "active"
-            ? "Camera active"
-            : effectiveConn === "reconnecting"
-              ? "Reconnecting…"
-              : "Camera off"}
-        </span>
+      <div
+        className="flex cursor-grab items-center gap-1 bg-black/80 px-2 py-1 text-[10px] font-semibold text-white active:cursor-grabbing"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          dragState.current = {
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            startY: e.clientY,
+            originLeft: pos.left,
+            originTop: pos.top,
+          };
+          setDragging(true);
+        }}
+      >
+        <span className={cn("h-1.5 w-1.5 rounded-full", statusDot)} />
+        <GripHorizontal className="h-3 w-3 opacity-60" />
+        <span className="truncate">Camera active</span>
       </div>
-      {stream ? (
+      <div className="relative aspect-[3/4] bg-slate-900">
         <video
           ref={setVideoNode}
-          className="aspect-[4/3] w-full scale-x-[-1] bg-black object-cover pointer-events-none"
+          className="h-full w-full object-cover"
           autoPlay
           playsInline
           muted
         />
-      ) : (
-        <div className="flex aspect-[4/3] w-full items-center justify-center bg-slate-900 px-2 text-center text-[10px] font-semibold text-white/80">
-          {camConn === "reconnecting" ? "Reconnecting camera…" : "Allow camera access"}
+        <div
+          className={cn(
+            "absolute inset-x-0 bottom-0 px-1.5 py-1 text-center text-[9px] font-bold text-white",
+            displayFaceStatus === "ok"
+              ? "bg-emerald-600/90"
+              : displayFaceStatus === "multi" || displayFaceStatus === "none"
+                ? "bg-red-600/90"
+                : "bg-amber-600/90",
+          )}
+        >
+          {faceLabel}
         </div>
-      )}
-      <div
-        className={cn(
-          "px-2 py-1 text-center text-[10px] font-bold text-white",
-          camConn === "reconnecting" && "bg-amber-600",
-          camConn === "unavailable" && "bg-red-700",
-          camConn === "active" && displayFaceStatus === "multi" && "bg-red-600",
-          camConn === "active" && displayFaceStatus === "none" && "bg-amber-600",
-          camConn === "active" && displayFaceStatus === "unclear" && "bg-amber-500",
-          camConn === "active" && displayFaceStatus === "ok" && "bg-emerald-600",
-          camConn === "active" && displayFaceStatus === "unavailable" && "bg-amber-500",
-        )}
-      >
-        {faceLabel}
       </div>
     </div>
   );
