@@ -21,8 +21,8 @@ export type HapticKind =
 
 const PATTERNS: Record<HapticKind, number[]> = {
   start: [200, 80, 220],
-  none: [70, 80, 80, 80, 90],
-  unclear: [65, 75, 75, 75, 85],
+  none: [120, 70, 140, 70, 160],
+  unclear: [90, 70, 100, 70, 120],
   light: [70, 80, 85],
   multi: [150, 60, 180, 60, 200, 70, 220, 70, 250],
   strong: [150, 60, 180, 60, 200, 70, 220, 70, 250],
@@ -177,40 +177,12 @@ export function haptic(kind: HapticKind) {
     timers.push(
       window.setTimeout(() => vibrateRaw([200, 50, 240, 50, 280, 60, 320]), 600),
       window.setTimeout(() => pulseTrain([200, 250, 300, 350], 55), 40),
-      window.setTimeout(() => vibrateRaw([220, 55, 280, 55, 320, 60, 380]), 1800),
-      window.setTimeout(() => vibrateRaw([250, 60, 320, 60, 400]), 3500),
-      window.setTimeout(() => pulseTrain([220, 280, 350], 60), 5000),
-    );
-  }
-
-  if (kind === "multi" || kind === "strong" || kind === "camera_blocked") {
-    timers.push(
-      window.setTimeout(() => vibrateRaw([160, 50, 190, 50, 220, 55, 260]), 500),
-      window.setTimeout(() => pulseTrain([150, 180, 220, 250], 45), 40),
-      window.setTimeout(() => vibrateRaw([170, 50, 210, 50, 250]), 1400),
-      window.setTimeout(() => vibrateRaw([180, 55, 230]), 2500),
+      window.setTimeout(() => vibrateRaw([250, 60, 300, 60, 350]), 900),
     );
   }
 }
 
-export function hapticExamStart() {
-  haptic("start");
-}
+/** Longest / loudest pulse for officer warnings. */
 export function hapticOfficerWarning() {
   haptic("officer_warning");
-}
-export function hapticFaceNone() {
-  haptic("none");
-}
-export function hapticFaceMulti() {
-  haptic("multi");
-}
-export function hapticLightWarning() {
-  haptic("none");
-}
-export function hapticStrongWarning() {
-  haptic("multi");
-}
-export function isHapticPrimed() {
-  return primed;
 }
