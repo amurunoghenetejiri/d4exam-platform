@@ -1,9 +1,9 @@
 /**
  * Real, in-browser face detection for CBT camera monitoring.
  *
- * Order:
- *  1) Native FaceDetector (Chrome/Edge) — fast, no download
- *  2) MediaPipe BlazeFace WASM — broader support (with timeout)
+ * Order (most reliable continuous count first):
+ *  1) MediaPipe BlazeFace WASM — works on mobile Chrome/Safari WebViews
+ *  2) Native FaceDetector (Chrome/Edge) — fast when available
  *
  * Only the face COUNT is returned. No frames are uploaded.
  */
@@ -12,12 +12,14 @@ const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
-const MEDIAPIPE_LOAD_TIMEOUT_MS = 8000;
+const MEDIAPIPE_LOAD_TIMEOUT_MS = 10_000;
+/** Lower threshold so real faces are not stuck as "unclear". */
+const MIN_DETECTION_CONFIDENCE = 0.32;
 
 export type FaceEngine = {
   count: (video: HTMLVideoElement) => Promise<number | null>;
   close: () => void;
-  backend: "mediapipe" | "native";
+  backend: "mediapipe" | "native" | "hybrid";
 };
 
 type NativeDetector = { detect: (v: HTMLVideoElement) => Promise<unknown[]> };
@@ -30,15 +32,27 @@ function createNative(): FaceEngine | null {
   try {
     detector = new FD({ fastMode: true, maxDetectedFaces: 5 });
   } catch {
-    return null;
+    try {
+      detector = new FD({ maxDetectedFaces: 5 });
+    } catch {
+      return null;
+    }
   }
   return {
     backend: "native",
     count: async (video) => {
-      if (!video || video.readyState < 2 || video.videoWidth === 0) return null;
+      if (!video || video.readyState < 2 || video.videoWidth < 16) return null;
       try {
+        if (video.paused) {
+          try {
+            await video.play();
+          } catch {
+            /* ignore */
+          }
+        }
         const faces = await detector.detect(video);
-        return faces?.length ?? 0;
+        if (!faces) return null;
+        return faces.length;
       } catch {
         return null;
       }
@@ -51,31 +65,38 @@ async function createMediapipe(): Promise<FaceEngine | null> {
   try {
     const vision = await import("@mediapipe/tasks-vision");
     const fileset = await vision.FilesetResolver.forVisionTasks(WASM_BASE);
-    // Try GPU first, fall back to CPU if WebGL is blocked
     let detector;
     try {
       detector = await vision.FaceDetector.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
         runningMode: "VIDEO",
-        minDetectionConfidence: 0.4,
+        minDetectionConfidence: MIN_DETECTION_CONFIDENCE,
       });
     } catch {
       detector = await vision.FaceDetector.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
         runningMode: "VIDEO",
-        minDetectionConfidence: 0.4,
+        minDetectionConfidence: MIN_DETECTION_CONFIDENCE,
       });
     }
     let lastTs = 0;
     return {
       backend: "mediapipe",
       count: async (video) => {
-        if (!video || video.readyState < 2 || video.videoWidth === 0) return null;
+        if (!video || video.readyState < 2 || video.videoWidth < 16) return null;
         try {
+          if (video.paused) {
+            try {
+              await video.play();
+            } catch {
+              /* ignore */
+            }
+          }
           const ts = Math.max(lastTs + 1, Math.round(performance.now()));
           lastTs = ts;
-          const res = detector.detectForVideo(video, ts);
-          return res?.detections?.length ?? 0;
+          const result = detector.detectForVideo(video, ts);
+          const faces = result?.detections ?? [];
+          return faces.length;
         } catch {
           return null;
         }
@@ -119,11 +140,49 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   });
 }
 
+function makeHybrid(primary: FaceEngine, secondary: FaceEngine | null): FaceEngine {
+  if (!secondary) return primary;
+  let nullStreak = 0;
+  return {
+    backend: "hybrid",
+    count: async (video) => {
+      const a = await primary.count(video);
+      if (a != null) {
+        nullStreak = 0;
+        return a;
+      }
+      nullStreak += 1;
+      if (nullStreak >= 2) {
+        const b = await secondary.count(video);
+        if (b != null) {
+          nullStreak = 0;
+          return b;
+        }
+      }
+      return null;
+    },
+    close: () => {
+      try {
+        primary.close();
+      } catch {
+        /* ignore */
+      }
+      try {
+        secondary.close();
+      } catch {
+        /* ignore */
+      }
+    },
+  };
+}
+
 /** Create the best available face-detection engine, or null if none works. */
 export async function createFaceEngine(): Promise<FaceEngine | null> {
-  // Native first — works offline and starts immediately when supported
+  // MediaPipe first — more reliable face count on mobile (native often stuck unclear)
+  const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
   const native = createNative();
+  if (mp && native) return makeHybrid(mp, native);
+  if (mp) return mp;
   if (native) return native;
-  // MediaPipe can hang on slow networks — hard timeout so PIP never freezes
-  return withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
+  return null;
 }
