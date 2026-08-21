@@ -461,7 +461,7 @@ function Page() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-extrabold text-slate-900">{item.title}</p>
-                        <StatusBadge status={String(item.status).replaceAll("_", " ")} />
+                        <StatusBadge status={String(item.status).split("_").join(" ")} />
                       </div>
                       <p className="mt-1 text-xs text-slate-500">
                         {courseCode(item)} · {courseName(item)}
@@ -592,7 +592,7 @@ function Page() {
                         : ""}
                     </p>
                   </div>
-                  <StatusBadge status={String(item.status).replaceAll("_", " ")} />
+                  <StatusBadge status={String(item.status).split("_").join(" ")} />
                 </li>
               ))}
             </ul>
