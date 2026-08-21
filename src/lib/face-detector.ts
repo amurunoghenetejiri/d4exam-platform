@@ -1,20 +1,20 @@
 /**
- * Real, in-browser face detection for CBT camera monitoring.
+ * In-browser face detection for CBT camera monitoring.
+ * Returns face COUNT only — no frames uploaded.
  *
- * Order (most reliable continuous count first):
- *  1) MediaPipe BlazeFace WASM — works on mobile Chrome/Safari WebViews
- *  2) Native FaceDetector (Chrome/Edge) — fast when available
- *
- * Only the face COUNT is returned. No frames are uploaded.
+ * Order:
+ *  1) Native FaceDetector when available (Chrome/Edge — fast)
+ *  2) MediaPipe BlazeFace WASM (mobile Chrome / Safari WebView)
+ *  Hybrid: prefer primary, fall back on null streaks.
  */
 
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
-const MEDIAPIPE_LOAD_TIMEOUT_MS = 10_000;
-/** Lower threshold so real faces are not stuck as "unclear". */
-const MIN_DETECTION_CONFIDENCE = 0.32;
+const MEDIAPIPE_LOAD_TIMEOUT_MS = 12_000;
+/** Low threshold so real faces are not stuck as "Face unclear". */
+const MIN_DETECTION_CONFIDENCE = 0.22;
 
 export type FaceEngine = {
   count: (video: HTMLVideoElement) => Promise<number | null>;
@@ -22,7 +22,7 @@ export type FaceEngine = {
   backend: "mediapipe" | "native" | "hybrid";
 };
 
-type NativeDetector = { detect: (v: HTMLVideoElement) => Promise<unknown[]> };
+type NativeDetector = { detect: (v: HTMLVideoElement | ImageBitmap | HTMLCanvasElement) => Promise<unknown[]> };
 
 function createNative(): FaceEngine | null {
   if (typeof window === "undefined") return null;
@@ -38,6 +38,11 @@ function createNative(): FaceEngine | null {
       return null;
     }
   }
+
+  const canvas =
+    typeof document !== "undefined" ? document.createElement("canvas") : null;
+  const ctx = canvas?.getContext("2d", { willReadFrequently: true }) ?? null;
+
   return {
     backend: "native",
     count: async (video) => {
@@ -50,9 +55,22 @@ function createNative(): FaceEngine | null {
             /* ignore */
           }
         }
-        const faces = await detector.detect(video);
-        if (!faces) return null;
-        return faces.length;
+        try {
+          const faces = await detector.detect(video);
+          if (faces && faces.length >= 0) return faces.length;
+        } catch {
+          /* fall through to canvas */
+        }
+        if (canvas && ctx) {
+          const w = Math.min(video.videoWidth, 320);
+          const h = Math.round((video.videoHeight / video.videoWidth) * w) || 240;
+          canvas.width = w;
+          canvas.height = h;
+          ctx.drawImage(video, 0, 0, w, h);
+          const faces = await detector.detect(canvas);
+          if (faces) return faces.length;
+        }
+        return null;
       } catch {
         return null;
       }
@@ -65,21 +83,47 @@ async function createMediapipe(): Promise<FaceEngine | null> {
   try {
     const vision = await import("@mediapipe/tasks-vision");
     const fileset = await vision.FilesetResolver.forVisionTasks(WASM_BASE);
-    let detector;
+
+    let detector: {
+      detect?: (img: HTMLVideoElement | HTMLCanvasElement) => { detections?: unknown[] };
+      detectForVideo?: (img: HTMLVideoElement, ts: number) => { detections?: unknown[] };
+      close: () => void;
+    } | null = null;
+    let mode: "IMAGE" | "VIDEO" = "IMAGE";
+
+    const tryCreate = async (runningMode: "IMAGE" | "VIDEO", delegate: "GPU" | "CPU") => {
+      return vision.FaceDetector.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate },
+        runningMode,
+        minDetectionConfidence: MIN_DETECTION_CONFIDENCE,
+      });
+    };
+
     try {
-      detector = await vision.FaceDetector.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-        runningMode: "VIDEO",
-        minDetectionConfidence: MIN_DETECTION_CONFIDENCE,
-      });
+      detector = await tryCreate("IMAGE", "GPU");
+      mode = "IMAGE";
     } catch {
-      detector = await vision.FaceDetector.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
-        runningMode: "VIDEO",
-        minDetectionConfidence: MIN_DETECTION_CONFIDENCE,
-      });
+      try {
+        detector = await tryCreate("IMAGE", "CPU");
+        mode = "IMAGE";
+      } catch {
+        try {
+          detector = await tryCreate("VIDEO", "GPU");
+          mode = "VIDEO";
+        } catch {
+          detector = await tryCreate("VIDEO", "CPU");
+          mode = "VIDEO";
+        }
+      }
     }
+
+    if (!detector) return null;
+
     let lastTs = 0;
+    const canvas =
+      typeof document !== "undefined" ? document.createElement("canvas") : null;
+    const ctx = canvas?.getContext("2d", { willReadFrequently: true }) ?? null;
+
     return {
       backend: "mediapipe",
       count: async (video) => {
@@ -92,10 +136,31 @@ async function createMediapipe(): Promise<FaceEngine | null> {
               /* ignore */
             }
           }
-          const ts = Math.max(lastTs + 1, Math.round(performance.now()));
-          lastTs = ts;
-          const result = detector.detectForVideo(video, ts);
-          const faces = result?.detections ?? [];
+
+          let faces: unknown[] = [];
+
+          if (mode === "IMAGE" && typeof detector!.detect === "function") {
+            if (canvas && ctx) {
+              const w = Math.min(video.videoWidth, 320);
+              const h = Math.round((video.videoHeight / Math.max(1, video.videoWidth)) * w) || 240;
+              if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w;
+                canvas.height = h;
+              }
+              ctx.drawImage(video, 0, 0, w, h);
+              const result = detector!.detect(canvas);
+              faces = result?.detections ?? [];
+            } else {
+              const result = detector!.detect(video);
+              faces = result?.detections ?? [];
+            }
+          } else if (typeof detector!.detectForVideo === "function") {
+            const ts = Math.max(lastTs + 1, Math.round(performance.now()));
+            lastTs = ts;
+            const result = detector!.detectForVideo(video, ts);
+            faces = result?.detections ?? [];
+          }
+
           return faces.length;
         } catch {
           return null;
@@ -103,7 +168,7 @@ async function createMediapipe(): Promise<FaceEngine | null> {
       },
       close: () => {
         try {
-          detector.close();
+          detector?.close();
         } catch {
           /* noop */
         }
@@ -152,7 +217,7 @@ function makeHybrid(primary: FaceEngine, secondary: FaceEngine | null): FaceEngi
         return a;
       }
       nullStreak += 1;
-      if (nullStreak >= 2) {
+      if (nullStreak >= 1) {
         const b = await secondary.count(video);
         if (b != null) {
           nullStreak = 0;
@@ -178,11 +243,16 @@ function makeHybrid(primary: FaceEngine, secondary: FaceEngine | null): FaceEngi
 
 /** Create the best available face-detection engine, or null if none works. */
 export async function createFaceEngine(): Promise<FaceEngine | null> {
-  // MediaPipe first — more reliable face count on mobile (native often stuck unclear)
-  const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
   const native = createNative();
-  if (mp && native) return makeHybrid(mp, native);
-  if (mp) return mp;
+  const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
+
+  if (native && mp) {
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    if (isMobile) return makeHybrid(mp, native);
+    return makeHybrid(native, mp);
+  }
   if (native) return native;
+  if (mp) return mp;
   return null;
 }
