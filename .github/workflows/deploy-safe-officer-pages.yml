@@ -1,0 +1,67 @@
+name: Deploy safe officer pages
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-safe-officer-pages.yml'
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch replaceAll crash + harden pages in place
+        run: |
+          set -e
+          # 1) Kill replaceAll which throws on some WebViews
+          for f in src/routes/officer.approvals.tsx src/routes/officer.live-monitor.tsx src/components/dashboard/kit.tsx; do
+            if [ -f "$f" ]; then
+              sed -i 's/\.replaceAll("_", " ")/.split("_").join(" ")/g' "$f" || true
+              sed -i "s/\.replaceAll('_', ' ')/.split('_').join(' ')/g" "$f" || true
+            fi
+          done
+          # 2) Ensure StatusBadge is null-safe
+          if grep -q 'export function StatusBadge' src/components/dashboard/kit.tsx; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/components/dashboard/kit.tsx')
+          t = p.read_text()
+          old = '''export function StatusBadge({ status, className }: { status: string; className?: string }) {
+            const key = status.toLowerCase().replaceAll("_", " ");'''
+          # already may be fixed - force safe version of body start
+          import re
+          t2 = re.sub(
+              r'export function StatusBadge\(\{ status, className \}: \{ status: string; className\?: string \}\) \{[\s\S]*?const (?:safe|key)[^;]+;',
+              '''export function StatusBadge({ status, className }: { status: string; className?: string }) {
+            const safe = String(status ?? "");
+            const key = safe.toLowerCase().split("_").join(" ");''',
+              t,
+              count=1,
+          )
+          if t2 != t:
+              p.write_text(t2)
+              print('StatusBadge hardened')
+          else:
+              print('StatusBadge already ok or pattern miss')
+          PY
+          fi
+          # 3) Verify no replaceAll left in officer pages
+          if grep -n 'replaceAll' src/routes/officer.approvals.tsx src/routes/officer.live-monitor.tsx 2>/dev/null; then
+            echo 'WARN: replaceAll still present — stripping'
+            sed -i 's/replaceAll("_", " ")/split("_").join(" ")/g' src/routes/officer.approvals.tsx src/routes/officer.live-monitor.tsx
+          fi
+          grep -n 'replaceAll' src/routes/officer.approvals.tsx src/routes/officer.live-monitor.tsx && exit 1 || echo 'no replaceAll — good'
+          wc -c src/routes/officer.approvals.tsx src/routes/officer.live-monitor.tsx
+      - name: Commit if changed
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/routes/officer.approvals.tsx src/routes/officer.live-monitor.tsx src/components/dashboard/kit.tsx || true
+          if git diff --cached --quiet; then
+            echo No changes
+          else
+            git commit -m 'fix(officer): remove replaceAll crash on approvals/monitor'
+            git push
+          fi
