@@ -1,0 +1,66 @@
+name: fix-kit-duplicate-key
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-kit-duplicate-key.yml'
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove duplicate const key in StatusBadge
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('src/components/dashboard/kit.tsx')
+          t = p.read_text()
+          old = '''  const safe = String(status ?? "");
+  const key = safe.toLowerCase().split("_").join(" ");
+  const key = safe.toLowerCase().split("_").join(" ");
+'''
+          new = '''  const safe = String(status ?? "");
+  const key = safe.toLowerCase().split("_").join(" ");
+'''
+          if old not in t:
+              # try alternate spacing
+              lines = t.splitlines(keepends=True)
+              out = []
+              seen_key = False
+              i = 0
+              while i < len(lines):
+                  line = lines[i]
+                  if 'const key = safe.toLowerCase()' in line:
+                      if seen_key:
+                          print('skipping duplicate key line', i+1)
+                          i += 1
+                          continue
+                      seen_key = True
+                  out.append(line)
+                  i += 1
+              t2 = ''.join(out)
+              if t2.count('const key = safe.toLowerCase()') == 1:
+                  p.write_text(t2)
+                  print('fixed via line filter')
+              else:
+                  raise SystemExit('could not fix duplicate key')
+          else:
+              p.write_text(t.replace(old, new, 1))
+              print('fixed via exact replace')
+          t3 = p.read_text()
+          assert t3.count('const key = safe.toLowerCase()') == 1
+          print('ok', p.stat().st_size)
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/dashboard/kit.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m 'fix: remove duplicate key declaration in StatusBadge (Vercel build)'
+            git push
+          fi
