@@ -3,9 +3,10 @@
  * Android Chrome supports navigator.vibrate after a user gesture.
  * iOS Safari has no Vibration API (calls are no-ops).
  *
- * light (none/unclear)  → soft short
- * multi / camera_blocked → strong
+ * none (no face)        → medium pulse
+ * multi                 → strong
  * officer_warning       → longest / strongest
+ * start                 → on Start Exam only
  */
 
 export type HapticKind =
@@ -29,7 +30,7 @@ const PATTERNS: Record<HapticKind, number[]> = {
   camera_blocked: [140, 55, 170, 55, 190, 60, 220, 60, 240],
   tab_switch: [90, 50, 120],
   officer_warning: [
-    180, 50, 200, 50, 220, 55, 250, 55, 280, 60, 300, 60, 320, 70, 350, 70, 400,
+    220, 40, 260, 40, 300, 45, 340, 45, 380, 50, 420, 50, 460, 55, 500, 55, 550,
   ],
 };
 
@@ -51,9 +52,9 @@ export function canVibrate(): boolean {
 }
 
 function clearTimers() {
-  for (const t of timers) {
+  for (const id of timers) {
     try {
-      window.clearTimeout(t);
+      window.clearTimeout(id);
     } catch {
       /* ignore */
     }
@@ -65,24 +66,23 @@ function vibrateRaw(arg: number | number[]): boolean {
   try {
     const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
     const win = window as Window & { vibrate?: (p: number | number[]) => boolean };
-    const fn = (typeof nav?.vibrate === "function" ? nav.vibrate.bind(nav) : null)
-      || (typeof win?.vibrate === "function" ? win.vibrate.bind(win) : null);
+    const fn =
+      (typeof nav?.vibrate === "function" ? nav.vibrate.bind(nav) : null) ||
+      (typeof win?.vibrate === "function" ? win.vibrate.bind(win) : null);
     if (!fn) return false;
-    const result = fn(arg);
-    return result !== false;
+    return Boolean(fn(arg));
   } catch {
     return false;
   }
 }
 
-function pulseTrain(ons: number[], gap: number) {
+/** Pulse train fallback when array patterns are ignored. */
+function pulseTrain(ons: number[], gap = 50) {
   let delay = 0;
-  for (const ms of ons) {
-    const pulse = Math.max(80, ms);
-    const d = delay;
+  for (const pulse of ons) {
     const id = window.setTimeout(() => {
       vibrateRaw(pulse);
-    }, d);
+    }, delay);
     timers.push(id);
     delay += pulse + gap;
   }
@@ -91,7 +91,7 @@ function pulseTrain(ons: number[], gap: number) {
 function extractOns(pattern: number[]): number[] {
   const ons: number[] = [];
   for (let i = 0; i < pattern.length; i += 2) {
-    ons.push(Math.max(60, pattern[i]!));
+    if (typeof pattern[i] === "number") ons.push(pattern[i]);
   }
   return ons;
 }
@@ -155,7 +155,6 @@ export function haptic(kind: HapticKind) {
 
   const now = Date.now();
   const isLight = kind === "none" || kind === "unclear" || kind === "light";
-  // Light: avoid spam more than once per 1.5s; multi/officer always fire
   if (isLight && lastKind === kind && now - lastAt < 1500) return;
   lastKind = kind;
   lastAt = now;
@@ -165,7 +164,6 @@ export function haptic(kind: HapticKind) {
   const ons = extractOns(pattern);
   clearTimers();
 
-  // Primary + always pulse-train (many devices ignore array patterns)
   vibrateRaw(pattern);
   timers.push(
     window.setTimeout(() => pulseTrain(ons, isLight ? 55 : 45), 30),
