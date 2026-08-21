@@ -1,6 +1,9 @@
-Redeploy 2026-08-21T09:12Z WAT
+Redeploy 2026-08-21T09:25Z WAT
 
-Restored officer.approvals.tsx and officer.live-monitor.tsx (full working files).
-Safe queryFn + null-safe event labels already in place.
+Officer crash fix:
+- StatusBadge null-safe (no replaceAll)
+- humanEventLabel uses split/join
+- live-monitor safe courses/profiles joins
+- approvals courseCode helpers
 
 URL: https://d4exam-platform.vercel.app
