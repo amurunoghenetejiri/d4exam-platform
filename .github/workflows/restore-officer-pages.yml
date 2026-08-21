@@ -1,0 +1,37 @@
+name: Restore officer pages
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-officer-pages.yml'
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore officer pages from 57cc63b if placeholder
+        run: |
+          set -e
+          GOOD=57cc63b
+          for f in src/routes/officer.approvals.tsx src/routes/officer.live-monitor.tsx; do
+            if grep -q 'PLACEHOLDER' "$f" 2>/dev/null || [ "$(wc -c < "$f")" -lt 1000 ]; then
+              echo "Restoring $f from $GOOD"
+              git show "$GOOD:$f" > "$f"
+            else
+              echo "$f looks OK ($(wc -c < "$f") bytes)"
+            fi
+          done
+          if ! git diff --quiet -- src/routes/officer.approvals.tsx src/routes/officer.live-monitor.tsx; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add src/routes/officer.approvals.tsx src/routes/officer.live-monitor.tsx
+            git commit -m 'fix: restore officer approvals + live-monitor from known-good commit'
+            git push
+          else
+            echo 'No restore needed'
+          fi
