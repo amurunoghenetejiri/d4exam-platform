@@ -177,7 +177,7 @@ export function humanEventLabel(eventType: string | null | undefined, descriptio
     WARNING_SHOWN: "Officer warning sent",
   };
   if (map[t]) return map[t];
-  const raw = String(eventType || "event").replaceAll("_", " ").toLowerCase();
+  const raw = String(eventType || "event").split("_").join(" ").toLowerCase();
   return raw || "Event";
 }
 

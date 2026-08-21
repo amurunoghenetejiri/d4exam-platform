@@ -66,6 +66,22 @@ type ExamRow = {
   courses: { code: string; name: string } | null;
 };
 
+
+function courseCode(item: { courses?: unknown }): string {
+  const c = item.courses;
+  if (!c) return "—";
+  if (Array.isArray(c)) return String((c[0] as { code?: string } | undefined)?.code ?? "—");
+  if (typeof c === "object") return String((c as { code?: string }).code ?? "—");
+  return "—";
+}
+function courseName(item: { courses?: unknown }): string {
+  const c = item.courses;
+  if (!c) return "Course";
+  if (Array.isArray(c)) return String((c[0] as { name?: string } | undefined)?.name ?? "Course");
+  if (typeof c === "object") return String((c as { name?: string }).name ?? "Course");
+  return "Course";
+}
+
 function toLocalInput(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -318,7 +334,11 @@ function Page() {
         .update(update as never)
         .eq("id", selected.id)
         .eq("school_id", schoolId);
-      if (error) throw error;
+      if (error) {
+            console.warn("[officer.approvals] update exam", error);
+            toast.error(error.message || "Could not update examination. Try again.");
+            return;
+          }
 
       // audit_logs historically had no INSERT policy for officers — never block the decision
       {
@@ -444,7 +464,7 @@ function Page() {
                         <StatusBadge status={String(item.status).replaceAll("_", " ")} />
                       </div>
                       <p className="mt-1 text-xs text-slate-500">
-                        {item.courses?.code ?? "—"} · {item.courses?.name ?? "Course"}
+                        {courseCode(item)} · {courseName(item)}
                       </p>
                       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
                         <span className="inline-flex items-center gap-1">
@@ -566,7 +586,7 @@ function Page() {
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-slate-900">{item.title}</p>
                     <p className="text-xs text-slate-500">
-                      {item.courses?.code ?? "—"}
+                      {courseCode(item)}
                       {item.scheduled_start
                         ? ` · Starts ${new Date(item.scheduled_start).toLocaleString()}`
                         : ""}
@@ -589,7 +609,7 @@ function Page() {
               {action === "changes" && "Request changes"}
             </DialogTitle>
             <DialogDescription>
-              {selected?.title} · {selected?.courses?.code} · {selected?.duration_minutes} min
+              {selected?.title} · {selected ? courseCode(selected) : "—"} · {selected?.duration_minutes} min
               {selected && questionsToAnswerFor(selected) != null
                 ? ` · Students answer ${questionsToAnswerFor(selected)}`
                 : ""}

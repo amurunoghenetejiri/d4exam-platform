@@ -193,7 +193,8 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
-  const key = status.toLowerCase().replaceAll("_", " ");
+  const safe = String(status ?? "");
+  const key = safe.toLowerCase().split("_").join(" ");
   const style = STATUS_STYLES[key] ?? "bg-slate-100 text-slate-600 border-slate-200";
   return (
     <span
@@ -203,7 +204,7 @@ export function StatusBadge({ status, className }: { status: string; className?:
         className,
       )}
     >
-      {status.replaceAll("_", " ")}
+      {safe.split("_").join(" ")}
     </span>
   );
 }
