@@ -16,7 +16,7 @@ import { parseExamMeta } from "@/lib/exam-meta";
 import { loadExamQuestionBank, prepareStudentPaper } from "@/lib/cbt-load-questions";
 import { type DeviceCapabilities } from "@/lib/device-capabilities";
 import { toast } from "sonner";
-import { hapticOfficerWarning, haptic as fireHaptic, primeHaptics, refreshHapticUnlock, startHapticKeepAlive, stopHapticKeepAlive } from "@/lib/haptic";
+import { hapticOfficerWarning, primeHaptics, refreshHapticUnlock, startHapticKeepAlive, stopHapticKeepAlive } from "@/lib/haptic";
 import { ExamCameraPip, type FaceSecurityEvent } from "@/components/cbt/ExamCameraPip";
 import { saveCbtResult } from "@/lib/cbt-save-result";
 import { logSecurityEvent } from "@/lib/cbt-security";
@@ -369,7 +369,6 @@ export function CbtExamPage() {
           } catch (e) { console.warn("[cbt] tab_switch_count update failed", e); }
         })();
       }
-      fireHaptic("tab_switch");
       toast.error("Tab switch recorded — stay on the exam", { duration: 2800, id: "tab-switch-warn" });
     };
     document.addEventListener("visibilitychange", onHide);
