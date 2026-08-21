@@ -1,0 +1,41 @@
+name: cbt-session-haptic
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cbt-session-haptic.yml'
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove tab_switch haptic only
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          t = p.read_text()
+          before = t.count('fireHaptic("tab_switch")')
+          t = t.replace('      fireHaptic("tab_switch");\n', '')
+          t = t.replace("      fireHaptic('tab_switch');\n", '')
+          # clean unused import if fireHaptic no longer used
+          if 'fireHaptic(' not in t and 'haptic as fireHaptic' in t:
+              t = t.replace(', haptic as fireHaptic', '')
+              t = t.replace('haptic as fireHaptic, ', '')
+          p.write_text(t)
+          print('removed tab_switch haptic count was', before)
+          print('bytes', p.stat().st_size)
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m 'fix(cbt): vibrate only on start, no-face, multi-face, officer warning'
+            git push
+          fi
