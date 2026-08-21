@@ -1,0 +1,168 @@
+name: Fix CBT pip haptics
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-cbt-pip-haptics.yml'
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch ExamCameraPip + CbtExamSession
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("src/components/cbt/ExamCameraPip.tsx")
+          t = p.read_text()
+
+          t = t.replace(
+          """function haptic(kind: SecurityAlertKind) {
+            const map: Record<SecurityAlertKind, HapticKind> = {
+              none: "none",
+              unclear: "unclear",
+              multi: "multi",
+              camera_blocked: "camera_blocked",
+            };
+            fireHaptic(map[kind]);
+          }""",
+          """function haptic(kind: SecurityAlertKind) {
+            // Only vibrate for no-face and multiple-faces (officer warning is handled elsewhere)
+            if (kind === "none") fireHaptic("none");
+            else if (kind === "multi") fireHaptic("multi");
+          }"""
+          )
+
+          t = t.replace("const ALERT_COOLDOWN_MS = 1800;", "const ALERT_COOLDOWN_MS = 2200;")
+          t = t.replace("const FACE_TICK_MS = 900;", "const FACE_TICK_MS = 500;")
+          t = t.replace("const ENGINE_TIMEOUT_MS = 4000;", "const ENGINE_TIMEOUT_MS = 6000;")
+
+          if "okStreakRef" not in t:
+              m = re.search(r"const lastStateRef = useRef<FaceState>\([^)]*\);", t)
+              if m:
+                  t = t.replace(m.group(0), m.group(0) + """
+            /** Hysteresis so a clear face is not stuck on Face unclear. */
+            const okStreakRef = useRef(0);
+            const badStreakRef = useRef(0);
+            const multiStreakRef = useRef(0);
+            const noneStreakRef = useRef(0);""", 1)
+
+          # Harden applyState: on ok set immediately; require streaks for none/multi; no haptic on unclear
+          t2 = re.sub(
+              r"const applyState = \(next: FaceState, faceCount: number \| null\) => \{[\s\S]*?^    \};",
+              '''const applyState = (next: FaceState, faceCount: number | null) => {
+      if (cancelled) return;
+      const prev = lastStateRef.current;
+
+      if (next === "ok") {
+        okStreakRef.current += 1;
+        badStreakRef.current = 0;
+        noneStreakRef.current = 0;
+        multiStreakRef.current = 0;
+        if (okStreakRef.current >= 1) {
+          setFaceStatus("ok");
+          lastStateRef.current = "ok";
+          faceWarnRef.current = Math.max(0, faceWarnRef.current - 1);
+          if (prev !== "ok") {
+            onSecRef.current?.({ kind: "ok", faceCount, at: new Date().toISOString() });
+          }
+        }
+        return;
+      }
+
+      if (!engineReady) return;
+      okStreakRef.current = 0;
+
+      if (next === "none") {
+        noneStreakRef.current += 1;
+        multiStreakRef.current = 0;
+        badStreakRef.current += 1;
+        if (noneStreakRef.current >= 2 || prev !== "ok") {
+          setFaceStatus("none");
+          lastStateRef.current = "none";
+          if (noneStreakRef.current >= 2) {
+            faceWarnRef.current += 1;
+            fireAlert("none", faceCount);
+          }
+        }
+        return;
+      }
+
+      if (next === "multi") {
+        multiStreakRef.current += 1;
+        noneStreakRef.current = 0;
+        badStreakRef.current += 1;
+        if (multiStreakRef.current >= 2 || prev !== "ok") {
+          setFaceStatus("multi");
+          lastStateRef.current = "multi";
+          if (multiStreakRef.current >= 2) {
+            faceWarnRef.current += 1;
+            fireAlert("multi", faceCount);
+          }
+        }
+        return;
+      }
+
+      badStreakRef.current += 1;
+      noneStreakRef.current = 0;
+      multiStreakRef.current = 0;
+      if (prev === "ok" && badStreakRef.current < 4) {
+        return;
+      }
+      if (badStreakRef.current >= 3) {
+        setFaceStatus("unclear");
+        lastStateRef.current = "unclear";
+      }
+    };''',
+              t,
+              count=1,
+              flags=re.M,
+          )
+          if t2 != t:
+              t = t2
+              print("applyState replaced via regex")
+          else:
+              print("applyState regex miss")
+
+          p.write_text(t)
+
+          s = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          st = s.read_text()
+          if "hapticExamStart" not in st:
+              st = st.replace(
+                  'import { hapticOfficerWarning, haptic as fireHaptic, primeHaptics, refreshHapticUnlock, startHapticKeepAlive, stopHapticKeepAlive } from "@/lib/haptic";',
+                  'import { hapticOfficerWarning, hapticExamStart, haptic as fireHaptic, primeHaptics, refreshHapticUnlock, startHapticKeepAlive, stopHapticKeepAlive } from "@/lib/haptic";',
+              )
+          st = st.replace('      fireHaptic("tab_switch");\n', "")
+          if "hapticExamStart()" not in st:
+              st = st.replace(
+                  """      setSeconds((examQ.data?.duration_minutes ?? 60) * 60);
+      setStarted(true);
+      setIndex(0);""",
+                  """      setSeconds((examQ.data?.duration_minutes ?? 60) * 60);
+      setStarted(true);
+      setIndex(0);
+      try { hapticExamStart(); } catch { /* ignore */ }""",
+              )
+          st = st.replace(
+              "try { primeHaptics(); startHapticKeepAlive(); } catch { /* ignore */ }",
+              "try { primeHaptics(); } catch { /* ignore */ }",
+          )
+          s.write_text(st)
+          print("session ok", "hapticExamStart" in st)
+          print("pip ok", 'if (kind === "none") fireHaptic("none")' in t or "Only vibrate for no-face" in t)
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/cbt/ExamCameraPip.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): face hysteresis + haptics only on start/none/multi/officer-warning"
+            git push
+          fi
