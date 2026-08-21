@@ -1,0 +1,142 @@
+name: Fix officer page crash
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/fix-officer-crash.yml"
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply crash fixes
+        run: |
+          set -e
+          python3 <<'PY'
+          from pathlib import Path
+
+          # 1) StatusBadge — null-safe, no replaceAll (old WebViews crash)
+          kit = Path("src/components/dashboard/kit.tsx")
+          t = kit.read_text()
+          t = t.replace(
+              """export function StatusBadge({ status, className }: { status: string; className?: string }) {
+            const key = status.toLowerCase().replaceAll("_", " ");
+            const style = STATUS_STYLES[key] ?? "bg-slate-100 text-slate-600 border-slate-200";
+            return (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide sm:text-[11px]",
+                  style,
+                  className,
+                )}
+              >
+                {status.replaceAll("_", " ")}
+              </span>
+            );
+          }""",
+              """export function StatusBadge({ status, className }: { status: string; className?: string }) {
+            const safe = String(status ?? "");
+            const key = safe.toLowerCase().split("_").join(" ");
+            const style = STATUS_STYLES[key] ?? "bg-slate-100 text-slate-600 border-slate-200";
+            return (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide sm:text-[11px]",
+                  style,
+                  className,
+                )}
+              >
+                {safe.split("_").join(" ")}
+              </span>
+            );
+          }""",
+          )
+          kit.write_text(t)
+          print("kit", "split" in t and "replaceAll" not in t[t.find("StatusBadge"):t.find("StatusBadge")+500])
+
+          # 2) humanEventLabel — no replaceAll
+          lm = Path("src/lib/live-monitor.ts")
+          t2 = lm.read_text()
+          t2 = t2.replace(
+              'String(eventType || "event").replaceAll("_", " ").toLowerCase()',
+              'String(eventType || "event").split("_").join(" ").toLowerCase()',
+          )
+          lm.write_text(t2)
+          print("live-monitor.ts", "replaceAll" not in t2 or t2.count("replaceAll")==0)
+
+          # 3) live-monitor route — safe courses/profiles
+          p = Path("src/routes/officer.live-monitor.tsx")
+          t3 = p.read_text()
+          assert "PLACEHOLDER" not in t3 and len(t3) > 10000
+          t3 = t3.replace(
+              'const course = a.examinations?.courses?.code || "—";',
+              '''const _c = a.examinations?.courses as unknown;
+                  const course = Array.isArray(_c)
+                    ? ((_c[0] as { code?: string } | undefined)?.code || "—")
+                    : ((_c as { code?: string } | null | undefined)?.code || "—");''',
+          )
+          t3 = t3.replace(
+              'const fromProfile = String(a.students?.profiles?.full_name || "").trim();',
+              '''const _prof = a.students?.profiles as unknown;
+                const fromProfile = String(
+                  Array.isArray(_prof)
+                    ? (_prof[0] as { full_name?: string | null } | undefined)?.full_name || ""
+                    : (_prof as { full_name?: string | null } | null | undefined)?.full_name || "",
+                ).trim();''',
+          )
+          # primaryExamLabel courses array
+          t3 = t3.replace(
+              '`${(liveExams[0].courses as { code?: string } | null)?.code ?? ""} · ${liveExams[0].title}`',
+              '`${(Array.isArray(liveExams[0].courses) ? (liveExams[0].courses[0] as { code?: string } | undefined)?.code : (liveExams[0].courses as { code?: string } | null)?.code) ?? ""} · ${liveExams[0].title}`',
+          )
+          p.write_text(t3)
+          print("live-monitor route ok", len(t3))
+
+          # 4) approvals — course helpers + no throw on update
+          ap = Path("src/routes/officer.approvals.tsx")
+          t4 = ap.read_text()
+          assert "PLACEHOLDER" not in t4 and len(t4) > 5000
+          if "function courseCode(" not in t4:
+              helper = '''
+          function courseCode(item: { courses?: unknown }): string {
+            const c = item.courses;
+            if (!c) return "—";
+            if (Array.isArray(c)) return String((c[0] as { code?: string } | undefined)?.code ?? "—");
+            if (typeof c === "object") return String((c as { code?: string }).code ?? "—");
+            return "—";
+          }
+          function courseName(item: { courses?: unknown }): string {
+            const c = item.courses;
+            if (!c) return "Course";
+            if (Array.isArray(c)) return String((c[0] as { name?: string } | undefined)?.name ?? "Course");
+            if (typeof c === "object") return String((c as { name?: string }).name ?? "Course");
+            return "Course";
+          }
+
+          '''
+              t4 = t4.replace("function toLocalInput(d: Date) {", helper + "function toLocalInput(d: Date) {", 1)
+              t4 = t4.replace('{item.courses?.code ?? "—"} · {item.courses?.name ?? "Course"}', '{courseCode(item)} · {courseName(item)}')
+              t4 = t4.replace('{item.courses?.code ?? "—"}', '{courseCode(item)}')
+              t4 = t4.replace('{selected?.title} · {selected?.courses?.code} · {selected?.duration_minutes} min', '{selected?.title} · {selected ? courseCode(selected) : "—"} · {selected?.duration_minutes} min')
+          t4 = t4.replace(
+              "      if (error) throw error;",
+              '''      if (error) {
+                      console.warn("[officer.approvals] update exam", error);
+                      toast.error(error.message || "Could not update examination. Try again.");
+                      return;
+                    }''',
+              1,
+          )
+          ap.write_text(t4)
+          print("approvals ok", len(t4))
+          PY
+          git config user.name "fix-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/dashboard/kit.tsx src/lib/live-monitor.ts src/routes/officer.live-monitor.tsx src/routes/officer.approvals.tsx
+          git status
+          git commit -m "fix: officer monitor/approvals crash — null-safe StatusBadge, no replaceAll, safe joins" || echo no-change
+          git push
