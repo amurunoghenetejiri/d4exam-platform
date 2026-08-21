@@ -117,7 +117,12 @@ function studentDisplayName(a: AttemptRow): string {
   if (fromMeta) return fromMeta;
   const fromStudent = String(a.students?.full_name || "").trim();
   if (fromStudent) return fromStudent;
-  const fromProfile = String(a.students?.profiles?.full_name || "").trim();
+  const _prof = a.students?.profiles as unknown;
+      const fromProfile = String(
+        Array.isArray(_prof)
+          ? (_prof[0] as { full_name?: string | null } | undefined)?.full_name || ""
+          : (_prof as { full_name?: string | null } | null | undefined)?.full_name || "",
+      ).trim();
   if (fromProfile) return fromProfile;
   return a.students?.matric_number || a.students?.student_id || "Student";
 }
@@ -414,7 +419,10 @@ function Page() {
         const sev: MonitorSeverity = isDone ? "completed" : severityFromPresence(a.status, presence, now);
         const name = studentDisplayName(a);
         const matric = a.students?.matric_number || a.students?.student_id || "—";
-        const course = a.examinations?.courses?.code || "—";
+        const _c = a.examinations?.courses as unknown;
+        const course = Array.isArray(_c)
+          ? ((_c[0] as { code?: string } | undefined)?.code || "—")
+          : ((_c as { code?: string } | null | undefined)?.code || "—");
         const title = a.examinations?.title || "Exam";
         const frame = frames[a.id];
         const hasLiveVideo = !isDone && Boolean(frame && isLiveCamFrameFresh(frame.ts, now));
@@ -530,7 +538,7 @@ function Page() {
   }, [events, selected]);
 
   const primaryExamLabel = liveExams[0]
-    ? `${(liveExams[0].courses as { code?: string } | null)?.code ?? ""} · ${liveExams[0].title}`
+    ? `${(Array.isArray(liveExams[0].courses) ? (liveExams[0].courses[0] as { code?: string } | undefined)?.code : (liveExams[0].courses as { code?: string } | null)?.code) ?? ""} · ${liveExams[0].title}`
     : cards[0]
       ? `${cards[0].course} · ${cards[0].title}`
       : "No live exam";
