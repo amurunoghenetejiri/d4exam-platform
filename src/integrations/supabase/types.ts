@@ -1717,11 +1717,25 @@ export type Database = {
     }
     Functions: {
       can_manage_school: { Args: { _school: string }; Returns: boolean }
+      claim_approved_school_admin: {
+        Args: { _email: string; _tracking_code: string; _user_id: string }
+        Returns: {
+          error: string
+          ok: boolean
+          school_code: string
+        }[]
+      }
       current_account_active: { Args: never; Returns: boolean }
       current_school_id: { Args: never; Returns: string }
       current_student_id: { Args: never; Returns: string }
       current_teacher_id: { Args: never; Returns: string }
       generate_school_code: { Args: { _name: string }; Returns: string }
+      get_my_roles: {
+        Args: never
+        Returns: {
+          role: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -1745,6 +1759,17 @@ export type Database = {
       }
       is_school_teacher: { Args: { _school: string }; Returns: boolean }
       is_super_admin: { Args: never; Returns: boolean }
+      lookup_school_application_for_setup: {
+        Args: { _email: string; _tracking_code: string }
+        Returns: {
+          applicant_email: string
+          id: string
+          issued_admin_email: string
+          issued_school_code: string
+          school_name: string
+          status: string
+        }[]
+      }
       notifications_add_to_realtime: { Args: never; Returns: undefined }
       resolve_login_identity: {
         Args: { _identifier: string; _school_code: string }
@@ -1753,6 +1778,14 @@ export type Database = {
           email: string
           kind: string
           school_active: boolean
+        }[]
+      }
+      resolve_school_for_login: {
+        Args: { _school_code: string }
+        Returns: {
+          id: string
+          school_code: string
+          status: string
         }[]
       }
     }
