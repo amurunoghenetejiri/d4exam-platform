@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useSessionUser } from "@/lib/session";
+import { useNavigate } from "@tanstack/react-router";
 import { useRows } from "@/lib/queries";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
@@ -70,8 +71,75 @@ const tones: Record<string, string> = {
   officer_warning: "bg-red-50 text-red-700",
 };
 
+function resolveNotifHref(n: Notif, scope: string): string | null {
+  const direct = (n.link || n.action_url || "").trim();
+  if (direct.startsWith("/")) return direct;
+
+  const ty = (n.type || "info").toLowerCase();
+  const home =
+    scope === "super-admin"
+      ? "/super-admin"
+      : scope === "admin"
+        ? "/admin"
+        : scope === "officer"
+          ? "/officer"
+          : scope === "teacher"
+            ? "/teacher"
+            : "/student";
+
+  const byScope: Record<string, Record<string, string>> = {
+    student: {
+      exam_available: "/student/examinations",
+      exam_scheduled: "/student/examinations",
+      exam_approved: "/student/examinations",
+      result_published: "/student/results",
+      result_pending_release: "/student/results",
+      officer_warning: "/student/examinations",
+      announcement: "/student/notifications",
+      system_alert: "/student",
+      warning: "/student/examinations",
+    },
+    teacher: {
+      exam_submitted: "/teacher/examinations",
+      exam_approved: "/teacher/examinations",
+      exam_rejected: "/teacher/examinations",
+      exam_revision_requested: "/teacher/examinations",
+      exam_scheduled: "/teacher/examinations",
+      announcement: "/teacher/notifications",
+      system_alert: "/teacher",
+    },
+    officer: {
+      exam_submitted: "/officer/approvals",
+      exam_approved: "/officer/approvals",
+      result_pending_release: "/officer/results",
+      result_published: "/officer/results",
+      officer_warning: "/officer/live-monitor",
+      system_alert: "/officer/live-monitor",
+      warning: "/officer/live-monitor",
+      announcement: "/officer/notifications",
+    },
+    admin: {
+      exam_scheduled: "/admin/examinations",
+      exam_available: "/admin/examinations",
+      result_published: "/admin/results",
+      announcement: "/admin/notifications",
+      system_alert: "/admin",
+    },
+    "super-admin": {
+      system_alert: "/super-admin/applications",
+      announcement: "/super-admin/applications",
+      warning: "/super-admin/applications",
+      info: "/super-admin/applications",
+    },
+  };
+
+  const map = byScope[scope] || byScope.student;
+  return map[ty] || `${home}/notifications`;
+}
+
 export function NotificationsPage({ scope }: { scope: string }) {
   const { data: user } = useSessionUser();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
 
@@ -186,16 +254,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
           const t = (n.type || "info").toLowerCase();
           const Icon = icons[t] ?? Info;
           const unreadItem = !n.read_at;
-          const hrefFromType: Record<string, string> = {
-            exam_submitted: "/officer/approvals",
-            exam_approved: "/teacher/examinations",
-            exam_rejected: "/teacher/examinations",
-            exam_revision_requested: "/teacher/examinations",
-            exam_scheduled: "/teacher/examinations",
-            exam_available: "/student/examinations",
-            result_published: "/student/results",
-          };
-          const href = n.link || n.action_url || hrefFromType[t] || null;
+          const href = resolveNotifHref(n, scope);
           return (
             <li
               key={n.id}
@@ -206,7 +265,11 @@ export function NotificationsPage({ scope }: { scope: string }) {
               onClick={() => {
                 if (unreadItem) void markOne(n.id);
                 if (href && href.startsWith("/")) {
-                  window.location.assign(href);
+                  try {
+                    void navigate({ to: href as never });
+                  } catch {
+                    window.location.assign(href);
+                  }
                 } else if (href) {
                   window.location.href = href;
                 }
