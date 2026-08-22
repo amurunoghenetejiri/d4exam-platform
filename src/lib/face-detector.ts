@@ -1,11 +1,6 @@
 /**
  * In-browser face detection for CBT camera monitoring.
  * Returns face COUNT only — no frames uploaded.
- *
- * Order:
- *  1) Native FaceDetector when available (Chrome/Edge — fast)
- *  2) MediaPipe BlazeFace WASM (mobile Chrome / Safari WebView)
- *  Hybrid: prefer primary, fall back on null streaks.
  */
 
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
@@ -13,8 +8,7 @@ const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
 const MEDIAPIPE_LOAD_TIMEOUT_MS = 12_000;
-/** Low threshold so real faces are not stuck as "Face unclear". */
-const MIN_DETECTION_CONFIDENCE = 0.22;
+const MIN_DETECTION_CONFIDENCE = 0.18;
 
 export type FaceEngine = {
   count: (video: HTMLVideoElement) => Promise<number | null>;
@@ -39,8 +33,7 @@ function createNative(): FaceEngine | null {
     }
   }
 
-  const canvas =
-    typeof document !== "undefined" ? document.createElement("canvas") : null;
+  const canvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
   const ctx = canvas?.getContext("2d", { willReadFrequently: true }) ?? null;
 
   return {
@@ -59,7 +52,7 @@ function createNative(): FaceEngine | null {
           const faces = await detector.detect(video);
           if (faces && faces.length >= 0) return faces.length;
         } catch {
-          /* fall through to canvas */
+          /* canvas fallback */
         }
         if (canvas && ctx) {
           const w = Math.min(video.videoWidth, 320);
@@ -120,8 +113,7 @@ async function createMediapipe(): Promise<FaceEngine | null> {
     if (!detector) return null;
 
     let lastTs = 0;
-    const canvas =
-      typeof document !== "undefined" ? document.createElement("canvas") : null;
+    const canvas = typeof document !== "undefined" ? document.createElement("canvas") : null;
     const ctx = canvas?.getContext("2d", { willReadFrequently: true }) ?? null;
 
     return {
@@ -241,7 +233,6 @@ function makeHybrid(primary: FaceEngine, secondary: FaceEngine | null): FaceEngi
   };
 }
 
-/** Create the best available face-detection engine, or null if none works. */
 export async function createFaceEngine(): Promise<FaceEngine | null> {
   const native = createNative();
   const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
