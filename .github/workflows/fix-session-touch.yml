@@ -1,0 +1,53 @@
+name: fix-session-touch
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-session-touch.yml'
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove onInteract vibrate effect
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+          s = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          st = s.read_text()
+          st2, n = re.subn(
+              r'  useEffect\(\(\) => \{\n    if \(previewMode \|\| !started \|\| done\) return;\n    const onInteract = \(\) => \{ try \{ refreshHapticUnlock\(\); \} catch \{ /\* ignore \*/ \} \};\n    document\.addEventListener\("pointerdown", onInteract, \{ passive: true \}\);\n    document\.addEventListener\("touchstart", onInteract, \{ passive: true \}\);\n    return \(\) => \{\n      document\.removeEventListener\("pointerdown", onInteract\);\n      document\.removeEventListener\("touchstart", onInteract\);\n    \};\n  \}, \[previewMode, started, done\]\);\n\n',
+              '', st, count=1)
+          print('removed', n)
+          st = st2 if n else st
+          st = st.replace('                    try { refreshHapticUnlock(); } catch { /* ignore */ }\n', '')
+          s.write_text(st)
+
+          # notif + shell live
+          np = Path('src/components/pages/NotificationsPage.tsx')
+          nt = np.read_text()
+          if 'officer_warning' not in nt:
+              nt = nt.replace('  system_alert: AlertTriangle,\n};', '  system_alert: AlertTriangle,\n  officer_warning: AlertTriangle,\n};')
+              nt = nt.replace('  system_alert: "bg-amber-50 text-amber-700",\n};', '  system_alert: "bg-amber-50 text-amber-700",\n  officer_warning: "bg-red-50 text-red-700",\n};')
+          if '400,' not in nt:
+              nt = nt.replace('Boolean(user?.userId),\n  );', 'Boolean(user?.userId),\n    400,\n  );')
+          np.write_text(nt)
+
+          sh = Path('src/components/layout/AppShell.tsx')
+          sht = sh.read_text().replace('Boolean(session?.userId),\n    800,', 'Boolean(session?.userId),\n    400,')
+          sh.write_text(sht)
+          print('done')
+          PY
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/cbt/CbtExamSession.impl.tsx src/components/pages/NotificationsPage.tsx src/components/layout/AppShell.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m 'fix: remove touch vibrate; faster live notifications for all roles'
+            git push
+          fi
