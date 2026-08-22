@@ -5,12 +5,12 @@ import {
   FileText,
   Upload,
   Trash2,
-  ExternalLink,
   Loader2,
   ClipboardList,
   Lightbulb,
   GraduationCap,
   File,
+  FileImage,
 } from "lucide-react";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -18,8 +18,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
 import { useSessionUser } from "@/lib/session";
+import { imagesToPdfBlob, isImageFile } from "@/lib/images-to-pdf";
+import { MaterialViewer } from "@/components/materials/MaterialViewer";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 
 export type MaterialType =
   | "notes"
@@ -92,8 +93,10 @@ export function CourseMaterialsPanel({
   const [description, setDescription] = useState("");
   const [materialType, setMaterialType] = useState<MaterialType>("notes");
   const [files, setFiles] = useState<File[]>([]);
+  const [imagesToPdf, setImagesToPdf] = useState(true);
   const [busy, setBusy] = useState(false);
   const [filterCourse, setFilterCourse] = useState<string>("all");
+  const [viewer, setViewer] = useState<MaterialRow | null>(null);
 
   const courseIds = useMemo(() => courses.map((c) => c.id), [courses]);
   const courseMap = useMemo(() => {
@@ -125,6 +128,8 @@ export function CourseMaterialsPanel({
     (m) => filterCourse === "all" || m.course_id === filterCourse,
   );
 
+  const onlyImages = files.length > 0 && files.every(isImageFile);
+
   function onPickFiles(list: FileList | null) {
     if (!list?.length) return;
     const next = [...files];
@@ -143,25 +148,24 @@ export function CourseMaterialsPanel({
     if (fileRef.current) fileRef.current.value = "";
   }
 
-  async function uploadOne(file: File): Promise<{ url: string; name: string; mime: string; size: number } | null> {
-    const safe = file.name.replace(/[^\w.\-()+ ]+/g, "_").slice(0, 120);
+  async function uploadBlob(
+    blob: Blob,
+    fileName: string,
+    mime: string,
+  ): Promise<{ url: string; name: string; mime: string; size: number } | null> {
+    const safe = fileName.replace(/[^\w.\-()+ ]+/g, "_").slice(0, 120);
     const path = `${schoolId}/${courseId || "general"}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
-    const { error } = await supabase.storage.from("course-materials").upload(path, file, {
+    const { error } = await supabase.storage.from("course-materials").upload(path, blob, {
       cacheControl: "3600",
       upsert: false,
-      contentType: file.type || undefined,
+      contentType: mime || undefined,
     });
     if (error) {
       console.warn("[materials] storage upload", error.message);
       return null;
     }
     const { data } = supabase.storage.from("course-materials").getPublicUrl(path);
-    return {
-      url: data.publicUrl,
-      name: file.name,
-      mime: file.type || "application/octet-stream",
-      size: file.size,
-    };
+    return { url: data.publicUrl, name: fileName, mime, size: blob.size };
   }
 
   async function submit() {
@@ -182,7 +186,30 @@ export function CourseMaterialsPanel({
     try {
       const rows: Record<string, unknown>[] = [];
 
-      if (files.length === 0) {
+      if (files.length > 0 && onlyImages && imagesToPdf) {
+        toast.message("Converting images to PDF…");
+        const pdfBlob = await imagesToPdfBlob(files, baseTitle || "Notes");
+        const pdfName = `${(baseTitle || "notes").replace(/[^\w\- ]+/g, "").trim() || "notes"}.pdf`;
+        const up = await uploadBlob(pdfBlob, pdfName, "application/pdf");
+        if (!up) {
+          toast.error("Could not upload PDF. Check storage permissions.");
+          return;
+        }
+        rows.push({
+          school_id: schoolId,
+          course_id: courseId,
+          uploaded_by: session.userId,
+          uploader_role: role,
+          uploader_name: displayName || null,
+          title: baseTitle || pdfName,
+          description: description.trim() || null,
+          material_type: materialType,
+          file_url: up.url,
+          file_name: up.name,
+          file_mime: up.mime,
+          file_size: up.size,
+        });
+      } else if (files.length === 0) {
         rows.push({
           school_id: schoolId,
           course_id: courseId,
@@ -196,9 +223,9 @@ export function CourseMaterialsPanel({
       } else {
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-          const up = await uploadOne(file);
+          const up = await uploadBlob(file, file.name, file.type || "application/octet-stream");
           if (!up) {
-            toast.error(`Could not upload ${file.name}. Check storage permissions.`);
+            toast.error(`Could not upload ${file.name}.`);
             continue;
           }
           rows.push({
@@ -229,7 +256,13 @@ export function CourseMaterialsPanel({
       const { error } = await supabase.from("course_materials").insert(rows as never);
       if (error) throw error;
 
-      toast.success(rows.length === 1 ? "Material posted." : `${rows.length} materials posted.`);
+      toast.success(
+        onlyImages && imagesToPdf && files.length > 0
+          ? "Images converted to PDF and posted."
+          : rows.length === 1
+            ? "Material posted."
+            : `${rows.length} materials posted.`,
+      );
       setTitle("");
       setDescription("");
       setFiles([]);
@@ -250,6 +283,7 @@ export function CourseMaterialsPanel({
       return;
     }
     toast.success("Deleted");
+    if (viewer?.id === id) setViewer(null);
     await qc.invalidateQueries({ queryKey: ["course-materials"] });
   }
 
@@ -278,7 +312,10 @@ export function CourseMaterialsPanel({
         }
       />
 
-      <SectionCard title="Upload" description={`PDF, images, or text · up to ${MAX_FILES} files`}>
+      <SectionCard
+        title="Upload"
+        description={`Select multiple files at once · up to ${MAX_FILES} · images can become one PDF`}
+      >
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-semibold text-slate-600">
             Course
@@ -335,7 +372,7 @@ export function CourseMaterialsPanel({
             type="file"
             className="hidden"
             multiple
-            accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.ppt,.pptx,.txt,image/*"
+            accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.ppt,.pptx,.txt,image/*"
             onChange={(e) => onPickFiles(e.target.files)}
           />
           <Button
@@ -346,7 +383,7 @@ export function CourseMaterialsPanel({
             onClick={() => fileRef.current?.click()}
           >
             <Upload className="h-3.5 w-3.5" />
-            Add files ({files.length}/{MAX_FILES})
+            Choose files ({files.length}/{MAX_FILES})
           </Button>
           <Button
             type="button"
@@ -359,11 +396,34 @@ export function CourseMaterialsPanel({
             Post material
           </Button>
         </div>
+
+        {onlyImages && (
+          <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={imagesToPdf}
+              onChange={(e) => setImagesToPdf(e.target.checked)}
+            />
+            <span>
+              <span className="inline-flex items-center gap-1 font-semibold">
+                <FileImage className="h-3.5 w-3.5" /> Convert images to one PDF
+              </span>
+              <span className="mt-0.5 block text-slate-500">
+                All selected photos become a single PDF on the site (recommended for handwritten pages).
+              </span>
+            </span>
+          </label>
+        )}
+
         {files.length > 0 && (
-          <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-xs text-slate-600">
+          <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-lg border border-slate-100 bg-white p-2 text-xs text-slate-600">
             {files.map((f, i) => (
               <li key={`${f.name}-${i}`} className="flex items-center justify-between gap-2">
-                <span className="truncate">{f.name}</span>
+                <span className="truncate">
+                  {f.name}
+                  <span className="text-slate-400"> · {(f.size / 1024).toFixed(0)} KB</span>
+                </span>
                 <button
                   type="button"
                   className="shrink-0 text-red-600 hover:underline"
@@ -380,7 +440,7 @@ export function CourseMaterialsPanel({
       <div className="mt-4 sm:mt-6">
         <SectionCard
           title="Materials"
-          description={listQ.isLoading ? "Loading…" : `${items.length} item(s)`}
+          description={listQ.isLoading ? "Loading…" : `${items.length} item(s) · tap to open in app`}
           actions={
             <select
               className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold"
@@ -399,7 +459,7 @@ export function CourseMaterialsPanel({
           {listQ.isError ? (
             <p className="text-sm text-red-600">
               {(listQ.error as Error)?.message ||
-                "Could not load materials. Run the course_materials SQL migration in Supabase if the table is missing."}
+                "Could not load materials. Run the course_materials SQL in Supabase if needed."}
             </p>
           ) : items.length === 0 ? (
             <EmptyState
@@ -415,40 +475,37 @@ export function CourseMaterialsPanel({
                 const mine = m.uploaded_by === session?.userId;
                 return (
                   <li key={m.id} className="flex flex-wrap items-start gap-3 py-3 first:pt-0 last:pb-0">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-                      <Icon className="h-4 w-4" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-900">{m.title}</p>
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
-                          {typeLabel(m.material_type)}
-                        </span>
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 items-start gap-3 rounded-lg text-left hover:bg-slate-50"
+                      onClick={() => setViewer(m)}
+                    >
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-900">{m.title}</p>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                            {typeLabel(m.material_type)}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {course ? `${course.code ? course.code + " · " : ""}${course.name}` : "Course"}
+                          {" · "}
+                          {m.uploader_role === "teacher" ? "Teacher" : "Student"}
+                          {m.uploader_name ? ` · ${m.uploader_name}` : ""}
+                          {" · "}
+                          {new Date(m.created_at).toLocaleString()}
+                        </p>
+                        {m.description ? (
+                          <p className="mt-1 line-clamp-2 text-sm text-slate-700">{m.description}</p>
+                        ) : null}
+                        <p className="mt-1 text-[11px] font-semibold text-primary">
+                          {m.file_url ? "Open in app" : "View note"}
+                        </p>
                       </div>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {course ? `${course.code ? course.code + " · " : ""}${course.name}` : "Course"}
-                        {" · "}
-                        {m.uploader_role === "teacher" ? "Teacher" : "Student"}
-                        {m.uploader_name ? ` · ${m.uploader_name}` : ""}
-                        {" · "}
-                        {new Date(m.created_at).toLocaleString()}
-                      </p>
-                      {m.description ? (
-                        <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{m.description}</p>
-                      ) : null}
-                      {m.file_url ? (
-                        <a
-                          href={m.file_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={cn(
-                            "mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline",
-                          )}
-                        >
-                          {m.file_name || "Open file"} <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : null}
-                    </div>
+                    </button>
                     {mine ? (
                       <Button
                         type="button"
@@ -468,6 +525,15 @@ export function CourseMaterialsPanel({
           )}
         </SectionCard>
       </div>
+
+      {viewer ? (
+        <MaterialViewer
+          item={viewer}
+          siblings={items}
+          onClose={() => setViewer(null)}
+          onNavigate={(m) => setViewer(m as MaterialRow)}
+        />
+      ) : null}
     </>
   );
 }
