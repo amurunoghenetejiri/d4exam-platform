@@ -216,7 +216,7 @@ export function AppShell({
       ["student-dashboard-notifs"],
     ],
     Boolean(session?.userId),
-    800,
+    400,
   );
 
   const unreadQ = useUnreadNotificationCount(session?.userId);

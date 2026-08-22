@@ -50,6 +50,7 @@ const icons: Record<string, typeof Info> = {
   result_published: CircleCheck,
   announcement: Info,
   system_alert: AlertTriangle,
+  officer_warning: AlertTriangle,
 };
 
 const tones: Record<string, string> = {
@@ -66,6 +67,7 @@ const tones: Record<string, string> = {
   result_published: "bg-emerald-50 text-emerald-700",
   announcement: "bg-violet-50 text-violet-700",
   system_alert: "bg-amber-50 text-amber-700",
+  officer_warning: "bg-red-50 text-red-700",
 };
 
 export function NotificationsPage({ scope }: { scope: string }) {
@@ -88,6 +90,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
       ["student-dashboard-notifs"],
     ],
     Boolean(user?.userId),
+    400,
   );
 
   const { data, isLoading, isError, error, refetch } = useRows<Notif>({

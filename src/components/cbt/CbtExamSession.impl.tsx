@@ -414,17 +414,6 @@ export function CbtExamPage() {
 
   useEffect(() => {
     if (previewMode || !started || done) return;
-    const onInteract = () => { try { refreshHapticUnlock(); } catch { /* ignore */ } };
-    document.addEventListener("pointerdown", onInteract, { passive: true });
-    document.addEventListener("touchstart", onInteract, { passive: true });
-    return () => {
-      document.removeEventListener("pointerdown", onInteract);
-      document.removeEventListener("touchstart", onInteract);
-    };
-  }, [previewMode, started, done]);
-
-  useEffect(() => {
-    if (previewMode || !started || done) return;
     const studentId = student?.studentId;
     const authUserId = session?.userId;
     if ((!studentId && !authUserId) || !id) return;
@@ -867,7 +856,6 @@ export function CbtExamPage() {
               return (
                 <li key={oi}>
                   <button type="button" onClick={() => {
-                    try { refreshHapticUnlock(); } catch { /* ignore */ }
                     if (q) setAnswers((a) => ({ ...a, [q.id]: oi }));
                   }}
                     className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
