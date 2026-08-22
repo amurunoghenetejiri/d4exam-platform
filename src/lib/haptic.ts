@@ -1,12 +1,9 @@
 /**
  * CBT exam vibration (motor only — no sound).
- * Android Chrome supports navigator.vibrate after a user gesture.
- * iOS Safari has no Vibration API (calls are no-ops).
+ * Hierarchy (weakest → strongest):
+ *   start  <  unclear/none (amber)  <  multi  <  officer_warning
  *
- * none (no face)        → medium pulse
- * multi                 → strong
- * officer_warning       → longest / strongest
- * start                 → on Start Exam only
+ * Only these events may vibrate. Never vibrate on taps/swipes.
  */
 
 export type HapticKind =
@@ -21,16 +18,20 @@ export type HapticKind =
   | "strong";
 
 const PATTERNS: Record<HapticKind, number[]> = {
-  start: [200, 80, 220],
-  none: [120, 70, 140, 70, 160],
-  unclear: [90, 70, 100, 70, 120],
-  light: [70, 80, 85],
-  multi: [150, 60, 180, 60, 200, 70, 220, 70, 250],
-  strong: [150, 60, 180, 60, 200, 70, 220, 70, 250],
-  camera_blocked: [140, 55, 170, 55, 190, 60, 220, 60, 240],
+  // Weakest — Start Exam only
+  start: [140, 60, 160],
+  // Amber: face not seen / unclear — stronger than start
+  none: [180, 50, 220, 50, 260, 55, 280],
+  unclear: [180, 50, 220, 50, 260, 55, 280],
+  light: [100, 50, 120],
+  // Multiple faces — longer/harder than unclear
+  multi: [200, 40, 240, 40, 280, 45, 320, 45, 360, 50, 400],
+  strong: [200, 40, 240, 40, 280, 45, 320, 45, 360, 50, 400],
+  camera_blocked: [160, 50, 200, 50, 240],
   tab_switch: [90, 50, 120],
+  // Officer warning — strongest / longest
   officer_warning: [
-    220, 40, 260, 40, 300, 45, 340, 45, 380, 50, 420, 50, 460, 55, 500, 55, 550,
+    250, 35, 300, 35, 350, 40, 400, 40, 450, 45, 500, 45, 550, 50, 600, 50, 650,
   ],
 };
 
@@ -76,7 +77,6 @@ function vibrateRaw(arg: number | number[]): boolean {
   }
 }
 
-/** Pulse train fallback when array patterns are ignored. */
 function pulseTrain(ons: number[], gap = 50) {
   let delay = 0;
   for (const pulse of ons) {
@@ -96,46 +96,32 @@ function extractOns(pattern: number[]): number[] {
   return ons;
 }
 
-/** Unlock from Start Exam (must be user gesture). */
+/** Unlock + Start Exam vibration (must run from user gesture). */
 export function primeHaptics() {
   primed = true;
   clearTimers();
-  vibrateRaw(1);
   const pattern = PATTERNS.start;
-  const id0 = window.setTimeout(() => {
-    if (!vibrateRaw(pattern)) pulseTrain(extractOns(pattern), 50);
-  }, 10);
-  timers.push(id0);
+  vibrateRaw(pattern);
   timers.push(
-    window.setTimeout(() => vibrateRaw(pattern), 80),
-    window.setTimeout(() => pulseTrain([120, 150, 180], 50), 20),
+    window.setTimeout(() => {
+      if (!vibrateRaw(pattern)) pulseTrain(extractOns(pattern), 45);
+    }, 40),
   );
   startHapticKeepAlive();
 }
 
-/** Tiny pulse to keep activation chain alive on Android WebViews. */
+/** Mark primed only — never vibrate (avoids buzz on every tap). */
 export function refreshHapticUnlock() {
   primed = true;
-  if (!canVibrate()) return;
-  try {
-    vibrateRaw(1);
-  } catch {
-    /* ignore */
-  }
 }
 
-/** While exam is running, gently keep vibrate permission warm. */
+/** Keep permission flag; no motor pulse (user does not want random buzz). */
 export function startHapticKeepAlive() {
   if (typeof window === "undefined") return;
   stopHapticKeepAlive();
   keepAliveTimer = window.setInterval(() => {
-    if (!primed || !canVibrate()) return;
-    try {
-      vibrateRaw(1);
-    } catch {
-      /* ignore */
-    }
-  }, 8_000);
+    primed = true;
+  }, 15_000);
 }
 
 export function stopHapticKeepAlive() {
@@ -153,9 +139,13 @@ export function haptic(kind: HapticKind) {
   if (typeof window === "undefined") return;
   if (!canVibrate()) return;
 
+  const allowed: HapticKind[] = ["start", "none", "unclear", "multi", "officer_warning"];
+  if (!allowed.includes(kind)) return;
+
   const now = Date.now();
-  const isLight = kind === "none" || kind === "unclear" || kind === "light";
-  if (isLight && lastKind === kind && now - lastAt < 1500) return;
+  const cooldown =
+    kind === "officer_warning" ? 800 : kind === "multi" ? 1200 : kind === "start" ? 500 : 1600;
+  if (lastKind === kind && now - lastAt < cooldown) return;
   lastKind = kind;
   lastAt = now;
   primed = true;
@@ -166,21 +156,24 @@ export function haptic(kind: HapticKind) {
 
   vibrateRaw(pattern);
   timers.push(
-    window.setTimeout(() => pulseTrain(ons, isLight ? 55 : 45), 30),
-    window.setTimeout(() => vibrateRaw(pattern), 70),
-    window.setTimeout(() => vibrateRaw(pattern), 200),
+    window.setTimeout(() => pulseTrain(ons, kind === "start" ? 55 : 40), 25),
+    window.setTimeout(() => vibrateRaw(pattern), 60),
   );
+
+  if (kind === "multi") {
+    timers.push(window.setTimeout(() => vibrateRaw([280, 40, 320, 40, 380]), 350));
+  }
 
   if (kind === "officer_warning") {
     timers.push(
-      window.setTimeout(() => vibrateRaw([200, 50, 240, 50, 280, 60, 320]), 600),
-      window.setTimeout(() => pulseTrain([200, 250, 300, 350], 55), 40),
-      window.setTimeout(() => vibrateRaw([250, 60, 300, 60, 350]), 900),
+      window.setTimeout(() => vibrateRaw([300, 30, 350, 30, 400, 35, 450, 35, 500]), 200),
+      window.setTimeout(() => pulseTrain([300, 350, 400, 450, 500, 550], 40), 30),
+      window.setTimeout(() => vibrateRaw([350, 30, 400, 30, 500, 30, 600]), 700),
+      window.setTimeout(() => vibrateRaw([400, 30, 500, 30, 600]), 1200),
     );
   }
 }
 
-/** Longest / loudest pulse for officer warnings. */
 export function hapticOfficerWarning() {
   haptic("officer_warning");
 }
