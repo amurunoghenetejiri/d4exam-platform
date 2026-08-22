@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useRows } from "@/lib/queries";
 import { reviewSchoolApplication } from "@/lib/auth.school-admin.functions";
 import { toast } from "sonner";
-import { Copy, Loader2 } from "lucide-react";
+import { Building2, Copy, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/super-admin/applications")({
   head: () => ({
@@ -29,6 +30,7 @@ type AppRow = {
   status: string;
   created_at: string;
   review_notes: string | null;
+  documents?: { logo_url?: string | null } | null;
 };
 
 type Creds = {
@@ -40,13 +42,44 @@ type Creds = {
   emailError?: string | null;
 };
 
+function SchoolLogo({ url, name, size = "md" }: { url?: string | null; name: string; size?: "sm" | "md" | "lg" }) {
+  const dim = size === "lg" ? "h-14 w-14" : size === "sm" ? "h-9 w-9" : "h-12 w-12";
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt={`${name} logo`}
+        className={cn(dim, "shrink-0 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm")}
+      />
+    );
+  }
+  return (
+    <span
+      className={cn(
+        dim,
+        "grid shrink-0 place-items-center rounded-xl border border-slate-200 bg-slate-50 text-slate-400 shadow-sm",
+      )}
+      aria-hidden
+    >
+      <Building2 className={size === "sm" ? "h-4 w-4" : "h-6 w-6"} />
+    </span>
+  );
+}
+
+function logoFromApp(app: AppRow): string | null {
+  const docs = app.documents;
+  if (!docs || typeof docs !== "object") return null;
+  const u = (docs as { logo_url?: string | null }).logo_url;
+  return typeof u === "string" && u.trim() ? u.trim() : null;
+}
+
 function Page() {
   const review = useServerFn(reviewSchoolApplication);
   const qc = useQueryClient();
   const { data, isLoading, refetch } = useRows<AppRow>({
     table: "school_applications",
     select:
-      "id, school_name, school_type, country, official_email, applicant_name, applicant_email, applicant_phone, status, created_at, review_notes",
+      "id, school_name, school_type, country, official_email, applicant_name, applicant_email, applicant_phone, status, created_at, review_notes, documents",
     order: { column: "created_at", ascending: false },
     limit: 100,
   });
@@ -59,6 +92,17 @@ function Page() {
     applicationId: string,
     decision: "approved" | "rejected" | "under_review" | "more_information_required",
   ) {
+    if (decision === "approved") {
+      const ok = window.confirm(
+        "Are you sure you want to approve this school application?\n\nThis will create the school, generate login credentials, and notify the applicant.",
+      );
+      if (!ok) return;
+    }
+    if (decision === "rejected") {
+      const ok = window.confirm("Reject this application? The school will not be created.");
+      if (!ok) return;
+    }
+
     setBusyId(applicationId);
     try {
       const result = await review({
@@ -78,15 +122,14 @@ function Page() {
           emailSent?: boolean;
           emailError?: string | null;
         };
-        const packet: Creds = {
+        setCreds({
           schoolName: String(r.schoolName ?? "School"),
           schoolCode: String(r.schoolCode),
           adminEmail: String(r.adminEmail ?? ""),
           adminPassword: String(r.adminPassword ?? ""),
-          emailSent: Boolean(r.emailSent),
-          emailError: r.emailError ?? null,
-        };
-        setCreds(packet);
+          emailSent: r.emailSent,
+          emailError: r.emailError,
+        });
         if (r.emailSent) {
           toast.success("School approved. Login details emailed to the applicant.");
         } else {
@@ -96,32 +139,41 @@ function Page() {
               : "School approved. Copy the login details below (email not configured).",
           );
         }
+      } else if (decision === "rejected") {
+        toast.success("Application rejected.");
+        setCreds(null);
+      } else if (decision === "more_information_required") {
+        toast.success("Marked as needing more information.");
       } else {
-        toast.success(`Application marked ${decision.replaceAll("_", " ")}`);
+        toast.success("Application marked under review.");
       }
-      await qc.invalidateQueries({ queryKey: ["rows"] });
-      await qc.invalidateQueries({ queryKey: ["count"] });
+
+      await qc.invalidateQueries({ queryKey: ["rows", "school_applications"] });
       await refetch();
     } catch (e) {
-      toast.error((e as Error).message || "Action failed");
+      toast.error((e as Error).message || "Could not update application");
     } finally {
       setBusyId(null);
     }
   }
 
-  function copyAll() {
+  function copyCreds() {
     if (!creds) return;
     const text = [
       `Congratulations! Your school is live on D4EXAM.`,
       `School: ${creds.schoolName}`,
       `School code: ${creds.schoolCode}`,
       `Admin email: ${creds.adminEmail}`,
-      `Password: ${creds.adminPassword}`,
+      `Temporary password: ${creds.adminPassword}`,
       `Login: open /login, enter school code, email and password.`,
     ].join("\n");
-    void navigator.clipboard.writeText(text);
-    toast.success("Credentials copied");
+    void navigator.clipboard.writeText(text).then(
+      () => toast.success("Credentials copied"),
+      () => toast.error("Could not copy"),
+    );
   }
+
+  const apps = data ?? [];
 
   return (
     <>
@@ -131,10 +183,10 @@ function Page() {
       />
 
       {creds && (
-        <SectionCard title="School login details (show once — copy and share)">
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-slate-800">
+        <SectionCard title="Approved — login credentials" description="Share these with the school administrator.">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 text-sm">
             <p className="font-bold text-emerald-900">Congratulations — school space is ready</p>
-            <ul className="mt-3 space-y-1.5 font-mono text-[13px]">
+            <ul className="mt-2 space-y-1 font-mono text-xs text-slate-800 sm:text-sm">
               <li>
                 <span className="font-sans font-semibold text-slate-600">School:</span> {creds.schoolName}
               </li>
@@ -151,104 +203,129 @@ function Page() {
                 {creds.adminPassword}
               </li>
             </ul>
-            <p className="mt-3 font-sans text-xs text-slate-600">
-              {creds.emailSent ? (
-                <span className="text-emerald-700">Email sent to applicant.</span>
-              ) : (
-                <span className="text-amber-700">
-                  Email not sent{creds.emailError ? `: ${creds.emailError}` : " (set RESEND_API_KEY on Vercel)"}.
-                </span>
-              )}
-              <br />
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" className="gap-1.5 font-semibold" onClick={copyCreds}>
+                <Copy className="h-3.5 w-3.5" /> Copy details
+              </Button>
+            </div>
+            <p className="mt-3 text-xs text-slate-600">
               Tell them: go to Login → enter school code + email + password → they open the School Admin
-              dashboard and can add teachers and students.
+              dashboard.
             </p>
-            <Button type="button" size="sm" className="mt-4 gap-2 font-semibold" onClick={copyAll}>
-              <Copy className="h-3.5 w-3.5" />
-              Copy message
-            </Button>
           </div>
         </SectionCard>
       )}
 
-      <div className={creds ? "mt-6" : ""}>
+      <div className="mt-4 sm:mt-6">
         {isLoading ? (
           <p className="text-sm text-slate-500">Loading applications…</p>
-        ) : (data ?? []).length === 0 ? (
+        ) : apps.length === 0 ? (
           <EmptyState
             title="No applications"
             description="When schools apply from the public form, they stay here until you review them."
           />
         ) : (
           <div className="space-y-4">
-            {(data ?? []).map((app) => (
-              <SectionCard key={app.id}>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-base font-bold text-slate-900">{app.school_name}</h2>
-                      <StatusBadge status={app.status} />
+            {apps.map((app) => {
+              const logo = logoFromApp(app);
+              const st = String(app.status || "").toLowerCase();
+              const isApproved = st === "approved";
+              const isRejected = st === "rejected";
+              return (
+                <SectionCard key={app.id} title="">
+                  <div className="flex flex-wrap items-start gap-3">
+                    <SchoolLogo url={logo} name={app.school_name} size="lg" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-base font-bold text-slate-900">{app.school_name}</h2>
+                        <StatusBadge status={app.status} />
+                      </div>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {[app.school_type, app.country].filter(Boolean).join(" · ") || "—"}
+                      </p>
+                      <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
+                        <p>
+                          <span className="font-semibold text-slate-500">Applicant:</span>{" "}
+                          {app.applicant_name}
+                        </p>
+                        <p>
+                          <span className="font-semibold text-slate-500">Email:</span>{" "}
+                          {app.applicant_email}
+                        </p>
+                        <p>
+                          <span className="font-semibold text-slate-500">Official email:</span>{" "}
+                          {app.official_email}
+                        </p>
+                        {app.applicant_phone ? (
+                          <p>
+                            <span className="font-semibold text-slate-500">Phone:</span>{" "}
+                            {app.applicant_phone}
+                          </p>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Submitted {new Date(app.created_at).toLocaleString()}
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {[app.school_type, app.country].filter(Boolean).join(" · ") || "—"}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Applicant: {app.applicant_name} · {app.applicant_email}
-                      {app.applicant_phone ? ` · ${app.applicant_phone}` : ""}
-                    </p>
-                    <p className="text-xs text-slate-500">Official: {app.official_email}</p>
-                    <p className="text-xs text-slate-400">
-                      Submitted {new Date(app.created_at).toLocaleString()}
-                    </p>
                   </div>
-                </div>
 
-                <div className="mt-4 space-y-2">
-                  <Textarea
-                    placeholder="Review notes / feedback (optional)"
-                    value={notes[app.id] ?? app.review_notes ?? ""}
-                    onChange={(e) => setNotes((n) => ({ ...n, [app.id]: e.target.value }))}
-                    rows={2}
-                    className="border-slate-200"
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      className="font-semibold"
-                      disabled={busyId === app.id}
-                      onClick={() => void decide(app.id, "approved")}
-                    >
-                      {busyId === app.id && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
-                      {app.status === "approved" ? "Re-issue credentials" : "Approve"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busyId === app.id}
-                      onClick={() => void decide(app.id, "under_review")}
-                    >
-                      Under review
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busyId === app.id}
-                      onClick={() => void decide(app.id, "more_information_required")}
-                    >
-                      Need more info
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      disabled={busyId === app.id || app.status === "rejected"}
-                      onClick={() => void decide(app.id, "rejected")}
-                    >
-                      Reject
-                    </Button>
-                  </div>
-                </div>
-              </SectionCard>
-            ))}
+                  {isApproved ? (
+                    <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+                      Approved — this school is live. Manage or remove it from Schools.
+                    </div>
+                  ) : isRejected ? (
+                    <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800">
+                      Rejected — no further review actions.
+                    </div>
+                  ) : (
+                    <div className="mt-4 space-y-2">
+                      <Textarea
+                        placeholder="Review notes / feedback (optional)"
+                        value={notes[app.id] ?? app.review_notes ?? ""}
+                        onChange={(e) => setNotes((n) => ({ ...n, [app.id]: e.target.value }))}
+                        rows={2}
+                        className="border-slate-200"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          className="font-semibold"
+                          disabled={busyId === app.id}
+                          onClick={() => void decide(app.id, "approved")}
+                        >
+                          {busyId === app.id && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busyId === app.id}
+                          onClick={() => void decide(app.id, "under_review")}
+                        >
+                          Under review
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busyId === app.id}
+                          onClick={() => void decide(app.id, "more_information_required")}
+                        >
+                          Need more info
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={busyId === app.id}
+                          onClick={() => void decide(app.id, "rejected")}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </SectionCard>
+              );
+            })}
           </div>
         )}
       </div>
