@@ -2,7 +2,7 @@ import {
   LayoutDashboard,
   FileText,
   BarChart3,
-  BookOpen,
+  BookOpen, FolderOpen,
   Bell,
   User,
   Settings,
@@ -55,6 +55,7 @@ export const studentNav: RoleConfig = {
         { label: "My Exams", to: "/student/examinations", icon: FileText },
         { label: "Results", to: "/student/results", icon: BarChart3 },
         { label: "My Courses", to: "/student/courses", icon: BookOpen },
+        { label: "Materials", to: "/student/materials", icon: FolderOpen },
       ],
     },
     {
@@ -83,6 +84,7 @@ export const teacherNav: RoleConfig = {
       items: [
         { label: "Dashboard", to: "/teacher", icon: LayoutDashboard },
         { label: "My Courses", to: "/teacher/courses", icon: BookOpen },
+        { label: "Materials", to: "/teacher/materials", icon: FolderOpen },
         { label: "Question Bank", to: "/teacher/question-bank", icon: Layers },
         { label: "Examinations", to: "/teacher/examinations", icon: FileText },
       ],

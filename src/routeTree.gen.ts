@@ -58,6 +58,7 @@ import { Route as OfficerResultsRouteImport } from './routes/officer.results'
 import { Route as OfficerSettingsRouteImport } from './routes/officer.settings'
 import { Route as StudentIndexRouteImport } from './routes/student.index'
 import { Route as StudentCoursesRouteImport } from './routes/student.courses'
+import { Route as StudentMaterialsRouteImport } from './routes/student.materials'
 import { Route as StudentExaminationsRouteImport } from './routes/student.examinations'
 import { Route as StudentHistoryRouteImport } from './routes/student.history'
 import { Route as StudentNotificationsRouteImport } from './routes/student.notifications'
@@ -77,6 +78,7 @@ import { Route as SuperAdminSubscriptionsRouteImport } from './routes/super-admi
 import { Route as SuperAdminUsersRouteImport } from './routes/super-admin.users'
 import { Route as TeacherIndexRouteImport } from './routes/teacher.index'
 import { Route as TeacherCoursesRouteImport } from './routes/teacher.courses'
+import { Route as TeacherMaterialsRouteImport } from './routes/teacher.materials'
 import { Route as TeacherExamSecurityRouteImport } from './routes/teacher.exam-security'
 import { Route as TeacherExaminationsRouteImport } from './routes/teacher.examinations'
 import { Route as TeacherIntegrityRouteImport } from './routes/teacher.integrity'
@@ -341,6 +343,11 @@ const StudentCoursesRoute = StudentCoursesRouteImport.update({
   path: '/courses',
   getParentRoute: () => StudentRoute,
 } as any)
+const StudentMaterialsRoute = StudentMaterialsRouteImport.update({
+  id: '/materials',
+  path: '/materials',
+  getParentRoute: () => StudentRoute,
+} as any)
 const StudentExaminationsRoute = StudentExaminationsRouteImport.update({
   id: '/examinations',
   path: '/examinations',
@@ -434,6 +441,11 @@ const TeacherIndexRoute = TeacherIndexRouteImport.update({
 const TeacherCoursesRoute = TeacherCoursesRouteImport.update({
   id: '/courses',
   path: '/courses',
+  getParentRoute: () => TeacherRoute,
+} as any)
+const TeacherMaterialsRoute = TeacherMaterialsRouteImport.update({
+  id: '/materials',
+  path: '/materials',
   getParentRoute: () => TeacherRoute,
 } as any)
 const TeacherExamSecurityRoute = TeacherExamSecurityRouteImport.update({
@@ -1768,6 +1780,7 @@ const StudentResultsRouteWithChildren = StudentResultsRoute._addFileChildren(
 
 interface StudentRouteChildren {
   StudentCoursesRoute: typeof StudentCoursesRoute
+  StudentMaterialsRoute: typeof StudentMaterialsRoute
   StudentExaminationsRoute: typeof StudentExaminationsRoute
   StudentHistoryRoute: typeof StudentHistoryRoute
   StudentNotificationsRoute: typeof StudentNotificationsRoute
@@ -1780,6 +1793,7 @@ interface StudentRouteChildren {
 
 const StudentRouteChildren: StudentRouteChildren = {
   StudentCoursesRoute: StudentCoursesRoute,
+  StudentMaterialsRoute: StudentMaterialsRoute,
   StudentExaminationsRoute: StudentExaminationsRoute,
   StudentHistoryRoute: StudentHistoryRoute,
   StudentNotificationsRoute: StudentNotificationsRoute,
@@ -1840,6 +1854,7 @@ const SuperAdminRouteWithChildren = SuperAdminRoute._addFileChildren(
 
 interface TeacherRouteChildren {
   TeacherCoursesRoute: typeof TeacherCoursesRoute
+  TeacherMaterialsRoute: typeof TeacherMaterialsRoute
   TeacherExamSecurityRoute: typeof TeacherExamSecurityRoute
   TeacherExaminationsRoute: typeof TeacherExaminationsRoute
   TeacherIntegrityRoute: typeof TeacherIntegrityRoute
@@ -1857,6 +1872,7 @@ interface TeacherRouteChildren {
 
 const TeacherRouteChildren: TeacherRouteChildren = {
   TeacherCoursesRoute: TeacherCoursesRoute,
+  TeacherMaterialsRoute: TeacherMaterialsRoute,
   TeacherExamSecurityRoute: TeacherExamSecurityRoute,
   TeacherExaminationsRoute: TeacherExaminationsRoute,
   TeacherIntegrityRoute: TeacherIntegrityRoute,
