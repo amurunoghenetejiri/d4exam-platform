@@ -10,6 +10,23 @@ const MODEL_URL =
 const MEDIAPIPE_LOAD_TIMEOUT_MS = 12_000;
 const MIN_DETECTION_CONFIDENCE = 0.18;
 
+/** Count only confident faces so landmark noise does not inflate multi-face. */
+function confidentFaceCount(faces: unknown[]): number {
+  if (!faces?.length) return 0;
+  let strong = 0;
+  for (const f of faces) {
+    const any = f as { categories?: { score?: number }[]; keypoints?: unknown[]; boundingBox?: unknown; score?: number };
+    const score =
+      any?.categories?.[0]?.score ??
+      (typeof any.score === "number" ? any.score : undefined);
+    // Accept if score unknown (native API) or reasonably confident
+    if (score == null || score >= 0.35) strong += 1;
+  }
+  // If filtering wiped everything but we had detections, keep at least 1
+  if (strong === 0 && faces.length > 0) return 1;
+  return strong;
+}
+
 export type FaceEngine = {
   count: (video: HTMLVideoElement) => Promise<number | null>;
   close: () => void;
@@ -153,7 +170,7 @@ async function createMediapipe(): Promise<FaceEngine | null> {
             faces = result?.detections ?? [];
           }
 
-          return faces.length;
+          return confidentFaceCount(faces);
         } catch {
           return null;
         }
