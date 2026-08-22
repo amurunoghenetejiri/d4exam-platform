@@ -808,7 +808,7 @@ function Page() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white shadow-sm"><div className="relative mx-auto aspect-square w-full max-w-[min(100%,420px)] bg-slate-900">
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white shadow-sm"><div className="relative w-full bg-slate-900" style={{ height: "min(420px, 70vw)" }}>
               {selected.videoStatus === "live" && selected.frame?.src ? (
                 <>
                   <img
