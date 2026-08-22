@@ -10,15 +10,16 @@ type CamConnState = "active" | "reconnecting" | "unavailable";
 type SecurityAlertKind = "none" | "multi" | "unclear" | "camera_blocked";
 
 function haptic(kind: SecurityAlertKind) {
-  // Vibration only for: no face, multiple faces (start exam + officer warning are elsewhere)
-  if (kind === "unclear" || kind === "camera_blocked") return;
+  // Hierarchy: none/unclear (amber) < multi  |  start + officer are elsewhere
+  if (kind === "camera_blocked") return;
   if (kind === "none") fireHaptic("none");
+  else if (kind === "unclear") fireHaptic("unclear");
   else if (kind === "multi") fireHaptic("multi");
 }
 
 const ALERT_COOLDOWN_MS = 1800;
-const FACE_TICK_MS = 550;
-const ENGINE_TIMEOUT_MS = 8000;
+const FACE_TICK_MS = 400;
+const ENGINE_TIMEOUT_MS = 6000;
 
 const ALERT_COPY: Record<
   SecurityAlertKind,
@@ -351,11 +352,11 @@ export function ExamCameraPip({
 
       if (!engineReady) return;
 
-      // unclear: label only — no toast/haptic
-      if (next === "unclear" || next === "unavailable") return;
+      if (next === "unavailable") return;
 
       faceWarnRef.current += 1;
       if (next === "none") fireAlert("none", faceCount);
+      else if (next === "unclear") fireAlert("unclear", faceCount);
       else if (next === "multi") fireAlert("multi", faceCount);
     };
 
@@ -377,7 +378,7 @@ export function ExamCameraPip({
         engineReady = true;
         if (n == null) {
           nullStreak += 1;
-          if (nullStreak >= 3) applyState("unclear", null);
+          if (nullStreak >= 2) applyState("unclear", null);
         } else if (n <= 0) {
           nullStreak = 0;
           applyState("none", 0);
@@ -390,7 +391,7 @@ export function ExamCameraPip({
         }
       } catch {
         nullStreak += 1;
-        if (!cancelled && nullStreak >= 3) applyState("unclear", null);
+        if (!cancelled && nullStreak >= 2) applyState("unclear", null);
       }
       if (!cancelled) timer = window.setTimeout(() => void tick(), FACE_TICK_MS);
     };
@@ -414,6 +415,12 @@ export function ExamCameraPip({
           return;
         }
         faceEngineRef.current = engine;
+        // Camera is live + engine ready → show green monitoring immediately
+        setFaceStatus((prev) => (prev === "unavailable" || prev === "unclear" ? "ok" : prev));
+        lastStateRef.current =
+          lastStateRef.current === "unavailable" || lastStateRef.current === "unclear"
+            ? "ok"
+            : lastStateRef.current;
         void tick();
       } catch {
         window.clearTimeout(timeoutId);
