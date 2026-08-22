@@ -18,7 +18,7 @@ function haptic(kind: SecurityAlertKind) {
 }
 
 const ALERT_COOLDOWN_MS = 1800;
-const FACE_TICK_MS = 400;
+const FACE_TICK_MS = 450;
 const ENGINE_TIMEOUT_MS = 6000;
 
 const ALERT_COPY: Record<
@@ -321,7 +321,7 @@ export function ExamCameraPip({
     }
   }, [stream]);
 
-  // Face detection: start immediately when camera is live
+  // Face detection: stable hysteresis — no flicker between ok / unclear / multi
   useEffect(() => {
     if (!stream || !faceDetection || !enabled) {
       setFaceStatus(stream && enabled ? (faceDetection ? "unclear" : "ok") : "unavailable");
@@ -334,30 +334,58 @@ export function ExamCameraPip({
     let cancelled = false;
     let timer: number | undefined;
     let engineReady = false;
-    let nullStreak = 0;
+    // Stability: require consecutive consistent readings before changing state
+    // so noise does not flicker multi / unclear / none.
+    let pending: FaceState | null = null;
+    let pendingStreak = 0;
+    const CONFIRM: Record<FaceState, number> = {
+      ok: 1, // recover quickly to green
+      multi: 4, // genuine multi faces must persist
+      none: 3,
+      unclear: 4,
+      unavailable: 2,
+    };
 
-    const applyState = (next: FaceState, faceCount: number | null) => {
+    const commitState = (next: FaceState, faceCount: number | null) => {
       if (cancelled) return;
       const prev = lastStateRef.current;
+      if (prev === next) return;
       setFaceStatus(next);
       lastStateRef.current = next;
 
       if (next === "ok") {
         faceWarnRef.current = Math.max(0, faceWarnRef.current - 1);
-        if (prev !== "ok") {
-          onSecRef.current?.({ kind: "ok", faceCount, at: new Date().toISOString() });
-        }
+        onSecRef.current?.({ kind: "ok", faceCount, at: new Date().toISOString() });
         return;
       }
-
       if (!engineReady) return;
-
       if (next === "unavailable") return;
 
       faceWarnRef.current += 1;
       if (next === "none") fireAlert("none", faceCount);
       else if (next === "unclear") fireAlert("unclear", faceCount);
       else if (next === "multi") fireAlert("multi", faceCount);
+    };
+
+    const proposeState = (next: FaceState, faceCount: number | null) => {
+      if (cancelled) return;
+      if (next === lastStateRef.current) {
+        pending = null;
+        pendingStreak = 0;
+        return;
+      }
+      if (pending === next) {
+        pendingStreak += 1;
+      } else {
+        pending = next;
+        pendingStreak = 1;
+      }
+      const need = CONFIRM[next] ?? 2;
+      if (pendingStreak >= need) {
+        commitState(next, faceCount);
+        pending = null;
+        pendingStreak = 0;
+      }
     };
 
     const tick = async () => {
@@ -376,22 +404,20 @@ export function ExamCameraPip({
         const n = await engine.count(video);
         if (cancelled) return;
         engineReady = true;
+        // Treat borderline / null as soft (unclear), never instant multi
         if (n == null) {
-          nullStreak += 1;
-          if (nullStreak >= 2) applyState("unclear", null);
+          proposeState("unclear", null);
         } else if (n <= 0) {
-          nullStreak = 0;
-          applyState("none", 0);
-        } else if (n > 1) {
-          nullStreak = 0;
-          applyState("multi", n);
+          proposeState("none", 0);
+        } else if (n === 1) {
+          proposeState("ok", 1);
         } else {
-          nullStreak = 0;
-          applyState("ok", 1);
+          // n >= 2 — require consecutive confirms before RED multi
+          proposeState("multi", n);
         }
       } catch {
-        nullStreak += 1;
-        if (!cancelled && nullStreak >= 2) applyState("unclear", null);
+        // Temporary engine errors → soft unclear, not hard violation
+        proposeState("unclear", null);
       }
       if (!cancelled) timer = window.setTimeout(() => void tick(), FACE_TICK_MS);
     };
@@ -509,11 +535,12 @@ export function ExamCameraPip({
                   : "Camera active"
                 : "Face unclear";
 
+  // RED = multi (hard). AMBER = none / unclear / soft. GREEN = ok.
   const statusDot =
     effectiveConn === "active"
       ? displayFaceStatus === "ok"
         ? "bg-emerald-400"
-        : displayFaceStatus === "multi" || displayFaceStatus === "none"
+        : displayFaceStatus === "multi"
           ? "bg-red-400"
           : "bg-amber-400"
       : effectiveConn === "reconnecting"
@@ -561,7 +588,7 @@ export function ExamCameraPip({
             "absolute inset-x-0 bottom-0 px-1.5 py-1 text-center text-[9px] font-bold text-white",
             displayFaceStatus === "ok"
               ? "bg-emerald-600/90"
-              : displayFaceStatus === "multi" || displayFaceStatus === "none"
+              : displayFaceStatus === "multi"
                 ? "bg-red-600/90"
                 : "bg-amber-600/90",
           )}
