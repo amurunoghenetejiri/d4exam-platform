@@ -10,7 +10,6 @@ type CamConnState = "active" | "reconnecting" | "unavailable";
 type SecurityAlertKind = "none" | "multi" | "unclear" | "camera_blocked";
 
 function haptic(kind: SecurityAlertKind) {
-  // Hierarchy: none/unclear (amber) < multi  |  start + officer are elsewhere
   if (kind === "camera_blocked") return;
   if (kind === "none") fireHaptic("none");
   else if (kind === "unclear") fireHaptic("unclear");
@@ -65,6 +64,25 @@ function streamIsLive(stream: MediaStream | null | undefined): boolean {
   return tracks.some((t) => t.readyState === "live" && t.enabled !== false);
 }
 
+function viewportSize() {
+  const vv = typeof window !== "undefined" ? window.visualViewport : null;
+  return {
+    w: vv?.width ?? window.innerWidth,
+    h: vv?.height ?? window.innerHeight,
+  };
+}
+
+function clampPos(left: number, top: number, elW: number, elH: number) {
+  const edge = 4;
+  const { w, h } = viewportSize();
+  const maxL = Math.max(edge, w - elW - edge);
+  const maxT = Math.max(edge, h - elH - edge);
+  return {
+    left: Math.min(maxL, Math.max(edge, left)),
+    top: Math.min(maxT, Math.max(edge, top)),
+  };
+}
+
 export type FaceSecurityEvent = {
   kind: SecurityAlertKind | "ok";
   faceCount: number | null;
@@ -87,6 +105,7 @@ export function ExamCameraPip({
   onNeedReconnect?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pipRef = useRef<HTMLDivElement | null>(null);
   const faceEngineRef = useRef<FaceEngine | null>(null);
   const faceWarnRef = useRef(0);
   const lastAlertRef = useRef(0);
@@ -100,6 +119,7 @@ export function ExamCameraPip({
     originLeft: number;
     originTop: number;
   } | null>(null);
+  const posRef = useRef({ left: 4, top: 4 });
   const onSecRef = useRef(onSecurityEvent);
   onSecRef.current = onSecurityEvent;
   const onNeedRef = useRef(onNeedReconnect);
@@ -114,6 +134,28 @@ export function ExamCameraPip({
     externalStream ? "active" : enabled ? "reconnecting" : "unavailable",
   );
   const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    posRef.current = pos;
+  }, [pos]);
+
+  // Keep inside viewport on resize / rotate
+  useEffect(() => {
+    const keepInView = () => {
+      const el = pipRef.current;
+      const w = el?.offsetWidth || 132;
+      const h = el?.offsetHeight || 160;
+      setPos((p) => clampPos(p.left, p.top, w, h));
+    };
+    window.addEventListener("resize", keepInView);
+    window.visualViewport?.addEventListener("resize", keepInView);
+    window.visualViewport?.addEventListener("scroll", keepInView);
+    return () => {
+      window.removeEventListener("resize", keepInView);
+      window.visualViewport?.removeEventListener("resize", keepInView);
+      window.visualViewport?.removeEventListener("scroll", keepInView);
+    };
+  }, []);
 
   const fireAlert = useCallback((kind: SecurityAlertKind, faceCount: number | null) => {
     const now = Date.now();
@@ -321,7 +363,6 @@ export function ExamCameraPip({
     }
   }, [stream]);
 
-  // Face detection: stable hysteresis — no flicker between ok / unclear / multi
   useEffect(() => {
     if (!stream || !faceDetection || !enabled) {
       setFaceStatus(stream && enabled ? (faceDetection ? "unclear" : "ok") : "unavailable");
@@ -334,13 +375,11 @@ export function ExamCameraPip({
     let cancelled = false;
     let timer: number | undefined;
     let engineReady = false;
-    // Stability: require consecutive consistent readings before changing state
-    // so noise does not flicker multi / unclear / none.
     let pending: FaceState | null = null;
     let pendingStreak = 0;
     const CONFIRM: Record<FaceState, number> = {
-      ok: 1, // recover quickly to green
-      multi: 4, // genuine multi faces must persist
+      ok: 1,
+      multi: 4,
       none: 3,
       unclear: 4,
       unavailable: 2,
@@ -404,7 +443,6 @@ export function ExamCameraPip({
         const n = await engine.count(video);
         if (cancelled) return;
         engineReady = true;
-        // Treat borderline / null as soft (unclear), never instant multi
         if (n == null) {
           proposeState("unclear", null);
         } else if (n <= 0) {
@@ -412,11 +450,9 @@ export function ExamCameraPip({
         } else if (n === 1) {
           proposeState("ok", 1);
         } else {
-          // n >= 2 — require consecutive confirms before RED multi
           proposeState("multi", n);
         }
       } catch {
-        // Temporary engine errors → soft unclear, not hard violation
         proposeState("unclear", null);
       }
       if (!cancelled) timer = window.setTimeout(() => void tick(), FACE_TICK_MS);
@@ -441,7 +477,6 @@ export function ExamCameraPip({
           return;
         }
         faceEngineRef.current = engine;
-        // Camera is live + engine ready → show green monitoring immediately
         setFaceStatus((prev) => (prev === "unavailable" || prev === "unclear" ? "ok" : prev));
         lastStateRef.current =
           lastStateRef.current === "unavailable" || lastStateRef.current === "unclear"
@@ -471,16 +506,12 @@ export function ExamCameraPip({
       e.preventDefault();
       const dx = e.clientX - d.startX;
       const dy = e.clientY - d.startY;
-      const edge = 2;
-      const el = document.querySelector("[data-exam-pip]") as HTMLElement | null;
+      const el = pipRef.current;
       const w = el?.offsetWidth || 132;
       const h = el?.offsetHeight || 160;
-      const maxL = Math.max(edge, window.innerWidth - w - edge);
-      const maxT = Math.max(edge, window.innerHeight - h - edge);
-      setPos({
-        left: Math.min(maxL, Math.max(edge, d.originLeft + dx)),
-        top: Math.min(maxT, Math.max(edge, d.originTop + dy)),
-      });
+      const next = clampPos(d.originLeft + dx, d.originTop + dy, w, h);
+      posRef.current = next;
+      setPos(next);
     };
 
     const onUp = (e: PointerEvent) => {
@@ -499,6 +530,25 @@ export function ExamCameraPip({
       document.removeEventListener("pointercancel", onUp);
     };
   }, [dragging]);
+
+  function startDrag(e: React.PointerEvent) {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    dragState.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originLeft: posRef.current.left,
+      originTop: posRef.current.top,
+    };
+    setDragging(true);
+  }
 
   if (!enabled) return null;
 
@@ -535,7 +585,6 @@ export function ExamCameraPip({
                   : "Camera active"
                 : "Face unclear";
 
-  // RED = multi (hard). AMBER = none / unclear / soft. GREEN = ok.
   const statusDot =
     effectiveConn === "active"
       ? displayFaceStatus === "ok"
@@ -549,33 +598,29 @@ export function ExamCameraPip({
 
   return (
     <div
+      ref={pipRef}
       data-exam-pip
       className={cn(
         "fixed z-[80] w-[132px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[150px]",
-        dragging && "cursor-grabbing",
+        dragging ? "cursor-grabbing" : "cursor-grab",
       )}
-      style={{ left: pos.left, top: pos.top }}
+      style={{
+        left: pos.left,
+        top: pos.top,
+        touchAction: "none",
+        userSelect: "none",
+      }}
+      onPointerDown={startDrag}
     >
       <div
-        className="flex cursor-grab items-center gap-1 bg-black/80 px-2 py-1 text-[10px] font-semibold text-white active:cursor-grabbing"
-        onPointerDown={(e) => {
-          if (e.button !== 0) return;
-          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-          dragState.current = {
-            pointerId: e.pointerId,
-            startX: e.clientX,
-            startY: e.clientY,
-            originLeft: pos.left,
-            originTop: pos.top,
-          };
-          setDragging(true);
-        }}
+        className="flex items-center gap-1 bg-black/80 px-2 py-1 text-[10px] font-semibold text-white"
+        style={{ touchAction: "none" }}
       >
         <span className={cn("h-1.5 w-1.5 rounded-full", statusDot)} />
         <GripHorizontal className="h-3 w-3 opacity-60" />
         <span className="truncate">Camera active</span>
       </div>
-      <div className="relative aspect-[3/4] bg-slate-900">
+      <div className="relative aspect-[3/4] bg-slate-900 pointer-events-none">
         <video
           ref={setVideoNode}
           className="h-full w-full object-cover"
