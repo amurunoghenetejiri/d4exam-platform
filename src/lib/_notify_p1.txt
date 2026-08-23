@@ -122,20 +122,3 @@ export async function notifyMany(payloads: NotifyPayload[]): Promise<void> {
   await Promise.all(payloads.map((p) => notifyUser(p)));
 }
 
-export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
-  const uniq = (ids: (string | null | undefined)[]) =>
-    [...new Set(ids.filter((x): x is string => Boolean(x)))];
-  try {
-    const { data: bySchool, error: e1 } = await supabase
-      .from("user_roles")
-      .select("user_id")
-      .eq("school_id", schoolId)
-      .eq("role", "examination_officer");
-    if (!e1) {
-      const ids = uniq((bySchool ?? []).map((r) => (r as { user_id: string }).user_id));
-      if (ids.length) {
-        const resolved = await resolveAuthUserIds(ids, schoolId);
-        if (resolved.length) return resolved;
-        return ids;
-      }
-    }
