@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
+import { createSign } from "node:crypto";
 
 function adminClient() {
   const url =
@@ -23,6 +24,109 @@ type PushInput = {
   message: string;
   link?: string | null;
 };
+
+type ServiceAccount = {
+  project_id?: string;
+  client_email?: string;
+  private_key?: string;
+};
+
+function parseServiceAccount(): ServiceAccount | null {
+  const raw =
+    process.env["FIREBASE_SERVICE_ACCOUNT_JSON"] ||
+    process.env["GOOGLE_SERVICE_ACCOUNT_JSON"] ||
+    "";
+  if (!raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as ServiceAccount;
+    if (parsed.client_email && parsed.private_key) return parsed;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function base64url(input: Buffer | string) {
+  const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
+  return buf.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+async function getFcmAccessToken(sa: ServiceAccount): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claim = base64url(
+    JSON.stringify({
+      iss: sa.client_email,
+      sub: sa.client_email,
+      aud: "https://oauth2.googleapis.com/token",
+      iat: now,
+      exp: now + 3600,
+      scope: "https://www.googleapis.com/auth/firebase.messaging",
+    }),
+  );
+  const unsigned = `${header}.${claim}`;
+  const signer = createSign("RSA-SHA256");
+  signer.update(unsigned);
+  signer.end();
+  const signature = base64url(signer.sign(sa.private_key!));
+  const jwt = `${unsigned}.${signature}`;
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`oauth token failed: ${text}`);
+  }
+  const json = (await res.json()) as { access_token?: string };
+  if (!json.access_token) throw new Error("oauth token missing");
+  return json.access_token;
+}
+
+async function sendFcmV1(
+  token: string,
+  title: string,
+  body: string,
+  link: string,
+  sa: ServiceAccount,
+  accessToken: string,
+) {
+  const projectId = sa.project_id || process.env["FIREBASE_PROJECT_ID"] || "d4exam-6506a";
+  const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message: {
+        token,
+        notification: { title, body },
+        data: {
+          title,
+          body,
+          message: body,
+          link: link || "/",
+        },
+        webpush: {
+          fcm_options: { link: link || "/" },
+          headers: { Urgency: "high" },
+        },
+      },
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    return { ok: false as const, error: text };
+  }
+  return { ok: true as const };
+}
 
 async function sendFcmLegacy(token: string, title: string, body: string, link: string, serverKey: string) {
   const res = await fetch("https://fcm.googleapis.com/fcm/send", {
@@ -79,9 +183,30 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
     const list = devices || [];
     if (!list.length) return { sent: 0, failed: 0, skipped: true as const, reason: "no devices" };
 
+    const sa = parseServiceAccount();
     const legacyKey = process.env["FCM_SERVER_KEY"] || process.env["FIREBASE_SERVER_KEY"] || "";
-    if (!legacyKey) {
-      return { sent: 0, failed: 0, skipped: true as const, reason: "no fcm credentials on server" };
+
+    if (!sa && !legacyKey) {
+      return {
+        sent: 0,
+        failed: 0,
+        skipped: true as const,
+        reason: "no fcm credentials on server (set FIREBASE_SERVICE_ACCOUNT_JSON)",
+      };
+    }
+
+    let accessToken: string | null = null;
+    if (sa) {
+      try {
+        accessToken = await getFcmAccessToken(sa);
+      } catch (e) {
+        return {
+          sent: 0,
+          failed: 0,
+          skipped: true as const,
+          reason: `oauth failed: ${(e as Error).message}`,
+        };
+      }
     }
 
     let sent = 0;
@@ -89,11 +214,15 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
     for (const d of list) {
       const token = (d as { token: string }).token;
       try {
-        const result = await sendFcmLegacy(token, data.title, data.message || "", data.link || "/", legacyKey);
+        const result =
+          sa && accessToken
+            ? await sendFcmV1(token, data.title, data.message || "", data.link || "/", sa, accessToken)
+            : await sendFcmLegacy(token, data.title, data.message || "", data.link || "/", legacyKey);
+
         if (result.ok) sent += 1;
         else {
           failed += 1;
-          if (result.error && /NotRegistered|InvalidRegistration/i.test(result.error)) {
+          if (result.error && /NotRegistered|InvalidRegistration|UNREGISTERED|INVALID_ARGUMENT/i.test(result.error)) {
             await sb.from("push_devices").update({ enabled: false } as never).eq("token", token);
           }
         }
