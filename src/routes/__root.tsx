@@ -16,12 +16,28 @@ import { ThemeColorSync } from "@/components/ThemeColorSync";
 import { useSessionUser } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
+import { applyNativeStatusBar, hideSplashSafely } from "@/native/statusBar";
 
 function NativeBootstrap() {
   const { data: session } = useSessionUser();
   useEffect(() => {
     if (!isNativeShell()) return;
-    void initNativePushIfNeeded(session?.userId, session?.role);
+    let cancelled = false;
+    (async () => {
+      try {
+        document.documentElement.classList.add("d4-native");
+        await applyNativeStatusBar();
+        await hideSplashSafely();
+        if (!cancelled) {
+          await initNativePushIfNeeded(session?.userId, session?.role);
+        }
+      } catch (e) {
+        console.warn("[D4EXAM] Native bootstrap error", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [session?.userId, session?.role]);
   return null;
 }
