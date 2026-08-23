@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { BrandLoader } from "@/components/brand/BrandLoader";
 
 export function PageHeader({
   title,
@@ -304,12 +305,23 @@ export function EmptyState({
   );
 }
 
-export function PageLoading({ label = "Loading…" }: { label?: string }) {
+/** Identity-aware page loader (D4EXAM or school logo). Replaces generic spinner. */
+export function PageLoading({
+  label,
+  schoolId,
+  forcePlatform,
+}: {
+  label?: string;
+  schoolId?: string | null;
+  forcePlatform?: boolean;
+}) {
   return (
-    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-      <p className="text-sm text-slate-500">{label}</p>
-    </div>
+    <BrandLoader
+      variant="full"
+      label={label}
+      schoolId={schoolId}
+      forcePlatform={forcePlatform}
+    />
   );
 }
 
