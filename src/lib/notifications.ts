@@ -28,11 +28,6 @@ export type SendNotificationInput = {
   entityId?: string | null;
 };
 
-/**
- * Send an in-app notification.
- * Prefers SECURITY DEFINER RPC `insert_notification` so RLS never blocks delivery.
- * Falls back to direct insert if the RPC is missing.
- */
 export async function sendNotification(
   input: SendNotificationInput,
 ): Promise<{ id: string | null; error: string | null }> {
@@ -45,7 +40,6 @@ export async function sendNotification(
   const schoolId = input.schoolId ?? null;
   const link = input.link ?? null;
 
-  // 1) Preferred path: RPC
   try {
     const { data, error } = await supabase.rpc("insert_notification" as never, {
       _recipient: recipient,
@@ -55,22 +49,19 @@ export async function sendNotification(
       _school_id: schoolId,
       _link: link,
       _entity_type: input.entityType ?? null,
-      _entity_id: input.entityId ?? null,
+      _entity_id: input.entityId != null ? String(input.entityId) : null,
     } as never);
 
     if (!error && data) {
       return { id: String(data), error: null };
     }
-    // If function missing, fall through
     if (error && !/function|does not exist|42883/i.test(error.message)) {
-      // Real error from RPC
       console.warn("[notify] rpc", error.message);
     }
   } catch (e) {
     console.warn("[notify] rpc failed", e);
   }
 
-  // 2) Direct insert fallback
   const { data: row, error: insErr } = await supabase
     .from("notifications")
     .insert({
@@ -82,7 +73,7 @@ export async function sendNotification(
       link,
       action_url: link,
       entity_type: input.entityType ?? null,
-      entity_id: input.entityId ?? null,
+      entity_id: input.entityId != null ? String(input.entityId) : null,
     } as never)
     .select("id")
     .maybeSingle();
@@ -94,7 +85,6 @@ export async function sendNotification(
   return { id: (row as { id?: string } | null)?.id ?? null, error: null };
 }
 
-/** Notify many users (best-effort; continues on individual failures). */
 export async function sendNotifications(
   recipients: string[],
   payload: Omit<SendNotificationInput, "recipientUserId">,
@@ -110,7 +100,6 @@ export async function sendNotifications(
   return { sent, failed };
 }
 
-/** Resolve auth user ids for a role inside a school. */
 export async function userIdsForRoleInSchool(
   schoolId: string,
   role: "school_admin" | "examination_officer" | "teacher" | "student" | "super_admin",
