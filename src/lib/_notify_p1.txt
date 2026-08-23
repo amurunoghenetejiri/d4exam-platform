@@ -1,0 +1,125 @@
+/**
+ * D4EXAM notification helpers — DB-backed inserts with light dedupe.
+ * recipient_user_id MUST be auth.users id (auth.uid()), never profiles.id.
+ */
+import { supabase } from "@/integrations/supabase/client";
+
+export type NotifyType =
+  | "info"
+  | "success"
+  | "warning"
+  | "error"
+  | "exam_submitted"
+  | "exam_approved"
+  | "exam_rejected"
+  | "exam_revision_requested"
+  | "exam_scheduled"
+  | "exam_available"
+  | "result_published"
+  | "result_pending_release"
+  | "announcement"
+  | "system_alert"
+  | "officer_warning";
+
+export type NotifyPayload = {
+  recipientUserId: string;
+  schoolId?: string | null;
+  title: string;
+  message: string;
+  type?: NotifyType | string;
+  link?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  dedupeMinutes?: number;
+};
+
+/** Ensure ids are auth.users ids. Accepts auth ids or profile ids. */
+export async function resolveAuthUserIds(
+  ids: string[],
+  schoolId?: string | null,
+): Promise<string[]> {
+  const uniq = (xs: (string | null | undefined)[]) =>
+    [...new Set(xs.filter((x): x is string => Boolean(x)))];
+  const input = uniq(ids);
+  if (!input.length) return [];
+  try {
+    let q1 = supabase.from("profiles").select("auth_user_id").in("auth_user_id", input);
+    if (schoolId) q1 = q1.eq("school_id", schoolId);
+    const { data: byAuth } = await q1;
+    const matched = uniq((byAuth ?? []).map((p) => (p as { auth_user_id: string | null }).auth_user_id));
+    const missing = input.filter((id) => !matched.includes(id));
+    if (!missing.length) return matched.length ? matched : input;
+    let q2 = supabase.from("profiles").select("auth_user_id").in("id", missing);
+    if (schoolId) q2 = q2.eq("school_id", schoolId);
+    const { data: byProfile } = await q2;
+    const via = uniq((byProfile ?? []).map((p) => (p as { auth_user_id: string | null }).auth_user_id));
+    return uniq([...matched, ...via, ...input.filter((id) => matched.includes(id))]);
+  } catch {
+    return input;
+  }
+}
+
+export async function notifyUser(p: NotifyPayload): Promise<string | null> {
+  if (!p.recipientUserId) return null;
+  try {
+    const resolved = await resolveAuthUserIds([p.recipientUserId], p.schoolId);
+    const recipientUserId = resolved[0] || p.recipientUserId;
+    p = { ...p, recipientUserId };
+
+    if (p.dedupeMinutes && p.entityId) {
+      const since = new Date(Date.now() - p.dedupeMinutes * 60_000).toISOString();
+      let q = supabase
+        .from("notifications")
+        .select("id")
+        .eq("recipient_user_id", p.recipientUserId)
+        .eq("type", p.type || "info")
+        .gte("created_at", since)
+        .limit(1);
+      if (p.entityId) q = q.eq("entity_id" as never, p.entityId as never);
+      const { data: existing } = await q.maybeSingle();
+      if (existing?.id) return existing.id as string;
+    }
+
+    const { data: rpcId, error: rpcErr } = await supabase.rpc("insert_notification" as never, {
+      _recipient: p.recipientUserId,
+      _title: p.title,
+      _message: p.message,
+      _type: p.type || "info",
+      _school_id: p.schoolId ?? null,
+      _link: p.link ?? null,
+      _entity_type: p.entityType ?? null,
+      _entity_id: p.entityId ?? null,
+    } as never);
+
+    if (!rpcErr && rpcId) return String(rpcId);
+
+    const row: Record<string, unknown> = {
+      recipient_user_id: p.recipientUserId,
+      title: p.title,
+      message: p.message,
+      type: p.type || "info",
+    };
+    if (p.schoolId) row.school_id = p.schoolId;
+    if (p.link) {
+      row.link = p.link;
+      row.action_url = p.link;
+    }
+    if (p.entityType) row.entity_type = p.entityType;
+    if (p.entityId) row.entity_id = String(p.entityId);
+
+    const { data, error } = await supabase.from("notifications").insert(row as never).select("id").maybeSingle();
+    if (error) {
+      console.warn("[notify] insert failed", error.message);
+      return null;
+    }
+    return (data?.id as string) ?? null;
+  } catch (e) {
+    console.warn("[notify] error:", e);
+    return null;
+  }
+}
+
+export async function notifyMany(payloads: NotifyPayload[]): Promise<void> {
+  await Promise.all(payloads.map((p) => notifyUser(p)));
+}
+
