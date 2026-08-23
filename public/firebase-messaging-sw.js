@@ -15,7 +15,7 @@ firebase.initializeApp({
 
 var messaging = firebase.messaging();
 
-var SHELL_CACHE = "d4exam-shell-v4";
+var SHELL_CACHE = "d4exam-shell-v2";
 var SHELL_URLS = ["/", "/offline.html", "/icon-192.png", "/logo.png", "/favicon.png", "/site.webmanifest"];
 
 self.addEventListener("install", function (event) {
@@ -86,23 +86,35 @@ function showD4Notification(payload) {
   var icon = data.icon || absUrl("/icon-192.png");
   var badge = data.badge || absUrl("/icon-192.png");
 
-  // Same tag replaces any previous so one event cannot stack two cards
   return self.registration.showNotification(title, {
     body: body,
     icon: icon,
     badge: badge,
     data: { link: link, title: title },
     tag: data.tag || "d4exam-notification",
-    renotify: false,
+    renotify: true,
     requireInteraction: false,
     silent: false,
     vibrate: [120, 40, 120],
   });
 }
 
-// ONLY this handler. Do not also listen to raw "push" — that doubles every alert.
 messaging.onBackgroundMessage(function (payload) {
   return showD4Notification(payload);
+});
+
+self.addEventListener("push", function (event) {
+  // Backup path if FCM delivers a raw push event
+  try {
+    var raw = event.data ? event.data.json() : {};
+    event.waitUntil(showD4Notification(raw));
+  } catch (e) {
+    event.waitUntil(
+      showD4Notification({
+        data: { title: "D4EXAM", body: "You have a new update." },
+      }),
+    );
+  }
 });
 
 self.addEventListener("notificationclick", function (event) {
