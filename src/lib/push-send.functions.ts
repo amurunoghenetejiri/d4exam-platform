@@ -97,6 +97,10 @@ async function getFcmAccessToken(sa: ServiceAccount): Promise<string> {
   return json.access_token;
 }
 
+/**
+ * Data-only FCM so Chrome does NOT auto-render a "Chrome · site" notification.
+ * Our service worker shows the notification with the D4EXAM icon.
+ */
 async function sendFcmV1(
   token: string,
   title: string,
@@ -120,26 +124,23 @@ async function sendFcmV1(
     body: JSON.stringify({
       message: {
         token,
-        notification: {
-          title,
-          body,
-          image: icon,
-        },
         data: {
-          title,
-          body,
-          message: body,
-          link: absoluteLink,
+          title: String(title),
+          body: String(body),
+          message: String(body),
+          link: String(absoluteLink),
+          icon: String(icon),
+          badge: String(icon),
+          tag: "d4exam-notification",
         },
         webpush: {
-          notification: {
-            title,
-            body,
-            icon,
-            badge: icon,
+          headers: {
+            Urgency: "high",
+            TTL: "86400",
           },
-          fcm_options: { link: absoluteLink },
-          headers: { Urgency: "high" },
+          fcm_options: {
+            link: absoluteLink,
+          },
         },
       },
     }),
@@ -162,13 +163,17 @@ async function sendFcmLegacy(token: string, title: string, body: string, link: s
     },
     body: JSON.stringify({
       to: token,
-      notification: {
+      data: {
         title,
         body,
+        message: body,
+        link: link || "/",
         icon,
-        click_action: link || "/",
+        badge: icon,
+        tag: "d4exam-notification",
       },
-      data: { title, body, message: body, link: link || "/" },
+      priority: "high",
+      content_available: true,
     }),
   });
   if (!res.ok) {
