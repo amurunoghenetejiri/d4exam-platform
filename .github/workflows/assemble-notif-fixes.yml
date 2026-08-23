@@ -1,0 +1,37 @@
+name: assemble-notif-fixes
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - src/components/pages/_notif_page_p1.txt
+      - src/components/pages/_notif_page_p2.txt
+      - src/lib/_notify_p1.txt
+      - src/lib/_notify_p2.txt
+      - src/lib/notifications.ts
+      - .github/workflows/assemble-notif-fixes.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble
+        run: |
+          if [ -f src/components/pages/_notif_page_p1.txt ]; then
+            cat src/components/pages/_notif_page_p1.txt src/components/pages/_notif_page_p2.txt > src/components/pages/NotificationsPage.tsx
+          fi
+          if [ -f src/lib/_notify_p1.txt ]; then
+            cat src/lib/_notify_p1.txt src/lib/_notify_p2.txt > src/lib/notify.ts
+          fi
+          wc -c src/components/pages/NotificationsPage.tsx src/lib/notify.ts src/lib/notifications.ts || true
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/pages/NotificationsPage.tsx src/lib/notify.ts src/lib/notifications.ts || true
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(notifications): page scope + notify auth resolution for all roles"
+            git push
+          fi
