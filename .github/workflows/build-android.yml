@@ -59,29 +59,20 @@ jobs:
             exit 1
           fi
 
-          # Capacitor needs an index.html entry point
           if [ ! -f dist/index.html ]; then
             echo "==> Creating minimal index.html shell for Capacitor"
-            cat > dist/index.html << 'HTML'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-            <meta name="theme-color" content="#070D1B" />
-            <title>D4EXAM</title>
-            <style>
-              html, body { margin: 0; height: 100%; background: #070D1B; color: #fff;
-                font-family: system-ui, -apple-system, sans-serif; }
-              .wrap { display: flex; align-items: center; justify-content: center;
-                height: 100%; flex-direction: column; gap: 12px; }
-            </style>
-          </head>
-          <body>
-            <div class="wrap"><p>Loading D4EXAM…</p></div>
-          </body>
-          </html>
-          HTML
+            printf '%s\n' \
+              '<!DOCTYPE html>' \
+              '<html lang="en">' \
+              '<head>' \
+              '  <meta charset="UTF-8" />' \
+              '  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />' \
+              '  <meta name="theme-color" content="#070D1B" />' \
+              '  <title>D4EXAM</title>' \
+              '  <style>html,body{margin:0;height:100%;background:#070D1B;color:#fff;font-family:system-ui,sans-serif}.wrap{display:flex;align-items:center;justify-content:center;height:100%}</style>' \
+              '</head>' \
+              '<body><div class="wrap"><p>Loading D4EXAM…</p></div></body>' \
+              '</html>' > dist/index.html
           fi
 
           echo "==> dist/ contents:"
@@ -91,8 +82,6 @@ jobs:
       - name: Ensure complete Android platform
         run: |
           set -euo pipefail
-          # The committed android/ folder may be incomplete (missing gradlew, icons).
-          # Always regenerate a complete Capacitor Android project for a reliable CI build.
           echo "==> Regenerating complete android/ platform"
           rm -rf android
           npx cap add android
@@ -102,7 +91,6 @@ jobs:
           test -f android/gradlew || { echo "ERROR: android/gradlew missing"; exit 1; }
           test -f android/app/build.gradle || { echo "ERROR: android/app/build.gradle missing"; exit 1; }
 
-          # Ensure application identity
           grep -q 'com.d4exam.app' android/app/build.gradle \
             || { echo "ERROR: applicationId not com.d4exam.app"; exit 1; }
 
@@ -114,7 +102,6 @@ jobs:
           set -euo pipefail
           MANIFEST="android/app/src/main/AndroidManifest.xml"
 
-          # Ensure required permissions exist (idempotent)
           for perm in \
             android.permission.INTERNET \
             android.permission.ACCESS_NETWORK_STATE \
@@ -123,31 +110,27 @@ jobs:
           do
             if ! grep -q "$perm" "$MANIFEST"; then
               echo "==> Adding permission $perm"
-              # Insert before closing </manifest>
               sed -i "s|</manifest>|    <uses-permission android:name=\"$perm\" />\n</manifest>|" "$MANIFEST"
             fi
           done
 
-          # Camera features (optional hardware)
           if ! grep -q 'android.hardware.camera' "$MANIFEST"; then
             sed -i 's|</manifest>|    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <uses-feature android:name="android.hardware.camera.front" android:required="false" />\n</manifest>|' "$MANIFEST"
           fi
 
-          # Brand colors
           mkdir -p android/app/src/main/res/values
-          cat > android/app/src/main/res/values/colors.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="colorPrimary">#070D1B</color>
-              <color name="colorPrimaryDark">#070D1B</color>
-              <color name="colorAccent">#3B82F6</color>
-              <color name="ic_launcher_background">#070D1B</color>
-          </resources>
-          EOF
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="utf-8"?>' \
+            '<resources>' \
+            '    <color name="colorPrimary">#070D1B</color>' \
+            '    <color name="colorPrimaryDark">#070D1B</color>' \
+            '    <color name="colorAccent">#3B82F6</color>' \
+            '    <color name="ic_launcher_background">#070D1B</color>' \
+            '</resources>' > android/app/src/main/res/values/colors.xml
 
-          # Ensure app name is D4EXAM
           if [ -f android/app/src/main/res/values/strings.xml ]; then
-            sed -i 's|>.*</string>|>D4EXAM</string>|' android/app/src/main/res/values/strings.xml || true
+            sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
+            sed -i 's/<string name="title_activity_main">.*<\/string>/<string name="title_activity_main">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
           fi
 
           echo "==> Manifest permissions:"
@@ -175,11 +158,12 @@ jobs:
           set -euo pipefail
           yes | sdkmanager --licenses >/tmp/sdk-licenses.txt 2>&1 || true
           tail -20 /tmp/sdk-licenses.txt || true
-          # Install required packages for Capacitor 8 / AGP 8.x
           sdkmanager "platform-tools" "platforms;android-35" "platforms;android-36" "build-tools;35.0.0" || true
 
       - name: Build debug APK with Gradle
         working-directory: android
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
         run: |
           set -euo pipefail
           echo "==> Java version:"
@@ -210,7 +194,6 @@ jobs:
 
           SIZE=$(wc -c < "$APK")
           echo "==> Found APK: $APK ($SIZE bytes)"
-          # Copy to a stable path for upload
           mkdir -p artifacts
           cp "$APK" artifacts/D4EXAM-debug.apk
           echo "apk_path=artifacts/D4EXAM-debug.apk" >> "$GITHUB_OUTPUT"
