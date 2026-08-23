@@ -131,7 +131,7 @@ async function sendFcmV1(
           link: String(absoluteLink),
           icon: String(icon),
           badge: String(icon),
-          tag: "d4exam-notification",
+          tag: `d4exam-${Date.now()}`,
         },
         webpush: {
           headers: {
@@ -170,7 +170,7 @@ async function sendFcmLegacy(token: string, title: string, body: string, link: s
         link: link || "/",
         icon,
         badge: icon,
-        tag: "d4exam-notification",
+        tag: `d4exam-${Date.now()}`,
       },
       priority: "high",
       content_available: true,
@@ -296,16 +296,15 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
                 ? "/student/notifications"
                 : "/";
 
-    const welcomeTitle = "Welcome to D4EXAM";
-    const welcomeBody =
-      "Secure online exams for schools — create papers, run CBT, monitor integrity, and release results in one place.";
+    const testTitle = "D4EXAM Test Notification";
+    const testBody = "This is a D4EXAM heads-up notification test.";
 
     const sb = adminClient();
     if (sb) {
       await sb.from("notifications").insert({
         recipient_user_id: data.userId,
-        title: welcomeTitle,
-        message: welcomeBody,
+        title: testTitle,
+        message: testBody,
         type: "system_alert",
         link,
         action_url: link,
@@ -315,8 +314,8 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
     const push = await dispatchPushToUser({
       data: {
         recipientUserId: data.userId,
-        title: welcomeTitle,
-        message: welcomeBody,
+        title: testTitle,
+        message: testBody,
         link,
       },
     });
