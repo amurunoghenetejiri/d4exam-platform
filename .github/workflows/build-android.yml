@@ -119,14 +119,36 @@ jobs:
           fi
 
           mkdir -p android/app/src/main/res/values
+
+          # Theme colors only — do NOT define ic_launcher_background here.
+          # Capacitor already provides values/ic_launcher_background.xml;
+          # a second definition causes: Error: Duplicate resources
           printf '%s\n' \
             '<?xml version="1.0" encoding="utf-8"?>' \
             '<resources>' \
             '    <color name="colorPrimary">#070D1B</color>' \
             '    <color name="colorPrimaryDark">#070D1B</color>' \
             '    <color name="colorAccent">#3B82F6</color>' \
-            '    <color name="ic_launcher_background">#070D1B</color>' \
             '</resources>' > android/app/src/main/res/values/colors.xml
+
+          # Brand the launcher background color that Capacitor already owns
+          if [ -f android/app/src/main/res/values/ic_launcher_background.xml ]; then
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="utf-8"?>' \
+              '<resources>' \
+              '    <color name="ic_launcher_background">#070D1B</color>' \
+              '</resources>' > android/app/src/main/res/values/ic_launcher_background.xml
+          fi
+
+          # Safety: if any other file also defines ic_launcher_background, keep only the dedicated file
+          if grep -Rql 'name="ic_launcher_background"' android/app/src/main/res/values/ 2>/dev/null; then
+            COUNT=$(grep -Rh 'name="ic_launcher_background"' android/app/src/main/res/values/ | wc -l)
+            echo "==> ic_launcher_background definitions found: $COUNT"
+            if [ "$COUNT" -gt 1 ]; then
+              echo "==> Removing duplicate ic_launcher_background from colors.xml if present"
+              sed -i '/ic_launcher_background/d' android/app/src/main/res/values/colors.xml || true
+            fi
+          fi
 
           if [ -f android/app/src/main/res/values/strings.xml ]; then
             sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
@@ -135,6 +157,9 @@ jobs:
 
           echo "==> Manifest permissions:"
           grep 'uses-permission\|uses-feature' "$MANIFEST" || true
+          echo "==> Color resources:"
+          ls -la android/app/src/main/res/values/
+          grep -n 'ic_launcher_background\|colorPrimary' android/app/src/main/res/values/*.xml || true
 
       - name: Capacitor sync
         run: |
