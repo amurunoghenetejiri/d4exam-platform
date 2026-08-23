@@ -72,6 +72,15 @@ function friendlyLoginError(raw: unknown): string {
   if (!msg) return "Unable to sign in. Please try again.";
   const lower = msg.toLowerCase();
   if (
+    lower.includes("failed to fetch") ||
+    lower.includes("networkerror") ||
+    lower.includes("network request failed") ||
+    lower.includes("timed out") ||
+    lower.includes("timeout")
+  ) {
+    return "Unable to connect to D4EXAM. Check your internet and try again.";
+  }
+  if (
     lower.includes("<!doctype") ||
     lower.includes("<html") ||
     lower.includes("this page didn't load") ||
@@ -105,10 +114,11 @@ function LoginPage() {
   const inFlight = useRef(false);
 
   async function goHomeAfterSession() {
-    let user = await fetchSessionUser();
-    for (let i = 0; i < 5 && !user?.role; i++) {
-      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
-      user = await fetchSessionUser();
+    const deadline = Date.now() + 12_000;
+    let user = await fetchSessionUser().catch(() => null);
+    for (let i = 0; i < 4 && !user?.role && Date.now() < deadline; i++) {
+      await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+      user = await fetchSessionUser().catch(() => null);
     }
     if (user?.role && user.role in roleHome) {
       navigate({ to: roleHome[user.role] as never });
@@ -150,6 +160,12 @@ function LoginPage() {
     inFlight.current = true;
     setLoading(true);
     let lastServerMsg = "";
+    const loginTimeout = window.setTimeout(() => {
+      if (!inFlight.current) return;
+      setLoading(false);
+      inFlight.current = false;
+      setError("Login is taking longer than expected. Check your connection and try again.");
+    }, 25_000);
     try {
       const schoolCode = code.trim().toUpperCase();
       const ident = identifier.trim();
@@ -241,7 +257,8 @@ function LoginPage() {
       const msg = friendlyLoginError(lastServerMsg || "Invalid login credentials.");
       setError(
         msg +
-          (msg.toLowerCase().includes("unable to sign in right now")
+          (msg.toLowerCase().includes("unable to sign in right now") ||
+          msg.toLowerCase().includes("unable to connect")
             ? ""
             : " Check school code, email/matric/staff ID, and password. Students: password is usually your matric number."),
       );
@@ -249,6 +266,7 @@ function LoginPage() {
       console.error("[login] sign-in failed:", err);
       setError(friendlyLoginError(err));
     } finally {
+      window.clearTimeout(loginTimeout);
       setLoading(false);
       inFlight.current = false;
     }
@@ -302,7 +320,7 @@ function LoginPage() {
                   id="school-code"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  placeholder="Leave blank for super admin"
+                  placeholder="e.g. ABC123"
                   className="h-11"
                   autoComplete="organization"
                 />
