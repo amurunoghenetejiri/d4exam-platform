@@ -90,17 +90,21 @@ jobs:
             sed -i 's|</manifest>|    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <uses-feature android:name="android.hardware.camera.front" android:required="false" />\n    <uses-feature android:name="android.hardware.microphone" android:required="false" />\n</manifest>|' "$MANIFEST"
           fi
           mkdir -p android/app/src/main/res/values
-          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' '    <color name="colorPrimary">#0b1b3a</color>' '    <color name="colorPrimaryDark">#0b1b3a</color>' '    <color name="colorAccent">#3B82F6</color>' '</resources>' > android/app/src/main/res/values/colors.xml
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' '    <color name="colorPrimary">#0b1b3a</color>' '    <color name="colorPrimaryDark">#0b1b3a</color>' '    <color name="colorAccent">#3B82F6</color>' '    <color name="splash_background">#0b1b3a</color>' '</resources>' > android/app/src/main/res/values/colors.xml
           if [ -f android/app/src/main/res/values/ic_launcher_background.xml ]; then
             printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' '    <color name="ic_launcher_background">#0b1b3a</color>' '</resources>' > android/app/src/main/res/values/ic_launcher_background.xml
           fi
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
           sed -i 's/<string name="title_activity_main">.*<\/string>/<string name="title_activity_main">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
-          sed -i 's/versionCode [0-9]*/versionCode 4/' android/app/build.gradle || true
-          sed -i 's/versionName "[^"]*"/versionName "1.3.0"/' android/app/build.gradle || true
+          sed -i 's/versionCode [0-9]*/versionCode 5/' android/app/build.gradle || true
+          sed -i 's/versionName "[^"]*"/versionName "1.3.1"/' android/app/build.gradle || true
+          # Theme / window background = navy (no gray/white flash)
+          if [ -f android/app/src/main/res/values/styles.xml ]; then
+            sed -i 's/android:windowBackground">@[^<]*/android:windowBackground">@color\/splash_background/' android/app/src/main/res/values/styles.xml || true
+          fi
           grep -E 'versionCode|versionName|applicationId' android/app/build.gradle || true
 
-      - name: Generate D4EXAM launcher icons from official logo
+      - name: Generate D4EXAM launcher icons + splash from official logo
         run: |
           set -euo pipefail
           sudo apt-get update -qq
@@ -115,13 +119,37 @@ jobs:
             size=${density_size##*:}
             dir="android/app/src/main/res/mipmap-${density}"
             mkdir -p "$dir"
+            # Legacy icons: logo on D4EXAM navy (no white square)
             convert "$SRC" -resize "${size}x${size}" -background "#0b1b3a" -gravity center -extent "${size}x${size}" "$dir/ic_launcher.png"
             convert "$SRC" -resize "${size}x${size}" -background "#0b1b3a" -gravity center -extent "${size}x${size}" "$dir/ic_launcher_round.png"
+            # Adaptive foreground: transparent pad around logo
             fsize=$((size * 2))
-            convert "$SRC" -resize "${size}x${size}" -background none -gravity center -extent "${fsize}x${fsize}" "$dir/ic_launcher_foreground.png" 2>/dev/null || convert "$SRC" -resize "${size}x${size}" "$dir/ic_launcher_foreground.png"
+            safe=$((fsize * 66 / 100))
+            convert "$SRC" -resize "${safe}x${safe}" -background none -gravity center -extent "${fsize}x${fsize}" "$dir/ic_launcher_foreground.png" 2>/dev/null \
+              || convert "$SRC" -resize "${size}x${size}" -background none -gravity center -extent "${fsize}x${fsize}" "$dir/ic_launcher_foreground.png"
           done
           mkdir -p android/app/src/main/res/drawable
           convert "$SRC" -resize 96x96 -colorspace Gray -threshold 40% -negate -transparent white android/app/src/main/res/drawable/ic_stat_d4exam.png 2>/dev/null || convert "$SRC" -resize 96x96 android/app/src/main/res/drawable/ic_stat_d4exam.png
+          # Splash: full navy canvas + centered logo (no white box, no Capacitor default)
+          convert -size 1080x1920 xc:"#0b1b3a" \
+            \( "$SRC" -resize 420x420 \) -gravity center -compose over -composite \
+            android/app/src/main/res/drawable/splash.png
+          convert -size 1080x1920 xc:"#0b1b3a" \
+            \( "$SRC" -resize 420x420 \) -gravity center -compose over -composite \
+            android/app/src/main/res/drawable/splash_dark.png 2>/dev/null || true
+          # Point splash drawable XML at our branded image if present
+          for splash_xml in android/app/src/main/res/drawable/splash.xml android/app/src/main/res/drawable/splash_dark.xml; do
+            if [ -f "$splash_xml" ] || true; then
+              printf '%s\n' \
+                '<?xml version="1.0" encoding="utf-8"?>' \
+                '<layer-list xmlns:android="http://schemas.android.com/apk/res/android">' \
+                '    <item android:drawable="@color/splash_background"/>' \
+                '    <item>' \
+                '        <bitmap android:gravity="center" android:src="@drawable/splash"/>' \
+                '    </item>' \
+                '</layer-list>' > "$splash_xml"
+            fi
+          done
           mkdir -p android/app/src/main/res/mipmap-anydpi-v26
           printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">' '    <background android:drawable="@color/ic_launcher_background"/>' '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>' '</adaptive-icon>' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           cp android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
@@ -192,6 +220,6 @@ jobs:
         run: |
           echo "### D4EXAM Android Debug APK" >> "$GITHUB_STEP_SUMMARY"
           echo "- **App ID:** com.d4exam.app" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Version:** 1.3.0 (versionCode 4)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version:** 1.3.1 (versionCode 5)" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Artifact:** D4EXAM-Android-APK" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Icon:** from public D4EXAM logo" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Icon + splash:** D4EXAM logo on navy #0b1b3a" >> "$GITHUB_STEP_SUMMARY"
