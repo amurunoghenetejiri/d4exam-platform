@@ -8,6 +8,10 @@ on:
       - "android/**"
       - "capacitor.config.ts"
       - "package.json"
+      - "public/logo.png"
+      - "public/icon-512.png"
+      - "src/lib/push.ts"
+      - "src/native/**"
       - ".github/workflows/build-android.yml"
 
 concurrency:
@@ -32,17 +36,13 @@ jobs:
       - name: Install npm dependencies
         run: |
           set -euo pipefail
-          echo "==> Installing dependencies with npm"
           npm install --no-fund --no-audit
-          echo "==> Capacitor packages:"
-          npm ls @capacitor/core @capacitor/cli @capacitor/android --depth=0 || true
+          npm ls @capacitor/core @capacitor/cli @capacitor/android @capacitor/push-notifications @capacitor/camera --depth=0 || true
 
       - name: Build web application
         run: |
           set -euo pipefail
-          echo "==> Building TanStack Start / Vite app"
           npm run build
-          echo "==> Build output:"
           ls -la .output/public 2>/dev/null || ls -la .output 2>/dev/null || true
 
       - name: Prepare Capacitor dist/ from .output/public
@@ -50,124 +50,98 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           if [ -d .output/public ]; then
-            echo "==> Copying .output/public → dist"
             cp -a .output/public/. dist/
-          elif [ -d dist ] && [ "$(ls -A dist 2>/dev/null)" ]; then
-            echo "==> dist/ already has content"
           else
-            echo "ERROR: No web build output found (.output/public missing)"
-            exit 1
+            echo "ERROR: .output/public missing"; exit 1
           fi
-
           if [ ! -f dist/index.html ]; then
-            echo "==> Creating minimal index.html shell for Capacitor"
-            printf '%s\n' \
-              '<!DOCTYPE html>' \
-              '<html lang="en">' \
-              '<head>' \
-              '  <meta charset="UTF-8" />' \
-              '  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />' \
-              '  <meta name="theme-color" content="#070D1B" />' \
-              '  <title>D4EXAM</title>' \
-              '  <style>html,body{margin:0;height:100%;background:#070D1B;color:#fff;font-family:system-ui,sans-serif}.wrap{display:flex;align-items:center;justify-content:center;height:100%}</style>' \
-              '</head>' \
-              '<body><div class="wrap"><p>Loading D4EXAM…</p></div></body>' \
-              '</html>' > dist/index.html
+            printf '%s\n' '<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>D4EXAM</title></head><body style="background:#070D1B;color:#fff">Loading D4EXAM…</body></html>' > dist/index.html
           fi
-
-          echo "==> dist/ contents:"
-          ls -la dist/ | head -30
-          test -f dist/index.html || { echo "ERROR: dist/index.html missing"; exit 1; }
+          test -f dist/index.html
 
       - name: Ensure complete Android platform
         run: |
           set -euo pipefail
-          echo "==> Regenerating complete android/ platform"
           rm -rf android
           npx cap add android
-
-          echo "==> Verifying android project"
-          test -d android || { echo "ERROR: android/ missing after cap add"; exit 1; }
-          test -f android/gradlew || { echo "ERROR: android/gradlew missing"; exit 1; }
-          test -f android/app/build.gradle || { echo "ERROR: android/app/build.gradle missing"; exit 1; }
-
-          grep -q 'com.d4exam.app' android/app/build.gradle \
-            || { echo "ERROR: applicationId not com.d4exam.app"; exit 1; }
-
+          test -f android/gradlew
+          grep -q 'com.d4exam.app' android/app/build.gradle
           chmod +x android/gradlew
-          echo "==> android/ ready"
 
-      - name: Apply D4EXAM Android permissions and branding
+      - name: Apply D4EXAM permissions, version, branding
         run: |
           set -euo pipefail
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-
           for perm in \
             android.permission.INTERNET \
             android.permission.ACCESS_NETWORK_STATE \
             android.permission.CAMERA \
-            android.permission.POST_NOTIFICATIONS
+            android.permission.RECORD_AUDIO \
+            android.permission.POST_NOTIFICATIONS \
+            android.permission.VIBRATE \
+            android.permission.RECEIVE_BOOT_COMPLETED
           do
             if ! grep -q "$perm" "$MANIFEST"; then
-              echo "==> Adding permission $perm"
               sed -i "s|</manifest>|    <uses-permission android:name=\"$perm\" />\n</manifest>|" "$MANIFEST"
             fi
           done
-
           if ! grep -q 'android.hardware.camera' "$MANIFEST"; then
-            sed -i 's|</manifest>|    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <uses-feature android:name="android.hardware.camera.front" android:required="false" />\n</manifest>|' "$MANIFEST"
+            sed -i 's|</manifest>|    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <uses-feature android:name="android.hardware.camera.front" android:required="false" />\n    <uses-feature android:name="android.hardware.microphone" android:required="false" />\n</manifest>|' "$MANIFEST"
           fi
-
           mkdir -p android/app/src/main/res/values
-
-          # Theme colors only — do NOT define ic_launcher_background here.
-          # Capacitor already provides values/ic_launcher_background.xml;
-          # a second definition causes: Error: Duplicate resources
-          printf '%s\n' \
-            '<?xml version="1.0" encoding="utf-8"?>' \
-            '<resources>' \
-            '    <color name="colorPrimary">#070D1B</color>' \
-            '    <color name="colorPrimaryDark">#070D1B</color>' \
-            '    <color name="colorAccent">#3B82F6</color>' \
-            '</resources>' > android/app/src/main/res/values/colors.xml
-
-          # Brand the launcher background color that Capacitor already owns
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' '    <color name="colorPrimary">#070D1B</color>' '    <color name="colorPrimaryDark">#070D1B</color>' '    <color name="colorAccent">#3B82F6</color>' '</resources>' > android/app/src/main/res/values/colors.xml
           if [ -f android/app/src/main/res/values/ic_launcher_background.xml ]; then
-            printf '%s\n' \
-              '<?xml version="1.0" encoding="utf-8"?>' \
-              '<resources>' \
-              '    <color name="ic_launcher_background">#070D1B</color>' \
-              '</resources>' > android/app/src/main/res/values/ic_launcher_background.xml
+            printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' '    <color name="ic_launcher_background">#070D1B</color>' '</resources>' > android/app/src/main/res/values/ic_launcher_background.xml
           fi
+          sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
+          sed -i 's/<string name="title_activity_main">.*<\/string>/<string name="title_activity_main">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
+          sed -i 's/versionCode [0-9]*/versionCode 3/' android/app/build.gradle || true
+          sed -i 's/versionName "[^"]*"/versionName "1.2.0"/' android/app/build.gradle || true
+          grep -E 'versionCode|versionName|applicationId' android/app/build.gradle || true
 
-          # Safety: if any other file also defines ic_launcher_background, keep only the dedicated file
-          if grep -Rql 'name="ic_launcher_background"' android/app/src/main/res/values/ 2>/dev/null; then
-            COUNT=$(grep -Rh 'name="ic_launcher_background"' android/app/src/main/res/values/ | wc -l)
-            echo "==> ic_launcher_background definitions found: $COUNT"
-            if [ "$COUNT" -gt 1 ]; then
-              echo "==> Removing duplicate ic_launcher_background from colors.xml if present"
-              sed -i '/ic_launcher_background/d' android/app/src/main/res/values/colors.xml || true
-            fi
+      - name: Generate D4EXAM launcher icons from official logo
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq imagemagick
+          SRC=""
+          if [ -f public/icon-512.png ]; then SRC=public/icon-512.png
+          elif [ -f public/logo.png ]; then SRC=public/logo.png
+          else echo "WARNING: no logo"; exit 0; fi
+          echo "Using $SRC"
+          for density_size in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            density=${density_size%%:*}
+            size=${density_size##*:}
+            dir="android/app/src/main/res/mipmap-${density}"
+            mkdir -p "$dir"
+            convert "$SRC" -resize "${size}x${size}" -background "#070D1B" -gravity center -extent "${size}x${size}" "$dir/ic_launcher.png"
+            convert "$SRC" -resize "${size}x${size}" -background "#070D1B" -gravity center -extent "${size}x${size}" "$dir/ic_launcher_round.png"
+            fsize=$((size * 2))
+            convert "$SRC" -resize "${size}x${size}" -background none -gravity center -extent "${fsize}x${fsize}" "$dir/ic_launcher_foreground.png" 2>/dev/null || convert "$SRC" -resize "${size}x${size}" "$dir/ic_launcher_foreground.png"
+          done
+          mkdir -p android/app/src/main/res/drawable
+          convert "$SRC" -resize 96x96 -colorspace Gray -threshold 40% -negate -transparent white android/app/src/main/res/drawable/ic_stat_d4exam.png 2>/dev/null || convert "$SRC" -resize 96x96 android/app/src/main/res/drawable/ic_stat_d4exam.png
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">' '    <background android:drawable="@color/ic_launcher_background"/>' '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>' '</adaptive-icon>' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          cp android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+          ls android/app/src/main/res/mipmap-xxxhdpi/ || true
+
+      - name: Optional google-services.json from secret
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
+            printf '%s\n' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "google-services.json written"
+          else
+            echo "No FIREBASE_GOOGLE_SERVICES_JSON secret — add from Firebase Console for full native FCM"
           fi
-
-          if [ -f android/app/src/main/res/values/strings.xml ]; then
-            sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
-            sed -i 's/<string name="title_activity_main">.*<\/string>/<string name="title_activity_main">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
-          fi
-
-          echo "==> Manifest permissions:"
-          grep 'uses-permission\|uses-feature' "$MANIFEST" || true
-          echo "==> Color resources:"
-          ls -la android/app/src/main/res/values/
-          grep -n 'ic_launcher_background\|colorPrimary' android/app/src/main/res/values/*.xml || true
 
       - name: Capacitor sync
         run: |
           set -euo pipefail
-          echo "==> npx cap sync android"
           npx cap sync android
-          echo "==> Sync complete"
-          ls android/app/src/main/assets/public/ | head -20 || true
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
@@ -182,46 +156,28 @@ jobs:
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/tmp/sdk-licenses.txt 2>&1 || true
-          tail -20 /tmp/sdk-licenses.txt || true
           sdkmanager "platform-tools" "platforms;android-35" "platforms;android-36" "build-tools;35.0.0" || true
 
       - name: Build debug APK with Gradle
         working-directory: android
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME }}
         run: |
           set -euo pipefail
-          echo "==> Java version:"
           java -version
-          echo "==> Running ./gradlew assembleDebug"
           ./gradlew assembleDebug --stacktrace --no-daemon
-          echo "==> Gradle build finished"
 
       - name: Locate APK
         id: find_apk
         run: |
           set -euo pipefail
-          echo "==> Searching for APK"
-          find android -name "*.apk" -type f 2>/dev/null || true
-
           APK=""
           if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
             APK="android/app/build/outputs/apk/debug/app-debug.apk"
           else
             APK=$(find android -name "*-debug.apk" -type f | head -1 || true)
           fi
-
-          if [ -z "$APK" ] || [ ! -f "$APK" ]; then
-            echo "ERROR: Debug APK not found after Gradle build"
-            find android -type f -name "*.apk" 2>/dev/null || true
-            exit 1
-          fi
-
-          SIZE=$(wc -c < "$APK")
-          echo "==> Found APK: $APK ($SIZE bytes)"
+          test -n "$APK" && test -f "$APK"
           mkdir -p artifacts
           cp "$APK" artifacts/D4EXAM-debug.apk
-          echo "apk_path=artifacts/D4EXAM-debug.apk" >> "$GITHUB_OUTPUT"
           ls -la artifacts/
 
       - name: Upload D4EXAM Android APK artifact
@@ -235,11 +191,7 @@ jobs:
       - name: Summary
         run: |
           echo "### D4EXAM Android Debug APK" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- **App ID:** com.d4exam.app" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **App name:** D4EXAM" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Build type:** debug (no keystore required)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version:** 1.2.0 (versionCode 3)" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Artifact:** D4EXAM-Android-APK" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Download the artifact from this workflow run, then install on your Android phone." >> "$GITHUB_STEP_SUMMARY"
-          echo "You may need to allow installing apps from unknown sources." >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Icon:** from public D4EXAM logo" >> "$GITHUB_STEP_SUMMARY"
