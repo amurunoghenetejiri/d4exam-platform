@@ -30,3 +30,19 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Capacitor / Android
+android/.gradle/
+android/app/build/
+android/build/
+android/.idea/
+android/local.properties
+android/captures/
+android/*.iml
+android/app/*.iml
+*.apk
+*.aab
+.DS_Store
+
+# Capacitor web copy (generated)
+# Keep android/ in git so the project is complete for Android Studio
