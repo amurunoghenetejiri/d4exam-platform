@@ -17,10 +17,15 @@ import { useEffect, useRef, useState } from "react";
 import { useSessionUser, signOut } from "@/lib/session";
 import {
   DEFAULT_NOTIFICATION_PREFS,
+  DEFAULT_DISPLAY_PREFS,
   loadNotificationPrefs,
-  saveNotificationPrefs,
+  loadDisplayPrefs,
+  hydratePrefsFromDb,
+  persistPrefsToDb,
   type NotificationPrefs,
+  type DisplayPrefs,
 } from "@/lib/notification-prefs";
+import { supabase } from "@/integrations/supabase/client";
 import {
   updateSchoolLogoUrl,
   updateSchoolName,
@@ -34,9 +39,12 @@ import { Loader2, Upload, Building2 } from "lucide-react";
 export function SettingsPage({ scope }: { scope: string }) {
   const { data: session } = useSessionUser();
   const [saving, setSaving] = useState(false);
+  const [pwdBusy, setPwdBusy] = useState(false);
   const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({ ...DEFAULT_NOTIFICATION_PREFS });
-  const [compactTables, setCompactTables] = useState(false);
-  const [reducedMotion, setReducedMotion] = useState(false);
+  const [displayPrefs, setDisplayPrefs] = useState<DisplayPrefs>({ ...DEFAULT_DISPLAY_PREFS });
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const scopeLower = (scope || "").toLowerCase();
   const isSchoolAdmin =
     scopeLower.includes("school admin") ||
@@ -46,27 +54,77 @@ export function SettingsPage({ scope }: { scope: string }) {
   useEffect(() => {
     if (!session?.userId) return;
     setNotifPrefs(loadNotificationPrefs(session.userId));
-    try {
-      setCompactTables(localStorage.getItem(`d4exam_pref_compact:${session.userId}`) === "1");
-      setReducedMotion(localStorage.getItem(`d4exam_pref_reduced:${session.userId}`) === "1");
-    } catch { /* ignore */ }
-  }, [session?.userId]);
+    setDisplayPrefs(loadDisplayPrefs(session.userId));
+    void hydratePrefsFromDb(session.userId, session.profileId).then(({ notif, display }) => {
+      setNotifPrefs(notif);
+      setDisplayPrefs(display);
+    });
+  }, [session?.userId, session?.profileId]);
 
-  function savePrefs() {
+  async function savePrefs() {
+    if (!session?.userId) {
+      toast.error("Sign in required.");
+      return;
+    }
     setSaving(true);
     try {
-      if (session?.userId) {
-        saveNotificationPrefs(session.userId, notifPrefs);
-        try {
-          localStorage.setItem(`d4exam_pref_compact:${session.userId}`, compactTables ? "1" : "0");
-          localStorage.setItem(`d4exam_pref_reduced:${session.userId}`, reducedMotion ? "1" : "0");
-        } catch { /* ignore */ }
-      }
-      toast.success("Notification and display preferences saved.");
-    } catch {
-      toast.error("Could not save preferences on this device.");
+      await persistPrefsToDb(session.userId, session.profileId, notifPrefs, displayPrefs);
+      toast.success("Settings saved.");
+    } catch (e) {
+      toast.error((e as Error).message || "Could not save settings.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function changePassword() {
+    if (!session?.userId) {
+      toast.error("Sign in required.");
+      return;
+    }
+    const cur = currentPassword;
+    const next = newPassword;
+    const conf = confirmPassword;
+    if (!cur || !next || !conf) {
+      toast.error("Fill in current password, new password, and confirmation.");
+      return;
+    }
+    if (next.length < 8) {
+      toast.error("New password must be at least 8 characters.");
+      return;
+    }
+    if (next !== conf) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+    if (next === cur) {
+      toast.error("New password must be different from the current password.");
+      return;
+    }
+    setPwdBusy(true);
+    try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData.user?.email) {
+        throw new Error(userErr?.message || "Could not load your account.");
+      }
+      const email = userData.user.email;
+      const { error: verifyErr } = await supabase.auth.signInWithPassword({
+        email,
+        password: cur,
+      });
+      if (verifyErr) {
+        throw new Error("Current password is incorrect.");
+      }
+      const { error: updErr } = await supabase.auth.updateUser({ password: next });
+      if (updErr) throw new Error(updErr.message || "Could not update password.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      toast.success("Password updated. Use your new password next time you sign in.");
+    } catch (e) {
+      toast.error((e as Error).message || "Password change failed.");
+    } finally {
+      setPwdBusy(false);
     }
   }
 
@@ -84,7 +142,10 @@ export function SettingsPage({ scope }: { scope: string }) {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="lang">Language</Label>
-              <Select defaultValue="en">
+              <Select
+                value={displayPrefs.language}
+                onValueChange={(v) => setDisplayPrefs((p) => ({ ...p, language: v }))}
+              >
                 <SelectTrigger id="lang">
                   <SelectValue />
                 </SelectTrigger>
@@ -97,7 +158,10 @@ export function SettingsPage({ scope }: { scope: string }) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="tz">Time zone</Label>
-              <Select defaultValue="wat">
+              <Select
+                value={displayPrefs.timezone}
+                onValueChange={(v) => setDisplayPrefs((p) => ({ ...p, timezone: v }))}
+              >
                 <SelectTrigger id="tz">
                   <SelectValue />
                 </SelectTrigger>
@@ -109,8 +173,24 @@ export function SettingsPage({ scope }: { scope: string }) {
               </Select>
             </div>
             <Separator />
-            <ToggleRow id="compact" label="Compact tables" hint="Reduce row height on data tables" checked={compactTables} onCheckedChange={setCompactTables} />
-            <ToggleRow id="reduced" label="Reduced motion" hint="Minimise interface animation" checked={reducedMotion} onCheckedChange={setReducedMotion} />
+            <ToggleRow
+              id="compact"
+              label="Compact tables"
+              hint="Reduce row height on data tables"
+              checked={displayPrefs.compactTables}
+              onCheckedChange={(v) => setDisplayPrefs((p) => ({ ...p, compactTables: v }))}
+            />
+            <ToggleRow
+              id="reduced"
+              label="Reduced motion"
+              hint="Minimise interface animation"
+              checked={displayPrefs.reducedMotion}
+              onCheckedChange={(v) => setDisplayPrefs((p) => ({ ...p, reducedMotion: v }))}
+            />
+            <Button disabled={saving} onClick={() => void savePrefs()}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save preferences
+            </Button>
           </div>
         </SectionCard>
 
@@ -120,6 +200,10 @@ export function SettingsPage({ scope }: { scope: string }) {
             <ToggleRow id="n2" label="Result publications" checked={notifPrefs.resultPublications} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, resultPublications: v }))} />
             <ToggleRow id="n3" label="Integrity alerts" checked={notifPrefs.integrityAlerts} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, integrityAlerts: v }))} />
             <ToggleRow id="n4" label="Product announcements" checked={notifPrefs.productAnnouncements} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, productAnnouncements: v }))} />
+            <Button disabled={saving} onClick={() => void savePrefs()}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save notification settings
+            </Button>
           </div>
         </SectionCard>
 
@@ -127,21 +211,56 @@ export function SettingsPage({ scope }: { scope: string }) {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="cur">Current password</Label>
-              <Input id="cur" type="password" autoComplete="current-password" placeholder="••••••••" />
+              <Input
+                id="cur"
+                type="password"
+                autoComplete="current-password"
+                placeholder="••••••••"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="new">New password</Label>
-              <Input id="new" type="password" autoComplete="new-password" placeholder="At least 8 characters" />
+              <Input
+                id="new"
+                type="password"
+                autoComplete="new-password"
+                placeholder="At least 8 characters"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
             </div>
-            <ToggleRow id="2fa" label="Two-factor authentication" hint="Email one-time code" />
-            <Button disabled={saving} onClick={() => savePrefs()}>
-              {saving ? "Saving…" : "Save preferences"}
+            <div className="space-y-2">
+              <Label htmlFor="confirm">Confirm new password</Label>
+              <Input
+                id="confirm"
+                type="password"
+                autoComplete="new-password"
+                placeholder="Repeat new password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+              {confirmPassword && newPassword !== confirmPassword ? (
+                <p className="text-xs font-medium text-red-600">Passwords do not match.</p>
+              ) : null}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Two-factor authentication is not enabled on this portal yet.
+            </p>
+            <Button
+              disabled={pwdBusy || !currentPassword || !newPassword || newPassword !== confirmPassword}
+              onClick={() => void changePassword()}
+            >
+              {pwdBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Update password
             </Button>
           </div>
         </SectionCard>
 
         <SectionCard title="Session" description="Device and access information">
           <InfoRow label="Account scope" value={scope} />
+          <InfoRow label="Signed-in email" value={session?.email || "—"} />
           <div className="pt-4">
             <Button variant="outline" onClick={() => void signOut()}>
               Sign out
@@ -276,7 +395,6 @@ function SchoolIdentityCard() {
       className="lg:col-span-2"
     >
       <div className="space-y-6">
-        {/* Name */}
         <div className="space-y-2">
           <Label htmlFor="school-name" className="flex items-center gap-1.5">
             <Building2 className="h-3.5 w-3.5" /> School name
@@ -309,7 +427,6 @@ function SchoolIdentityCard() {
 
         <Separator />
 
-        {/* Logo */}
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
           <div className="flex flex-col items-center gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Current logo</p>
