@@ -18,6 +18,15 @@ function adminClient() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
+function appOrigin() {
+  return (
+    process.env["APP_URL"] ||
+    process.env["VITE_APP_URL"] ||
+    process.env["PUBLIC_APP_URL"] ||
+    "https://d4exam-platform.vercel.app"
+  ).replace(/\/$/, "");
+}
+
 type PushInput = {
   recipientUserId: string;
   title: string;
@@ -98,6 +107,10 @@ async function sendFcmV1(
 ) {
   const projectId = sa.project_id || process.env["FIREBASE_PROJECT_ID"] || "d4exam-6506a";
   const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
+  const origin = appOrigin();
+  const icon = `${origin}/icon-192.png`;
+  const absoluteLink = link.startsWith("http") ? link : `${origin}${link.startsWith("/") ? link : `/${link}`}`;
+
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -107,15 +120,25 @@ async function sendFcmV1(
     body: JSON.stringify({
       message: {
         token,
-        notification: { title, body },
+        notification: {
+          title,
+          body,
+          image: icon,
+        },
         data: {
           title,
           body,
           message: body,
-          link: link || "/",
+          link: absoluteLink,
         },
         webpush: {
-          fcm_options: { link: link || "/" },
+          notification: {
+            title,
+            body,
+            icon,
+            badge: icon,
+          },
+          fcm_options: { link: absoluteLink },
           headers: { Urgency: "high" },
         },
       },
@@ -129,6 +152,8 @@ async function sendFcmV1(
 }
 
 async function sendFcmLegacy(token: string, title: string, body: string, link: string, serverKey: string) {
+  const origin = appOrigin();
+  const icon = `${origin}/icon-192.png`;
   const res = await fetch("https://fcm.googleapis.com/fcm/send", {
     method: "POST",
     headers: {
@@ -137,7 +162,12 @@ async function sendFcmLegacy(token: string, title: string, body: string, link: s
     },
     body: JSON.stringify({
       to: token,
-      notification: { title, body, click_action: link || "/" },
+      notification: {
+        title,
+        body,
+        icon,
+        click_action: link || "/",
+      },
       data: { title, body, message: body, link: link || "/" },
     }),
   });
@@ -261,12 +291,16 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
                 ? "/student/notifications"
                 : "/";
 
+    const welcomeTitle = "Welcome to D4EXAM";
+    const welcomeBody =
+      "Secure online exams for schools — create papers, run CBT, monitor integrity, and release results in one place.";
+
     const sb = adminClient();
     if (sb) {
       await sb.from("notifications").insert({
         recipient_user_id: data.userId,
-        title: "Test notification",
-        message: "This is a D4EXAM test notification. If you see this, in-app notifications are working.",
+        title: welcomeTitle,
+        message: welcomeBody,
         type: "system_alert",
         link,
         action_url: link,
@@ -276,8 +310,8 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
     const push = await dispatchPushToUser({
       data: {
         recipientUserId: data.userId,
-        title: "D4EXAM Test",
-        message: "This is a test push notification from D4EXAM.",
+        title: welcomeTitle,
+        message: welcomeBody,
         link,
       },
     });
