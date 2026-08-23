@@ -1,9 +1,6 @@
 /**
  * Client-side push registration (FCM web).
  * Saves device tokens to public.push_devices for the signed-in user.
- *
- * Foreground: toast only (user is already in the app).
- * Background: service worker shows ONE D4EXAM-branded system notification.
  */
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getMessaging, getToken, isSupported, onMessage, type Messaging } from "firebase/messaging";
@@ -35,6 +32,33 @@ export type PushPermissionState = "granted" | "denied" | "default" | "unsupporte
 export function getPushPermissionState(): PushPermissionState {
   if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
   return Notification.permission as PushPermissionState;
+}
+
+function showLocalNotification(title: string, body: string, link?: string) {
+  if (typeof window === "undefined" || Notification.permission !== "granted") return;
+  const icon = `${window.location.origin}/icon-192.png`;
+  try {
+    const n = new Notification(title, {
+      body,
+      icon,
+      badge: icon,
+      tag: "d4exam-notification",
+      data: { link: link || "/" },
+    });
+    n.onclick = () => {
+      window.focus();
+      if (link) {
+        try {
+          window.location.assign(link.startsWith("http") ? link : link);
+        } catch {
+          /* ignore */
+        }
+      }
+      n.close();
+    };
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function enablePushNotifications(userId: string, role?: string | null): Promise<{
@@ -96,11 +120,11 @@ export async function enablePushNotifications(userId: string, role?: string | nu
     if (!onMessageBound) {
       onMessageBound = true;
       onMessage(msg, (payload) => {
-        /* Foreground only: in-app toast. Do NOT call new Notification()
-           — that caused a second system tray item (Chrome-branded). */
-        const title = payload.data?.title || payload.notification?.title || "D4EXAM";
+        const title = payload.notification?.title || payload.data?.title || "D4EXAM";
         const body =
-          payload.data?.body || payload.data?.message || payload.notification?.body || "";
+          payload.notification?.body || payload.data?.body || payload.data?.message || "";
+        const link = payload.data?.link;
+        showLocalNotification(title, body, link);
         toast.info(title, { description: body });
       });
     }
