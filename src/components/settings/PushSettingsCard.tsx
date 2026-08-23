@@ -12,8 +12,6 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
   const [pushBusy, setPushBusy] = useState(false);
   const [testBusy, setTestBusy] = useState(false);
   const [pushStatus, setPushStatus] = useState(() => getPushPermissionState());
-  const isSuper =
-    (scope || "").toLowerCase().includes("super") || session?.role === "super_admin";
 
   return (
     <SectionCard
@@ -49,32 +47,40 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
             {pushBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Enable notifications
           </Button>
-          {isSuper && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={testBusy || !session?.userId}
-              onClick={() => {
-                if (!session?.userId) return;
-                setTestBusy(true);
-                void sendTestNotificationToSelf({
-                  data: { userId: session.userId, role: session.role || "super_admin" },
-                })
-                  .then((r) => {
-                    if (r && (r as { ok?: boolean }).ok) {
-                      toast.success("Test notification sent. Check your bell and device.");
+          <Button
+            type="button"
+            variant="outline"
+            disabled={testBusy || !session?.userId}
+            onClick={() => {
+              if (!session?.userId) return;
+              setTestBusy(true);
+              void sendTestNotificationToSelf({
+                data: {
+                  userId: session.userId,
+                  role: session.role || scope || "student",
+                },
+              })
+                .then((r) => {
+                  if (r && (r as { ok?: boolean }).ok) {
+                    const push = (r as { push?: { reason?: string; sent?: number; skipped?: boolean } }).push;
+                    if (push?.skipped && push.reason === "no devices") {
+                      toast.error("Enable notifications on this device first, then try again.");
+                    } else if (push?.skipped && push.reason) {
+                      toast.message(`In-app sent. Push: ${push.reason}`);
                     } else {
-                      toast.error((r as { error?: string })?.error || "Test failed");
+                      toast.success("Test notification sent. Check your bell and device.");
                     }
-                  })
-                  .catch((e) => toast.error((e as Error).message || "Test failed"))
-                  .finally(() => setTestBusy(false));
-              }}
-            >
-              {testBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Send test to myself
-            </Button>
-          )}
+                  } else {
+                    toast.error((r as { error?: string })?.error || "Test failed");
+                  }
+                })
+                .catch((e) => toast.error((e as Error).message || "Test failed"))
+                .finally(() => setTestBusy(false));
+            }}
+          >
+            {testBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Send test to myself
+          </Button>
         </div>
       </div>
     </SectionCard>
