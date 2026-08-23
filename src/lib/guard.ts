@@ -17,7 +17,14 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     user = queryClient.getQueryData<SessionUser | null>(["session-user"]);
   }
   if (user === undefined) {
-    user = await fetchSessionUser();
+    try {
+      user = await Promise.race([
+        fetchSessionUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
+      ]);
+    } catch {
+      user = null;
+    }
     if (queryClient) {
       queryClient.setQueryData(["session-user"], user);
     }
@@ -33,8 +40,6 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     throw redirect({ to: "/login", search: { blocked: "1" } as never });
   }
 
-  // Pending/invited: allow through when a real role is already assigned (login just activated session).
-  // Only bounce when there is no usable role at all.
   if (
     !isSuper &&
     (user.status === "pending" || user.status === "invited") &&

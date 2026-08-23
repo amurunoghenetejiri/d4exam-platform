@@ -5,3 +5,4 @@ export * from "./notificationService";
 export * from "./cameraService";
 export * from "./statusBar";
 export * from "./permissions";
+export * from "./backButton";
