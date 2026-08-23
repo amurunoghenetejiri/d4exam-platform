@@ -34,33 +34,6 @@ export function getPushPermissionState(): PushPermissionState {
   return Notification.permission as PushPermissionState;
 }
 
-function showLocalNotification(title: string, body: string, link?: string) {
-  if (typeof window === "undefined" || Notification.permission !== "granted") return;
-  const icon = `${window.location.origin}/icon-192.png`;
-  try {
-    const n = new Notification(title, {
-      body,
-      icon,
-      badge: icon,
-      tag: "d4exam-notification",
-      data: { link: link || "/" },
-    });
-    n.onclick = () => {
-      window.focus();
-      if (link) {
-        try {
-          window.location.assign(link.startsWith("http") ? link : link);
-        } catch {
-          /* ignore */
-        }
-      }
-      n.close();
-    };
-  } catch {
-    /* ignore */
-  }
-}
-
 export async function enablePushNotifications(userId: string, role?: string | null): Promise<{
   ok: boolean;
   token?: string;
@@ -78,8 +51,12 @@ export async function enablePushNotifications(userId: string, role?: string | nu
     }
 
     if ("serviceWorker" in navigator) {
-      await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
+      const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
       await navigator.serviceWorker.ready;
+      // Force activate latest SW so icon / single-fire fixes apply
+      if (reg.waiting) {
+        reg.waiting.postMessage({ type: "SKIP_WAITING" });
+      }
     }
 
     const msg = await getFirebaseMessaging();
@@ -119,12 +96,11 @@ export async function enablePushNotifications(userId: string, role?: string | nu
 
     if (!onMessageBound) {
       onMessageBound = true;
+      // Foreground only: in-app toast. Do NOT also new Notification() — that duplicates SW/system push.
       onMessage(msg, (payload) => {
         const title = payload.notification?.title || payload.data?.title || "D4EXAM";
         const body =
           payload.notification?.body || payload.data?.body || payload.data?.message || "";
-        const link = payload.data?.link;
-        showLocalNotification(title, body, link);
         toast.info(title, { description: body });
       });
     }
