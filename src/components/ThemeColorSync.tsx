@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import { useRouterState } from "@tanstack/react-router";
+import { isNativeShell } from "@/native/platform";
+import { D4EXAM_STATUS_BAR } from "@/native/statusBar";
 
 function ensureThemeMeta(): HTMLMetaElement {
   let el = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null;
@@ -38,6 +40,10 @@ export function ThemeColorSync() {
     if (typeof document === "undefined") return;
 
     const apply = () => {
+      if (isNativeShell()) {
+        ensureThemeMeta().setAttribute("content", D4EXAM_STATUS_BAR);
+        return;
+      }
       const candidates: (Element | null)[] = [
         document.querySelector("main"),
         document.querySelector("[data-app-shell]"),
