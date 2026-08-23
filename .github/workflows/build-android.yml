@@ -90,69 +90,27 @@ jobs:
             sed -i 's|</manifest>|    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <uses-feature android:name="android.hardware.camera.front" android:required="false" />\n    <uses-feature android:name="android.hardware.microphone" android:required="false" />\n</manifest>|' "$MANIFEST"
           fi
           mkdir -p android/app/src/main/res/values
-          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' '    <color name="colorPrimary">#0b1b3a</color>' '    <color name="colorPrimaryDark">#0b1b3a</color>' '    <color name="colorAccent">#3B82F6</color>' '    <color name="splash_background">#0b1b3a</color>' '</resources>' > android/app/src/main/res/values/colors.xml
+          # Transparent launcher background + navy splash window
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' \
+            '    <color name="colorPrimary">#0b1b3a</color>' \
+            '    <color name="colorPrimaryDark">#0b1b3a</color>' \
+            '    <color name="colorAccent">#3B82F6</color>' \
+            '    <color name="splash_background">#0b1b3a</color>' \
+            '    <color name="ic_launcher_background">#00000000</color>' \
+            '</resources>' > android/app/src/main/res/values/colors.xml
           if [ -f android/app/src/main/res/values/ic_launcher_background.xml ]; then
-            printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' '    <color name="ic_launcher_background">#0b1b3a</color>' '</resources>' > android/app/src/main/res/values/ic_launcher_background.xml
+            printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' \
+              '    <color name="ic_launcher_background">#00000000</color>' \
+              '</resources>' > android/app/src/main/res/values/ic_launcher_background.xml
           fi
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
           sed -i 's/<string name="title_activity_main">.*<\/string>/<string name="title_activity_main">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
-          sed -i 's/versionCode [0-9]*/versionCode 5/' android/app/build.gradle || true
-          sed -i 's/versionName "[^"]*"/versionName "1.3.1"/' android/app/build.gradle || true
-          # Theme / window background = navy (no gray/white flash)
+          sed -i 's/versionCode [0-9]*/versionCode 6/' android/app/build.gradle || true
+          sed -i 's/versionName "[^"]*"/versionName "1.3.2"/' android/app/build.gradle || true
           if [ -f android/app/src/main/res/values/styles.xml ]; then
-            sed -i 's/android:windowBackground">@[^<]*/android:windowBackground">@color\/splash_background/' android/app/src/main/res/values/styles.xml || true
+            sed -i 's/android:windowBackground">@[^<]*/android:windowBackground">@drawable\/splash/' android/app/src/main/res/values/styles.xml || true
           fi
           grep -E 'versionCode|versionName|applicationId' android/app/build.gradle || true
-
-      - name: Generate D4EXAM launcher icons + splash from official logo
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq imagemagick
-          SRC=""
-          if [ -f public/icon-512.png ]; then SRC=public/icon-512.png
-          elif [ -f public/logo.png ]; then SRC=public/logo.png
-          else echo "WARNING: no logo"; exit 0; fi
-          echo "Using $SRC"
-          for density_size in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-            density=${density_size%%:*}
-            size=${density_size##*:}
-            dir="android/app/src/main/res/mipmap-${density}"
-            mkdir -p "$dir"
-            # Legacy icons: logo on D4EXAM navy (no white square)
-            convert "$SRC" -resize "${size}x${size}" -background "#0b1b3a" -gravity center -extent "${size}x${size}" "$dir/ic_launcher.png"
-            convert "$SRC" -resize "${size}x${size}" -background "#0b1b3a" -gravity center -extent "${size}x${size}" "$dir/ic_launcher_round.png"
-            # Adaptive foreground: transparent pad around logo
-            fsize=$((size * 2))
-            safe=$((fsize * 66 / 100))
-            convert "$SRC" -resize "${safe}x${safe}" -background none -gravity center -extent "${fsize}x${fsize}" "$dir/ic_launcher_foreground.png" 2>/dev/null \
-              || convert "$SRC" -resize "${size}x${size}" -background none -gravity center -extent "${fsize}x${fsize}" "$dir/ic_launcher_foreground.png"
-          done
-          mkdir -p android/app/src/main/res/drawable
-          convert "$SRC" -resize 96x96 -colorspace Gray -threshold 40% -negate -transparent white android/app/src/main/res/drawable/ic_stat_d4exam.png 2>/dev/null || convert "$SRC" -resize 96x96 android/app/src/main/res/drawable/ic_stat_d4exam.png
-          # Splash: full navy canvas + centered logo (no white box, no Capacitor default)
-          convert -size 1080x1920 xc:"#0b1b3a" \
-            \( "$SRC" -resize 420x420 \) -gravity center -compose over -composite \
-            android/app/src/main/res/drawable/splash.png
-          convert -size 1080x1920 xc:"#0b1b3a" \
-            \( "$SRC" -resize 420x420 \) -gravity center -compose over -composite \
-            android/app/src/main/res/drawable/splash_dark.png 2>/dev/null || true
-          # Point splash drawable XML at our branded image if present
-          for splash_xml in android/app/src/main/res/drawable/splash.xml android/app/src/main/res/drawable/splash_dark.xml; do
-            if [ -f "$splash_xml" ] || true; then
-              printf '%s\n' \
-                '<?xml version="1.0" encoding="utf-8"?>' \
-                '<layer-list xmlns:android="http://schemas.android.com/apk/res/android">' \
-                '    <item android:drawable="@color/splash_background"/>' \
-                '    <item>' \
-                '        <bitmap android:gravity="center" android:src="@drawable/splash"/>' \
-                '    </item>' \
-                '</layer-list>' > "$splash_xml"
-            fi
-          done
-          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
-          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">' '    <background android:drawable="@color/ic_launcher_background"/>' '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>' '</adaptive-icon>' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
-          cp android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
       - name: Optional google-services.json from secret
         env:
@@ -170,6 +128,72 @@ jobs:
         run: |
           set -euo pipefail
           npx cap sync android
+
+      - name: Generate D4EXAM icons + splash (after sync — no duplicate XML/PNG)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq imagemagick
+          SRC=""
+          if [ -f public/logo.png ]; then SRC=public/logo.png
+          elif [ -f public/icon-512.png ]; then SRC=public/icon-512.png
+          else echo "WARNING: no logo"; exit 0; fi
+          echo "Using $SRC for transparent launcher + splash"
+
+          # Prefer website transparent logo; do not force opaque white/navy box on adaptive foreground
+          for density_size in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            density=${density_size%%:*}
+            size=${density_size##*:}
+            dir="android/app/src/main/res/mipmap-${density}"
+            mkdir -p "$dir"
+            # Legacy launcher: transparent canvas + logo (no solid box)
+            convert "$SRC" -resize "${size}x${size}" -background none -gravity center -extent "${size}x${size}" PNG32:"$dir/ic_launcher.png"
+            convert "$SRC" -resize "${size}x${size}" -background none -gravity center -extent "${size}x${size}" PNG32:"$dir/ic_launcher_round.png"
+            # Adaptive foreground: logo only, transparent padding (safe zone ~66%)
+            fsize=$((size * 2))
+            safe=$((fsize * 66 / 100))
+            convert "$SRC" -resize "${safe}x${safe}" -background none -gravity center -extent "${fsize}x${fsize}" PNG32:"$dir/ic_launcher_foreground.png"
+          done
+
+          mkdir -p android/app/src/main/res/drawable
+          convert "$SRC" -resize 96x96 -colorspace Gray -threshold 40% -negate -transparent white \
+            android/app/src/main/res/drawable/ic_stat_d4exam.png 2>/dev/null \
+            || convert "$SRC" -resize 96x96 android/app/src/main/res/drawable/ic_stat_d4exam.png
+
+          # CRITICAL: Android cannot have both splash.png AND splash.xml with the same name.
+          # Capacitor may ship splash.xml — remove XML, keep a single PNG resource.
+          rm -f android/app/src/main/res/drawable/splash.xml
+          rm -f android/app/src/main/res/drawable/splash_dark.xml
+          rm -f android/app/src/main/res/drawable-*/splash.xml 2>/dev/null || true
+          rm -f android/app/src/main/res/drawable-*/splash_dark.xml 2>/dev/null || true
+
+          # Splash PNG only: navy full-screen + centered transparent logo
+          convert -size 1080x1920 xc:"#0b1b3a" \
+            \( "$SRC" -resize 420x420 \) -gravity center -compose over -composite \
+            PNG32:android/app/src/main/res/drawable/splash.png
+          convert -size 1080x1920 xc:"#0b1b3a" \
+            \( "$SRC" -resize 420x420 \) -gravity center -compose over -composite \
+            PNG32:android/app/src/main/res/drawable/splash_dark.png
+
+          # Adaptive icon XML: transparent background + logo foreground
+          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="utf-8"?>' \
+            '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">' \
+            '    <background android:drawable="@color/ic_launcher_background"/>' \
+            '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>' \
+            '</adaptive-icon>' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          cp android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml \
+            android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+
+          # Ensure windowBackground points at the PNG splash (not a missing/conflicting XML)
+          if [ -f android/app/src/main/res/values/styles.xml ]; then
+            sed -i 's|android:windowBackground">@[^<]*|android:windowBackground">@drawable/splash|' \
+              android/app/src/main/res/values/styles.xml || true
+          fi
+
+          echo "Icon/splash assets ready (no duplicate splash XML)"
+          ls -la android/app/src/main/res/drawable/splash* || true
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
@@ -220,6 +244,7 @@ jobs:
         run: |
           echo "### D4EXAM Android Debug APK" >> "$GITHUB_STEP_SUMMARY"
           echo "- **App ID:** com.d4exam.app" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Version:** 1.3.1 (versionCode 5)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version:** 1.3.2 (versionCode 6)" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Artifact:** D4EXAM-Android-APK" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Icon + splash:** D4EXAM logo on navy #0b1b3a" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Icon:** transparent website logo (no solid box)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Splash:** navy + centered logo (PNG only, no duplicate XML)" >> "$GITHUB_STEP_SUMMARY"
