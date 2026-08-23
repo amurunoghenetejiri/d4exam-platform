@@ -28,6 +28,21 @@ export type SendNotificationInput = {
   entityId?: string | null;
 };
 
+function firePush(recipientUserId: string, title: string, message: string, link: string | null) {
+  void import("@/lib/push-send.functions")
+    .then((m) =>
+      m.dispatchPushToUser({
+        data: {
+          recipientUserId,
+          title,
+          message,
+          link: link || "/",
+        },
+      }),
+    )
+    .catch(() => undefined);
+}
+
 export async function sendNotification(
   input: SendNotificationInput,
 ): Promise<{ id: string | null; error: string | null }> {
@@ -53,6 +68,7 @@ export async function sendNotification(
     } as never);
 
     if (!error && data) {
+      firePush(recipient, title, message, link);
       return { id: String(data), error: null };
     }
     if (error && !/function|does not exist|42883/i.test(error.message)) {
@@ -81,6 +97,9 @@ export async function sendNotification(
   if (insErr) {
     console.error("[notify] insert", insErr.message);
     return { id: null, error: insErr.message };
+  }
+  if ((row as { id?: string } | null)?.id) {
+    firePush(recipient, title, message, link);
   }
   return { id: (row as { id?: string } | null)?.id ?? null, error: null };
 }
