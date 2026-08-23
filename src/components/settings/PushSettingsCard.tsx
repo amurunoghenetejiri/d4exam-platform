@@ -59,16 +59,7 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
               })
                 .then((r) => {
                   if (r && (r as { ok?: boolean }).ok) {
-                    const meta = r as {
-                      recipients?: number;
-                      inAppInserted?: number;
-                      push?: { sent?: number };
-                    };
-                    const n = meta.recipients ?? 0;
-                    const inserted = meta.inAppInserted ?? 0;
-                    toast.success(
-                      `Test sent to ${n} user${n === 1 ? "" : "s"} (${inserted} in-app). Check the bell and Notifications.`,
-                    );
+                    toast.success("Test notification sent. Check your bell and device.");
                   } else {
                     toast.error((r as { error?: string })?.error || "Test failed");
                   }
@@ -82,8 +73,8 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
           </Button>
         </div>
         <p className="text-xs text-slate-500">
-          Test creates an in-app notification for every user and sends a push to all registered
-          devices. Open Notifications in settings (or the bell) to confirm each row received it.
+          Test sends an in-app notification and push to your account only. Open Notifications or the
+          bell to confirm.
         </p>
       </div>
     </SectionCard>
