@@ -122,15 +122,44 @@ export function SettingsPage({ scope }: { scope: string }) {
       setNewPassword("");
       setConfirmPassword("");
       toast.success("Password updated. Use your new password next time you sign in.");
+      const title = "Password changed";
+      const message = "Your D4EXAM account password was successfully changed.";
+      const link =
+        session.role === "super_admin"
+          ? "/super-admin/settings"
+          : session.role === "school_admin"
+            ? "/admin/settings"
+            : session.role === "examination_officer"
+              ? "/officer/settings"
+              : session.role === "teacher"
+                ? "/teacher/settings"
+                : session.role === "student"
+                  ? "/student/settings"
+                  : "/settings";
       try {
         await supabase.from("notifications").insert({
           recipient_user_id: session.userId,
-          title: "Password changed",
-          message: "Your D4EXAM account password was successfully changed.",
+          title,
+          message,
           type: "system_alert",
-          link: "/settings",
+          link,
+          action_url: link,
         } as never);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
+      void import("@/lib/push-send.functions")
+        .then((m) =>
+          m.dispatchPushToUser({
+            data: {
+              recipientUserId: session.userId,
+              title,
+              message,
+              link,
+            },
+          }),
+        )
+        .catch(() => undefined);
     } catch (e) {
       toast.error((e as Error).message || "Password change failed.");
     } finally {
