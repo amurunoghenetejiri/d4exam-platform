@@ -109,8 +109,12 @@ async function sendFcmV1(
   const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
   const origin = appOrigin();
   const icon = `${origin}/icon-192.png`;
-  const absoluteLink = link.startsWith("http") ? link : `${origin}${link.startsWith("/") ? link : `/${link}`}`;
+  const absoluteLink = link.startsWith("http")
+    ? link
+    : `${origin}${link.startsWith("/") ? link : `/${link}`}`;
 
+  // notification + android = system tray on native Android
+  // data + webpush = browser / PWA
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -120,6 +124,10 @@ async function sendFcmV1(
     body: JSON.stringify({
       message: {
         token,
+        notification: {
+          title: String(title),
+          body: String(body),
+        },
         data: {
           title: String(title),
           body: String(body),
@@ -129,10 +137,24 @@ async function sendFcmV1(
           badge: String(icon),
           tag: "d4exam-notification",
         },
+        android: {
+          priority: "HIGH",
+          notification: {
+            channel_id: "d4exam_default",
+            sound: "default",
+            click_action: "FCM_PLUGIN_ACTIVITY",
+          },
+        },
         webpush: {
           headers: {
             Urgency: "high",
             TTL: "86400",
+          },
+          notification: {
+            title: String(title),
+            body: String(body),
+            icon,
+            badge: icon,
           },
           fcm_options: {
             link: absoluteLink,
@@ -148,7 +170,13 @@ async function sendFcmV1(
   return { ok: true as const };
 }
 
-async function sendFcmLegacy(token: string, title: string, body: string, link: string, serverKey: string) {
+async function sendFcmLegacy(
+  token: string,
+  title: string,
+  body: string,
+  link: string,
+  serverKey: string,
+) {
   const origin = appOrigin();
   const icon = `${origin}/icon-192.png`;
   const res = await fetch("https://fcm.googleapis.com/fcm/send", {
@@ -159,6 +187,11 @@ async function sendFcmLegacy(token: string, title: string, body: string, link: s
     },
     body: JSON.stringify({
       to: token,
+      notification: {
+        title,
+        body,
+        sound: "default",
+      },
       data: {
         title,
         body,
@@ -247,13 +280,29 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
       try {
         const result =
           sa && accessToken
-            ? await sendFcmV1(token, data.title, data.message || "", data.link || "/", sa, accessToken)
-            : await sendFcmLegacy(token, data.title, data.message || "", data.link || "/", legacyKey);
+            ? await sendFcmV1(
+                token,
+                data.title,
+                data.message || "",
+                data.link || "/",
+                sa,
+                accessToken,
+              )
+            : await sendFcmLegacy(
+                token,
+                data.title,
+                data.message || "",
+                data.link || "/",
+                legacyKey,
+              );
 
         if (result.ok) sent += 1;
         else {
           failed += 1;
-          if (result.error && /NotRegistered|InvalidRegistration|UNREGISTERED|INVALID_ARGUMENT/i.test(result.error)) {
+          if (
+            result.error &&
+            /NotRegistered|InvalidRegistration|UNREGISTERED|INVALID_ARGUMENT/i.test(result.error)
+          ) {
             await sb.from("push_devices").update({ enabled: false } as never).eq("token", token);
           }
         }
