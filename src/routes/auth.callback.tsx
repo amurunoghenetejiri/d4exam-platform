@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2 } from "lucide-react";
+import { BrandLoaderScreen } from "@/components/brand/BrandLoader";
 
 export const Route = createFileRoute("/auth/callback")({
   head: () => ({
@@ -17,6 +17,7 @@ export const Route = createFileRoute("/auth/callback")({
 function AuthCallbackPage() {
   const navigate = useNavigate();
   const [message, setMessage] = useState("Finishing sign-in…");
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,13 +31,19 @@ function AuthCallbackPage() {
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) {
-            if (!cancelled) setMessage(error.message || "Link invalid or expired.");
+            if (!cancelled) {
+              setFailed(true);
+              setMessage(error.message || "Link invalid or expired.");
+            }
             return;
           }
         } else {
           const { data } = await supabase.auth.getSession();
           if (!data.session) {
-            if (!cancelled) setMessage("No session found. Open the link from your email again.");
+            if (!cancelled) {
+              setFailed(true);
+              setMessage("No session found. Open the link from your email again.");
+            }
             return;
           }
         }
@@ -45,7 +52,10 @@ function AuthCallbackPage() {
           navigate({ to: next as never });
         }
       } catch {
-        if (!cancelled) setMessage("Could not complete sign-in from this link.");
+        if (!cancelled) {
+          setFailed(true);
+          setMessage("Could not complete sign-in from this link.");
+        }
       }
     }
 
@@ -55,10 +65,13 @@ function AuthCallbackPage() {
     };
   }, [navigate]);
 
-  return (
-    <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-white px-4">
-      <Loader2 className="h-6 w-6 animate-spin text-primary" />
-      <p className="text-sm text-slate-600">{message}</p>
-    </div>
-  );
+  if (failed) {
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-background px-4">
+        <p className="max-w-sm text-center text-sm text-slate-600">{message}</p>
+      </div>
+    );
+  }
+
+  return <BrandLoaderScreen forcePlatform label={message} />;
 }
