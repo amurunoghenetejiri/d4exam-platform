@@ -17,6 +17,7 @@ import { useSessionUser } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
 import { applyNativeStatusBar, hideSplashSafely } from "@/native/statusBar";
+import { registerAndroidBackButton } from "@/native/backButton";
 
 function NativeBootstrap() {
   const { data: session } = useSessionUser();
@@ -28,6 +29,12 @@ function NativeBootstrap() {
         document.documentElement.classList.add("d4-native");
         await applyNativeStatusBar();
         await hideSplashSafely();
+        const unsubBack = await registerAndroidBackButton();
+        if (cancelled) {
+          unsubBack();
+          return;
+        }
+        (window as unknown as { __d4UnsubBack?: () => void }).__d4UnsubBack = unsubBack;
         if (!cancelled) {
           await initNativePushIfNeeded(session?.userId, session?.role);
         }
@@ -37,6 +44,11 @@ function NativeBootstrap() {
     })();
     return () => {
       cancelled = true;
+      try {
+        (window as unknown as { __d4UnsubBack?: () => void }).__d4UnsubBack?.();
+      } catch {
+        /* ignore */
+      }
     };
   }, [session?.userId, session?.role]);
   return null;
@@ -75,10 +87,10 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
     <div className="flex min-h-dvh items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          This page didn't load
+          Something went wrong
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
+          Don't worry — D4EXAM is still running. You can try again or head back home.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
@@ -88,14 +100,27 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
             }}
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Try again
+            Try Again
           </button>
           <a
             href="/"
             className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
-            Go home
+            Go Home
           </a>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                window.location.reload();
+              } catch {
+                window.location.href = "/";
+              }
+            }}
+            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            Reload App
+          </button>
         </div>
       </div>
     </div>
@@ -157,8 +182,25 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function installGlobalErrorHandlers() {
+  if (typeof window === "undefined") return;
+  const w = window as Window & { __d4GlobalHandlers?: boolean };
+  if (w.__d4GlobalHandlers) return;
+  w.__d4GlobalHandlers = true;
+  window.addEventListener("unhandledrejection", (ev) => {
+    console.warn("[D4EXAM] unhandledrejection", ev.reason);
+    ev.preventDefault?.();
+  });
+  window.addEventListener("error", (ev) => {
+    console.warn("[D4EXAM] window error", ev.message);
+  });
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  useEffect(() => {
+    installGlobalErrorHandlers();
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
