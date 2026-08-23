@@ -15,15 +15,13 @@ firebase.initializeApp({
 
 var messaging = firebase.messaging();
 
-var SHELL_CACHE = "d4exam-shell-v1";
-var SHELL_URLS = ["/", "/offline.html", "/icon-192.png", "/favicon.png", "/site.webmanifest"];
+var SHELL_CACHE = "d4exam-shell-v2";
+var SHELL_URLS = ["/", "/offline.html", "/icon-192.png", "/logo.png", "/favicon.png", "/site.webmanifest"];
 
 self.addEventListener("install", function (event) {
   event.waitUntil(
     caches.open(SHELL_CACHE).then(function (cache) {
-      return cache.addAll(SHELL_URLS).catch(function () {
-        /* partial cache ok */
-      });
+      return cache.addAll(SHELL_URLS).catch(function () {});
     }),
   );
   self.skipWaiting();
@@ -49,8 +47,6 @@ self.addEventListener("fetch", function (event) {
   if (req.method !== "GET") return;
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-
-  // Never cache API / auth traffic
   if (url.pathname.indexOf("/api") === 0 || url.pathname.indexOf("/auth") === 0) return;
 
   event.respondWith(
@@ -61,9 +57,6 @@ self.addEventListener("fetch", function (event) {
       .catch(function () {
         return caches.match(req).then(function (cached) {
           if (cached) return cached;
-          if (req.mode === "navigate") {
-            return caches.match("/offline.html");
-          }
           return caches.match("/offline.html");
         });
       }),
@@ -78,7 +71,7 @@ function absUrl(path) {
   }
 }
 
-messaging.onBackgroundMessage(function (payload) {
+function showD4Notification(payload) {
   var data = (payload && payload.data) || {};
   var title =
     (payload && payload.notification && payload.notification.title) ||
@@ -90,11 +83,13 @@ messaging.onBackgroundMessage(function (payload) {
     data.message ||
     "Secure online examinations for schools.";
   var link = data.link || data.url || "/";
+  var icon = data.icon || absUrl("/icon-192.png");
+  var badge = data.badge || absUrl("/icon-192.png");
 
-  self.registration.showNotification(title, {
+  return self.registration.showNotification(title, {
     body: body,
-    icon: absUrl("/icon-192.png"),
-    badge: absUrl("/icon-192.png"),
+    icon: icon,
+    badge: badge,
     data: { link: link, title: title },
     tag: data.tag || "d4exam-notification",
     renotify: true,
@@ -102,6 +97,24 @@ messaging.onBackgroundMessage(function (payload) {
     silent: false,
     vibrate: [120, 40, 120],
   });
+}
+
+messaging.onBackgroundMessage(function (payload) {
+  return showD4Notification(payload);
+});
+
+self.addEventListener("push", function (event) {
+  // Backup path if FCM delivers a raw push event
+  try {
+    var raw = event.data ? event.data.json() : {};
+    event.waitUntil(showD4Notification(raw));
+  } catch (e) {
+    event.waitUntil(
+      showD4Notification({
+        data: { title: "D4EXAM", body: "You have a new update." },
+      }),
+    );
+  }
 });
 
 self.addEventListener("notificationclick", function (event) {
