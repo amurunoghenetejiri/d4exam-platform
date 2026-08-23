@@ -1,0 +1,255 @@
+              .join(" · ") || typeLabel(item.material_type)}
+          </p>
+        </div>
+        {pages > 0 && (
+          <div className="hidden items-center gap-1 rounded-lg bg-white/10 px-1 sm:flex">
+            <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-white" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-[3.5rem] text-center text-xs font-semibold">
+              {page} / {pages}
+            </span>
+            <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-white" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+        <div className="hidden items-center gap-1 rounded-lg bg-white/10 px-1 sm:flex">
+          <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-white" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.15).toFixed(2)))}>
+            <Minus className="h-4 w-4" />
+          </Button>
+          <span className="min-w-[3rem] text-center text-xs font-semibold">{Math.round(zoom * 100)}%</span>
+          <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-white" onClick={() => setZoom((z) => Math.min(2.5, +(z + 0.15).toFixed(2)))}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+        <Button type="button" size="icon" variant="ghost" className="hidden h-9 w-9 text-white hover:bg-white/10 sm:inline-flex" onClick={() => setSearchOpen((v) => !v)}>
+          <Search className="h-4 w-4" />
+        </Button>
+        <Button type="button" size="icon" variant="ghost" className={cn("h-9 w-9 text-white hover:bg-white/10", bookmarked && "text-amber-400")} onClick={toggleBookmark}>
+          <Bookmark className={cn("h-4 w-4", bookmarked && "fill-current")} />
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="hidden border-white/20 bg-white/10 text-white hover:bg-white/20 sm:inline-flex" onClick={download}>
+          <Download className="mr-1 h-3.5 w-3.5" /> Download
+        </Button>
+        <div className="relative">
+          <Button type="button" size="icon" variant="ghost" className="h-9 w-9 text-white hover:bg-white/10" onClick={() => setMoreOpen((v) => !v)}>
+            <MoreVertical className="h-4 w-4" />
+          </Button>
+          {moreOpen && (
+            <div className="absolute right-0 z-30 mt-1 w-48 rounded-xl border border-white/10 bg-slate-900 py-1 text-sm shadow-xl">
+              <button type="button" className="flex w-full px-3 py-2 hover:bg-white/10" onClick={() => { setGoPage(String(page)); setSearchOpen(true); setMoreOpen(false); }}>Go to page</button>
+              <button type="button" className="flex w-full px-3 py-2 hover:bg-white/10" onClick={() => { setZoom(1); setMoreOpen(false); }}>Reset zoom</button>
+              <button type="button" className="flex w-full px-3 py-2 hover:bg-white/10" onClick={() => { toggleBookmark(); setMoreOpen(false); }}>
+                {bookmarked ? "Remove bookmark" : "Add bookmark"}
+              </button>
+              <button type="button" className="flex w-full px-3 py-2 hover:bg-white/10" onClick={() => { void share(); setMoreOpen(false); }}>Share</button>
+              <button type="button" className="flex w-full px-3 py-2 hover:bg-white/10" onClick={() => { download(); setMoreOpen(false); }}>Download</button>
+              <button type="button" className="flex w-full px-3 py-2 hover:bg-white/10" onClick={() => { window.print(); setMoreOpen(false); }}>Print</button>
+            </div>
+          )}
+        </div>
+        <Button type="button" size="icon" variant="ghost" className="h-9 w-9 text-white hover:bg-white/10" onClick={onClose}>
+          <X className="h-5 w-5" />
+        </Button>
+      </header>
+
+      {searchOpen && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-slate-900 px-3 py-2">
+          <span className="text-xs text-white/60">Go to page</span>
+          <input
+            className="w-20 rounded border border-white/20 bg-black/40 px-2 py-1 text-sm"
+            value={goPage}
+            onChange={(e) => setGoPage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const n = parseInt(goPage, 10);
+                if (n >= 1 && n <= pages) setPage(n);
+                setSearchOpen(false);
+              }
+            }}
+          />
+          <Button size="sm" variant="secondary" onClick={() => { const n = parseInt(goPage, 10); if (n >= 1 && n <= pages) setPage(n); setSearchOpen(false); }}>
+            Go
+          </Button>
+        </div>
+      )}
+
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-white/10 bg-slate-900/80 px-2 py-1.5">
+        {(
+          [
+            ["select", MousePointer2],
+            ["pan", Hand],
+            ["pen", Pen],
+            ["highlight", Highlighter],
+            ["text", Type],
+            ["eraser", Eraser],
+          ] as const
+        ).map(([t, Icon]) => (
+          <button
+            key={t}
+            type="button"
+            title={t}
+            className={cn(
+              "grid h-9 w-9 place-items-center rounded-lg",
+              tool === t ? "bg-violet-600 text-white" : "text-white/70 hover:bg-white/10",
+            )}
+            onClick={() => {
+              setTool(t);
+              if (t === "pen" || t === "highlight" || t === "text" || t === "eraser") setShowTools(true);
+            }}
+          >
+            <Icon className="h-4 w-4" />
+          </button>
+        ))}
+        <span className="mx-1 h-5 w-px bg-white/15" />
+        {COLORS.map((c) => (
+          <button
+            key={c}
+            type="button"
+            className={cn("h-6 w-6 rounded-full border-2", color === c ? "border-white" : "border-transparent")}
+            style={{ background: c }}
+            onClick={() => setColor(c)}
+            aria-label={c}
+          />
+        ))}
+        <input
+          type="range"
+          min={1}
+          max={12}
+          value={thickness}
+          onChange={(e) => setThickness(Number(e.target.value))}
+          className="mx-2 w-20 accent-violet-500"
+          title="Thickness"
+        />
+        <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-white" onClick={undo} title="Undo">
+          <Undo2 className="h-4 w-4" />
+        </Button>
+        <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-white" onClick={redo} title="Redo">
+          <Redo2 className="h-4 w-4" />
+        </Button>
+        <span className="ml-auto text-[11px] text-white/50">
+          {pageStrokes} mark{pageStrokes === 1 ? "" : "s"} on page · auto-saved
+        </span>
+        <Button type="button" size="sm" className="bg-violet-600 font-semibold hover:bg-violet-500" onClick={() => { saveMaterialAnn({ ...annState, materialId: item.id, lastPage: page }); toast.success("Annotations saved"); }}>
+          <Save className="mr-1 h-3.5 w-3.5" /> Save
+        </Button>
+      </div>
+
+      <div className="flex min-h-0 flex-1">
+        {showThumbs && pages > 0 && (
+          <aside className="hidden w-28 shrink-0 overflow-y-auto border-r border-white/10 bg-black/40 p-2 sm:block">
+            {Array.from({ length: pages }, (_, i) => i + 1).map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={cn(
+                  "mb-2 w-full rounded border py-3 text-xs font-semibold",
+                  n === page ? "border-violet-500 bg-violet-600/30" : "border-white/10 bg-white/5 hover:bg-white/10",
+                )}
+                onClick={() => setPage(n)}
+              >
+                {n}
+                {annState.bookmarks.includes(n) ? " ★" : ""}
+              </button>
+            ))}
+          </aside>
+        )}
+
+        <div ref={wrapRef} className="relative min-h-0 flex-1 overflow-auto bg-slate-800/80 p-2 sm:p-4">
+          {busy && (
+            <p className="flex items-center justify-center gap-2 py-20 text-sm text-white/70">
+              <Loader2 className="h-5 w-5 animate-spin" /> Loading…
+            </p>
+          )}
+          {error && <p className="py-12 text-center text-sm text-red-300">{error}</p>}
+
+          {!item.file_url && (
+            <div className="mx-auto max-w-lg rounded-xl bg-white p-6 text-slate-800 shadow">
+              <p className="whitespace-pre-wrap text-sm">{item.description || "No file attached."}</p>
+            </div>
+          )}
+
+          {item.file_url && isImage(item) && (
+            <div className="flex justify-center">
+              <img src={item.file_url} alt={item.title} className="max-h-full max-w-full rounded shadow-lg" style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }} />
+            </div>
+          )}
+
+          {item.file_url && isPdf(item) && !error && (
+            <div className="relative mx-auto w-fit shadow-2xl">
+              <canvas ref={canvasRef} className="block bg-white" />
+              <canvas
+                ref={annCanvasRef}
+                className="absolute left-0 top-0 touch-none"
+                style={{
+                  width: pageSize.w,
+                  height: pageSize.h,
+                  cursor: tool === "pen" || tool === "highlight" ? "crosshair" : tool === "text" ? "text" : tool === "eraser" ? "cell" : "default",
+                }}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+              />
+            </div>
+          )}
+
+          {item.file_url && !isPdf(item) && !isImage(item) && (
+            <div className="mx-auto max-w-md rounded-xl bg-white p-8 text-center text-slate-800 shadow">
+              <File className="mx-auto h-12 w-12 text-slate-400" />
+              <p className="mt-3 font-semibold">Preview not available for this file type</p>
+              <p className="mt-1 text-sm text-slate-500">Download to open on your device.</p>
+              <Button className="mt-4" onClick={download}>
+                <Download className="mr-1 h-4 w-4" /> Download
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <footer className="flex shrink-0 items-center justify-around border-t border-white/10 bg-slate-950 px-2 py-2 sm:hidden">
+        <button type="button" className="flex flex-col items-center gap-0.5 text-[10px] text-white/80" onClick={() => setShowThumbs((v) => !v)}>
+          <Grid3X3 className="h-5 w-5" /> Thumbnails
+        </button>
+        <button type="button" className="flex flex-col items-center gap-0.5 text-[10px] text-white/80" onClick={() => void share()}>
+          <Share2 className="h-5 w-5" /> Share
+        </button>
+        <button
+          type="button"
+          className="grid h-12 w-12 place-items-center rounded-full bg-violet-600 shadow-lg"
+          onClick={() => {
+            setShowTools(true);
+            setTool("pen");
+          }}
+        >
+          <Pen className="h-5 w-5" />
+        </button>
+        <button type="button" className="flex flex-col items-center gap-0.5 text-[10px] text-white/80" onClick={() => { saveMaterialAnn({ ...annState, materialId: item.id, lastPage: page }); toast.success("Saved"); }}>
+          <Save className="h-5 w-5" /> Save
+        </button>
+        <button type="button" className="flex flex-col items-center gap-0.5 text-[10px] text-white/80" onClick={download}>
+          <Download className="h-5 w-5" /> Download
+        </button>
+      </footer>
+
+      {pages > 0 && (
+        <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs font-semibold sm:hidden">
+          {page} / {pages}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function typeLabel(t: string) {
+  const map: Record<string, string> = {
+    notes: "Notes",
+    assignment: "Assignment",
+    study_guide: "Study guide",
+    past_question: "Past question",
+    reading_tips: "Reading tips",
+    other: "Other",
+  };
+  return map[t] || t;
+}
