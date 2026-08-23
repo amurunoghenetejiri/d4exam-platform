@@ -6,64 +6,43 @@
 |--------|--------|
 | App name | D4EXAM |
 | App ID | `com.d4exam.app` |
-| Capacitor | 8.5.x |
-| webDir | `dist` |
-| Server URL | `https://d4exam-platform.vercel.app` (SSR inside WebView) |
+| Version | 1.2.0 (versionCode 3) |
+| Capacitor | 8.x |
+| Server URL | `https://d4exam-platform.vercel.app` |
 
-## Why server.url is enabled
+## Native features
 
-D4EXAM uses **TanStack Start SSR** (server functions, Supabase session, CBT).  
-A static-only WebView would break login and exams. The native shell loads the  
-live Vercel site so all existing website features work on Android.
+- **Launcher icon** — generated from `public/icon-512.png` / `public/logo.png` in CI
+- **Push** — `@capacitor/push-notifications` on Android; web FCM on browser/PWA
+- **Camera** — native permission via `@capacitor/camera`, then WebView `getUserMedia` for CBT
+- **Microphone** — `RECORD_AUDIO` + runtime `getUserMedia({ audio: true })`
+- **Files** — system file picker only (no broad storage permission)
 
-PWA / website on Vercel is unchanged.
+## Build APK (phone)
 
-## Build APK from your phone (GitHub Actions)
+1. https://github.com/amurunoghenetejiri/d4exam-platform/actions/workflows/build-android.yml
+2. **Run workflow** → `main`
+3. Download artifact **D4EXAM-Android-APK**
+4. Install `D4EXAM-debug.apk` (allow unknown sources)
 
-1. Open: https://github.com/amurunoghenetejiri/d4exam-platform/actions
-2. Select workflow **Build Android APK**
-3. Tap **Run workflow** → branch `main` → **Run workflow**
-4. Wait until the run is green (about 5–15 minutes)
-5. Open the completed run → **Artifacts** → download **D4EXAM-Android-APK**
-6. Unzip if needed → install `D4EXAM-debug.apk` on your phone  
-   (allow install from unknown sources if prompted)
+## Required for full native FCM
 
-This is a **debug** APK — no keystore or signing secrets required.
+1. Firebase Console → Project **d4exam-6506a** → Add Android app `com.d4exam.app`
+2. Download `google-services.json`
+3. GitHub → Settings → Secrets → Actions → New secret:
+   - Name: `FIREBASE_GOOGLE_SERVICES_JSON`
+   - Value: full JSON file contents
+4. Re-run the Android workflow
 
-## Local build (optional, needs desktop)
+Without this secret the APK still builds; native push token registration may be limited until the secret is added.
 
-```bash
-npm install
-npm run build
-mkdir -p dist && cp -r .output/public/* dist/
-npx cap add android   # if android/ incomplete
-npx cap sync android
-cd android && ./gradlew assembleDebug
-```
+## Website vs APK
 
-APK path: `android/app/build/outputs/apk/debug/app-debug.apk`
+| | Website / PWA | Android APK |
+|--|---------------|-------------|
+| UI | Unchanged | Same UI in WebView |
+| Push | Browser FCM | Capacitor + FCM |
+| Camera | Browser permission | Native + WebView |
+| Icon | Favicon / PWA | D4EXAM logo mipmaps |
 
-## Future Google Play (release / AAB)
-
-Not required for the debug APK. Later you would add GitHub Secrets such as:
-
-- `ANDROID_KEYSTORE_BASE64` — base64-encoded `.jks` / `.keystore`
-- `ANDROID_KEYSTORE_PASSWORD`
-- `ANDROID_KEY_ALIAS`
-- `ANDROID_KEY_PASSWORD`
-
-Then a separate workflow can run `./gradlew bundleRelease` and upload the `.aab`.
-
-Do **not** commit keystores or passwords to the repo.
-
-## Permissions (Android)
-
-- `INTERNET`
-- `ACCESS_NETWORK_STATE`
-- `CAMERA` (CBT / PIP)
-- `POST_NOTIFICATIONS`
-
-## Notes
-
-- Existing web UI/UX, routes, auth, CBT, notifications, and PWA are preserved.
-- No secrets are committed by the Android pipeline.
+Web changes must be deployed on Vercel for the APK WebView to pick them up (APK loads the live site).
