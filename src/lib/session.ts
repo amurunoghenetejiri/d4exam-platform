@@ -2,6 +2,21 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
+/** Bound async work so login/session never hang forever. */
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export type AppRole =
   | "student"
   | "teacher"
@@ -125,30 +140,31 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
             .eq("profile_id", profile.id)
             .maybeSingle();
           identifier = s?.matric_number ?? s?.student_id ?? null;
-          if (!identifier && profile.email) {
+          if (!identifier && profile.email && profile.school_id) {
             const local = String(profile.email).split("@")[0] || "";
-            if (local.length >= 6 && profile.school_id) {
-              const { data: byGuess } = await supabase
-                .from("students")
-                .select("id, matric_number, student_id")
-                .eq("school_id", profile.school_id)
-                .limit(3000);
-              const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
-              const target = norm(local);
-              const hit = (byGuess ?? []).find((row) => {
-                const m = norm(String(row.matric_number || row.student_id || ""));
-                return m && (m === target || target.includes(m) || m.includes(target));
-              });
-              if (hit) {
-                identifier = hit.matric_number ?? hit.student_id ?? null;
-                try {
-                  await supabase
+            if (local.length >= 3) {
+              try {
+                const { data: byMatric } = await supabase
+                  .from("students")
+                  .select("id, matric_number, student_id")
+                  .eq("school_id", profile.school_id)
+                  .ilike("matric_number", local)
+                  .limit(5);
+                const hit = byMatric?.[0];
+                if (hit) {
+                  identifier = hit.matric_number ?? hit.student_id ?? null;
+                } else {
+                  const { data: bySid } = await supabase
                     .from("students")
-                    .update({ profile_id: profile.id } as never)
-                    .eq("id", hit.id);
-                } catch {
-                  /* ignore */
+                    .select("id, matric_number, student_id")
+                    .eq("school_id", profile.school_id)
+                    .ilike("student_id", local)
+                    .limit(5);
+                  const hit2 = bySid?.[0];
+                  if (hit2) identifier = hit2.matric_number ?? hit2.student_id ?? null;
                 }
+              } catch {
+                /* ignore identifier resolve */
               }
             }
           }
@@ -230,10 +246,12 @@ export function useSessionUser() {
 
   return useQuery({
     queryKey: ["session-user"],
-    queryFn: fetchSessionUser,
+    queryFn: () => withTimeout(fetchSessionUser(), 18_000, "session"),
     staleTime: 10 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
+    retry: 1,
+    retryDelay: 1_500,
   });
 }
 
