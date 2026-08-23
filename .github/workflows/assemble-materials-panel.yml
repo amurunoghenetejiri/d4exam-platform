@@ -1,0 +1,29 @@
+name: assemble-materials-panel
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - src/components/materials/_panel_part1.txt
+      - src/components/materials/_panel_part2.txt
+      - .github/workflows/assemble-materials-panel.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble panel
+        run: |
+          cat src/components/materials/_panel_part1.txt src/components/materials/_panel_part2.txt > src/components/materials/CourseMaterialsPanel.tsx
+          wc -c src/components/materials/CourseMaterialsPanel.tsx
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/materials/CourseMaterialsPanel.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "feat(materials): Learning Materials UI v2 reference layout"
+            git push
+          fi
