@@ -2,7 +2,11 @@
  * Client-side push registration.
  * - Web/PWA: Firebase Cloud Messaging (browser)
  * - Android Capacitor: @capacitor/push-notifications (native FCM)
- * Tokens saved to public.push_devices for the signed-in user.
+ *
+ * IMPORTANT (Android):
+ * PushNotifications.register() talks to native FCM. Without google-services.json
+ * in the APK, the native layer can kill the process — JS try/catch cannot stop that.
+ * Therefore we never auto-register on every app open after a failed/crashing attempt.
  */
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getMessaging, getToken, isSupported, onMessage, type Messaging } from "firebase/messaging";
@@ -16,6 +20,33 @@ let messaging: Messaging | null = null;
 let onMessageBound = false;
 let nativeListenersBound = false;
 let nativePermissionCache: PushPermissionState | null = null;
+let nativeRegisterInFlight = false;
+
+const NATIVE_PUSH_SKIP_KEY = "d4_native_push_skip_register";
+
+function shouldSkipNativeRegister(): boolean {
+  try {
+    return localStorage.getItem(NATIVE_PUSH_SKIP_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markNativeRegisterUnsafe(): void {
+  try {
+    localStorage.setItem(NATIVE_PUSH_SKIP_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearNativeRegisterSkip(): void {
+  try {
+    localStorage.removeItem(NATIVE_PUSH_SKIP_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 function getFirebaseApp(): FirebaseApp {
   if (app) return app;
@@ -72,30 +103,34 @@ async function upsertPushDevice(
     typeof navigator !== "undefined"
       ? `${navigator.userAgent} | platform=${getRuntimePlatform()}`
       : `platform=${getRuntimePlatform()}`;
-  const { error } = await supabase.from("push_devices").upsert(
-    {
-      user_id: userId,
-      token,
-      role: role || null,
-      user_agent: ua.slice(0, 400),
-      enabled: true,
-      last_seen_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    } as never,
-    { onConflict: "token" },
-  );
-  if (error) {
-    const ins = await supabase.from("push_devices").insert({
-      user_id: userId,
-      token,
-      role: role || null,
-      user_agent: ua.slice(0, 400),
-      enabled: true,
-      last_seen_at: new Date().toISOString(),
-    } as never);
-    if (ins.error) return { ok: false, error: ins.error.message };
+  try {
+    const { error } = await supabase.from("push_devices").upsert(
+      {
+        user_id: userId,
+        token,
+        role: role || null,
+        user_agent: ua.slice(0, 400),
+        enabled: true,
+        last_seen_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as never,
+      { onConflict: "token" },
+    );
+    if (error) {
+      const ins = await supabase.from("push_devices").insert({
+        user_id: userId,
+        token,
+        role: role || null,
+        user_agent: ua.slice(0, 400),
+        enabled: true,
+        last_seen_at: new Date().toISOString(),
+      } as never);
+      if (ins.error) return { ok: false, error: ins.error.message };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message || "Could not save device" };
   }
-  return { ok: true };
 }
 
 function showLocalNotification(title: string, body: string, link?: string) {
@@ -126,39 +161,127 @@ function showLocalNotification(title: string, body: string, link?: string) {
   }
 }
 
+async function ensureAndroidChannel(): Promise<void> {
+  try {
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+    await PushNotifications.createChannel({
+      id: "d4exam_default",
+      name: "D4EXAM",
+      description: "Exams, results and important updates",
+      importance: 4,
+      visibility: 1,
+      sound: "default",
+      vibration: true,
+    });
+  } catch {
+    /* channels unsupported or already exist */
+  }
+}
+
 async function bindNativePushListeners(userId: string, role?: string | null) {
   if (nativeListenersBound) return;
-  const { PushNotifications } = await import("@capacitor/push-notifications");
+  try {
+    const { PushNotifications } = await import("@capacitor/push-notifications");
 
-  await PushNotifications.addListener("registration", async (token) => {
-    if (token?.value) {
-      await upsertPushDevice(userId, token.value, role);
+    // Avoid duplicate listeners across re-logins
+    try {
+      await PushNotifications.removeAllListeners();
+    } catch {
+      /* ignore */
     }
-  });
 
-  await PushNotifications.addListener("registrationError", (err) => {
-    console.warn("[D4EXAM] Push registration error", err);
-  });
+    await PushNotifications.addListener("registration", (token) => {
+      clearNativeRegisterSkip();
+      if (token?.value) {
+        void upsertPushDevice(userId, token.value, role);
+      }
+    });
 
-  await PushNotifications.addListener("pushNotificationReceived", (notification) => {
-    const title = notification.title || "D4EXAM";
-    const body = notification.body || "";
-    toast.info(title, { description: body });
-  });
+    await PushNotifications.addListener("registrationError", (err) => {
+      console.warn("[D4EXAM] Push registration error", err);
+      markNativeRegisterUnsafe();
+    });
 
-  await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-    const data = action.notification?.data as Record<string, string> | undefined;
-    const link = data?.link || data?.url;
-    if (link && typeof window !== "undefined") {
+    await PushNotifications.addListener("pushNotificationReceived", (notification) => {
       try {
-        window.location.assign(link.startsWith("http") ? link : link);
+        const title = notification.title || "D4EXAM";
+        const body = notification.body || "";
+        toast.info(title, { description: body });
       } catch {
         /* ignore */
       }
-    }
-  });
+    });
 
-  nativeListenersBound = true;
+    await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+      try {
+        const data = action.notification?.data as Record<string, string> | undefined;
+        const link = data?.link || data?.url;
+        if (link && typeof window !== "undefined") {
+          window.location.assign(link.startsWith("http") ? link : link);
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+
+    nativeListenersBound = true;
+  } catch (e) {
+    console.warn("[D4EXAM] bindNativePushListeners failed", e);
+  }
+}
+
+/** Soft FCM register — never throws; may no-op if previously unsafe. */
+async function safeNativeRegister(): Promise<{ ok: boolean; token?: string; error?: string }> {
+  if (shouldSkipNativeRegister()) {
+    return {
+      ok: false,
+      error:
+        "Push registration was disabled after a previous failure. Rebuild the APK with google-services.json, then clear app storage or tap Enable again.",
+    };
+  }
+  if (nativeRegisterInFlight) {
+    return { ok: false, error: "Registration already in progress" };
+  }
+  nativeRegisterInFlight = true;
+  try {
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+    await ensureAndroidChannel();
+
+    const tokenPromise = new Promise<string | null>((resolve) => {
+      const timeout = setTimeout(() => resolve(null), 8_000);
+      void PushNotifications.addListener("registration", (t) => {
+        clearTimeout(timeout);
+        resolve(t?.value || null);
+      }).catch(() => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+      void PushNotifications.addListener("registrationError", () => {
+        clearTimeout(timeout);
+        markNativeRegisterUnsafe();
+        resolve(null);
+      }).catch(() => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+    });
+
+    // Native FCM register — if google-services.json is missing this can kill the process.
+    // We still call it once when the user explicitly enables notifications.
+    await PushNotifications.register();
+    const token = await tokenPromise;
+    if (token) {
+      clearNativeRegisterSkip();
+      return { ok: true, token };
+    }
+    // No token within timeout — do not mark skip permanently (FCM may be slow)
+    return { ok: true };
+  } catch (e) {
+    markNativeRegisterUnsafe();
+    return { ok: false, error: (e as Error).message || "Native push registration failed" };
+  } finally {
+    nativeRegisterInFlight = false;
+  }
 }
 
 async function enableNativePushNotifications(
@@ -191,27 +314,24 @@ async function enableNativePushNotifications(
       };
     }
 
+    // Permission alone is enough for OS dialogs; FCM register is optional/best-effort
     await bindNativePushListeners(userId, role);
 
-    const tokenPromise = new Promise<string | null>((resolve) => {
-      const timeout = setTimeout(() => resolve(null), 12000);
-      void PushNotifications.addListener("registration", (t) => {
-        clearTimeout(timeout);
-        resolve(t?.value || null);
-      });
-    });
-
-    await PushNotifications.register();
-    const token = await tokenPromise;
-
-    if (token) {
-      const saved = await upsertPushDevice(userId, token, role);
+    // User explicitly enabled — allow one more attempt even if previously marked unsafe
+    clearNativeRegisterSkip();
+    const reg = await safeNativeRegister();
+    if (reg.token) {
+      const saved = await upsertPushDevice(userId, reg.token, role);
       if (!saved.ok) return { ok: false, error: saved.error };
-      return { ok: true, token };
+      return { ok: true, token: reg.token };
     }
-
-    return { ok: true };
+    // Granted permission counts as success for UX even if FCM token missing
+    return {
+      ok: true,
+      error: reg.error,
+    };
   } catch (e) {
+    markNativeRegisterUnsafe();
     return { ok: false, error: (e as Error).message || "Native push registration failed" };
   }
 }
@@ -302,19 +422,21 @@ export async function refreshPushLastSeen(userId: string): Promise<void> {
   }
 }
 
+/**
+ * Startup hook for Capacitor.
+ * Only reads permission + attaches listeners.
+ * Does NOT call PushNotifications.register() automatically — that was causing
+ * the reopen crash loop when FCM/google-services.json was missing from the APK.
+ */
 export async function initNativePushIfNeeded(
-  userId?: string | null,
-  role?: string | null,
+  _userId?: string | null,
+  _role?: string | null,
 ): Promise<void> {
   if (!isNativeShell()) return;
-  await refreshNativePushPermissionState();
-  if (userId && nativePermissionCache === "granted") {
-    try {
-      await bindNativePushListeners(userId, role);
-      const { PushNotifications } = await import("@capacitor/push-notifications");
-      await PushNotifications.register();
-    } catch {
-      /* ignore */
-    }
+  try {
+    await refreshNativePushPermissionState();
+    // Intentionally no register() on cold start.
+  } catch {
+    /* never crash startup */
   }
 }
