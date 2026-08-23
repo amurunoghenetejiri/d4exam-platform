@@ -1,0 +1,151 @@
+import { useState, type MouseEvent } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Bell, CheckCheck, Loader2, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useSessionUser } from "@/lib/session";
+import { supabase } from "@/integrations/supabase/client";
+import { useRows } from "@/lib/queries";
+import { useRealtimeInvalidate } from "@/lib/realtime";
+import { cn } from "@/lib/utils";
+
+type Notif = {
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  created_at: string;
+  read_at: string | null;
+  link?: string | null;
+  action_url?: string | null;
+};
+
+const typeStyles: Record<string, string> = {
+  info: "bg-slate-100 text-slate-700",
+  success: "bg-emerald-50 text-emerald-700",
+  warning: "bg-amber-50 text-amber-700",
+  error: "bg-red-50 text-red-700",
+  exam_submitted: "bg-sky-50 text-sky-700",
+  exam_approved: "bg-emerald-50 text-emerald-700",
+  exam_rejected: "bg-red-50 text-red-700",
+  exam_revision_requested: "bg-amber-50 text-amber-700",
+  exam_scheduled: "bg-blue-50 text-blue-700",
+  exam_available: "bg-blue-50 text-blue-700",
+  result_published: "bg-emerald-50 text-emerald-700",
+  announcement: "bg-violet-50 text-violet-700",
+  system_alert: "bg-amber-50 text-amber-700",
+  officer_warning: "bg-red-50 text-red-700",
+};
+
+function normalizeNotifScope(scope: string): string {
+  const s = (scope || "").toLowerCase().trim();
+  if (s.includes("super")) return "super-admin";
+  if (s.includes("school") || s === "admin") return "admin";
+  if (s.includes("officer") || s.includes("exam")) return "officer";
+  if (s.includes("teacher")) return "teacher";
+  if (s.includes("student")) return "student";
+  return "student";
+}
+
+function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
+  const direct = (n.link || n.action_url || "").trim();
+  if (direct.startsWith("/")) return direct;
+
+  const scope = normalizeNotifScope(scopeRaw);
+  const ty = (n.type || "info").toLowerCase();
+  const home =
+    scope === "super-admin"
+      ? "/super-admin"
+      : scope === "admin"
+        ? "/admin"
+        : scope === "officer"
+          ? "/officer"
+          : scope === "teacher"
+            ? "/teacher"
+            : "/student";
+
+  const byScope: Record<string, Record<string, string>> = {
+    student: {
+      exam_available: "/student/examinations",
+      exam_scheduled: "/student/examinations",
+      exam_approved: "/student/examinations",
+      result_published: "/student/results",
+      result_pending_release: "/student/results",
+      officer_warning: "/student/examinations",
+      announcement: "/student/notifications",
+      system_alert: "/student",
+      warning: "/student/examinations",
+    },
+    teacher: {
+      exam_submitted: "/teacher/examinations",
+      exam_approved: "/teacher/examinations",
+      exam_rejected: "/teacher/examinations",
+      exam_revision_requested: "/teacher/examinations",
+      exam_scheduled: "/teacher/examinations",
+      announcement: "/teacher/notifications",
+      system_alert: "/teacher",
+    },
+    officer: {
+      exam_submitted: "/officer/approvals",
+      exam_approved: "/officer/approvals",
+      result_pending_release: "/officer/results",
+      result_published: "/officer/results",
+      officer_warning: "/officer/live-monitor",
+      system_alert: "/officer/live-monitor",
+      warning: "/officer/live-monitor",
+      announcement: "/officer/notifications",
+    },
+    admin: {
+      exam_scheduled: "/admin/examinations",
+      exam_available: "/admin/examinations",
+      result_published: "/admin/results",
+      announcement: "/admin/notifications",
+      system_alert: "/admin",
+    },
+    "super-admin": {
+      system_alert: "/super-admin/applications",
+      announcement: "/super-admin/applications",
+      warning: "/super-admin/applications",
+      info: "/super-admin/applications",
+    },
+  };
+
+  const map = byScope[scope] || byScope.student;
+  return map[ty] || `${home}/notifications`;
+}
+
+export function NotificationsPage({ scope }: { scope: string }) {
+  const { data: user } = useSessionUser();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  useRealtimeInvalidate(
+    `notifs-${user?.userId ?? "anon"}`,
+    [
+      {
+        table: "notifications",
+        filter: user?.userId ? `recipient_user_id=eq.${user.userId}` : undefined,
+      },
+    ],
+    [
+      ["rows", "notifications"],
+      ["count", "notifications"],
+      ["count", "notifications", "unread", user?.userId],
+      ["student-dashboard-notifs"],
+    ],
+    Boolean(user?.userId),
+    400,
+  );
+
+  const { data, isLoading, isError, error, refetch } = useRows<Notif>({
+    table: "notifications",
+    select: "id, title, message, type, created_at, read_at, link, action_url",
+    filters: user?.userId ? [{ column: "recipient_user_id", value: user.userId }] : [],
+    order: { column: "created_at", ascending: false },
+    limit: 150,
+    enabled: Boolean(user?.userId),
+  });
