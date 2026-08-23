@@ -10,6 +10,7 @@ import { toast } from "sonner";
 
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
+let onMessageBound = false;
 
 function getFirebaseApp(): FirebaseApp {
   if (app) return app;
@@ -31,6 +32,33 @@ export type PushPermissionState = "granted" | "denied" | "default" | "unsupporte
 export function getPushPermissionState(): PushPermissionState {
   if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
   return Notification.permission as PushPermissionState;
+}
+
+function showLocalNotification(title: string, body: string, link?: string) {
+  if (typeof window === "undefined" || Notification.permission !== "granted") return;
+  const icon = `${window.location.origin}/icon-192.png`;
+  try {
+    const n = new Notification(title, {
+      body,
+      icon,
+      badge: icon,
+      tag: "d4exam-notification",
+      data: { link: link || "/" },
+    });
+    n.onclick = () => {
+      window.focus();
+      if (link) {
+        try {
+          window.location.assign(link.startsWith("http") ? link : link);
+        } catch {
+          /* ignore */
+        }
+      }
+      n.close();
+    };
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function enablePushNotifications(userId: string, role?: string | null): Promise<{
@@ -89,11 +117,17 @@ export async function enablePushNotifications(userId: string, role?: string | nu
       if (ins.error) return { ok: false, error: ins.error.message };
     }
 
-    onMessage(msg, (payload) => {
-      const title = payload.notification?.title || payload.data?.title || "D4EXAM";
-      const body = payload.notification?.body || payload.data?.body || payload.data?.message || "";
-      toast.info(title, { description: body });
-    });
+    if (!onMessageBound) {
+      onMessageBound = true;
+      onMessage(msg, (payload) => {
+        const title = payload.notification?.title || payload.data?.title || "D4EXAM";
+        const body =
+          payload.notification?.body || payload.data?.body || payload.data?.message || "";
+        const link = payload.data?.link;
+        showLocalNotification(title, body, link);
+        toast.info(title, { description: body });
+      });
+    }
 
     return { ok: true, token };
   } catch (e) {
