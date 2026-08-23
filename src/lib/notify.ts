@@ -498,16 +498,20 @@ export async function notifyOfficersExamSubmitted(opts: {
   teacherName?: string | null;
 }): Promise<void> {
   try {
-    const officers = await listOfficerUserIds(opts.schoolId);
+    const [officers, admins] = await Promise.all([
+      listOfficerUserIds(opts.schoolId),
+      listAdminUserIds(opts.schoolId),
+    ]);
+    const recipients = [...new Set([...officers, ...admins])];
     const who = opts.teacherName ? ` by ${opts.teacherName}` : "";
     await notifyMany(
-      officers.map((uid) => ({
+      recipients.map((uid) => ({
         recipientUserId: uid,
         schoolId: opts.schoolId,
         title: "Exam submitted for approval",
         message: `“${opts.examTitle}” was submitted${who}. Review in Approvals.`,
         type: "exam_submitted",
-        link: "/officer/approvals",
+        link: officers.includes(uid) ? "/officer/approvals" : "/admin/examinations",
         entityType: "examination",
         entityId: opts.examId,
         dedupeMinutes: 10,
