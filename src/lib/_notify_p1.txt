@@ -53,7 +53,7 @@ export async function resolveAuthUserIds(
     if (schoolId) q2 = q2.eq("school_id", schoolId);
     const { data: byProfile } = await q2;
     const via = uniq((byProfile ?? []).map((p) => (p as { auth_user_id: string | null }).auth_user_id));
-    return uniq([...matched, ...via, ...input.filter((id) => matched.includes(id))]);
+    return uniq([...matched, ...via]);
   } catch {
     return input;
   }
@@ -63,8 +63,7 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
   if (!p.recipientUserId) return null;
   try {
     const resolved = await resolveAuthUserIds([p.recipientUserId], p.schoolId);
-    const recipientUserId = resolved[0] || p.recipientUserId;
-    p = { ...p, recipientUserId };
+    p = { ...p, recipientUserId: resolved[0] || p.recipientUserId };
 
     if (p.dedupeMinutes && p.entityId) {
       const since = new Date(Date.now() - p.dedupeMinutes * 60_000).toISOString();
@@ -123,3 +122,20 @@ export async function notifyMany(payloads: NotifyPayload[]): Promise<void> {
   await Promise.all(payloads.map((p) => notifyUser(p)));
 }
 
+export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
+  const uniq = (ids: (string | null | undefined)[]) =>
+    [...new Set(ids.filter((x): x is string => Boolean(x)))];
+  try {
+    const { data: bySchool, error: e1 } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("school_id", schoolId)
+      .eq("role", "examination_officer");
+    if (!e1) {
+      const ids = uniq((bySchool ?? []).map((r) => (r as { user_id: string }).user_id));
+      if (ids.length) {
+        const resolved = await resolveAuthUserIds(ids, schoolId);
+        if (resolved.length) return resolved;
+        return ids;
+      }
+    }
