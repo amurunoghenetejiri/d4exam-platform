@@ -258,7 +258,6 @@ html {
   pointer-events: none;
 }
 
-/* Gentle continuous bell swing while unread notifications exist */
 @keyframes bell-swing {
   0%,
   100% {
@@ -297,4 +296,66 @@ html {
   .bell-ring {
     animation: none;
   }
+}
+
+/* Capacitor shell offsets */
+.d4-shell-main-offset {
+  padding-top: calc(3rem + env(safe-area-inset-top, 0px));
+}
+@media (min-width: 640px) {
+  .d4-shell-main-offset {
+    padding-top: calc(4rem + env(safe-area-inset-top, 0px));
+  }
+}
+
+html.d4-native body {
+  background-color: #0b1b3a;
+}
+
+/* Native Android: continuous navy under status bar + safe-area (web UI unchanged) */
+html.d4-native header.fixed.top-0,
+html.d4-native header[class*="fixed"][class*="top-0"] {
+  padding-top: env(safe-area-inset-top, 0px) !important;
+  background-color: #0b1b3a !important;
+  background-image: none !important;
+  border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+  color: #f8fafc !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+html.d4-native header.fixed.top-0 .text-slate-500,
+html.d4-native header.fixed.top-0 .text-slate-600,
+html.d4-native header.fixed.top-0 .text-slate-700,
+html.d4-native header.fixed.top-0 .text-slate-800,
+html.d4-native header.fixed.top-0 .text-slate-900,
+html.d4-native header[class*="fixed"][class*="top-0"] .text-slate-500,
+html.d4-native header[class*="fixed"][class*="top-0"] .text-slate-600,
+html.d4-native header[class*="fixed"][class*="top-0"] .text-slate-700,
+html.d4-native header[class*="fixed"][class*="top-0"] .text-slate-800,
+html.d4-native header[class*="fixed"][class*="top-0"] .text-slate-900 {
+  color: #e2e8f0 !important;
+}
+
+html.d4-native header.fixed.top-0 .text-primary,
+html.d4-native header[class*="fixed"][class*="top-0"] .text-primary {
+  color: #93c5fd !important;
+}
+
+html.d4-native .relative.z-10.pt-12,
+html.d4-native .d4-shell-main-offset {
+  padding-top: calc(3rem + env(safe-area-inset-top, 0px)) !important;
+}
+@media (min-width: 640px) {
+  html.d4-native .relative.z-10.pt-12,
+  html.d4-native .d4-shell-main-offset {
+    padding-top: calc(4rem + env(safe-area-inset-top, 0px)) !important;
+  }
+}
+
+html.d4-native header.sticky.top-0 {
+  padding-top: env(safe-area-inset-top, 0px) !important;
+}
+
+html.d4-native nav[aria-label="Primary"] {
+  padding-bottom: env(safe-area-inset-bottom, 0px) !important;
 }
