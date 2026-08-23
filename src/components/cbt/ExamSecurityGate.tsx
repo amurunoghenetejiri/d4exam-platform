@@ -20,6 +20,7 @@ import { resolveScreenShareMode } from "@/lib/exam-security";
 import type { ExamSecuritySettings } from "@/types";
 import { cn } from "@/lib/utils";
 import { primeHaptics } from "@/lib/haptic";
+import { ensureCameraPermission } from "@/native/cameraService";
 
 type Props = {
   examTitle: string;
@@ -102,6 +103,8 @@ export function ExamSecurityGate({
     setPreviewState("starting");
     setPreviewError(null);
     try {
+      const camOk = await ensureCameraPermission();
+      if (!camOk.granted) throw new Error(camOk.error || "Camera permission required");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
@@ -115,7 +118,7 @@ export function ExamSecurityGate({
     } catch {
       setPreviewState("error");
       setPreviewError(
-        "Camera unavailable. Allow camera access in your browser settings, close other apps using the camera, then try again.",
+        "Camera unavailable. Allow camera access for D4EXAM (Android Settings → Apps → D4EXAM → Permissions), close other apps using the camera, then try again.",
       );
     }
   };
@@ -357,7 +360,6 @@ export function ExamSecurityGate({
             className="mt-6 w-full font-semibold"
             disabled={busy || hardBlock || cameraBlocked || !acknowledgedNotice}
             onClick={() => {
-              // Unlock vibration + audio on this user gesture
               primeHaptics();
               stopPreview();
               void onStart({
