@@ -7,20 +7,21 @@ import type { CapacitorConfig } from "@capacitor/cli";
  *   appName  = D4EXAM
  *   appId    = com.d4exam.app
  *
- * Web assets:
- *   webDir = dist  (populate with: npm run build && copy .output/public → dist, or npm run cap:sync)
+ * Architecture note:
+ *   TanStack Start is SSR. A pure static dist shell cannot run auth, server
+ *   functions, or CBT correctly offline. The Android WebView therefore loads
+ *   the production Vercel deployment so the full existing website works inside
+ *   the native shell (camera permissions, splash, package id still native).
  *
- * For full SSR/auth/CBT inside the WebView against production, uncomment server.url.
- * Leave it commented to load local static assets from dist/.
+ *   webDir is still "dist" so Cap sync / CI have a valid asset folder.
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
   appName: "D4EXAM",
   webDir: "dist",
   server: {
-    // Uncomment to load the live Vercel deployment inside the Android WebView
-    // (recommended for TanStack Start SSR until a fully static client export is used):
-    // url: "https://d4exam-platform.vercel.app",
+    // Live SSR app — required for auth, exams, notifications, role dashboards.
+    url: "https://d4exam-platform.vercel.app",
     androidScheme: "https",
   },
   plugins: {
