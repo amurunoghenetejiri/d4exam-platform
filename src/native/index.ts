@@ -3,3 +3,5 @@ export * from "./networkService";
 export * from "./storageService";
 export * from "./notificationService";
 export * from "./cameraService";
+export * from "./statusBar";
+export * from "./permissions";

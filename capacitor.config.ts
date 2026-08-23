@@ -3,32 +3,42 @@ import type { CapacitorConfig } from "@capacitor/cli";
 /**
  * D4EXAM Capacitor config
  *
- * App identity:
- *   appName  = D4EXAM
- *   appId    = com.d4exam.app
- *
- * Architecture note:
- *   TanStack Start is SSR. A pure static dist shell cannot run auth, server
- *   functions, or CBT correctly offline. The Android WebView therefore loads
- *   the production Vercel deployment so the full existing website works inside
- *   the native shell (camera permissions, splash, package id still native).
- *
- *   webDir is still "dist" so Cap sync / CI have a valid asset folder.
+ * Live server: the Android WebView loads production Vercel so web deploys
+ * appear without reinstalling the APK. Native plugins (push, camera, status bar)
+ * still run inside the shell.
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
   appName: "D4EXAM",
   webDir: "dist",
   server: {
-    // Live SSR app — required for auth, exams, notifications, role dashboards.
     url: "https://d4exam-platform.vercel.app",
     androidScheme: "https",
+    allowNavigation: [
+      "d4exam-platform.vercel.app",
+      "*.vercel.app",
+      "*.supabase.co",
+    ],
+    errorPath: "/offline.html",
+  },
+  android: {
+    allowMixedContent: false,
+    backgroundColor: "#0b1b3a",
+    webContentsDebuggingEnabled: false,
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 1500,
-      backgroundColor: "#070D1B",
+      launchShowDuration: 2000,
+      launchAutoHide: true,
+      backgroundColor: "#0b1b3a",
       showSpinner: false,
+      splashFullScreen: true,
+      splashImmersive: false,
+    },
+    StatusBar: {
+      style: "DARK",
+      backgroundColor: "#0b1b3a",
+      overlaysWebView: false,
     },
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"],
