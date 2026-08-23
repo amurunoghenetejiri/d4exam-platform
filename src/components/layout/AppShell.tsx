@@ -17,6 +17,7 @@ import {
 import { Logo } from "@/components/brand/Logo";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { Watermark } from "@/components/brand/Watermark";
+import { InstallAndPushPrompt } from "@/components/InstallAndPushPrompt";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -487,6 +488,8 @@ export function AppShell({
           </ul>
         </nav>
       )}
+
+      <InstallAndPushPrompt />
     </div>
   );
 }
