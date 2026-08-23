@@ -18,6 +18,7 @@ import { Logo } from "@/components/brand/Logo";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { Watermark } from "@/components/brand/Watermark";
 import { InstallAndPushPrompt } from "@/components/InstallAndPushPrompt";
+import { NetworkBanner } from "@/components/NetworkBanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -231,6 +232,7 @@ export function AppShell({
 
   return (
     <div className="relative min-h-dvh bg-slate-50">
+      <NetworkBanner />
       <Watermark opacity={0.08} size="xl" className="pointer-events-none lg:left-64" />
 
       <aside className="fixed inset-y-0 left-0 z-40 hidden h-dvh max-h-dvh w-64 flex-col bg-[#0b1b3a] lg:flex">
