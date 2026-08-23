@@ -1,0 +1,247 @@
+import { PageHeader, SectionCard, InfoRow } from "@/components/dashboard/kit";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useSessionUser, signOut } from "@/lib/session";
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  DEFAULT_DISPLAY_PREFS,
+  loadNotificationPrefs,
+  loadDisplayPrefs,
+  hydratePrefsFromDb,
+  persistPrefsToDb,
+  type NotificationPrefs,
+  type DisplayPrefs,
+} from "@/lib/notification-prefs";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  updateSchoolLogoUrl,
+  updateSchoolName,
+  uploadSchoolLogo,
+  useSchoolIdentity,
+  validateLogoFile,
+} from "@/lib/school-identity";
+import { SchoolLogo } from "@/components/brand/SchoolLogo";
+import { Loader2, Upload, Building2 } from "lucide-react";
+
+export function SettingsPage({ scope }: { scope: string }) {
+  const { data: session } = useSessionUser();
+  const [saving, setSaving] = useState(false);
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({ ...DEFAULT_NOTIFICATION_PREFS });
+  const [displayPrefs, setDisplayPrefs] = useState<DisplayPrefs>({ ...DEFAULT_DISPLAY_PREFS });
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const scopeLower = (scope || "").toLowerCase();
+  const isSchoolAdmin =
+    scopeLower.includes("school admin") ||
+    scopeLower.includes("admin") ||
+    scopeLower === "school";
+
+  useEffect(() => {
+    if (!session?.userId) return;
+    setNotifPrefs(loadNotificationPrefs(session.userId));
+    setDisplayPrefs(loadDisplayPrefs(session.userId));
+    void hydratePrefsFromDb(session.userId, session.profileId).then(({ notif, display }) => {
+      setNotifPrefs(notif);
+      setDisplayPrefs(display);
+    });
+  }, [session?.userId, session?.profileId]);
+
+  async function savePrefs() {
+    if (!session?.userId) {
+      toast.error("Sign in required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await persistPrefsToDb(session.userId, session.profileId, notifPrefs, displayPrefs);
+      toast.success("Settings saved.");
+    } catch (e) {
+      toast.error((e as Error).message || "Could not save settings.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changePassword() {
+    if (!session?.userId) {
+      toast.error("Sign in required.");
+      return;
+    }
+    const cur = currentPassword;
+    const next = newPassword;
+    const conf = confirmPassword;
+    if (!cur || !next || !conf) {
+      toast.error("Fill in current password, new password, and confirmation.");
+      return;
+    }
+    if (next.length < 8) {
+      toast.error("New password must be at least 8 characters.");
+      return;
+    }
+    if (next !== conf) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+    if (next === cur) {
+      toast.error("New password must be different from the current password.");
+      return;
+    }
+    setPwdBusy(true);
+    try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !userData.user?.email) {
+        throw new Error(userErr?.message || "Could not load your account.");
+      }
+      const email = userData.user.email;
+      const { error: verifyErr } = await supabase.auth.signInWithPassword({
+        email,
+        password: cur,
+      });
+      if (verifyErr) {
+        throw new Error("Current password is incorrect.");
+      }
+      const { error: updErr } = await supabase.auth.updateUser({ password: next });
+      if (updErr) throw new Error(updErr.message || "Could not update password.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      toast.success("Password updated. Use your new password next time you sign in.");
+    } catch (e) {
+      toast.error((e as Error).message || "Password change failed.");
+    } finally {
+      setPwdBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Settings"
+        description={`Manage your school identity, preferences and account for ${scope}.`}
+      />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {isSchoolAdmin && <SchoolIdentityCard />}
+
+        <SectionCard title="Preferences" description="Regional and display options">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="lang">Language</Label>
+              <Select
+                value={displayPrefs.language}
+                onValueChange={(v) => setDisplayPrefs((p) => ({ ...p, language: v }))}
+              >
+                <SelectTrigger id="lang">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="en">English</SelectItem>
+                  <SelectItem value="fr">French</SelectItem>
+                  <SelectItem value="ar">Arabic</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tz">Time zone</Label>
+              <Select
+                value={displayPrefs.timezone}
+                onValueChange={(v) => setDisplayPrefs((p) => ({ ...p, timezone: v }))}
+              >
+                <SelectTrigger id="tz">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="wat">West Africa Time (UTC+1)</SelectItem>
+                  <SelectItem value="gmt">Greenwich Mean Time (UTC)</SelectItem>
+                  <SelectItem value="eat">East Africa Time (UTC+3)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Separator />
+            <ToggleRow
+              id="compact"
+              label="Compact tables"
+              hint="Reduce row height on data tables"
+              checked={displayPrefs.compactTables}
+              onCheckedChange={(v) => setDisplayPrefs((p) => ({ ...p, compactTables: v }))}
+            />
+            <ToggleRow
+              id="reduced"
+              label="Reduced motion"
+              hint="Minimise interface animation"
+              checked={displayPrefs.reducedMotion}
+              onCheckedChange={(v) => setDisplayPrefs((p) => ({ ...p, reducedMotion: v }))}
+            />
+            <Button disabled={saving} onClick={() => void savePrefs()}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save preferences
+            </Button>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Notifications" description="Choose what you get alerted about">
+          <div className="space-y-4">
+            <ToggleRow id="n1" label="Examination reminders" hint="24 hours before" checked={notifPrefs.examReminders} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, examReminders: v }))} />
+            <ToggleRow id="n2" label="Result publications" checked={notifPrefs.resultPublications} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, resultPublications: v }))} />
+            <ToggleRow id="n3" label="Integrity alerts" checked={notifPrefs.integrityAlerts} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, integrityAlerts: v }))} />
+            <ToggleRow id="n4" label="Product announcements" checked={notifPrefs.productAnnouncements} onCheckedChange={(v) => setNotifPrefs((p) => ({ ...p, productAnnouncements: v }))} />
+            <Button disabled={saving} onClick={() => void savePrefs()}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save notification settings
+            </Button>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Security" description="Protect your account">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="cur">Current password</Label>
+              <Input
+                id="cur"
+                type="password"
+                autoComplete="current-password"
+                placeholder="••••••••"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new">New password</Label>
+              <Input
+                id="new"
+                type="password"
+                autoComplete="new-password"
+                placeholder="At least 8 characters"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm">Confirm new password</Label>
+              <Input
+                id="confirm"
+                type="password"
+                autoComplete="new-password"
+                placeholder="Repeat new password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+              {confirmPassword && newPassword !== confirmPassword ? (
+                <p className="text-xs font-medium text-red-600">Passwords do not match.</p>
+              ) : null}
+            </div>
