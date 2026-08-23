@@ -34,6 +34,33 @@ export function getPushPermissionState(): PushPermissionState {
   return Notification.permission as PushPermissionState;
 }
 
+function showLocalNotification(title: string, body: string, link?: string) {
+  if (typeof window === "undefined" || Notification.permission !== "granted") return;
+  const icon = `${window.location.origin}/icon-192.png`;
+  try {
+    const n = new Notification(title, {
+      body,
+      icon,
+      badge: icon,
+      tag: "d4exam-notification",
+      data: { link: link || "/" },
+    });
+    n.onclick = () => {
+      window.focus();
+      if (link) {
+        try {
+          window.location.assign(link.startsWith("http") ? link : link);
+        } catch {
+          /* ignore */
+        }
+      }
+      n.close();
+    };
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function enablePushNotifications(userId: string, role?: string | null): Promise<{
   ok: boolean;
   token?: string;
@@ -51,12 +78,8 @@ export async function enablePushNotifications(userId: string, role?: string | nu
     }
 
     if ("serviceWorker" in navigator) {
-      const reg = await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
+      await navigator.serviceWorker.register("/firebase-messaging-sw.js", { scope: "/" });
       await navigator.serviceWorker.ready;
-      // Activate new SW so duplicate-push fix applies immediately
-      if (reg.waiting) {
-        reg.waiting.postMessage({ type: "SKIP_WAITING" });
-      }
     }
 
     const msg = await getFirebaseMessaging();
@@ -96,12 +119,12 @@ export async function enablePushNotifications(userId: string, role?: string | nu
 
     if (!onMessageBound) {
       onMessageBound = true;
-      // Foreground: in-app toast ONLY. Do not call new Notification()
-      // (that creates a second Chrome-branded system alert).
       onMessage(msg, (payload) => {
         const title = payload.notification?.title || payload.data?.title || "D4EXAM";
         const body =
           payload.notification?.body || payload.data?.body || payload.data?.message || "";
+        const link = payload.data?.link;
+        showLocalNotification(title, body, link);
         toast.info(title, { description: body });
       });
     }
