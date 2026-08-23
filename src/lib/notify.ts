@@ -33,9 +33,38 @@ export type NotifyPayload = {
   dedupeMinutes?: number;
 };
 
+/** Ensure ids are auth.users ids. Accepts auth ids or profile ids. */
+export async function resolveAuthUserIds(
+  ids: string[],
+  schoolId?: string | null,
+): Promise<string[]> {
+  const uniq = (xs: (string | null | undefined)[]) =>
+    [...new Set(xs.filter((x): x is string => Boolean(x)))];
+  const input = uniq(ids);
+  if (!input.length) return [];
+  try {
+    let q1 = supabase.from("profiles").select("auth_user_id").in("auth_user_id", input);
+    if (schoolId) q1 = q1.eq("school_id", schoolId);
+    const { data: byAuth } = await q1;
+    const matched = uniq((byAuth ?? []).map((p) => (p as { auth_user_id: string | null }).auth_user_id));
+    const missing = input.filter((id) => !matched.includes(id));
+    if (!missing.length) return matched.length ? matched : input;
+    let q2 = supabase.from("profiles").select("auth_user_id").in("id", missing);
+    if (schoolId) q2 = q2.eq("school_id", schoolId);
+    const { data: byProfile } = await q2;
+    const via = uniq((byProfile ?? []).map((p) => (p as { auth_user_id: string | null }).auth_user_id));
+    return uniq([...matched, ...via]);
+  } catch {
+    return input;
+  }
+}
+
 export async function notifyUser(p: NotifyPayload): Promise<string | null> {
   if (!p.recipientUserId) return null;
   try {
+    const resolved = await resolveAuthUserIds([p.recipientUserId], p.schoolId);
+    p = { ...p, recipientUserId: resolved[0] || p.recipientUserId };
+
     if (p.dedupeMinutes && p.entityId) {
       const since = new Date(Date.now() - p.dedupeMinutes * 60_000).toISOString();
       let q = supabase
@@ -70,9 +99,12 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
       type: p.type || "info",
     };
     if (p.schoolId) row.school_id = p.schoolId;
-    if (p.link) row.link = p.link;
+    if (p.link) {
+      row.link = p.link;
+      row.action_url = p.link;
+    }
     if (p.entityType) row.entity_type = p.entityType;
-    if (p.entityId) row.entity_id = p.entityId;
+    if (p.entityId) row.entity_id = String(p.entityId);
 
     const { data, error } = await supabase.from("notifications").insert(row as never).select("id").maybeSingle();
     if (error) {
@@ -101,7 +133,13 @@ export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
       .eq("role", "examination_officer");
     if (!e1) {
       const ids = uniq((bySchool ?? []).map((r) => (r as { user_id: string }).user_id));
-      if (ids.length) return ids;
+      if (ids.length) {
+        try {
+          const resolved = await resolveAuthUserIds(ids, schoolId);
+          if (resolved.length) return resolved;
+        } catch { /* ignore */ }
+        return ids;
+      }
     }
     const { data: allOfficers } = await supabase
       .from("user_roles")
@@ -141,7 +179,13 @@ export async function listAdminUserIds(schoolId: string): Promise<string[]> {
       .select("user_id")
       .eq("school_id", schoolId)
       .eq("role", "school_admin");
-    return [...new Set((roles ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
+    const ids = [...new Set((roles ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
+    if (!ids.length) return [];
+    try {
+      const resolved = await resolveAuthUserIds(ids, schoolId);
+      if (resolved.length) return resolved;
+    } catch { /* ignore */ }
+    return ids;
   } catch {
     return [];
   }
@@ -158,18 +202,13 @@ export async function studentIdsToAuthUserIds(studentIds: string[]): Promise<str
       .map((s) => (s as { auth_user_id?: string | null }).auth_user_id)
       .filter(Boolean) as string[];
     if (direct.length) return [...new Set(direct)];
-
     const profileIds = [...new Set((students ?? []).map((s) => s.profile_id).filter(Boolean))] as string[];
     if (!profileIds.length) return [];
     const { data: profiles } = await supabase
       .from("profiles")
       .select("id, auth_user_id")
       .in("id", profileIds);
-    const fromAuth = (profiles ?? [])
-      .map((p) => (p as { auth_user_id?: string | null }).auth_user_id)
-      .filter(Boolean) as string[];
-    if (fromAuth.length) return [...new Set(fromAuth)];
-    return [...new Set(profileIds)];
+    return [...new Set((profiles ?? []).map((p) => (p as { auth_user_id?: string | null }).auth_user_id).filter(Boolean) as string[])];
   } catch {
     return [];
   }
@@ -184,13 +223,14 @@ export async function listTeacherUserIds(schoolId: string): Promise<string[]> {
       .eq("school_id", schoolId)
       .eq("role", "teacher");
     const fromRoles = [...new Set((roles ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
-    if (fromRoles.length) return fromRoles;
-
+    if (fromRoles.length) {
+      const resolved = await resolveAuthUserIds(fromRoles, schoolId);
+      return resolved.length ? resolved : fromRoles;
+    }
     const { data: teachers } = await supabase
       .from("teachers")
       .select("profile_id, auth_user_id")
-      .eq("school_id", schoolId)
-      .limit(500);
+      .eq("school_id", schoolId);
     const direct = (teachers ?? [])
       .map((t) => (t as { auth_user_id?: string | null }).auth_user_id)
       .filter(Boolean) as string[];
@@ -207,231 +247,49 @@ export async function listTeacherUserIds(schoolId: string): Promise<string[]> {
 export async function notifyOfficersStudentResultPending(opts: {
   schoolId: string;
   examId: string;
-  studentId: string;
-  resultId?: string | null;
-  published?: boolean;
-}) {
-  if (opts.published) return;
-  const officers = await listOfficerUserIds(opts.schoolId);
-  if (!officers.length) return;
-  await notifyMany(
-    officers.map((uid) => ({
-      recipientUserId: uid,
-      schoolId: opts.schoolId,
-      title: "Result waiting for release",
-      message: "A student submitted an exam. Result is held pending officer approval or release.",
-      type: "result_pending_release",
-      link: "/officer/results",
-      entityType: "examination",
-      entityId: opts.examId,
-      dedupeMinutes: 5,
-    })),
-  );
+  examTitle: string;
+  studentName: string;
+}): Promise<void> {
+  try {
+    const officers = await listOfficerUserIds(opts.schoolId);
+    await notifyMany(
+      officers.map((uid) => ({
+        recipientUserId: uid,
+        schoolId: opts.schoolId,
+        title: "Result pending release",
+        message: `${opts.studentName} submitted “${opts.examTitle}”. Review and release when ready.`,
+        type: "result_pending_release",
+        link: "/officer/results",
+        entityType: "examination",
+        entityId: opts.examId,
+        dedupeMinutes: 30,
+      })),
+    );
+  } catch (e) {
+    console.warn("[notify] notifyOfficersStudentResultPending failed", e);
+  }
 }
 
 export async function notifyStudentResultPublished(opts: {
   studentUserId: string;
   schoolId?: string | null;
+  examId: string;
   examTitle: string;
-  resultId?: string | null;
-}) {
-  await notifyUser({
-    recipientUserId: opts.studentUserId,
-    schoolId: opts.schoolId,
-    title: "Result published",
-    message: `Your result for ${opts.examTitle} is now available.`,
-    type: "result_published",
-    link: "/student/results",
-    entityType: "result",
-    entityId: opts.resultId ?? null,
-    dedupeMinutes: 60,
-  });
-}
-
-export async function notifyStudentsResultsReleased(opts: {
-  schoolId: string;
-  studentIds: string[];
-  examTitle: string;
-  resultIdsByStudent?: Record<string, string>;
-}) {
-  const authIds = await studentIdsToAuthUserIds(opts.studentIds);
-  await notifyMany(
-    authIds.map((uid) => ({
-      recipientUserId: uid,
+}): Promise<void> {
+  try {
+    await notifyUser({
+      recipientUserId: opts.studentUserId,
       schoolId: opts.schoolId,
       title: "Result published",
-      message: `Your result for ${opts.examTitle} is now available. Open My Results to view it.`,
+      message: `Your result for “${opts.examTitle}” is now available.`,
       type: "result_published",
       link: "/student/results",
       entityType: "examination",
-      dedupeMinutes: 60,
-    })),
-  );
-}
-
-export async function notifyStudentExamSubmitted(opts: {
-  studentUserId: string;
-  schoolId?: string | null;
-  examId: string;
-  examTitle: string;
-}) {
-  await notifyUser({
-    recipientUserId: opts.studentUserId,
-    schoolId: opts.schoolId,
-    title: "Exam submitted successfully",
-    message: `Your examination “${opts.examTitle}” has been submitted.`,
-    type: "success",
-    link: `/student/results`,
-    entityType: "examination",
-    entityId: opts.examId,
-    dedupeMinutes: 10,
-  });
-}
-
-export async function notifyStudentOfficerWarning(opts: {
-  schoolId: string;
-  studentId: string;
-  examId: string;
-  examTitle?: string;
-  message?: string;
-}) {
-  const authIds = await studentIdsToAuthUserIds([opts.studentId]);
-  const uid = authIds[0];
-  if (!uid) {
-    console.warn("[notify] no auth user for student warning", opts.studentId);
-    return null;
-  }
-  const examBit = opts.examTitle ? ` during “${opts.examTitle}”` : "";
-  return notifyUser({
-    recipientUserId: uid,
-    schoolId: opts.schoolId,
-    title: "⚠ Officer warning",
-    message:
-      opts.message ||
-      `An examination officer has issued a warning${examBit}. Stay focused on your exam and follow all rules. Further violations may be flagged.`,
-    type: "officer_warning",
-    link: "/student/examinations",
-    entityType: "examination",
-    entityId: opts.examId,
-    dedupeMinutes: 30,
-  });
-}
-
-export async function notifyStudentsResultsHeld(opts: {
-  schoolId: string;
-  studentIds: string[];
-  examTitle: string;
-  reason?: string;
-}) {
-  const authIds = await studentIdsToAuthUserIds(opts.studentIds);
-  const reasonBit = opts.reason?.trim() ? ` Reason: ${opts.reason.trim()}` : "";
-  await notifyMany(
-    authIds.map((uid) => ({
-      recipientUserId: uid,
-      schoolId: opts.schoolId,
-      title: "Result held for review",
-      message: `Your result for “${opts.examTitle}” is held by the Examination Officer and is not yet released.${reasonBit}`,
-      type: "warning",
-      link: "/student/results",
-      entityType: "examination",
-      dedupeMinutes: 30,
-    })),
-  );
-}
-
-export async function notifyStudentsExamRescheduled(opts: {
-  schoolId: string;
-  studentIds: string[];
-  examTitle: string;
-  reason?: string;
-  windowLabel?: string;
-}) {
-  const authIds = await studentIdsToAuthUserIds(opts.studentIds);
-  const reasonBit = opts.reason?.trim() ? ` Reason: ${opts.reason.trim()}` : "";
-  const windowBit = opts.windowLabel ? ` New window: ${opts.windowLabel}.` : "";
-  await notifyMany(
-    authIds.map((uid) => ({
-      recipientUserId: uid,
-      schoolId: opts.schoolId,
-      title: "Exam rescheduled",
-      message: `“${opts.examTitle}” has been rescheduled by the Examination Officer.${windowBit}${reasonBit}`,
-      type: "exam_scheduled",
-      link: "/student/examinations",
-      entityType: "examination",
-      dedupeMinutes: 30,
-    })),
-  );
-}
-
-export async function notifyStudentsRewriteAllowed(opts: {
-  schoolId: string;
-  studentIds: string[];
-  examTitle: string;
-  reason?: string;
-}) {
-  const authIds = await studentIdsToAuthUserIds(opts.studentIds);
-  const reasonBit = opts.reason?.trim() ? ` Reason: ${opts.reason.trim()}` : "";
-  await notifyMany(
-    authIds.map((uid) => ({
-      recipientUserId: uid,
-      schoolId: opts.schoolId,
-      title: "Rewrite allowed",
-      message: `You may rewrite “${opts.examTitle}”. Open Examinations when the paper is available.${reasonBit}`,
-      type: "exam_available",
-      link: "/student/examinations",
-      entityType: "examination",
-      dedupeMinutes: 30,
-    })),
-  );
-}
-
-export async function notifyStudentResultTerminated(opts: {
-  schoolId: string;
-  studentId: string;
-  examTitle: string;
-  reason?: string;
-}) {
-  const authIds = await studentIdsToAuthUserIds([opts.studentId]);
-  const uid = authIds[0];
-  if (!uid) return null;
-  const reasonBit = opts.reason?.trim() ? ` Reason: ${opts.reason.trim()}` : "";
-  return notifyUser({
-    recipientUserId: uid,
-    schoolId: opts.schoolId,
-    title: "Exam terminated",
-    message: `Your attempt for “${opts.examTitle}” was terminated by the Examination Officer.${reasonBit}`,
-    type: "error",
-    link: "/student/results",
-    entityType: "examination",
-    dedupeMinutes: 10,
-  });
-}
-
-export async function notifyOfficersExamSubmitted(opts: {
-  schoolId: string;
-  teacherName: string;
-  examId: string;
-  examTitle: string;
-  courseLabel?: string;
-}) {
-  const officers = await listOfficerUserIds(opts.schoolId);
-  if (!officers.length) {
-    console.warn("[notify] no examination officers found for school", opts.schoolId);
-  }
-  const label = opts.courseLabel ? `${opts.courseLabel} — ${opts.examTitle}` : opts.examTitle;
-  await notifyMany(
-    officers.map((id) => ({
-      recipientUserId: id,
-      schoolId: opts.schoolId,
-      title: "Exam submitted for review",
-      message: `${opts.teacherName} submitted ${label} for examination review.`,
-      type: "exam_submitted",
-      link: "/officer/approvals",
-      entityType: "examination",
       entityId: opts.examId,
-      dedupeMinutes: 30,
-    })),
-  );
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentResultPublished failed", e);
+  }
 }
 
 export async function notifyTeacherExamDecision(opts: {
@@ -439,97 +297,106 @@ export async function notifyTeacherExamDecision(opts: {
   schoolId?: string | null;
   examId: string;
   examTitle: string;
-  decision: "approve" | "reject" | "changes";
-  scheduleNote?: string;
-  comment?: string;
-}) {
-  const titles = {
-    approve: "Examination approved",
-    reject: "Examination rejected",
-    changes: "Revision requested",
+  decision: "approved" | "rejected" | "revision";
+  note?: string | null;
+}): Promise<void> {
+  const map = {
+    approved: {
+      title: "Examination approved",
+      type: "exam_approved",
+      message: `“${opts.examTitle}” was approved.`,
+    },
+    rejected: {
+      title: "Examination rejected",
+      type: "exam_rejected",
+      message: `“${opts.examTitle}” was rejected.${opts.note ? ` ${opts.note}` : ""}`,
+    },
+    revision: {
+      title: "Revision requested",
+      type: "exam_revision_requested",
+      message: `Revision requested for “${opts.examTitle}”.${opts.note ? ` ${opts.note}` : ""}`,
+    },
   } as const;
-  const types = {
-    approve: "exam_approved",
-    reject: "exam_rejected",
-    changes: "exam_revision_requested",
-  } as const;
-  let message =
-    opts.decision === "approve"
-      ? `Your examination “${opts.examTitle}” was approved.`
-      : opts.decision === "reject"
-        ? `Your examination “${opts.examTitle}” was rejected.`
-        : `Changes were requested on “${opts.examTitle}”.`;
-  if (opts.scheduleNote) message += ` ${opts.scheduleNote}`;
-  if (opts.comment) message += ` Message: ${opts.comment}`;
+  const m = map[opts.decision];
+  try {
+    await notifyUser({
+      recipientUserId: opts.teacherUserId,
+      schoolId: opts.schoolId,
+      title: m.title,
+      message: m.message,
+      type: m.type,
+      link: "/teacher/examinations",
+      entityType: "examination",
+      entityId: opts.examId,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyTeacherExamDecision failed", e);
+  }
+}
 
-  await notifyUser({
-    recipientUserId: opts.teacherUserId,
-    schoolId: opts.schoolId,
-    title: titles[opts.decision],
-    message,
-    type: types[opts.decision],
-    link: `/teacher/examinations`,
-    entityType: "examination",
-    entityId: opts.examId,
-    dedupeMinutes: 5,
-  });
+export async function notifyStudentExamAvailable(opts: {
+  studentUserId: string;
+  schoolId?: string | null;
+  examId: string;
+  examTitle: string;
+}): Promise<void> {
+  try {
+    await notifyUser({
+      recipientUserId: opts.studentUserId,
+      schoolId: opts.schoolId,
+      title: "Exam available",
+      message: `“${opts.examTitle}” is available for you to take.`,
+      type: "exam_available",
+      link: "/student/examinations",
+      entityType: "examination",
+      entityId: opts.examId,
+      dedupeMinutes: 120,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentExamAvailable failed", e);
+  }
+}
+
+export async function notifyStudentOfficerWarning(opts: {
+  studentUserId: string;
+  schoolId?: string | null;
+  examId?: string | null;
+  message?: string | null;
+}): Promise<void> {
+  try {
+    await notifyUser({
+      recipientUserId: opts.studentUserId,
+      schoolId: opts.schoolId,
+      title: "Officer warning",
+      message: opts.message?.trim() || "An examination officer sent you a warning during your exam. Stay focused.",
+      type: "officer_warning",
+      link: "/student/examinations",
+      entityType: opts.examId ? "examination" : null,
+      entityId: opts.examId ?? null,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentOfficerWarning failed", e);
+  }
 }
 
 export async function notifyStudentsExamApproved(opts: {
   schoolId: string;
   examId: string;
   examTitle: string;
-  courseId?: string | null;
-  scheduledStart?: string | null;
-}) {
+  studentAuthUserIds: string[];
+}): Promise<void> {
   try {
-    let studentIds: string[] = [];
-
-    if (opts.courseId) {
-      const { data: course } = await supabase
-        .from("courses")
-        .select("id, department_id, level_id")
-        .eq("id", opts.courseId)
-        .maybeSingle();
-
-      let q = supabase.from("students").select("id").eq("school_id", opts.schoolId).limit(2000);
-      const dept = (course as { department_id?: string | null } | null)?.department_id;
-      const level = (course as { level_id?: string | null } | null)?.level_id;
-      if (dept) q = q.eq("department_id", dept);
-      if (level) q = q.eq("level_id", level);
-      const { data: students } = await q;
-      studentIds = [...new Set((students ?? []).map((s) => (s as { id: string }).id).filter(Boolean))];
-    }
-
-    if (!studentIds.length) {
-      const { data: students } = await supabase
-        .from("students")
-        .select("id")
-        .eq("school_id", opts.schoolId)
-        .limit(500);
-      studentIds = [...new Set((students ?? []).map((s) => (s as { id: string }).id).filter(Boolean))];
-    }
-
-    const authIds = await studentIdsToAuthUserIds(studentIds);
-    if (!authIds.length) {
-      console.warn("[notify] no student auth users for exam approval", opts.examId);
-      return;
-    }
-
-    const when = opts.scheduledStart
-      ? ` Starts ${new Date(opts.scheduledStart).toLocaleString()}.`
-      : "";
     await notifyMany(
-      authIds.map((uid) => ({
+      opts.studentAuthUserIds.map((uid) => ({
         recipientUserId: uid,
         schoolId: opts.schoolId,
-        title: "Exam available",
-        message: `“${opts.examTitle}” is now available for your programme.${when}`,
-        type: "exam_available",
+        title: "Exam approved",
+        message: `“${opts.examTitle}” has been approved and may appear in your exam list when scheduled.`,
+        type: "exam_approved",
         link: "/student/examinations",
         entityType: "examination",
         entityId: opts.examId,
-        dedupeMinutes: 120,
+        dedupeMinutes: 60,
       })),
     );
   } catch (e) {
