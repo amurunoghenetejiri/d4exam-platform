@@ -186,6 +186,23 @@ async function sendFcmLegacy(token: string, title: string, body: string, link: s
   return { ok: true as const };
 }
 
+function notificationsLinkForRole(role: string | null | undefined): string {
+  switch ((role || "").toLowerCase()) {
+    case "super_admin":
+      return "/super-admin/notifications";
+    case "school_admin":
+      return "/admin/notifications";
+    case "examination_officer":
+      return "/officer/notifications";
+    case "teacher":
+      return "/teacher/notifications";
+    case "student":
+      return "/student/notifications";
+    default:
+      return "/";
+  }
+}
+
 export const dispatchPushToUser = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => {
     const raw =
@@ -268,6 +285,11 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
     return { sent, failed, skipped: false as const };
   });
 
+/**
+ * Test notification: inserts an in-app row for EVERY user (user_roles + profiles),
+ * and dispatches FCM push to each. Callers see the test in Settings → Notifications
+ * (bell + notification list) as well as on enabled devices.
+ */
 export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => {
     const raw =
@@ -283,43 +305,114 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     if (!data.userId) return { ok: false as const, error: "userId required" };
 
-    const link =
-      data.role === "super_admin"
-        ? "/super-admin/notifications"
-        : data.role === "school_admin"
-          ? "/admin/notifications"
-          : data.role === "examination_officer"
-            ? "/officer/notifications"
-            : data.role === "teacher"
-              ? "/teacher/notifications"
-              : data.role === "student"
-                ? "/student/notifications"
-                : "/";
-
     const welcomeTitle = "Welcome to D4EXAM";
     const welcomeBody =
       "Secure online exams for schools — create papers, run CBT, monitor integrity, and release results in one place.";
 
     const sb = adminClient();
-    if (sb) {
-      await sb.from("notifications").insert({
-        recipient_user_id: data.userId,
+    if (!sb) {
+      return { ok: false as const, error: "no supabase admin (service role key missing on server)" };
+    }
+
+    // Collect every distinct auth user id from roles and profiles.
+    const userRoleMap = new Map<string, string>();
+
+    const { data: roleRows } = await sb.from("user_roles").select("user_id, role").limit(5000);
+    for (const r of roleRows || []) {
+      const uid = (r as { user_id?: string }).user_id;
+      const role = (r as { role?: string }).role;
+      if (uid) {
+        // Prefer non-student roles if a user has multiple; otherwise keep first seen.
+        const existing = userRoleMap.get(uid);
+        if (!existing || (role && role !== "student" && existing === "student")) {
+          userRoleMap.set(uid, role || "");
+        } else if (!existing) {
+          userRoleMap.set(uid, role || "");
+        }
+      }
+    }
+
+    const { data: profileRows } = await sb
+      .from("profiles")
+      .select("auth_user_id")
+      .not("auth_user_id", "is", null)
+      .limit(5000);
+    for (const p of profileRows || []) {
+      const uid = (p as { auth_user_id?: string | null }).auth_user_id;
+      if (uid && !userRoleMap.has(uid)) {
+        userRoleMap.set(uid, "");
+      }
+    }
+
+    // Always include the caller.
+    if (!userRoleMap.has(data.userId)) {
+      userRoleMap.set(data.userId, data.role || "");
+    } else if (data.role) {
+      userRoleMap.set(data.userId, data.role);
+    }
+
+    const recipients = [...userRoleMap.entries()];
+    if (!recipients.length) {
+      return { ok: false as const, error: "no users found to notify" };
+    }
+
+    // Batch insert in-app notification rows (chunks of 100).
+    const rows = recipients.map(([uid, role]) => {
+      const link = notificationsLinkForRole(role || data.role);
+      return {
+        recipient_user_id: uid,
         title: welcomeTitle,
         message: welcomeBody,
         type: "system_alert",
         link,
         action_url: link,
-      } as never);
-    }
-
-    const push = await dispatchPushToUser({
-      data: {
-        recipientUserId: data.userId,
-        title: welcomeTitle,
-        message: welcomeBody,
-        link,
-      },
+      };
     });
 
-    return { ok: true as const, push };
+    let inserted = 0;
+    const chunkSize = 100;
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const { error: insErr, data: insertedRows } = await sb
+        .from("notifications")
+        .insert(chunk as never)
+        .select("id");
+      if (insErr) {
+        console.warn("[sendTestNotificationToSelf] insert chunk failed", insErr.message);
+      } else {
+        inserted += (insertedRows || []).length;
+      }
+    }
+
+    // Push to every recipient (devices registered in push_devices).
+    let pushSent = 0;
+    let pushFailed = 0;
+    let pushSkipped = 0;
+    for (const [uid, role] of recipients) {
+      const link = notificationsLinkForRole(role || data.role);
+      try {
+        const push = await dispatchPushToUser({
+          data: {
+            recipientUserId: uid,
+            title: welcomeTitle,
+            message: welcomeBody,
+            link,
+          },
+        });
+        if (push && typeof push === "object") {
+          if ((push as { skipped?: boolean }).skipped) pushSkipped += 1;
+          pushSent += Number((push as { sent?: number }).sent || 0);
+          pushFailed += Number((push as { failed?: number }).failed || 0);
+        }
+      } catch {
+        pushFailed += 1;
+      }
+    }
+
+    return {
+      ok: true as const,
+      recipients: recipients.length,
+      inAppInserted: inserted,
+      push: { sent: pushSent, failed: pushFailed, skippedUsers: pushSkipped },
+    };
   });

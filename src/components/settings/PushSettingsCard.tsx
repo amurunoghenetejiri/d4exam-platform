@@ -12,8 +12,6 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
   const [pushBusy, setPushBusy] = useState(false);
   const [testBusy, setTestBusy] = useState(false);
   const [pushStatus, setPushStatus] = useState(() => getPushPermissionState());
-  const isSuper =
-    (scope || "").toLowerCase().includes("super") || session?.role === "super_admin";
 
   return (
     <SectionCard
@@ -49,33 +47,44 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
             {pushBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Enable notifications
           </Button>
-          {isSuper && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={testBusy || !session?.userId}
-              onClick={() => {
-                if (!session?.userId) return;
-                setTestBusy(true);
-                void sendTestNotificationToSelf({
-                  data: { userId: session.userId, role: session.role || "super_admin" },
+          <Button
+            type="button"
+            variant="outline"
+            disabled={testBusy || !session?.userId}
+            onClick={() => {
+              if (!session?.userId) return;
+              setTestBusy(true);
+              void sendTestNotificationToSelf({
+                data: { userId: session.userId, role: session.role || "" },
+              })
+                .then((r) => {
+                  if (r && (r as { ok?: boolean }).ok) {
+                    const meta = r as {
+                      recipients?: number;
+                      inAppInserted?: number;
+                      push?: { sent?: number };
+                    };
+                    const n = meta.recipients ?? 0;
+                    const inserted = meta.inAppInserted ?? 0;
+                    toast.success(
+                      `Test sent to ${n} user${n === 1 ? "" : "s"} (${inserted} in-app). Check the bell and Notifications.`,
+                    );
+                  } else {
+                    toast.error((r as { error?: string })?.error || "Test failed");
+                  }
                 })
-                  .then((r) => {
-                    if (r && (r as { ok?: boolean }).ok) {
-                      toast.success("Test notification sent. Check your bell and device.");
-                    } else {
-                      toast.error((r as { error?: string })?.error || "Test failed");
-                    }
-                  })
-                  .catch((e) => toast.error((e as Error).message || "Test failed"))
-                  .finally(() => setTestBusy(false));
-              }}
-            >
-              {testBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Send test to myself
-            </Button>
-          )}
+                .catch((e) => toast.error((e as Error).message || "Test failed"))
+                .finally(() => setTestBusy(false));
+            }}
+          >
+            {testBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Send test notification
+          </Button>
         </div>
+        <p className="text-xs text-slate-500">
+          Test creates an in-app notification for every user and sends a push to all registered
+          devices. Open Notifications in settings (or the bell) to confirm each row received it.
+        </p>
       </div>
     </SectionCard>
   );
