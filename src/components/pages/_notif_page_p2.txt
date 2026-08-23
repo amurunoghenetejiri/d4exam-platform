@@ -1,0 +1,176 @@
+
+  const items = data ?? [];
+  const unreadItems = items.filter((i) => !i.read_at);
+  const historyItems = items.filter((i) => i.read_at);
+  const unread = unreadItems.length;
+
+  async function invalidateAll() {
+    await qc.invalidateQueries({ queryKey: ["rows", "notifications"] });
+    await qc.invalidateQueries({ queryKey: ["count", "notifications"] });
+    await qc.invalidateQueries({
+      queryKey: ["count", "notifications", "unread", user?.userId],
+    });
+    await refetch();
+  }
+
+  async function markAllRead() {
+    if (!user?.userId) return;
+    setBusy(true);
+    try {
+      const { error: upErr } = await supabase
+        .from("notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("recipient_user_id", user.userId)
+        .is("read_at", null);
+      if (upErr) throw upErr;
+      await invalidateAll();
+      toast.success("All notifications marked as read");
+    } catch (e) {
+      toast.error((e as Error).message || "Could not update");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markOne(id: string) {
+    const { error: upErr } = await supabase
+      .from("notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("recipient_user_id", user?.userId ?? "");
+    if (!upErr) await invalidateAll();
+  }
+
+  async function dismissOne(id: string, e?: MouseEvent) {
+    e?.stopPropagation();
+    e?.preventDefault();
+    const { error: delErr } = await supabase
+      .from("notifications")
+      .delete()
+      .eq("id", id)
+      .eq("recipient_user_id", user?.userId ?? "");
+    if (delErr) toast.error(delErr.message);
+    else {
+      await invalidateAll();
+      toast.success("Notification dismissed");
+    }
+  }
+
+  function renderList(list: Notif[], emptyTitle: string, emptyDesc: string) {
+    if (!list.length) {
+      return <EmptyState title={emptyTitle} description={emptyDesc} />;
+    }
+    return (
+      <ul className="divide-y divide-slate-100">
+        {list.map((n) => {
+          const href = resolveNotifHref(n, scope);
+          const unreadItem = !n.read_at;
+          return (
+            <li
+              key={n.id}
+              className={cn(
+                "flex gap-3 px-1 py-3 transition-colors hover:bg-slate-50/80",
+                href || unreadItem ? "cursor-pointer" : "",
+              )}
+              onClick={() => {
+                if (unreadItem) void markOne(n.id);
+                if (href && href.startsWith("/")) {
+                  try {
+                    void navigate({ to: href as never });
+                  } catch {
+                    window.location.assign(href);
+                  }
+                } else if (href) {
+                  window.location.href = href;
+                }
+              }}
+            >
+              <div
+                className={cn(
+                  "mt-1 h-2.5 w-2.5 shrink-0 rounded-full",
+                  unreadItem ? "bg-sky-500" : "bg-transparent",
+                )}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-900">{n.title}</p>
+                  <Badge variant="secondary" className={cn("text-[10px]", typeStyles[n.type] || typeStyles.info)}>
+                    {(n.type || "info").replace(/_/g, " ")}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 text-sm text-slate-600">{n.message}</p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {new Date(n.created_at).toLocaleString()}
+                  {href && (
+                    <span className="ml-2 text-sky-600">Open →</span>
+                  )}
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0 text-slate-400 hover:text-red-600"
+                onClick={(e) => void dismissOne(n.id, e)}
+                aria-label="Dismiss"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title="Notifications"
+        description={`Alerts and updates for your ${scope} account.`}
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy || unread === 0}
+            onClick={() => void markAllRead()}
+          >
+            {busy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCheck className="mr-1 h-4 w-4" />}
+            Mark all read
+          </Button>
+        }
+      />
+
+      {isLoading ? (
+        <p className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading notifications…
+        </p>
+      ) : isError ? (
+        <SectionCard title="Could not load">
+          <p className="text-sm text-red-600">{(error as Error)?.message || "Failed to load notifications."}</p>
+          <Button className="mt-3" variant="outline" onClick={() => void refetch()}>
+            Retry
+          </Button>
+        </SectionCard>
+      ) : (
+        <>
+          <div className="mb-4 flex items-center gap-2 text-sm text-slate-600">
+            <Bell className="h-4 w-4" />
+            <span>
+              <strong className="text-slate-900">{unread}</strong> unread · {items.length} total
+            </span>
+          </div>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <SectionCard title="Unread" description="New alerts for you">
+              {renderList(unreadItems, "All caught up", "No unread notifications.")}
+            </SectionCard>
+            <SectionCard title="History" description="Previously opened">
+              {renderList(historyItems, "No history yet", "Read notifications will appear here.")}
+            </SectionCard>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
