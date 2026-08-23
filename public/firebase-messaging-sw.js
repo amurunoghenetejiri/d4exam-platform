@@ -15,7 +15,7 @@ firebase.initializeApp({
 
 var messaging = firebase.messaging();
 
-var SHELL_CACHE = "d4exam-shell-v2";
+var SHELL_CACHE = "d4exam-shell-v3";
 var SHELL_URLS = ["/", "/offline.html", "/icon-192.png", "/logo.png", "/favicon.png", "/site.webmanifest"];
 
 self.addEventListener("install", function (event) {
@@ -71,51 +71,51 @@ function absUrl(path) {
   }
 }
 
+/**
+ * ONE display path for background pushes.
+ * Server sends data-only FCM (no notification payload) so Chrome does not auto-show.
+ * We show exactly once via showNotification with D4EXAM icon.
+ */
 function showD4Notification(payload) {
   var data = (payload && payload.data) || {};
   var title =
-    (payload && payload.notification && payload.notification.title) ||
     data.title ||
+    (payload && payload.notification && payload.notification.title) ||
     "D4EXAM";
   var body =
-    (payload && payload.notification && payload.notification.body) ||
     data.body ||
     data.message ||
+    (payload && payload.notification && payload.notification.body) ||
     "Secure online examinations for schools.";
   var link = data.link || data.url || "/";
-  var icon = data.icon || absUrl("/icon-192.png");
-  var badge = data.badge || absUrl("/icon-192.png");
+  var icon = absUrl("/icon-192.png");
+  var badge = absUrl("/icon-192.png");
+  var tag = data.tag || ("d4exam-" + String(Date.now()));
 
   return self.registration.showNotification(title, {
     body: body,
     icon: icon,
     badge: badge,
+    image: undefined,
     data: { link: link, title: title },
-    tag: data.tag || "d4exam-notification",
-    renotify: true,
+    tag: tag,
+    renotify: false,
     requireInteraction: false,
     silent: false,
     vibrate: [120, 40, 120],
   });
 }
 
+/* FCM background handler — ONLY path that displays background notifications */
 messaging.onBackgroundMessage(function (payload) {
   return showD4Notification(payload);
 });
 
-self.addEventListener("push", function (event) {
-  // Backup path if FCM delivers a raw push event
-  try {
-    var raw = event.data ? event.data.json() : {};
-    event.waitUntil(showD4Notification(raw));
-  } catch (e) {
-    event.waitUntil(
-      showD4Notification({
-        data: { title: "D4EXAM", body: "You have a new update." },
-      }),
-    );
-  }
-});
+/*
+ * DO NOT also listen for raw "push" events.
+ * FCM + onBackgroundMessage already handles delivery.
+ * A second push listener caused Chrome + D4EXAM duplicate notifications.
+ */
 
 self.addEventListener("notificationclick", function (event) {
   event.notification.close();
