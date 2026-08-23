@@ -20,6 +20,7 @@ import { ExamCameraPip, type FaceSecurityEvent } from "@/components/cbt/ExamCame
 import { saveCbtResult } from "@/lib/cbt-save-result";
 import { logSecurityEvent } from "@/lib/cbt-security";
 import { mapFaceSecurityEvent } from "@/lib/live-monitor";
+import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 
 function isPreviewPath() {
   if (typeof window === "undefined") return false;
@@ -251,7 +252,14 @@ export function CbtExamPage() {
       const needMic = Boolean(security.requireMicrophone);
       if (needCam || needMic) {
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: needCam, audio: needMic });
+          let stream: MediaStream;
+          if (needCam) {
+            stream = await openCameraStream({ facingMode: "user", audio: needMic });
+          } else {
+            const mic = await ensureMicrophonePermission();
+            if (!mic.granted) throw new Error(mic.error || "Microphone required");
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          }
           stopMediaStream(mediaStreamRef.current);
           mediaStreamRef.current = stream;
           setLiveStream(stream);
