@@ -35,6 +35,7 @@ import {
 } from "@/lib/school-identity";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { Loader2, Upload, Building2 } from "lucide-react";
+import { PushSettingsCard } from "@/components/settings/PushSettingsCard";
 
 export function SettingsPage({ scope }: { scope: string }) {
   const { data: session } = useSessionUser();
@@ -121,6 +122,15 @@ export function SettingsPage({ scope }: { scope: string }) {
       setNewPassword("");
       setConfirmPassword("");
       toast.success("Password updated. Use your new password next time you sign in.");
+      try {
+        await supabase.from("notifications").insert({
+          recipient_user_id: session.userId,
+          title: "Password changed",
+          message: "Your D4EXAM account password was successfully changed.",
+          type: "system_alert",
+          link: "/settings",
+        } as never);
+      } catch { /* ignore */ }
     } catch (e) {
       toast.error((e as Error).message || "Password change failed.");
     } finally {
@@ -206,6 +216,8 @@ export function SettingsPage({ scope }: { scope: string }) {
             </Button>
           </div>
         </SectionCard>
+
+        <PushSettingsCard scope={scope} />
 
         <SectionCard title="Security" description="Protect your account">
           <div className="space-y-4">
