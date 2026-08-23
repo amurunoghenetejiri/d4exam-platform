@@ -13,26 +13,40 @@ firebase.initializeApp({
   measurementId: "G-0GNB3TGQBG",
 });
 
-const messaging = firebase.messaging();
+var messaging = firebase.messaging();
+
+function absUrl(path) {
+  try {
+    return new URL(path, self.location.origin).href;
+  } catch (e) {
+    return path;
+  }
+}
 
 messaging.onBackgroundMessage(function (payload) {
-  const data = (payload && payload.data) || {};
-  const title =
+  var data = (payload && payload.data) || {};
+  var title =
     (payload && payload.notification && payload.notification.title) ||
     data.title ||
     "D4EXAM";
-  const body =
+  var body =
     (payload && payload.notification && payload.notification.body) ||
     data.body ||
     data.message ||
-    "";
-  const link = data.link || data.url || "/";
+    "Secure online examinations for schools.";
+  var link = data.link || data.url || "/";
+
   self.registration.showNotification(title, {
     body: body,
-    icon: "/icon-192.png",
-    badge: "/favicon.png",
-    data: { link: link },
+    icon: absUrl("/icon-192.png"),
+    badge: absUrl("/icon-192.png"),
+    image: undefined,
+    data: { link: link, title: title },
     tag: data.tag || "d4exam-notification",
+    renotify: true,
+    requireInteraction: false,
+    silent: false,
+    vibrate: [120, 40, 120],
   });
 });
 
@@ -52,7 +66,7 @@ self.addEventListener("notificationclick", function (event) {
       for (var i = 0; i < clientList.length; i++) {
         var client = clientList[i];
         if ("focus" in client) {
-          client.navigate(link);
+          if (client.navigate) client.navigate(link);
           return client.focus();
         }
       }
