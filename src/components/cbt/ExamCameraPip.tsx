@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { openCameraStream } from "@/native/cameraService";
 import { toast } from "sonner";
 import { GripHorizontal } from "lucide-react";
 import { haptic as fireHaptic, refreshHapticUnlock, type HapticKind } from "@/lib/haptic";
@@ -139,7 +140,6 @@ export function ExamCameraPip({
     posRef.current = pos;
   }, [pos]);
 
-  // Keep inside viewport on resize / rotate
   useEffect(() => {
     const keepInView = () => {
       const el = pipRef.current;
@@ -204,10 +204,7 @@ export function ExamCameraPip({
         stopStream(ownStreamRef.current);
         ownStreamRef.current = null;
 
-        const s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false,
-        });
+        const s = await openCameraStream({ facingMode: "user", audio: false });
         ownStreamRef.current = s;
         setStream(s);
         setCamConn("active");
