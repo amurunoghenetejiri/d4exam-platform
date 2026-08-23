@@ -1,30 +1,16 @@
-import {
-  Bell,
-  CheckCheck,
-  Info,
-  AlertTriangle,
-  CircleCheck,
-  CircleX,
-  ExternalLink,
-  Trash2,
-} from "lucide-react";
-import {
-  EmptyState,
-  PageHeader,
-  SectionCard,
-  PageLoading,
-  ErrorState,
-} from "@/components/dashboard/kit";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import { toast } from "sonner";
-import { useSessionUser } from "@/lib/session";
-import { useNavigate } from "@tanstack/react-router";
-import { useRows } from "@/lib/queries";
-import { supabase } from "@/integrations/supabase/client";
-import { useQueryClient } from "@tanstack/react-query";
 import { useState, type MouseEvent } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { Bell, CheckCheck, Loader2, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useSessionUser } from "@/lib/session";
+import { supabase } from "@/integrations/supabase/client";
+import { useRows } from "@/lib/queries";
 import { useRealtimeInvalidate } from "@/lib/realtime";
+import { cn } from "@/lib/utils";
 
 type Notif = {
   id: string;
@@ -37,25 +23,8 @@ type Notif = {
   action_url?: string | null;
 };
 
-const icons: Record<string, typeof Info> = {
-  info: Info,
-  success: CircleCheck,
-  warning: AlertTriangle,
-  error: CircleX,
-  exam_submitted: Info,
-  exam_approved: CircleCheck,
-  exam_rejected: CircleX,
-  exam_revision_requested: AlertTriangle,
-  exam_scheduled: Info,
-  exam_available: Info,
-  result_published: CircleCheck,
-  announcement: Info,
-  system_alert: AlertTriangle,
-  officer_warning: AlertTriangle,
-};
-
-const tones: Record<string, string> = {
-  info: "bg-sky-50 text-sky-700",
+const typeStyles: Record<string, string> = {
+  info: "bg-slate-100 text-slate-700",
   success: "bg-emerald-50 text-emerald-700",
   warning: "bg-amber-50 text-amber-700",
   error: "bg-red-50 text-red-700",
@@ -71,10 +40,21 @@ const tones: Record<string, string> = {
   officer_warning: "bg-red-50 text-red-700",
 };
 
-function resolveNotifHref(n: Notif, scope: string): string | null {
+function normalizeNotifScope(scope: string): string {
+  const s = (scope || "").toLowerCase().trim();
+  if (s.includes("super")) return "super-admin";
+  if (s.includes("school") || s === "admin") return "admin";
+  if (s.includes("officer") || s.includes("exam")) return "officer";
+  if (s.includes("teacher")) return "teacher";
+  if (s.includes("student")) return "student";
+  return "student";
+}
+
+function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
   const direct = (n.link || n.action_url || "").trim();
   if (direct.startsWith("/")) return direct;
 
+  const scope = normalizeNotifScope(scopeRaw);
   const ty = (n.type || "info").toLowerCase();
   const home =
     scope === "super-admin"
@@ -220,46 +200,27 @@ export function NotificationsPage({ scope }: { scope: string }) {
       .delete()
       .eq("id", id)
       .eq("recipient_user_id", user?.userId ?? "");
-    if (delErr) {
-      toast.error(delErr.message || "Could not dismiss");
-      return;
+    if (delErr) toast.error(delErr.message);
+    else {
+      await invalidateAll();
+      toast.success("Notification dismissed");
     }
-    await invalidateAll();
-    toast.success("Notification dismissed");
   }
 
-  function formatNotifTime(iso: string) {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    const now = new Date();
-    const sameDay =
-      d.getFullYear() === now.getFullYear() &&
-      d.getMonth() === now.getMonth() &&
-      d.getDate() === now.getDate();
-    if (sameDay) {
-      return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  function renderList(list: Notif[], emptyTitle: string, emptyDesc: string) {
+    if (!list.length) {
+      return <EmptyState title={emptyTitle} description={emptyDesc} />;
     }
-    return d.toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-
-  function renderList(list: Notif[]) {
     return (
-      <ul className="divide-y divide-border">
+      <ul className="divide-y divide-slate-100">
         {list.map((n) => {
-          const t = (n.type || "info").toLowerCase();
-          const Icon = icons[t] ?? Info;
-          const unreadItem = !n.read_at;
           const href = resolveNotifHref(n, scope);
+          const unreadItem = !n.read_at;
           return (
             <li
               key={n.id}
               className={cn(
-                "group flex items-start gap-2.5 py-2.5 sm:gap-3 sm:py-3 first:pt-0 last:pb-0",
+                "flex gap-3 px-1 py-3 transition-colors hover:bg-slate-50/80",
                 href || unreadItem ? "cursor-pointer" : "",
               )}
               onClick={() => {
@@ -275,50 +236,37 @@ export function NotificationsPage({ scope }: { scope: string }) {
                 }
               }}
             >
-              <span
+              <div
                 className={cn(
-                  "mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md sm:h-8 sm:w-8 sm:rounded-lg",
-                  tones[t] ?? tones.info,
+                  "mt-1 h-2.5 w-2.5 shrink-0 rounded-full",
+                  unreadItem ? "bg-sky-500" : "bg-transparent",
                 )}
-              >
-                <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
-              </span>
+              />
               <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <p
-                    className={cn(
-                      "text-[13px] leading-snug sm:text-sm",
-                      unreadItem ? "font-semibold text-slate-900" : "font-medium text-slate-800",
-                    )}
-                  >
-                    {n.title}
-                  </p>
-                  <span className="shrink-0 pt-0.5 text-[10px] leading-none text-muted-foreground sm:text-xs">
-                    {formatNotifTime(n.created_at)}
-                  </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-900">{n.title}</p>
+                  <Badge variant="secondary" className={cn("text-[10px]", typeStyles[n.type] || typeStyles.info)}>
+                    {(n.type || "info").replace(/_/g, " ")}
+                  </Badge>
                 </div>
-                <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground sm:mt-1 sm:line-clamp-none sm:text-sm">
-                  {n.message}
+                <p className="mt-0.5 text-sm text-slate-600">{n.message}</p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {new Date(n.created_at).toLocaleString()}
+                  {href && (
+                    <span className="ml-2 text-sky-600">Open →</span>
+                  )}
                 </p>
-                {href && (
-                  <p className="mt-0.5 inline-flex items-center gap-0.5 text-[11px] font-semibold text-primary sm:mt-1 sm:gap-1 sm:text-xs">
-                    Open related page <ExternalLink className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                  </p>
-                )}
               </div>
-              <div className="flex shrink-0 flex-col items-center gap-1">
-                {unreadItem && <span className="h-1.5 w-1.5 rounded-full bg-primary sm:h-2 sm:w-2" />}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-slate-400 opacity-60 hover:text-red-600 group-hover:opacity-100 sm:h-8 sm:w-8"
-                  aria-label="Dismiss notification"
-                  onClick={(ev) => void dismissOne(n.id, ev)}
-                >
-                  <Trash2 className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                </Button>
-              </div>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0 text-slate-400 hover:text-red-600"
+                onClick={(e) => void dismissOne(n.id, e)}
+                aria-label="Dismiss"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
             </li>
           );
         })}
@@ -326,68 +274,50 @@ export function NotificationsPage({ scope }: { scope: string }) {
     );
   }
 
-  if (!user?.userId && !isLoading) {
-    return (
-      <>
-        <PageHeader title="Notifications" description={`Alerts for your ${scope} account.`} />
-        <EmptyState title="Sign in required" description="Sign in to see your notifications." />
-      </>
-    );
-  }
-
   return (
     <>
       <PageHeader
         title="Notifications"
-        description={`Realtime alerts for your ${scope} account.`}
+        description={`Alerts and updates for your ${scope} account.`}
         actions={
           <Button
+            type="button"
             variant="outline"
-            className="gap-2"
+            size="sm"
             disabled={busy || unread === 0}
             onClick={() => void markAllRead()}
           >
-            <CheckCheck className="h-4 w-4" aria-hidden />
+            {busy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCheck className="mr-1 h-4 w-4" />}
             Mark all read
           </Button>
         }
       />
 
-      {isError ? (
-        <ErrorState
-          title="Could not load notifications"
-          description={
-            (error as Error)?.message ||
-            "Check that the notifications table and RLS policies are applied in Supabase."
-          }
-          onRetry={() => void refetch()}
-        />
+      {isLoading ? (
+        <p className="flex items-center gap-2 text-sm text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading notifications…
+        </p>
+      ) : isError ? (
+        <SectionCard title="Could not load">
+          <p className="text-sm text-red-600">{(error as Error)?.message || "Failed to load notifications."}</p>
+          <Button className="mt-3" variant="outline" onClick={() => void refetch()}>
+            Retry
+          </Button>
+        </SectionCard>
       ) : (
         <>
-          <SectionCard title="Unread" description={isLoading ? "Loading…" : `${unread} unread`}>
-            {isLoading ? (
-              <PageLoading label="Loading notifications…" />
-            ) : unreadItems.length === 0 ? (
-              <EmptyState
-                icon={Bell}
-                title="No unread notifications"
-                description="You are all caught up. New alerts appear here in realtime."
-              />
-            ) : (
-              renderList(unreadItems)
-            )}
-          </SectionCard>
-
-          <div className="mt-4 sm:mt-6">
-            <SectionCard title="History" description={`${historyItems.length} older notifications`}>
-              {historyItems.length === 0 ? (
-                <EmptyState
-                  title="No history yet"
-                  description="Read notifications are kept here."
-                />
-              ) : (
-                renderList(historyItems)
-              )}
+          <div className="mb-4 flex items-center gap-2 text-sm text-slate-600">
+            <Bell className="h-4 w-4" />
+            <span>
+              <strong className="text-slate-900">{unread}</strong> unread · {items.length} total
+            </span>
+          </div>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <SectionCard title="Unread" description="New alerts for you">
+              {renderList(unreadItems, "All caught up", "No unread notifications.")}
+            </SectionCard>
+            <SectionCard title="History" description="Previously opened">
+              {renderList(historyItems, "No history yet", "Read notifications will appear here.")}
             </SectionCard>
           </div>
         </>
