@@ -90,7 +90,21 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
       _entity_id: p.entityId ?? null,
     } as never);
 
-    if (!rpcErr && rpcId) return String(rpcId);
+    if (!rpcErr && rpcId) {
+      void import("@/lib/push-send.functions")
+        .then((m) =>
+          m.dispatchPushToUser({
+            data: {
+              recipientUserId: p.recipientUserId,
+              title: p.title,
+              message: p.message,
+              link: p.link || "/",
+            },
+          }),
+        )
+        .catch(() => undefined);
+      return String(rpcId);
+    }
 
     const row: Record<string, unknown> = {
       recipient_user_id: p.recipientUserId,
@@ -110,6 +124,20 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
     if (error) {
       console.warn("[notify] insert failed", error.message);
       return null;
+    }
+    if (data?.id) {
+      void import("@/lib/push-send.functions")
+        .then((m) =>
+          m.dispatchPushToUser({
+            data: {
+              recipientUserId: p.recipientUserId,
+              title: p.title,
+              message: p.message,
+              link: p.link || "/",
+            },
+          }),
+        )
+        .catch(() => undefined);
     }
     return (data?.id as string) ?? null;
   } catch (e) {
