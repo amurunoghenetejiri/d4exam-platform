@@ -191,6 +191,75 @@ export async function listAdminUserIds(schoolId: string): Promise<string[]> {
   }
 }
 
+export async function listOfficerUserIds(schoolId: string): Promise<string[]> {
+  const uniq = (ids: (string | null | undefined)[]) =>
+    [...new Set(ids.filter((x): x is string => Boolean(x)))];
+  try {
+    const { data: bySchool, error: e1 } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("school_id", schoolId)
+      .eq("role", "examination_officer");
+    if (!e1) {
+      const ids = uniq((bySchool ?? []).map((r) => (r as { user_id: string }).user_id));
+      if (ids.length) {
+        try {
+          const resolved = await resolveAuthUserIds(ids, schoolId);
+          if (resolved.length) return resolved;
+        } catch { /* ignore */ }
+        return ids;
+      }
+    }
+    const { data: allOfficers } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("role", "examination_officer");
+    const candidates = uniq((allOfficers ?? []).map((r) => (r as { user_id: string }).user_id));
+    if (candidates.length) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("auth_user_id")
+        .eq("school_id", schoolId)
+        .in("auth_user_id", candidates);
+      const ids = uniq((profiles ?? []).map((p) => (p as { auth_user_id: string | null }).auth_user_id));
+      if (ids.length) return ids;
+    }
+    const { data: officerRows } = await supabase.from("examination_officers").select("profile_id").limit(500);
+    const profileIds = uniq((officerRows ?? []).map((o) => (o as { profile_id: string | null }).profile_id));
+    if (profileIds.length) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("auth_user_id")
+        .eq("school_id", schoolId)
+        .in("id", profileIds);
+      const ids = uniq((profiles ?? []).map((p) => (p as { auth_user_id: string | null }).auth_user_id));
+      if (ids.length) return ids;
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+export async function listAdminUserIds(schoolId: string): Promise<string[]> {
+  try {
+    const { data: roles } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("school_id", schoolId)
+      .eq("role", "school_admin");
+    const ids = [...new Set((roles ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
+    if (!ids.length) return [];
+    try {
+      const resolved = await resolveAuthUserIds(ids, schoolId);
+      if (resolved.length) return resolved;
+    } catch { /* ignore */ }
+    return ids;
+  } catch {
+    return [];
+  }
+}
+
 export async function studentIdsToAuthUserIds(studentIds: string[]): Promise<string[]> {
   if (!studentIds.length) return [];
   try {
