@@ -1,30 +1,56 @@
-export async function notifyOfficersStudentResultPending(opts: {
+export async function notifyStudentsExamRescheduled(opts: {
   schoolId: string;
   examId: string;
   examTitle: string;
-  studentName: string;
+  studentAuthUserIds: string[];
+  whenLabel?: string | null;
 }): Promise<void> {
   try {
-    const officers = await listOfficerUserIds(opts.schoolId);
+    const when = opts.whenLabel ? ` New time: ${opts.whenLabel}.` : "";
     await notifyMany(
-      officers.map((uid) => ({
+      opts.studentAuthUserIds.map((uid) => ({
         recipientUserId: uid,
         schoolId: opts.schoolId,
-        title: "Result pending release",
-        message: `${opts.studentName} submitted “${opts.examTitle}”. Review and release when ready.`,
-        type: "result_pending_release",
-        link: "/officer/results",
+        title: "Exam rescheduled",
+        message: `“${opts.examTitle}” was rescheduled.${when}`,
+        type: "exam_scheduled",
+        link: "/student/examinations",
         entityType: "examination",
         entityId: opts.examId,
         dedupeMinutes: 30,
       })),
     );
   } catch (e) {
-    console.warn("[notify] notifyOfficersStudentResultPending failed", e);
+    console.warn("[notify] notifyStudentsExamRescheduled failed", e);
   }
 }
 
-export async function notifyStudentResultPublished(opts: {
+export async function notifyStudentsRewriteAllowed(opts: {
+  schoolId: string;
+  examId: string;
+  examTitle: string;
+  studentAuthUserIds: string[];
+}): Promise<void> {
+  try {
+    await notifyMany(
+      opts.studentAuthUserIds.map((uid) => ({
+        recipientUserId: uid,
+        schoolId: opts.schoolId,
+        title: "Rewrite allowed",
+        message: `You may rewrite “${opts.examTitle}”. Open Examinations when ready.`,
+        type: "exam_available",
+        link: "/student/examinations",
+        entityType: "examination",
+        entityId: opts.examId,
+        dedupeMinutes: 30,
+      })),
+    );
+  } catch (e) {
+    console.warn("[notify] notifyStudentsRewriteAllowed failed", e);
+  }
+}
+
+export async function notifyStudentResultTerminated(opts: {
   studentUserId: string;
   schoolId?: string | null;
   examId: string;
@@ -34,15 +60,42 @@ export async function notifyStudentResultPublished(opts: {
     await notifyUser({
       recipientUserId: opts.studentUserId,
       schoolId: opts.schoolId,
-      title: "Result published",
-      message: `Your result for “${opts.examTitle}” is now available.`,
-      type: "result_published",
+      title: "Result terminated",
+      message: `Your attempt for “${opts.examTitle}” was terminated by an officer.`,
+      type: "warning",
       link: "/student/results",
       entityType: "examination",
       entityId: opts.examId,
     });
   } catch (e) {
-    console.warn("[notify] notifyStudentResultPublished failed", e);
+    console.warn("[notify] notifyStudentResultTerminated failed", e);
+  }
+}
+
+export async function notifyOfficersExamSubmitted(opts: {
+  schoolId: string;
+  examId: string;
+  examTitle: string;
+  teacherName?: string | null;
+}): Promise<void> {
+  try {
+    const officers = await listOfficerUserIds(opts.schoolId);
+    const who = opts.teacherName ? ` by ${opts.teacherName}` : "";
+    await notifyMany(
+      officers.map((uid) => ({
+        recipientUserId: uid,
+        schoolId: opts.schoolId,
+        title: "Exam submitted for approval",
+        message: `“${opts.examTitle}” was submitted${who}. Review in Approvals.`,
+        type: "exam_submitted",
+        link: "/officer/approvals",
+        entityType: "examination",
+        entityId: opts.examId,
+        dedupeMinutes: 10,
+      })),
+    );
+  } catch (e) {
+    console.warn("[notify] notifyOfficersExamSubmitted failed", e);
   }
 }
 
@@ -88,51 +141,6 @@ export async function notifyTeacherExamDecision(opts: {
   }
 }
 
-export async function notifyStudentExamAvailable(opts: {
-  studentUserId: string;
-  schoolId?: string | null;
-  examId: string;
-  examTitle: string;
-}): Promise<void> {
-  try {
-    await notifyUser({
-      recipientUserId: opts.studentUserId,
-      schoolId: opts.schoolId,
-      title: "Exam available",
-      message: `“${opts.examTitle}” is available for you to take.`,
-      type: "exam_available",
-      link: "/student/examinations",
-      entityType: "examination",
-      entityId: opts.examId,
-      dedupeMinutes: 120,
-    });
-  } catch (e) {
-    console.warn("[notify] notifyStudentExamAvailable failed", e);
-  }
-}
-
-export async function notifyStudentOfficerWarning(opts: {
-  studentUserId: string;
-  schoolId?: string | null;
-  examId?: string | null;
-  message?: string | null;
-}): Promise<void> {
-  try {
-    await notifyUser({
-      recipientUserId: opts.studentUserId,
-      schoolId: opts.schoolId,
-      title: "Officer warning",
-      message: opts.message?.trim() || "An examination officer sent you a warning during your exam. Stay focused.",
-      type: "officer_warning",
-      link: "/student/examinations",
-      entityType: opts.examId ? "examination" : null,
-      entityId: opts.examId ?? null,
-    });
-  } catch (e) {
-    console.warn("[notify] notifyStudentOfficerWarning failed", e);
-  }
-}
-
 export async function notifyStudentsExamApproved(opts: {
   schoolId: string;
   examId: string;
@@ -155,5 +163,28 @@ export async function notifyStudentsExamApproved(opts: {
     );
   } catch (e) {
     console.warn("[notify] notifyStudentsExamApproved failed", e);
+  }
+}
+
+export async function notifyStudentExamAvailable(opts: {
+  studentUserId: string;
+  schoolId?: string | null;
+  examId: string;
+  examTitle: string;
+}): Promise<void> {
+  try {
+    await notifyUser({
+      recipientUserId: opts.studentUserId,
+      schoolId: opts.schoolId,
+      title: "Exam available",
+      message: `“${opts.examTitle}” is available for you to take.`,
+      type: "exam_available",
+      link: "/student/examinations",
+      entityType: "examination",
+      entityId: opts.examId,
+      dedupeMinutes: 120,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentExamAvailable failed", e);
   }
 }
