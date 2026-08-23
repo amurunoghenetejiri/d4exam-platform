@@ -359,3 +359,24 @@ html.d4-native header.sticky.top-0 {
 html.d4-native nav[aria-label="Primary"] {
   padding-bottom: env(safe-area-inset-bottom, 0px) !important;
 }
+
+/* Native Android: clean hamburger — no white square/card around the menu icon */
+html.d4-native header button[aria-label="Open menu"],
+html.d4-native header [aria-label="Open menu"] {
+  background: transparent !important;
+  background-color: transparent !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+  color: #f8fafc !important;
+  box-shadow: none !important;
+}
+html.d4-native header button[aria-label="Open menu"]:hover,
+html.d4-native header [aria-label="Open menu"]:hover,
+html.d4-native header button[aria-label="Open menu"]:active,
+html.d4-native header [aria-label="Open menu"]:active {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+}
+html.d4-native header button[aria-label="Open menu"] svg,
+html.d4-native header [aria-label="Open menu"] svg {
+  color: #f8fafc !important;
+  stroke: #f8fafc !important;
+}
