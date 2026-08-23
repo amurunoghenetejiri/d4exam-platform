@@ -10,5 +10,5 @@ export const Route = createFileRoute("/super-admin/notifications")({
       { property: "og:description", content: "Alerts and updates for your super admin account on D4EXAM." },
     ],
   }),
-  component: () => <NotificationsPage scope="super admin" />,
+  component: () => <NotificationsPage scope="super-admin" />,
 });

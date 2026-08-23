@@ -10,5 +10,5 @@ export const Route = createFileRoute("/officer/notifications")({
       { property: "og:description", content: "Alerts and updates for your examination officer account on D4EXAM." },
     ],
   }),
-  component: () => <NotificationsPage scope="examination officer" />,
+  component: () => <NotificationsPage scope="officer" />,
 });
