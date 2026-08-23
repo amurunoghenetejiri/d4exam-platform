@@ -13,6 +13,18 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeColorSync } from "@/components/ThemeColorSync";
+import { useSessionUser } from "@/lib/session";
+import { initNativePushIfNeeded } from "@/lib/push";
+import { isNativeShell } from "@/native/platform";
+
+function NativeBootstrap() {
+  const { data: session } = useSessionUser();
+  useEffect(() => {
+    if (!isNativeShell()) return;
+    void initNativePushIfNeeded(session?.userId, session?.role);
+  }, [session?.userId, session?.role]);
+  return null;
+}
 
 function NotFoundComponent() {
   return (
@@ -136,6 +148,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <ThemeColorSync />
       <Outlet />
+      <NativeBootstrap />
       <Toaster />
     </QueryClientProvider>
   );
