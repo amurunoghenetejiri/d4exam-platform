@@ -19,14 +19,15 @@ function adminClient() {
 
 /** Reminder windows in minutes before scheduled_start */
 const WINDOWS: { minutes: number; label: string; title: string; type: string }[] = [
-  { minutes: 24 * 60, label: "tomorrow", title: "Exam Tomorrow", type: "exam_reminder_24h" },
-  { minutes: 60, label: "in 1 hour", title: "Exam Starting Soon", type: "exam_reminder_1h" },
-  { minutes: 30, label: "in 30 minutes", title: "Exam Starting Soon", type: "exam_reminder_30m" },
-  { minutes: 10, label: "in 10 minutes", title: "Get Ready", type: "exam_reminder_10m" },
-  { minutes: 0, label: "now", title: "Exam Starting Now", type: "exam_reminder_now" },
+  { minutes: 24 * 60, label: "tomorrow", title: "\u23f0 Examination Tomorrow", type: "exam_reminder_24h" },
+  { minutes: 60, label: "in 1 hour", title: "\u23f0 Examination Starts in 1 Hour", type: "exam_reminder_1h" },
+  { minutes: 30, label: "in 30 minutes", title: "\u23f0 Examination Starts in 30 Minutes", type: "exam_reminder_30m" },
+  { minutes: 10, label: "in 10 minutes", title: "\u23f0 Examination Starts in 10 Minutes", type: "exam_reminder_10m" },
+  { minutes: 5, label: "in 5 minutes", title: "\u23f0 Examination Starts in 5 Minutes", type: "exam_reminder_5m" },
+  { minutes: 0, label: "now", title: "\ud83d\ude80 Examination Starts Now", type: "exam_reminder_now" },
 ];
 
-const SLACK_MS = 90_000; // ±1.5 min window for cron ticks
+const SLACK_MS = 90_000; // \u00b11.5 min window for cron ticks
 
 async function insertNotif(
   sb: NonNullable<ReturnType<typeof adminClient>>,
@@ -41,7 +42,6 @@ async function insertNotif(
     dedupeKey: string;
   },
 ) {
-  // Idempotency: same entity_id + type + recipient within long window
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
   const { data: existing } = await sb
     .from("notifications")
@@ -67,7 +67,6 @@ async function insertNotif(
   } as never);
   if (error) return false;
 
-  // Push (best-effort)
   try {
     const { dispatchPushToUser } = await import("@/lib/push-send.functions");
     await dispatchPushToUser({
@@ -79,19 +78,18 @@ async function insertNotif(
       },
     });
   } catch {
-    /* ignore */
+    /* push best-effort */
   }
   return true;
 }
 
 /**
- * Scan scheduled exams and send due student reminders.
- * Call from a cron (Vercel cron / external) every 1–2 minutes.
- * Does NOT require the browser to stay open.
+ * Cron-friendly: scan upcoming exams and send 24h/1h/30m/10m/5m/now reminders.
+ * Invoke on a schedule (e.g. every 1\u20132 minutes) via Vercel cron or external worker.
  */
 export const processExamReminders = createServerFn({ method: "POST" }).handler(async () => {
   const sb = adminClient();
-  if (!sb) return { ok: false as const, error: "no admin client", sent: 0 };
+  if (!sb) return { ok: false as const, reason: "no admin client" };
 
   const now = Date.now();
   const horizon = now + 25 * 60 * 60 * 1000; // next 25h
@@ -100,25 +98,24 @@ export const processExamReminders = createServerFn({ method: "POST" }).handler(a
     .from("examinations")
     .select("id, title, school_id, course_id, scheduled_start, status")
     .not("scheduled_start", "is", null)
-    .in("status", ["approved", "scheduled", "published", "live", "active"])
-    .gte("scheduled_start", new Date(now - 5 * 60_000).toISOString())
+    .in("status", ["approved", "scheduled", "published", "active", "open"])
+    .gte("scheduled_start", new Date(now - 5 * 60 * 1000).toISOString())
     .lte("scheduled_start", new Date(horizon).toISOString())
     .limit(200);
 
-  if (error) return { ok: false as const, error: error.message, sent: 0 };
+  if (error) return { ok: false as const, reason: error.message };
 
   let sent = 0;
-
   for (const exam of exams ?? []) {
-    const startIso = (exam as { scheduled_start: string }).scheduled_start;
+    const examId = (exam as { id: string }).id;
+    const title = (exam as { title?: string }).title || "Examination";
+    const schoolId = (exam as { school_id?: string | null }).school_id ?? null;
+    const courseId = (exam as { course_id?: string | null }).course_id ?? null;
+    const startIso = (exam as { scheduled_start?: string | null }).scheduled_start;
+    if (!startIso) continue;
     const startMs = new Date(startIso).getTime();
     if (Number.isNaN(startMs)) continue;
-    const examId = (exam as { id: string }).id;
-    const title = (exam as { title: string }).title || "Examination";
-    const schoolId = (exam as { school_id: string | null }).school_id;
-    const courseId = (exam as { course_id: string | null }).course_id;
 
-    // Students linked to course (or school-wide if no course)
     let studentAuthIds: string[] = [];
     if (courseId) {
       const { data: enroll } = await sb
@@ -178,10 +175,10 @@ export const processExamReminders = createServerFn({ method: "POST" }).handler(a
           title: win.title,
           message:
             win.minutes === 0
-              ? `“${title}” is now available. Open Examinations to start.`
-              : `Your “${title}” examination begins ${win.label}.`,
+              ? `Your \u201c${title}\u201d starts now. Open Examinations to begin.`
+              : `Your \u201c${title}\u201d starts ${win.label}.`,
           type: win.type,
-          link: "/student/examinations",
+          link: win.minutes === 0 ? `/student/examinations` : `/student/examinations`,
           entityId: examId,
           dedupeKey,
         });
