@@ -1,0 +1,159 @@
+export async function notifyOfficersStudentResultPending(opts: {
+  schoolId: string;
+  examId: string;
+  examTitle: string;
+  studentName: string;
+}): Promise<void> {
+  try {
+    const officers = await listOfficerUserIds(opts.schoolId);
+    await notifyMany(
+      officers.map((uid) => ({
+        recipientUserId: uid,
+        schoolId: opts.schoolId,
+        title: "Result pending release",
+        message: `${opts.studentName} submitted “${opts.examTitle}”. Review and release when ready.`,
+        type: "result_pending_release",
+        link: "/officer/results",
+        entityType: "examination",
+        entityId: opts.examId,
+        dedupeMinutes: 30,
+      })),
+    );
+  } catch (e) {
+    console.warn("[notify] notifyOfficersStudentResultPending failed", e);
+  }
+}
+
+export async function notifyStudentResultPublished(opts: {
+  studentUserId: string;
+  schoolId?: string | null;
+  examId: string;
+  examTitle: string;
+}): Promise<void> {
+  try {
+    await notifyUser({
+      recipientUserId: opts.studentUserId,
+      schoolId: opts.schoolId,
+      title: "Result published",
+      message: `Your result for “${opts.examTitle}” is now available.`,
+      type: "result_published",
+      link: "/student/results",
+      entityType: "examination",
+      entityId: opts.examId,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentResultPublished failed", e);
+  }
+}
+
+export async function notifyTeacherExamDecision(opts: {
+  teacherUserId: string;
+  schoolId?: string | null;
+  examId: string;
+  examTitle: string;
+  decision: "approved" | "rejected" | "revision";
+  note?: string | null;
+}): Promise<void> {
+  const map = {
+    approved: {
+      title: "Examination approved",
+      type: "exam_approved",
+      message: `“${opts.examTitle}” was approved.`,
+    },
+    rejected: {
+      title: "Examination rejected",
+      type: "exam_rejected",
+      message: `“${opts.examTitle}” was rejected.${opts.note ? ` ${opts.note}` : ""}`,
+    },
+    revision: {
+      title: "Revision requested",
+      type: "exam_revision_requested",
+      message: `Revision requested for “${opts.examTitle}”.${opts.note ? ` ${opts.note}` : ""}`,
+    },
+  } as const;
+  const m = map[opts.decision];
+  try {
+    await notifyUser({
+      recipientUserId: opts.teacherUserId,
+      schoolId: opts.schoolId,
+      title: m.title,
+      message: m.message,
+      type: m.type,
+      link: "/teacher/examinations",
+      entityType: "examination",
+      entityId: opts.examId,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyTeacherExamDecision failed", e);
+  }
+}
+
+export async function notifyStudentExamAvailable(opts: {
+  studentUserId: string;
+  schoolId?: string | null;
+  examId: string;
+  examTitle: string;
+}): Promise<void> {
+  try {
+    await notifyUser({
+      recipientUserId: opts.studentUserId,
+      schoolId: opts.schoolId,
+      title: "Exam available",
+      message: `“${opts.examTitle}” is available for you to take.`,
+      type: "exam_available",
+      link: "/student/examinations",
+      entityType: "examination",
+      entityId: opts.examId,
+      dedupeMinutes: 120,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentExamAvailable failed", e);
+  }
+}
+
+export async function notifyStudentOfficerWarning(opts: {
+  studentUserId: string;
+  schoolId?: string | null;
+  examId?: string | null;
+  message?: string | null;
+}): Promise<void> {
+  try {
+    await notifyUser({
+      recipientUserId: opts.studentUserId,
+      schoolId: opts.schoolId,
+      title: "Officer warning",
+      message: opts.message?.trim() || "An examination officer sent you a warning during your exam. Stay focused.",
+      type: "officer_warning",
+      link: "/student/examinations",
+      entityType: opts.examId ? "examination" : null,
+      entityId: opts.examId ?? null,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentOfficerWarning failed", e);
+  }
+}
+
+export async function notifyStudentsExamApproved(opts: {
+  schoolId: string;
+  examId: string;
+  examTitle: string;
+  studentAuthUserIds: string[];
+}): Promise<void> {
+  try {
+    await notifyMany(
+      opts.studentAuthUserIds.map((uid) => ({
+        recipientUserId: uid,
+        schoolId: opts.schoolId,
+        title: "Exam approved",
+        message: `“${opts.examTitle}” has been approved and may appear in your exam list when scheduled.`,
+        type: "exam_approved",
+        link: "/student/examinations",
+        entityType: "examination",
+        entityId: opts.examId,
+        dedupeMinutes: 60,
+      })),
+    );
+  } catch (e) {
+    console.warn("[notify] notifyStudentsExamApproved failed", e);
+  }
+}
