@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { enablePushNotifications, getPushPermissionState } from "@/lib/push";
 import { useSessionUser } from "@/lib/session";
+import { isNativeShell } from "@/native/platform";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -17,11 +18,13 @@ function isStandaloneDisplay(): boolean {
 }
 
 /**
- * Native-only prompts (no custom card / floating bell):
+ * Web/PWA only:
  * - Chrome "Install app" dialog via beforeinstallprompt
- * - Browser notification permission dialog
- * Stops once installed + notifications granted.
- * Shows again only if app is removed or permission is reset.
+ * - Browser notification permission dialog (not on Capacitor Android)
+ *
+ * Capacitor Android: never auto-request notifications here.
+ * That path called PushNotifications.register() and crashed the app when FCM
+ * was not packaged. Users enable push from Settings instead.
  */
 export function InstallAndPushPrompt() {
   const { data: session } = useSessionUser();
@@ -31,6 +34,8 @@ export function InstallAndPushPrompt() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // Capacitor has no beforeinstallprompt
+    if (isNativeShell()) return;
 
     const onBip = (e: Event) => {
       e.preventDefault();
@@ -55,7 +60,6 @@ export function InstallAndPushPrompt() {
         if (choice.outcome === "accepted") {
           deferredRef.current = null;
         } else {
-          // User cancelled — allow another try later this session after navigation / delay
           installTried.current = false;
           deferredRef.current = ev;
           window.setTimeout(() => {
@@ -70,7 +74,6 @@ export function InstallAndPushPrompt() {
     window.addEventListener("beforeinstallprompt", onBip);
     window.addEventListener("appinstalled", onInstalled);
 
-    // If event already fired before listener (rare), nothing to do until next visit
     return () => {
       window.removeEventListener("beforeinstallprompt", onBip);
       window.removeEventListener("appinstalled", onInstalled);
@@ -79,19 +82,20 @@ export function InstallAndPushPrompt() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // CRITICAL: never auto-enable push inside the Android Capacitor app.
+    // Auto requestPermission + register was crashing the process after Allow.
+    if (isNativeShell()) return;
     if (!session?.userId) return;
     if (pushTried.current) return;
 
     const perm = getPushPermissionState();
     if (perm === "granted" || perm === "unsupported") return;
-    // If permanently denied, browser will not show the dialog again until user resets site settings
     if (perm === "denied") return;
 
     pushTried.current = true;
     const t = window.setTimeout(() => {
       void enablePushNotifications(session.userId, session.role).then((r) => {
         if (!r.ok && getPushPermissionState() === "default") {
-          // Permission UI not shown / not decided — retry once later
           pushTried.current = false;
         }
       });
@@ -100,8 +104,8 @@ export function InstallAndPushPrompt() {
     return () => window.clearTimeout(t);
   }, [session?.userId, session?.role]);
 
-  // Re-offer install when user returns to the tab if still not installed
   useEffect(() => {
+    if (isNativeShell()) return;
     const onVis = () => {
       if (document.visibilityState !== "visible") return;
       if (isStandaloneDisplay()) return;
