@@ -1,6 +1,6 @@
 import { useState, type MouseEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, CheckCheck, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
-import { useRows } from "@/lib/queries";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 
@@ -117,6 +116,45 @@ function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
   return map[ty] || `${home}/notifications`;
 }
 
+async function fetchOwnNotifications(userId: string): Promise<Notif[]> {
+  // Prefer full shape; fall back if a column is missing on older DBs
+  const full =
+    "id, title, message, type, created_at, read_at, link, action_url";
+  const minimal = "id, title, message, type, created_at, read_at";
+
+  let { data, error } = await supabase
+    .from("notifications")
+    .select(full)
+    .eq("recipient_user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(150);
+
+  if (error) {
+    const retry = await supabase
+      .from("notifications")
+      .select(minimal)
+      .eq("recipient_user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(150);
+    if (retry.error) throw new Error(retry.error.message);
+    data = retry.data;
+  }
+
+  return (data ?? []).map((row) => {
+    const r = row as Record<string, unknown>;
+    return {
+      id: String(r.id),
+      title: String(r.title ?? "Notification"),
+      message: String(r.message ?? ""),
+      type: String(r.type ?? "info"),
+      created_at: String(r.created_at ?? new Date().toISOString()),
+      read_at: (r.read_at as string | null) ?? null,
+      link: (r.link as string | null) ?? null,
+      action_url: (r.action_url as string | null) ?? null,
+    } satisfies Notif;
+  });
+}
+
 export function NotificationsPage({ scope }: { scope: string }) {
   const { data: user } = useSessionUser();
   const navigate = useNavigate();
@@ -132,6 +170,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
       },
     ],
     [
+      ["own-notifications", user?.userId],
       ["rows", "notifications"],
       ["count", "notifications"],
       ["count", "notifications", "unread", user?.userId],
@@ -141,13 +180,15 @@ export function NotificationsPage({ scope }: { scope: string }) {
     400,
   );
 
-  const { data, isLoading, isError, error, refetch } = useRows<Notif>({
-    table: "notifications",
-    select: "id, title, message, type, created_at, read_at, link, action_url",
-    filters: user?.userId ? [{ column: "recipient_user_id", value: user.userId }] : [],
-    order: { column: "created_at", ascending: false },
-    limit: 150,
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["own-notifications", user?.userId],
     enabled: Boolean(user?.userId),
+    staleTime: 5_000,
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      if (!user?.userId) return [] as Notif[];
+      return fetchOwnNotifications(user.userId);
+    },
   });
 
   const items = data ?? [];
@@ -156,6 +197,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
   const unread = unreadItems.length;
 
   async function invalidateAll() {
+    await qc.invalidateQueries({ queryKey: ["own-notifications", user?.userId] });
     await qc.invalidateQueries({ queryKey: ["rows", "notifications"] });
     await qc.invalidateQueries({ queryKey: ["count", "notifications"] });
     await qc.invalidateQueries({
@@ -252,9 +294,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
                 <p className="mt-0.5 text-sm text-slate-600">{n.message}</p>
                 <p className="mt-1 text-[11px] text-slate-400">
                   {new Date(n.created_at).toLocaleString()}
-                  {href && (
-                    <span className="ml-2 text-sky-600">Open →</span>
-                  )}
+                  {href && <span className="ml-2 text-sky-600">Open →</span>}
                 </p>
               </div>
               <Button
@@ -299,7 +339,12 @@ export function NotificationsPage({ scope }: { scope: string }) {
         </p>
       ) : isError ? (
         <SectionCard title="Could not load">
-          <p className="text-sm text-red-600">{(error as Error)?.message || "Failed to load notifications."}</p>
+          <p className="text-sm text-red-600">
+            {(error as Error)?.message || "Failed to load notifications."}
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
+            If this continues, confirm your account is signed in and try Retry. You can still use the rest of the app.
+          </p>
           <Button className="mt-3" variant="outline" onClick={() => void refetch()}>
             Retry
           </Button>
