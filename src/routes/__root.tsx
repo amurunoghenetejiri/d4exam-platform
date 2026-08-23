@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
+import { ThemeColorSync } from "@/components/ThemeColorSync";
 
 function NotFoundComponent() {
   return (
@@ -88,6 +89,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           "D4EXAM is a professional CBT and examination management platform for schools, colleges and universities worldwide.",
       },
       { name: "author", content: "D4EXAM" },
+      { name: "theme-color", content: "#f8fafc" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -132,6 +134,7 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ThemeColorSync />
       <Outlet />
       <Toaster />
     </QueryClientProvider>
