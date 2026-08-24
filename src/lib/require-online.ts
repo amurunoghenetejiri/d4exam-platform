@@ -8,10 +8,14 @@ import { probeConnectivity } from "@/native/networkService";
 
 export { requireOnlineMessage };
 
-export async function assertOnline(): Promise<void> {
-  const ok = isOnlineNow() && (await probeConnectivity(3000));
+export async function assertOnline(featureHint?: string): Promise<void> {
+  const ok = isOnlineNow() && (await probeConnectivity(3500));
   if (!ok) {
-    throw new Error(requireOnlineMessage());
+    throw new Error(
+      featureHint
+        ? `${featureHint} Internet connection required.`
+        : requireOnlineMessage(),
+    );
   }
 }
 

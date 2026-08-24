@@ -21,7 +21,7 @@ export function NetworkBanner() {
       role="status"
     >
       <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      <span>You are offline. Some actions may not work until connection returns.</span>
+      <span>You&apos;re offline. Cached content is available; some actions need Internet.</span>
     </div>
   );
 }
