@@ -43,13 +43,13 @@ jobs:
           set -euo pipefail
           npm run build
 
-      - name: Prepare Capacitor dist/ (local SPA shell)
+      - name: Prepare Capacitor dist local SPA shell
         run: |
           set -euo pipefail
           mkdir -p dist
           if [ -d .output/public ]; then
             cp -a .output/public/. dist/
-          elif [ -d dist ] && [ -f dist/index.html ]; then
+          elif [ -f dist/index.html ]; then
             echo "dist already has index.html"
           else
             echo "ERROR: no client build output found"
@@ -61,10 +61,9 @@ jobs:
           cp -f public/firebase-messaging-sw.js dist/firebase-messaging-sw.js 2>/dev/null || true
           cp -f public/site.webmanifest dist/site.webmanifest 2>/dev/null || true
           if [ ! -f dist/index.html ]; then
-            echo "ERROR: dist/index.html missing after build — cannot ship offline APK"
+            echo "ERROR: dist/index.html missing after build"
             exit 1
           fi
-          # Never inject a meta-refresh to Vercel — that forced remote dependency.
           ls -la dist/index.html dist/offline.html 2>/dev/null || true
           echo "dist file count: $(find dist -type f | wc -l)"
 
@@ -76,7 +75,7 @@ jobs:
           test -f android/gradlew
           chmod +x android/gradlew
 
-      - name: Apply D4EXAM permissions, version 2.4.0, branding
+      - name: Apply D4EXAM permissions version 2.4.0 branding
         run: |
           set -euo pipefail
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -110,25 +109,20 @@ jobs:
       - name: Capacitor sync
         run: npx cap sync android
 
-      - name: VERIFY local shell (no remote server.url)
+      - name: VERIFY local shell no remote server.url
         run: |
           set -euo pipefail
           CFG="android/app/src/main/assets/capacitor.config.json"
           cat "$CFG"
-          python3 -c "
-import json,sys
-c=json.load(open('android/app/src/main/assets/capacitor.config.json'))
-s=c.get('server') or {}
-u=s.get('url')
-if u:
-  print('ERROR: server.url must be absent for offline APK, got', u)
-  sys.exit(1)
-print('OK local shell — no server.url')
-"
+          if grep -q '"url"' "$CFG"; then
+            echo "ERROR: server.url must be absent for offline APK"
+            exit 1
+          fi
+          echo "OK local shell — no server.url"
           test -f android/app/src/main/assets/public/index.html
           echo "public assets: $(find android/app/src/main/assets/public -type f | wc -l)"
 
-      - name: Generate D4EXAM icons + splash
+      - name: Generate D4EXAM icons and splash
         run: |
           set -euo pipefail
           sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick fonts-dejavu-core
