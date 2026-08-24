@@ -8,54 +8,39 @@
     <style>
       * { box-sizing: border-box; }
       body {
-        margin: 0;
-        min-height: 100dvh;
-        display: grid;
-        place-items: center;
+        margin: 0; min-height: 100dvh; display: grid; place-items: center;
         font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        background: #0b1b3a;
-        color: #e2e8f0;
-        padding: max(1.25rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right))
-          max(1.25rem, env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left));
-        text-align: center;
+        background: #0b1b3a; color: #e2e8f0; text-align: center;
+        padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem max(1.25rem, env(safe-area-inset-bottom));
       }
       .mark {
-        width: 64px; height: 64px; margin: 0 auto 1rem;
-        border-radius: 16px; background: #1e3a5f;
-        display: grid; place-items: center;
-        font-weight: 800; font-size: 1.1rem; color: #93c5fd;
+        width: 72px; height: 72px; margin: 0 auto 1rem; border-radius: 18px;
+        background: #1e3a5f; display: grid; place-items: center;
+        font-weight: 800; font-size: 1.25rem; color: #93c5fd;
       }
-      h1 { font-size: 1.2rem; margin: 0 0 0.5rem; font-weight: 700; }
-      p { margin: 0 auto; font-size: 0.9rem; color: #94a3b8; max-width: 20rem; line-height: 1.45; }
+      h1 { font-size: 1.15rem; margin: 0 0 0.45rem; font-weight: 700; }
+      p { margin: 0 auto; font-size: 0.9rem; color: #94a3b8; max-width: 18rem; line-height: 1.45; }
       button {
         margin-top: 1.25rem; border: 0; border-radius: 0.75rem;
         background: #2563eb; color: #fff; font-weight: 600;
         padding: 0.75rem 1.35rem; font-size: 0.9rem; cursor: pointer;
       }
-      button:active { opacity: 0.9; }
-      .hint { margin-top: 0.85rem; font-size: 0.75rem; color: #64748b; }
     </style>
   </head>
   <body>
     <div>
       <div class="mark">D4</div>
-      <h1>D4EXAM is ready offline</h1>
-      <p>Your app shell is local. Tap below to open the app.</p>
-      <button type="button" id="retry">Open app</button>
-      <p class="hint">Cached pages work without Internet. Some actions need a connection.</p>
+      <h1>You're offline</h1>
+      <p>Open the local app shell. Cached pages stay available until you reconnect.</p>
+      <button type="button" id="retry">Open D4EXAM</button>
     </div>
     <script>
-      (function () {
-        function goHome() {
-          try {
-            location.replace("./index.html");
-          } catch (e) {
-            location.href = "index.html";
-          }
-        }
-        document.getElementById("retry").onclick = goHome;
-        setTimeout(goHome, 300);
-      })();
+      document.getElementById("retry").onclick = function () {
+        try { location.replace("./index.html"); } catch (e) { location.href = "index.html"; }
+      };
+      setTimeout(function () {
+        try { location.replace("./index.html"); } catch (e) {}
+      }, 500);
     </script>
   </body>
 </html>
