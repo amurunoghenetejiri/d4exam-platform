@@ -10,6 +10,15 @@ export function friendlyError(err: unknown, fallback = "Something went wrong. Pl
 
   const m = raw.toLowerCase();
 
+  if (
+    m.includes("internet connection required") ||
+    m.includes("requires an internet") ||
+    m.includes("err_internet_disconnected") ||
+    m.includes("networkerror") ||
+    m.includes("network request failed")
+  ) {
+    return "This feature requires an internet connection. Please reconnect and try again.";
+  }
   if (!raw || m.includes("jwt") || m.includes("session")) {
     return "Your session expired. Please sign in again.";
   }
@@ -19,7 +28,7 @@ export function friendlyError(err: unknown, fallback = "Something went wrong. Pl
   if (m.includes("duplicate") || m.includes("unique") || m.includes("already exists") || m.includes("23505")) {
     return "This record already exists.";
   }
-  if (m.includes("network") || m.includes("fetch") || m.includes("failed to fetch")) {
+  if (m.includes("network") || m.includes("fetch") || m.includes("failed to fetch") || m.includes("load failed")) {
     return "Network problem. Check your connection and try again.";
   }
   if (m.includes("timeout")) {
@@ -31,7 +40,6 @@ export function friendlyError(err: unknown, fallback = "Something went wrong. Pl
   if (m.includes("foreign key") || m.includes("23503")) {
     return "Related data is missing. Refresh the page and try again.";
   }
-  // Never surface long technical blobs
   if (raw.length > 120 || m.includes("supabase") || m.includes("postgres") || m.includes("violates") || m.includes("policy")) {
     return fallback;
   }
