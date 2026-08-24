@@ -1,1 +1,1 @@
-redeploy 20260820075200 full feature restore — name on live-monitor, haptics, results, officer warning
+redeploy 20260824130000 departmental officer labels + clear-all notifications
