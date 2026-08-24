@@ -30,6 +30,8 @@ import {
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeInvalidate } from "@/lib/realtime";
+import { withOfflineCache } from "@/lib/offline-query";
+import { OfflineKeys } from "@/lib/offline-cache";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/student/")({
@@ -70,7 +72,6 @@ function Page() {
   const { data: user } = useSessionUser();
   const navigate = useNavigate();
 
-  // Live clock so Ready exams flips when scheduled windows open/close
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => setTick((n) => n + 1), 15_000);
@@ -106,20 +107,30 @@ function Page() {
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async () => {
-      let q = supabase
-        .from("examinations")
-        .select(
-          "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
-        )
-        .eq("school_id", student!.schoolId)
-        .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
-        .order("scheduled_start", { ascending: true })
-        .limit(80);
-      // Only filter by courses when student has assigned course ids
-      if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
-      const { data, error } = await q;
-      if (error) { console.warn("[offline]", error); return []; }
-      return (data ?? []) as ExamRow[];
+      const uid = user?.userId ?? student?.profileId;
+      return withOfflineCache(
+        uid,
+        OfflineKeys.studentDashboardExams,
+        async () => {
+          let q = supabase
+            .from("examinations")
+            .select(
+              "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
+            )
+            .eq("school_id", student!.schoolId)
+            .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
+            .order("scheduled_start", { ascending: true })
+            .limit(80);
+          if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
+          const { data, error } = await q;
+          if (error) {
+            console.warn("[offline]", error);
+            return [] as ExamRow[];
+          }
+          return (data ?? []) as ExamRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as ExamRow[] },
+      );
     },
   });
 
@@ -130,12 +141,23 @@ function Page() {
     refetchInterval: 5_000,
     refetchOnMount: "always",
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("exam_attempts")
-        .select("exam_id, status")
-        .eq("student_id", student!.studentId);
-      if (error) { console.warn("[offline]", error); return []; }
-      return (data ?? []) as AttemptRow[];
+      const uid = user?.userId ?? student?.profileId;
+      return withOfflineCache(
+        uid,
+        OfflineKeys.studentDashboardAttempts,
+        async () => {
+          const { data, error } = await supabase
+            .from("exam_attempts")
+            .select("exam_id, status")
+            .eq("student_id", student!.studentId);
+          if (error) {
+            console.warn("[offline]", error);
+            return [] as AttemptRow[];
+          }
+          return (data ?? []) as AttemptRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as AttemptRow[] },
+      );
     },
   });
 
@@ -146,16 +168,27 @@ function Page() {
     refetchInterval: 10_000,
     refetchOnMount: "always",
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("results")
-        .select(
-          "id, exam_id, percentage, grade, pass_fail, status, released_at, created_at, examinations(title, courses(code))",
-        )
-        .eq("student_id", student!.studentId)
-        .order("created_at", { ascending: false })
-        .limit(40);
-      if (error) { console.warn("[offline]", error); return []; }
-      return (data ?? []) as ResultRow[];
+      const uid = user?.userId ?? student?.profileId;
+      return withOfflineCache(
+        uid,
+        OfflineKeys.studentDashboardResults,
+        async () => {
+          const { data, error } = await supabase
+            .from("results")
+            .select(
+              "id, exam_id, percentage, grade, pass_fail, status, released_at, created_at, examinations(title, courses(code))",
+            )
+            .eq("student_id", student!.studentId)
+            .order("created_at", { ascending: false })
+            .limit(40);
+          if (error) {
+            console.warn("[offline]", error);
+            return [] as ResultRow[];
+          }
+          return (data ?? []) as ResultRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as ResultRow[] },
+      );
     },
   });
 
@@ -165,14 +198,24 @@ function Page() {
     staleTime: 5_000,
     refetchInterval: 10_000,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("notifications")
-        .select("id, title, created_at, read_at")
-        .eq("recipient_user_id", user!.userId)
-        .order("created_at", { ascending: false })
-        .limit(20);
-      if (error) { console.warn("[offline]", error); return []; }
-      return (data ?? []) as Notif[];
+      return withOfflineCache(
+        user!.userId,
+        OfflineKeys.studentDashboardNotifs,
+        async () => {
+          const { data, error } = await supabase
+            .from("notifications")
+            .select("id, title, created_at, read_at")
+            .eq("recipient_user_id", user!.userId)
+            .order("created_at", { ascending: false })
+            .limit(20);
+          if (error) {
+            console.warn("[offline]", error);
+            return [] as Notif[];
+          }
+          return (data ?? []) as Notif[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as Notif[] },
+      );
     },
   });
 
@@ -198,7 +241,6 @@ function Page() {
     return DONE_ATTEMPT.includes(st);
   }
 
-  /** In-progress attempt means they already started — not “ready to start” again. */
   function isWriting(examId: string): boolean {
     return String(attemptsByExam.get(examId) || "").toLowerCase() === "in_progress";
   }
@@ -213,12 +255,12 @@ function Page() {
   }, [attemptsQ.data, finishedByResult]);
 
   const { availableNow, upcoming } = useMemo(() => {
-    void tick; // re-evaluate time windows live
+    void tick;
     const live: ExamRow[] = [];
     const up: ExamRow[] = [];
     for (const e of exams) {
       if (isStudentFinished(e.id)) continue;
-      if (isWriting(e.id)) continue; // already in session
+      if (isWriting(e.id)) continue;
       if (["completed", "closed", "cancelled"].includes(String(e.status).toLowerCase())) continue;
       const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
       if (avail === "available") live.push(e);
