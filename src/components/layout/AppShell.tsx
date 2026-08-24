@@ -266,7 +266,7 @@ export function AppShell({
           "bg-white shadow-sm",
           "supports-[backdrop-filter]:bg-white/95 supports-[backdrop-filter]:backdrop-blur-md",
         )}
-        style={{ position: "fixed" }}
+        style={{ position: "fixed", paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
         <div className="mx-auto grid h-12 max-w-[1400px] grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 px-2.5 sm:h-16 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
@@ -292,7 +292,7 @@ export function AppShell({
                 )}
               >
                 <SheetTitle className="sr-only">{config.label} navigation</SheetTitle>
-                <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 sm:px-4">
+                <div className="flex min-h-16 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 sm:px-4 pt-[env(safe-area-inset-top,0px)]">
                   <div className="min-w-0 flex-1">
                     <PortalBrand
                       isSchoolPortal={isSchoolPortal}
@@ -443,7 +443,7 @@ export function AppShell({
         </div>
       </header>
 
-      <div className="relative z-10 pt-12 sm:pt-16 lg:pl-64">
+      <div className="relative z-10 d4-shell-main-offset lg:pl-64" style={{ paddingTop: "calc(3rem + env(safe-area-inset-top, 0px))" }}>
         <main className="mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:max-w-[1400px] lg:px-8 lg:pb-12 lg:pt-8 xl:max-w-[1480px]">
           <div className="min-w-0 w-full">{children}</div>
         </main>

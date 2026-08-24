@@ -441,3 +441,20 @@ html.d4-native .d4-public-header-spacer {
 }
 
 html.d4-exam-immersive, body.d4-exam-immersive { overscroll-behavior: none; min-height: 100dvh; }
+
+
+/* === mobile safe-area / CBT fixes (2026-08-24) === */
+html.d4-exam-immersive,
+html.d4-exam-immersive body {
+  background-color: #0b1b3a !important;
+}
+html.d4-exam-immersive header.fixed {
+  background-color: #0b1b3a !important;
+}
+html.d4-native div[role="dialog"].fixed.inset-y-0 {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+html.d4-native .d4-shell-main-offset > main,
+html.d4-native .relative.z-10.pt-12 > main {
+  padding-top: 0.75rem !important;
+}

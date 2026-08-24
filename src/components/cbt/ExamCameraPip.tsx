@@ -474,11 +474,8 @@ export function ExamCameraPip({
           return;
         }
         faceEngineRef.current = engine;
-        setFaceStatus((prev) => (prev === "unavailable" || prev === "unclear" ? "ok" : prev));
-        lastStateRef.current =
-          lastStateRef.current === "unavailable" || lastStateRef.current === "unclear"
-            ? "ok"
-            : lastStateRef.current;
+        setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
+        if (lastStateRef.current === "unavailable") lastStateRef.current = "unclear";
         void tick();
       } catch {
         window.clearTimeout(timeoutId);
