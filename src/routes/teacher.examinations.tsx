@@ -348,7 +348,7 @@ function Page() {
             examId,
             courseId,
             schoolId: teacher.schoolId,
-            maxQuestions: null,
+            maxQuestions: questionsToAnswer > 0 ? questionsToAnswer : null,
           });
         } catch (linkErr) {
           console.warn("[teacher] ensureExamQuestionsLinked", linkErr);
@@ -411,7 +411,7 @@ function Page() {
             examId: id,
             courseId: row.course_id,
             schoolId: teacher.schoolId,
-            maxQuestions: null,
+            maxQuestions: (meta.questionsToAnswer && meta.questionsToAnswer > 0) ? meta.questionsToAnswer : null,
           });
         } catch (linkErr) {
           console.warn("[teacher] ensureExamQuestionsLinked", linkErr);
