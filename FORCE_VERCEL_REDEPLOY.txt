@@ -1,9 +1,1 @@
-Redeploy 2026-08-21T09:25Z WAT
-
-Officer crash fix:
-- StatusBadge null-safe (no replaceAll)
-- humanEventLabel uses split/join
-- live-monitor safe courses/profiles joins
-- approvals courseCode helpers
-
-URL: https://d4exam-platform.vercel.app
+force vercel 20260824102517
