@@ -6,8 +6,8 @@ import { haptic as fireHaptic, refreshHapticUnlock, type HapticKind } from "@/li
 import { createFaceEngine, type FaceEngine } from "@/lib/face-detector";
 import { cn } from "@/lib/utils";
 
-type FaceState = "ok" | "none" | "multi" | "unclear" | "unavailable";
-type CamConnState = "active" | "reconnecting" | "unavailable";
+type FaceState = "ok" | "none" | "multi" | "unclear" | "unavailable" | "starting";
+type CamConnState = "active" | "reconnecting" | "unavailable" | "starting";
 type SecurityAlertKind = "none" | "multi" | "unclear" | "camera_blocked";
 
 function haptic(kind: SecurityAlertKind) {
@@ -18,8 +18,11 @@ function haptic(kind: SecurityAlertKind) {
 }
 
 const ALERT_COOLDOWN_MS = 1800;
-const FACE_TICK_MS = 450;
-const ENGINE_TIMEOUT_MS = 6000;
+/** ~2 ticks/sec */
+const FACE_TICK_MS = 400;
+/** Face-loss / multi-face must hold ~1.5s before UI/violation changes */
+const STABILITY_MS = 1500;
+const ENGINE_TIMEOUT_MS = 4000;
 
 const ALERT_COPY: Record<
   SecurityAlertKind,
@@ -110,7 +113,7 @@ export function ExamCameraPip({
   const faceEngineRef = useRef<FaceEngine | null>(null);
   const faceWarnRef = useRef(0);
   const lastAlertRef = useRef(0);
-  const lastStateRef = useRef<FaceState>("unavailable");
+  const lastStateRef = useRef<FaceState>("starting");
   const ownStreamRef = useRef<MediaStream | null>(null);
   const acquiringRef = useRef(false);
   const dragState = useRef<{
@@ -125,14 +128,13 @@ export function ExamCameraPip({
   onSecRef.current = onSecurityEvent;
   const onNeedRef = useRef(onNeedReconnect);
   onNeedRef.current = onNeedReconnect;
+  const pendingRef = useRef<{ state: FaceState; since: number } | null>(null);
 
   const [pos, setPos] = useState({ left: 4, top: 4 });
-  const [faceStatus, setFaceStatus] = useState<FaceState>(
-    faceDetection ? "unclear" : "unavailable",
-  );
+  const [faceStatus, setFaceStatus] = useState<FaceState>(faceDetection ? "starting" : "unavailable");
   const [stream, setStream] = useState<MediaStream | null>(externalStream ?? null);
   const [camConn, setCamConn] = useState<CamConnState>(
-    externalStream ? "active" : enabled ? "reconnecting" : "unavailable",
+    externalStream ? "active" : enabled ? "starting" : "unavailable",
   );
   const [dragging, setDragging] = useState(false);
 
@@ -143,8 +145,8 @@ export function ExamCameraPip({
   useEffect(() => {
     const keepInView = () => {
       const el = pipRef.current;
-      const w = el?.offsetWidth || 132;
-      const h = el?.offsetHeight || 160;
+      const w = el?.offsetWidth || 112;
+      const h = el?.offsetHeight || 140;
       setPos((p) => clampPos(p.left, p.top, w, h));
     };
     window.addEventListener("resize", keepInView);
@@ -199,7 +201,7 @@ export function ExamCameraPip({
       }
 
       acquiringRef.current = true;
-      setCamConn("reconnecting");
+      setCamConn(reason === "mount" ? "starting" : "reconnecting");
       try {
         stopStream(ownStreamRef.current);
         ownStreamRef.current = null;
@@ -208,7 +210,7 @@ export function ExamCameraPip({
         ownStreamRef.current = s;
         setStream(s);
         setCamConn("active");
-        setFaceStatus(faceDetection ? "unclear" : "ok");
+        setFaceStatus(faceDetection ? "starting" : "ok");
       } catch {
         ownStreamRef.current = null;
         setStream(null);
@@ -229,7 +231,7 @@ export function ExamCameraPip({
       setStream(externalStream);
       if (streamIsLive(externalStream)) {
         setCamConn("active");
-        setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
+        setFaceStatus((prev) => (prev === "unavailable" ? "starting" : prev));
       }
       return;
     }
@@ -275,13 +277,9 @@ export function ExamCameraPip({
       }
     };
 
-    const onVis = () => tryReconnect();
-    const onFocus = () => tryReconnect();
-    const onPageShow = () => tryReconnect();
-
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", tryReconnect);
+    window.addEventListener("focus", tryReconnect);
+    window.addEventListener("pageshow", tryReconnect);
 
     const health = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
@@ -298,9 +296,9 @@ export function ExamCameraPip({
     }, 5000);
 
     return () => {
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", tryReconnect);
+      window.removeEventListener("focus", tryReconnect);
+      window.removeEventListener("pageshow", tryReconnect);
       window.clearInterval(health);
     };
   }, [enabled, externalStream, stream, acquireOwnCamera]);
@@ -313,27 +311,11 @@ export function ExamCameraPip({
       if (externalStream) onNeedRef.current?.();
       else void acquireOwnCamera("reconnect");
     };
-    const onMute = () => {
-      if (!streamIsLive(stream)) {
-        setCamConn("reconnecting");
-        if (externalStream) onNeedRef.current?.();
-        else void acquireOwnCamera("reconnect");
-      }
-    };
-    const onUnmute = () => {
-      if (streamIsLive(stream)) setCamConn("active");
-    };
     for (const tr of tracks) {
       tr.addEventListener("ended", onEnded);
-      tr.addEventListener("mute", onMute);
-      tr.addEventListener("unmute", onUnmute);
     }
     return () => {
-      for (const tr of tracks) {
-        tr.removeEventListener("ended", onEnded);
-        tr.removeEventListener("mute", onMute);
-        tr.removeEventListener("unmute", onUnmute);
-      }
+      for (const tr of tracks) tr.removeEventListener("ended", onEnded);
     };
   }, [stream, enabled, externalStream, acquireOwnCamera]);
 
@@ -362,25 +344,16 @@ export function ExamCameraPip({
 
   useEffect(() => {
     if (!stream || !faceDetection || !enabled) {
-      setFaceStatus(stream && enabled ? (faceDetection ? "unclear" : "ok") : "unavailable");
+      setFaceStatus(stream && enabled ? (faceDetection ? "starting" : "ok") : "unavailable");
       return;
     }
 
-    setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
-    lastStateRef.current = lastStateRef.current === "unavailable" ? "unclear" : lastStateRef.current;
+    setFaceStatus((prev) => (prev === "unavailable" ? "starting" : prev));
+    if (lastStateRef.current === "unavailable") lastStateRef.current = "starting";
 
     let cancelled = false;
     let timer: number | undefined;
     let engineReady = false;
-    let pending: FaceState | null = null;
-    let pendingStreak = 0;
-    const CONFIRM: Record<FaceState, number> = {
-      ok: 1,
-      multi: 4,
-      none: 3,
-      unclear: 4,
-      unavailable: 2,
-    };
 
     const commitState = (next: FaceState, faceCount: number | null) => {
       if (cancelled) return;
@@ -388,6 +361,7 @@ export function ExamCameraPip({
       if (prev === next) return;
       setFaceStatus(next);
       lastStateRef.current = next;
+      pendingRef.current = null;
 
       if (next === "ok") {
         faceWarnRef.current = Math.max(0, faceWarnRef.current - 1);
@@ -395,7 +369,7 @@ export function ExamCameraPip({
         return;
       }
       if (!engineReady) return;
-      if (next === "unavailable") return;
+      if (next === "unavailable" || next === "starting") return;
 
       faceWarnRef.current += 1;
       if (next === "none") fireAlert("none", faceCount);
@@ -403,24 +377,25 @@ export function ExamCameraPip({
       else if (next === "multi") fireAlert("multi", faceCount);
     };
 
+    /** Time-based stability: hold candidate state for STABILITY_MS before commit (except ok can go faster). */
     const proposeState = (next: FaceState, faceCount: number | null) => {
       if (cancelled) return;
+      const now = Date.now();
       if (next === lastStateRef.current) {
-        pending = null;
-        pendingStreak = 0;
+        pendingRef.current = null;
         return;
       }
-      if (pending === next) {
-        pendingStreak += 1;
-      } else {
-        pending = next;
-        pendingStreak = 1;
+      // One face: commit after one solid tick once engine is ready (immediate monitoring)
+      if (next === "ok" && engineReady) {
+        commitState("ok", faceCount);
+        return;
       }
-      const need = CONFIRM[next] ?? 2;
-      if (pendingStreak >= need) {
+      if (!pendingRef.current || pendingRef.current.state !== next) {
+        pendingRef.current = { state: next, since: now };
+        return;
+      }
+      if (now - pendingRef.current.since >= STABILITY_MS) {
         commitState(next, faceCount);
-        pending = null;
-        pendingStreak = 0;
       }
     };
 
@@ -433,7 +408,7 @@ export function ExamCameraPip({
         return;
       }
       if (video.readyState < 2 || video.videoWidth === 0) {
-        if (!cancelled) timer = window.setTimeout(() => void tick(), 280);
+        if (!cancelled) timer = window.setTimeout(() => void tick(), 200);
         return;
       }
       try {
@@ -458,7 +433,7 @@ export function ExamCameraPip({
     void (async () => {
       const timeoutId = window.setTimeout(() => {
         if (!cancelled && !faceEngineRef.current) {
-          setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
+          setFaceStatus((prev) => (prev === "unavailable" ? "starting" : prev));
         }
       }, ENGINE_TIMEOUT_MS);
 
@@ -474,8 +449,7 @@ export function ExamCameraPip({
           return;
         }
         faceEngineRef.current = engine;
-        setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
-        if (lastStateRef.current === "unavailable") lastStateRef.current = "unclear";
+        setFaceStatus((prev) => (prev === "unavailable" || prev === "starting" ? "starting" : prev));
         void tick();
       } catch {
         window.clearTimeout(timeoutId);
@@ -488,6 +462,7 @@ export function ExamCameraPip({
       if (timer) window.clearTimeout(timer);
       faceEngineRef.current?.close?.();
       faceEngineRef.current = null;
+      pendingRef.current = null;
     };
   }, [stream, faceDetection, maxFaceWarnings, enabled, fireAlert]);
 
@@ -501,8 +476,8 @@ export function ExamCameraPip({
       const dx = e.clientX - d.startX;
       const dy = e.clientY - d.startY;
       const el = pipRef.current;
-      const w = el?.offsetWidth || 132;
-      const h = el?.offsetHeight || 160;
+      const w = el?.offsetWidth || 112;
+      const h = el?.offsetHeight || 140;
       const next = clampPos(d.originLeft + dx, d.originTop + dy, w, h);
       posRef.current = next;
       setPos(next);
@@ -553,31 +528,35 @@ export function ExamCameraPip({
       ? "active"
       : camConn === "reconnecting"
         ? "reconnecting"
-        : reallyLive
-          ? "active"
-          : camConn;
+        : camConn === "starting"
+          ? "starting"
+          : reallyLive
+            ? "active"
+            : camConn;
 
   const displayFaceStatus: FaceState =
     effectiveConn === "active" && faceStatus === "unavailable" && faceDetection
-      ? "unclear"
+      ? "starting"
       : faceStatus;
 
   const faceLabel =
-    effectiveConn === "reconnecting"
-      ? "Reconnecting camera…"
-      : effectiveConn === "unavailable"
-        ? "Camera not available"
-        : displayFaceStatus === "multi"
-          ? "Multiple faces"
-          : displayFaceStatus === "none"
-            ? "Face not seen"
-            : displayFaceStatus === "ok"
-              ? "Monitoring · 1 face"
-              : displayFaceStatus === "unavailable"
-                ? faceDetection
-                  ? "Face check starting…"
-                  : "Camera active"
-                : "Face unclear";
+    effectiveConn === "starting"
+      ? "Camera starting…"
+      : effectiveConn === "reconnecting"
+        ? "Reconnecting camera…"
+        : effectiveConn === "unavailable"
+          ? "Camera error"
+          : displayFaceStatus === "multi"
+            ? "Multiple faces detected"
+            : displayFaceStatus === "none"
+              ? "Face not seen"
+              : displayFaceStatus === "ok"
+                ? "1 face detected · Monitoring"
+                : displayFaceStatus === "starting"
+                  ? "Detecting…"
+                  : displayFaceStatus === "unavailable"
+                    ? "Camera active"
+                    : "Face unclear";
 
   const statusDot =
     effectiveConn === "active"
@@ -586,16 +565,16 @@ export function ExamCameraPip({
         : displayFaceStatus === "multi"
           ? "bg-red-400"
           : "bg-amber-400"
-      : effectiveConn === "reconnecting"
+      : effectiveConn === "reconnecting" || effectiveConn === "starting"
         ? "bg-amber-400 animate-pulse"
-        : "bg-slate-400";
+        : "bg-red-400";
 
   return (
     <div
       ref={pipRef}
       data-exam-pip
       className={cn(
-        "fixed z-[80] w-[132px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[150px]",
+        "fixed z-[80] w-[112px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[128px]",
         dragging ? "cursor-grabbing" : "cursor-grab",
       )}
       style={{
@@ -612,7 +591,7 @@ export function ExamCameraPip({
       >
         <span className={cn("h-1.5 w-1.5 rounded-full", statusDot)} />
         <GripHorizontal className="h-3 w-3 opacity-60" />
-        <span className="truncate">Camera active</span>
+        <span className="truncate">Camera</span>
       </div>
       <div className="relative aspect-[4/5] bg-slate-900 pointer-events-none">
         <video
@@ -627,7 +606,7 @@ export function ExamCameraPip({
             "absolute inset-x-0 bottom-0 px-1.5 py-1 text-center text-[9px] font-bold text-white",
             displayFaceStatus === "ok"
               ? "bg-emerald-600/90"
-              : displayFaceStatus === "multi"
+              : displayFaceStatus === "multi" || effectiveConn === "unavailable"
                 ? "bg-red-600/90"
                 : "bg-amber-600/90",
           )}
