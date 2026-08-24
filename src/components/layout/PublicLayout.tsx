@@ -21,7 +21,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
     <div className="relative flex min-h-dvh flex-col bg-white">
       <Watermark opacity={0.1} size="xl" />
 
-      <header className="d4-public-header sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="d4-public-header fixed top-0 left-0 right-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-[1180px] items-center justify-between gap-4 px-4 sm:h-[4.5rem] sm:px-6">
           <Link to="/" aria-label="D4EXAM home" className="shrink-0">
             <span className="inline-flex lg:hidden">
@@ -92,6 +92,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
           </Sheet>
         </div>
       </header>
+      <div className="d4-public-header-spacer h-14 shrink-0 sm:h-[4.5rem]" aria-hidden />
 
       <main className="relative z-10 flex-1">{children}</main>
 
