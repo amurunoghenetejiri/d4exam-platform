@@ -1,0 +1,191 @@
+name: Mobile safe-area face notif fix
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/mobile-safe-face-notif-fix.yml"
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply targeted fixes
+        run: |
+          set -e
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          # ---------- 1) capacitor: do not overlay status bar (stops clipping) ----------
+          cap = Path("capacitor.config.ts")
+          t = cap.read_text()
+          t = t.replace("overlaysWebView: true", "overlaysWebView: false")
+          # keep dark style + brand color
+          cap.write_text(t)
+          print("capacitor overlaysWebView", "false" in t)
+
+          # ---------- 2) styles.css — centralized safe-area + CBT immersive blue ----------
+          css = Path("src/styles.css")
+          c = css.read_text()
+          # Ensure immersive uses brand blue (no black strip)
+          if "html.d4-exam-immersive body" not in c:
+              c += """
+
+  /* CBT immersive: brand blue under system bars — never black strip */
+  html.d4-exam-immersive,
+  html.d4-exam-immersive body {
+    background-color: #0b1b3a !important;
+  }
+  html.d4-exam-immersive header.fixed.inset-x-0.top-0 {
+    background-color: #0b1b3a !important;
+    padding-top: 0 !important; /* status bar hidden in exam mode */
+  }
+  /* Drawer sheet: respect status-bar inset on native */
+  html.d4-native [data-slot="sheet-content"],
+  html.d4-native .fixed.inset-y-0.left-0[role="dialog"] {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  /* Avoid double white gap: header already padded; main offset is exact */
+  html.d4-native .relative.z-10.pt-12 > main {
+    padding-top: 0.75rem !important;
+  }
+  @media (min-width: 640px) {
+    html.d4-native .relative.z-10.pt-12 > main {
+      padding-top: 1rem !important;
+    }
+  }
+  """
+          css.write_text(c)
+          print("styles immersive blue ok")
+
+          # ---------- 3) AppShell — header + drawer safe-area without redesign ----------
+          shell = Path("src/components/layout/AppShell.tsx")
+          s = shell.read_text()
+
+          # Header: add safe-area padding via style (works native + web; 0 on desktop)
+          old_header = '''      <header
+                  className={cn(
+                    "fixed top-0 right-0 z-50 border-b border-slate-200/90",
+                    "left-0 lg:left-64",
+                    "bg-white shadow-sm",
+                    "supports-[backdrop-filter]:bg-white/95 supports-[backdrop-filter]:backdrop-blur-md",
+                  )}
+                  style={{ position: "fixed" }}
+                >'''
+          new_header = '''      <header
+                  className={cn(
+                    "fixed top-0 right-0 z-50 border-b border-slate-200/90",
+                    "left-0 lg:left-64",
+                    "bg-white shadow-sm",
+                    "supports-[backdrop-filter]:bg-white/95 supports-[backdrop-filter]:backdrop-blur-md",
+                  )}
+                  style={{
+                    position: "fixed",
+                    paddingTop: "env(safe-area-inset-top, 0px)",
+                  }}
+                >'''
+          if old_header in s:
+              s = s.replace(old_header, new_header, 1)
+              print("header safe-area style added")
+          else:
+              # fallback: inject paddingTop into existing style
+              s2 = s.replace(
+                  'style={{ position: "fixed" }}',
+                  'style={{ position: "fixed", paddingTop: "env(safe-area-inset-top, 0px)" }}',
+                  1,
+              )
+              if s2 != s:
+                  s = s2
+                  print("header safe-area style added (fallback)")
+              else:
+                  print("WARN header pattern not found")
+
+          # Drawer header: add top safe-area so logo not clipped
+          old_drawer = '<div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 sm:px-4">'
+          new_drawer = '<div className="flex min-h-16 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 sm:px-4 pt-[env(safe-area-inset-top,0px)]">'
+          if old_drawer in s:
+              s = s.replace(old_drawer, new_drawer, 1)
+              print("drawer header safe-area added")
+          else:
+              print("WARN drawer header pattern not found")
+
+          # Content offset: use calc so content clears header+safe-area (no clip, no huge gap)
+          old_main = '<div className="relative z-10 pt-12 sm:pt-16 lg:pl-64">'
+          new_main = '<div className="relative z-10 d4-shell-main-offset lg:pl-64" style={{ paddingTop: "calc(3rem + env(safe-area-inset-top, 0px))" }}>' 
+          # Keep sm breakpoint via class in CSS already; inline for reliability on Android
+          if old_main in s:
+              s = s.replace(old_main, new_main, 1)
+              print("main offset fixed")
+          else:
+              print("WARN main offset pattern not found")
+
+          shell.write_text(s)
+
+          # ---------- 4) Face detection — don't fake "ok" before first real frame ----------
+          pip = Path("src/components/cbt/ExamCameraPip.tsx")
+          p = pip.read_text()
+          # After engine loads, stay on unclear until first successful detect tick
+          p = p.replace(
+              '''        faceEngineRef.current = engine;
+                  setFaceStatus((prev) => (prev === "unavailable" || prev === "unclear" ? "ok" : prev));
+                  lastStateRef.current =
+                    lastStateRef.current === "unavailable" || lastStateRef.current === "unclear"
+                      ? "ok"
+                      : lastStateRef.current;
+                  void tick();''',
+              '''        faceEngineRef.current = engine;
+                  // Stay "unclear" until the detector reports a real count — never fake "1 face"
+                  setFaceStatus((prev) => (prev === "unavailable" ? "unclear" : prev));
+                  if (lastStateRef.current === "unavailable") lastStateRef.current = "unclear";
+                  void tick();''',
+          )
+          # If engine fails, mark unclear not ok
+          p = p.replace(
+              '''        if (!engine) {
+                    setFaceStatus("unclear");
+                    return;
+                  }''',
+              '''        if (!engine) {
+                    console.warn("[ExamCameraPip] face engine unavailable");
+                    setFaceStatus("unclear");
+                    return;
+                  }''',
+          )
+          pip.write_text(p)
+          print("face pip: no fake ok before detect")
+
+          # ---------- 5) statusBar — ensure non-overlay in normal mode ----------
+          sb = Path("src/native/statusBar.ts")
+          st = sb.read_text()
+          if "setOverlaysWebView({ overlay: false })" not in st:
+              print("WARN statusBar missing overlay false")
+          else:
+              print("statusBar ok")
+
+          # ---------- 6) CBT session header: ensure continuous blue under status ----------
+          cbt = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          if cbt.exists():
+              ct = cbt.read_text()
+              # Add safe-area only when NOT immersive (status bar visible); in exam immersive bar is hidden
+              old_cbt_h = '<header className="fixed inset-x-0 top-0 z-40 border-b border-slate-200 bg-[#0b1b3a] text-white">'
+              new_cbt_h = '<header className="fixed inset-x-0 top-0 z-40 border-b border-slate-200 bg-[#0b1b3a] text-white" style={{ paddingTop: 0, backgroundColor: "#0b1b3a" }}>' 
+              if old_cbt_h in ct:
+                  ct = ct.replace(old_cbt_h, new_cbt_h, 1)
+                  cbt.write_text(ct)
+                  print("cbt header continuous blue")
+              else:
+                  print("WARN cbt header pattern not found")
+
+          print("DONE")
+          PY
+          git config user.name "fix-bot"
+          git config user.email "bot@d4exam.local"
+          git add -A
+          git status
+          git diff --cached --stat
+          git commit -m "fix: mobile safe-area/navbar/drawer, real face detect (no fake ok), CBT blue top, capacitor overlay off" || echo no-change
+          git push
