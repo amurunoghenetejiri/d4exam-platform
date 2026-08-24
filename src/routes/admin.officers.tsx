@@ -14,7 +14,7 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/officers")({
   head: () => ({
-    meta: [{ title: "Examination Officers — D4EXAM" }],
+    meta: [{ title: "Departmental Officers — D4EXAM" }],
   }),
   component: Page,
 });
@@ -96,8 +96,8 @@ function Page() {
   return (
     <>
       <PageHeader
-        title="Examination Officers"
-        description="Create officers who approve exams, monitor sessions, and release results. They sign in at the same /login page."
+        title="Departmental Officers"
+        description="Create departmental officers who approve exams, monitor sessions, and release results. They sign in at the same /login page."
       />
 
       {!schoolId && (
@@ -107,7 +107,7 @@ function Page() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <SectionCard title="Add examination officer">
+        <SectionCard title="Add departmental officer">
           <form className="space-y-3" onSubmit={onCreate}>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
@@ -149,7 +149,7 @@ function Page() {
               ) : (
                 <UserPlus className="mr-2 h-4 w-4" />
               )}
-              Create officer
+              Create departmental officer
             </Button>
           </form>
 
@@ -157,7 +157,7 @@ function Page() {
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
               <p className="flex items-center gap-2 font-extrabold">
                 <ShieldCheck className="h-4 w-4" />
-                Give these login details to the officer
+                Give these login details to the departmental officer
               </p>
               <ul className="mt-2 space-y-1 font-mono text-xs sm:text-sm">
                 <li>
@@ -179,9 +179,9 @@ function Page() {
           )}
         </SectionCard>
 
-        <SectionCard title="How officers sign in">
+        <SectionCard title="How departmental officers sign in">
           <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-700">
-            <li>School Admin creates the officer on this page.</li>
+            <li>School Admin creates the departmental officer on this page.</li>
             <li>Share school code, Officer ID (or email), and password (Officer ID).</li>
             <li>
               Officer goes to <strong>/login</strong> (same page as everyone).
@@ -202,8 +202,8 @@ function Page() {
           <p className="text-sm text-slate-500">Loading…</p>
         ) : officers.length === 0 ? (
           <EmptyState
-            title="No examination officers yet"
-            description="Create the first officer with the form above."
+            title="No departmental officers yet"
+            description="Create the first departmental officer with the form above."
           />
         ) : (
           <ul className="divide-y divide-slate-100">
