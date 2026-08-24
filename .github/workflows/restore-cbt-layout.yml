@@ -1,0 +1,53 @@
+name: Restore CBT layout
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/restore-cbt-layout.yml'
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore CBT with immersive layout
+        run: |
+          set -euo pipefail
+          git show 823fcea025f6f2101202ab0dcc2d62df651f44c4:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          t = p.read_text()
+          if 'd4-cbt-session' in t:
+            print('already has layout')
+            raise SystemExit(0)
+          t = t.replace('className="flex min-h-dvh flex-col bg-slate-50 select-none"','className="d4-cbt-session select-none"')
+          t = t.replace('header className="fixed inset-x-0 top-0 z-40 border-b border-slate-200 bg-[#0b1b3a] text-white"','header className="d4-cbt-header"')
+          t = t.replace('className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-3 px-3 sm:px-6"','className="d4-cbt-header-inner"')
+          old = '      <div className="mx-auto grid w-full max-w-[1200px] flex-1 grid-cols-1 gap-4 p-3 pt-[calc(4rem+0.75rem)] sm:p-6 sm:pt-[calc(4rem+1.5rem)] lg:grid-cols-[220px_1fr]">'
+          new = '      <div className="d4-cbt-body">\n      <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-4 p-3 sm:p-6 lg:grid-cols-[220px_1fr]">'
+          t = t.replace(old, new, 1)
+          marker = '{started && !done && security.requireCamera && ('
+          idx = t.find(marker)
+          if idx > 0:
+            insert_at = t[:idx].rfind('</div>')
+            t = t[:insert_at] + '</div>\n      ' + t[insert_at:]
+          t = t.replace(
+            'className="fixed inset-x-0 top-16 z-[150] flex justify-center px-3 pointer-events-none"',
+            'className="fixed inset-x-0 top-[calc(2.75rem+env(safe-area-inset-top,0px))] z-[150] flex justify-center px-3 pointer-events-none sm:top-[calc(3rem+env(safe-area-inset-top,0px))]"',
+          )
+          p.write_text(t)
+          print('applied', t.count('d4-cbt-session'), t.count('d4-cbt-body'))
+          PY
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(mobile): CBT immersive flex layout — scrollable d4-cbt-body, compact header"
+            git push origin HEAD:main
+          fi
