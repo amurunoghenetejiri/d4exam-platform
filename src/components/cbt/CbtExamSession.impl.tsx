@@ -21,6 +21,8 @@ import { saveCbtResult } from "@/lib/cbt-save-result";
 import { logSecurityEvent } from "@/lib/cbt-security";
 import { mapFaceSecurityEvent } from "@/lib/live-monitor";
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
+import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
+import { haptic } from "@/lib/haptic";
 
 function isPreviewPath() {
   if (typeof window === "undefined") return false;
@@ -38,11 +40,29 @@ function stopMediaStream(stream: MediaStream | null | undefined) {
 
 async function requestExamFullscreen(): Promise<boolean> {
   if (typeof document === "undefined") return false;
+  await enterExamImmersive();
   if (document.fullscreenElement) return true;
   try {
-    await document.documentElement.requestFullscreen?.();
-  } catch { /* blocked */ }
+    const el = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    };
+    if (el.requestFullscreen) await el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+  } catch { /* blocked by browser / Android policy */ }
+  // On native Capacitor WebView, StatusBar.hide is the real immersive control.
+  // document.fullscreen may remain false — treat native immersive as success.
+  try {
+    const { isNativeShell } = await import("@/native/platform");
+    if (isNativeShell()) return true;
+  } catch { /* ignore */ }
   return Boolean(document.fullscreenElement);
+}
+
+async function leaveExamFullscreen(): Promise<void> {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen?.();
+  } catch { /* ignore */ }
+  await exitExamImmersive();
 }
 
 export function CbtExamPage() {
@@ -65,7 +85,14 @@ export function CbtExamPage() {
   const [resultId, setResultId] = useState<string | null>(null);
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const [fsGate, setFsGate] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [pauseReason, setPauseReason] = useState<string>("");
+  const [warnBanner, setWarnBanner] = useState<string | null>(null);
   const attemptIdRef = useRef<string | null>(null);
+  const tabSwitchCountRef = useRef(0);
+  const fullscreenExitCountRef = useRef(0);
+  const lastViolationAtRef = useRef(0);
+  const orderedIdsRef = useRef<string[] | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const finishingRef = useRef(false);
   const startedRef = useRef(false);
@@ -130,14 +157,104 @@ export function CbtExamPage() {
     if (done) {
       shutdownMedia();
       setFsGate(false);
-      if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+      setPaused(false);
+      void leaveExamFullscreen();
     }
   }, [done, shutdownMedia]);
 
   useEffect(() => () => {
     stopMediaStream(mediaStreamRef.current);
     mediaStreamRef.current = null;
+    void exitExamImmersive();
   }, []);
+
+  // Integrity: fullscreen exit + app background / tab switch
+  useEffect(() => {
+    if (!started || done || previewMode || paused) return;
+    const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
+    const studentId = student?.studentId;
+    if (!schoolId || !studentId || !id) return;
+
+    const DEBOUNCE_MS = 2500;
+
+    const applyConsequence = async (eventType: string, description: string) => {
+      const now = Date.now();
+      if (now - lastViolationAtRef.current < DEBOUNCE_MS) return;
+      lastViolationAtRef.current = now;
+
+      const action = security.thresholdAction || "flag";
+      void logSecurityEvent({
+        schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+        eventType, severity: action === "terminate" ? "high" : "medium",
+        description, questionIndex: index,
+        extra: {
+          tab_switch_count: tabSwitchCountRef.current,
+          fullscreen_exit_count: fullscreenExitCountRef.current,
+          threshold_action: action,
+        },
+      });
+
+      if (action === "warn" || action === "flag") {
+        setWarnBanner(description);
+        try { haptic("tab_switch"); } catch { /* ignore */ }
+        window.setTimeout(() => setWarnBanner(null), 6000);
+      } else if (action === "terminate") {
+        setDoneTerminated(true);
+        await finishAttempt(true);
+      }
+    };
+
+    const onFsChange = () => {
+      if (!security.fullscreen) return;
+      if (document.fullscreenElement) {
+        setFsGate(false);
+        return;
+      }
+      // On native we rely on StatusBar immersive; document fullscreen may be unavailable.
+      // Still record exit when browser fullscreen was previously active.
+      fullscreenExitCountRef.current += 1;
+      setFsGate(true);
+      void applyConsequence("FULLSCREEN_EXIT", "Fullscreen was exited during the examination.");
+      if (attemptIdRef.current) {
+        void supabase.from("exam_attempts").update({
+          fullscreen_exit_count: fullscreenExitCountRef.current,
+        } as never).eq("id", attemptIdRef.current);
+      }
+    };
+
+    const onVis = () => {
+      if (!security.tabMonitoring) return;
+      if (document.visibilityState !== "hidden") return;
+      tabSwitchCountRef.current += 1;
+      if (attemptIdRef.current) {
+        void supabase.from("exam_attempts").update({
+          tab_switch_count: tabSwitchCountRef.current,
+        } as never).eq("id", attemptIdRef.current);
+      }
+      const max = security.maxTabSwitches ?? 5;
+      if (tabSwitchCountRef.current >= max) {
+        void applyConsequence("TAB_SWITCH", `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`);
+      } else {
+        void logSecurityEvent({
+          schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+          eventType: "TAB_SWITCH", severity: "low",
+          description: `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`,
+          questionIndex: index,
+        });
+        setWarnBanner(`Stay on the exam screen. Switches: ${tabSwitchCountRef.current}/${max}`);
+        window.setTimeout(() => setWarnBanner(null), 4000);
+      }
+    };
+
+    document.addEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+    // finishAttempt is stable enough via refs for this monitoring effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done, previewMode, paused, security.fullscreen, security.tabMonitoring, security.maxTabSwitches, security.thresholdAction, id, index, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId]);
 
   const questionsToAnswer = useMemo(() => {
     const row = (settingsQ.data as { questions_to_answer?: number } | null)?.questions_to_answer;
@@ -148,31 +265,60 @@ export function CbtExamPage() {
 
   const questions = useMemo(() => {
     const key = student?.studentId ?? (previewMode ? "officer-preview" : session?.userId ?? "anon");
-    return prepareStudentPaper((questionsQ.data ?? []) as never, {
+    const paper = prepareStudentPaper((questionsQ.data ?? []) as never, {
       questionsToAnswer,
       randomizeQuestions: Boolean(security.randomizeQuestions),
       randomizeOptions: Boolean(security.randomizeOptions),
       studentKey: key,
       examId: id,
     });
+    // Prefer locked order from attempt (stable across refresh)
+    const locked = orderedIdsRef.current;
+    if (locked && locked.length) {
+      const byId = new Map(paper.map((q) => [q.id, q]));
+      const ordered = locked.map((qid) => byId.get(qid)).filter(Boolean) as typeof paper;
+      if (ordered.length) return ordered;
+    }
+    return paper;
   }, [questionsQ.data, questionsToAnswer, security.randomizeQuestions, security.randomizeOptions, student?.studentId, session?.userId, previewMode, id]);
 
   const TOTAL = questions.length;
   const q = questions[index];
   const answeredCount = Object.keys(answers).length;
 
+  const faceWarnCountRef = useRef(0);
   const onFaceSecurityEvent = useCallback((ev: FaceSecurityEvent) => {
-    if (previewMode) return;
+    if (previewMode || doneRef.current) return;
     const mapped = mapFaceSecurityEvent(ev.kind, ev.faceCount);
     const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
     const studentId = student?.studentId;
     if (!schoolId || !studentId || !id) return;
+    const isViolation = ev.kind === "none" || ev.kind === "multi" || ev.kind === "camera_blocked";
+    if (isViolation) faceWarnCountRef.current += 1;
     void logSecurityEvent({
       schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
       eventType: mapped.eventType, severity: mapped.severity, description: mapped.description,
-      extra: { faceCount: ev.faceCount, source: "ExamCameraPip" },
+      extra: { faceCount: ev.faceCount, source: "ExamCameraPip", warnCount: faceWarnCountRef.current },
     });
-  }, [previewMode, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId, id]);
+    const maxW = security.maxFaceWarnings ?? 5;
+    const action = security.faceViolationAction || security.thresholdAction || "flag";
+    if (!isViolation) return;
+    if (faceWarnCountRef.current < maxW) {
+      setWarnBanner(mapped.description || "Face integrity warning");
+      window.setTimeout(() => setWarnBanner(null), 5000);
+      return;
+    }
+    if (action === "warn" || action === "flag") {
+      setWarnBanner(mapped.description || "Face integrity threshold reached");
+      window.setTimeout(() => setWarnBanner(null), 6000);
+    } else if (action === "pause") {
+      setPauseReason(mapped.description || "Face integrity violation");
+      setPaused(true);
+    } else if (action === "terminate") {
+      setDoneTerminated(true);
+      void finishAttempt(true);
+    }
+  }, [previewMode, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId, id, security.maxFaceWarnings, security.faceViolationAction, security.thresholdAction]);
 
   async function requestSubmit() {
     if (done || finishingRef.current || previewMode) return;
@@ -189,7 +335,8 @@ export function CbtExamPage() {
     finishingRef.current = true;
     shutdownMedia();
     setFsGate(false);
-    if (document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+    setPaused(false);
+    void leaveExamFullscreen();
     if (previewMode) {
       toast.message("Preview ended — nothing was saved");
       setDone(true);
@@ -274,12 +421,52 @@ export function CbtExamPage() {
         if (!ok) { toast.message("Please allow fullscreen to continue the exam"); setFsGate(true); }
       }
       if (!previewMode && student?.studentId && examQ.data?.school_id) {
+        // Load existing attempt for stable question set
+        const { data: existingFull } = await supabase
+          .from("exam_attempts")
+          .select("id, status, question_order, tab_switch_count, fullscreen_exit_count, answers")
+          .eq("exam_id", id)
+          .eq("student_id", student.studentId)
+          .maybeSingle();
+        if (existingFull?.id) {
+          attemptIdRef.current = existingFull.id as string;
+          tabSwitchCountRef.current = Number(existingFull.tab_switch_count ?? 0);
+          fullscreenExitCountRef.current = Number(existingFull.fullscreen_exit_count ?? 0);
+          const qo = existingFull.question_order;
+          if (Array.isArray(qo) && qo.length) {
+            orderedIdsRef.current = qo.map(String);
+          }
+          if (existingFull.answers && typeof existingFull.answers === "object") {
+            setAnswers(existingFull.answers as Record<string, number>);
+          }
+        }
+        // Build paper now so we can lock order
+        const key = student.studentId;
+        const paper = prepareStudentPaper((questionsQ.data ?? []) as never, {
+          questionsToAnswer,
+          randomizeQuestions: Boolean(security.randomizeQuestions),
+          randomizeOptions: Boolean(security.randomizeOptions),
+          studentKey: key,
+          examId: id,
+        });
+        const orderIds = orderedIdsRef.current?.length
+          ? orderedIdsRef.current
+          : paper.map((q) => q.id);
+        orderedIdsRef.current = orderIds;
+
         if (!attemptIdRef.current) {
           const { data } = await supabase.from("exam_attempts").upsert({
             exam_id: id, student_id: student.studentId, school_id: examQ.data?.school_id,
             status: "in_progress", started_at: new Date().toISOString(), answers: {},
+            question_order: orderIds,
           } as never, { onConflict: "exam_id,student_id" }).select("id").maybeSingle();
           if (data?.id) attemptIdRef.current = data.id as string;
+        } else {
+          // Persist order if missing
+          void supabase.from("exam_attempts").update({
+            question_order: orderIds,
+            status: "in_progress",
+          } as never).eq("id", attemptIdRef.current);
         }
       }
       setSeconds((examQ.data?.duration_minutes ?? 60) * 60);
@@ -290,8 +477,8 @@ export function CbtExamPage() {
 
   async function restoreFullscreenFromUser() {
     const ok = await requestExamFullscreen();
-    if (ok) { setFsGate(false); toast.success("Fullscreen restored"); }
-    else toast.error("Could not enter fullscreen.");
+    if (ok) { setFsGate(false); setPaused(false); toast.success("Fullscreen restored"); }
+    else toast.error("Could not enter fullscreen. Tap again or check device permissions.");
   }
 
   async function goToResult() {
@@ -457,7 +644,28 @@ export function CbtExamPage() {
           onNeedReconnect={() => {}}
         />
       )}
-      {fsGate && security.fullscreen && started && !done && (
+      {warnBanner && started && !done && (
+        <div className="fixed inset-x-0 top-16 z-[150] flex justify-center px-3 pointer-events-none">
+          <div className="max-w-md rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-900 shadow-lg">
+            Exam Integrity Warning — {warnBanner}
+          </div>
+        </div>
+      )}
+      {paused && started && !done && (
+        <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-white p-6 text-center shadow-2xl">
+            <h2 className="text-lg font-extrabold text-slate-900">EXAM PAUSED</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Your examination has been paused because an integrity violation was detected.
+            </p>
+            {pauseReason ? <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p> : null}
+            <Button className="mt-5 w-full font-semibold" onClick={() => void restoreFullscreenFromUser()}>
+              Resume examination
+            </Button>
+          </div>
+        </div>
+      )}
+      {fsGate && security.fullscreen && started && !done && !paused && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-white p-6 text-center shadow-2xl">
             <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-primary/10 text-primary"><Maximize className="h-6 w-6" /></div>
