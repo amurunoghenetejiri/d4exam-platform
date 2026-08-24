@@ -10,7 +10,7 @@ import { useRealtimeInvalidate } from "@/lib/realtime";
 
 export const Route = createFileRoute("/officer/")({
   head: () => ({
-    meta: [{ title: "Examination Officer Dashboard — D4EXAM" }],
+    meta: [{ title: "Departmental Officer Dashboard — D4EXAM" }],
   }),
   component: Page,
 });
@@ -30,7 +30,6 @@ type Audit = {
   created_at: string;
 };
 
-/** Same window as live-monitor online / offline hide — only “really writing” students. */
 const ACTIVE_WRITER_MS = 3 * 60 * 1000;
 
 function isAttemptActiveNow(
@@ -52,7 +51,6 @@ function isAttemptActiveNow(
     const t = new Date(row.updated_at).getTime();
     if (!Number.isNaN(t)) candidates.push(t);
   }
-  // Do not use started_at alone — that keeps stale attempts “alive” forever
   if (!candidates.length) return false;
   return now - Math.max(...candidates) <= ACTIVE_WRITER_MS;
 }
@@ -94,11 +92,6 @@ function Page() {
     enabled,
   );
 
-  /**
-   * Live examinations + Ongoing integrity — same source of truth as Live Monitor:
-   * only in_progress attempts with recent activity (last 3 min presence/update).
-   * Stale in_progress rows and bare “ongoing” exams with nobody writing do NOT count.
-   */
   const liveStatsQ = useQuery({
     queryKey: ["officer-dash-live", schoolId],
     enabled,
@@ -125,9 +118,7 @@ function Page() {
           now,
         ),
       );
-      const examIds = new Set<
-        string
-      >();
+      const examIds = new Set<string>();
       for (const a of active) {
         const eid = (a as { exam_id: string | null }).exam_id;
         if (eid) examIds.add(eid);
@@ -166,11 +157,11 @@ function Page() {
   return (
     <>
       <PageHeader
-        title={`Welcome${user?.fullName ? `, ${user.fullName}` : ", Examination Officer"}`}
+        title={`Welcome${user?.fullName ? `, ${user.fullName}` : ", Departmental Officer"}`}
         description={
           user?.schoolName
             ? `${user.schoolName} · Live officer dashboard`
-            : "Examination officer dashboard"
+            : "Departmental officer dashboard"
         }
         actions={
           <Button className="font-semibold" asChild>
