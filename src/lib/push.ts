@@ -1,7 +1,9 @@
 /**
  * Client-side push registration.
- * - Web/PWA: Firebase Cloud Messaging (browser)
- * - Android Capacitor: @capacitor/push-notifications (native FCM)
+ * - Web/PWA: Firebase Cloud Messaging (browser) — may show as Chrome
+ * - Android Capacitor: @capacitor/push-notifications ONLY (native D4EXAM channel)
+ *
+ * Native shell NEVER registers the Firebase messaging service worker.
  */
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getMessaging, getToken, isSupported, onMessage, type Messaging } from "firebase/messaging";
@@ -19,17 +21,32 @@ let nativeRegisterInFlight = false;
 
 const NATIVE_PUSH_SKIP_KEY = "d4_native_push_skip_register";
 
+/** Unregister every service worker in the Capacitor WebView so Chrome never owns push. */
 async function disableWebPushInNativeShell(): Promise<void> {
   if (typeof window === "undefined" || !isNativeShell()) return;
   try {
     if ("serviceWorker" in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
-      for (const r of regs) {
-        try {
-          await r.unregister();
-        } catch {
-          /* ignore */
-        }
+      await Promise.all(
+        regs.map(async (r) => {
+          try {
+            await r.unregister();
+          } catch {
+            /* ignore */
+          }
+        }),
+      );
+    }
+    if ("caches" in window) {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys
+            .filter((k) => /firebase|messaging|fcm|workbox/i.test(k))
+            .map((k) => caches.delete(k)),
+        );
+      } catch {
+        /* ignore */
       }
     }
   } catch {
@@ -69,6 +86,7 @@ function getFirebaseApp(): FirebaseApp {
 
 export async function getFirebaseMessaging(): Promise<Messaging | null> {
   if (typeof window === "undefined") return null;
+  if (isNativeShell()) return null;
   const supported = await isSupported().catch(() => false);
   if (!supported) return null;
   if (messaging) return messaging;
@@ -116,7 +134,7 @@ async function upsertPushDevice(
 
   const ua =
     typeof navigator !== "undefined"
-      ? `${navigator.userAgent} | platform=${getRuntimePlatform()}`
+      ? `${navigator.userAgent} | platform=${getRuntimePlatform()} | native=${isNativeShell() ? "1" : "0"}`
       : `platform=${getRuntimePlatform()}`;
 
   const row = {
@@ -175,7 +193,7 @@ async function upsertPushDevice(
 
 function showLocalNotification(title: string, body: string, link?: string) {
   if (typeof window === "undefined" || !("Notification" in window)) return;
-  if (isNativeShell()) return;
+  if (isNativeShell()) return; // never use browser Notification API inside the APK
   if (Notification.permission !== "granted") return;
   const icon = `${window.location.origin}/icon-192.png`;
   try {
@@ -209,10 +227,11 @@ async function ensureAndroidChannel(): Promise<void> {
       id: "d4exam_default",
       name: "D4EXAM",
       description: "Exams, results and important updates",
-      importance: 4,
+      importance: 5,
       visibility: 1,
       sound: "default",
       vibration: true,
+      lights: true,
     });
   } catch {
     /* channels unsupported or already exist */
@@ -287,7 +306,7 @@ async function safeNativeRegister(): Promise<{ ok: boolean; token?: string; erro
     await ensureAndroidChannel();
 
     const tokenPromise = new Promise<string | null>((resolve) => {
-      const timeout = setTimeout(() => resolve(null), 8_000);
+      const timeout = setTimeout(() => resolve(null), 10_000);
       void PushNotifications.addListener("registration", (t) => {
         clearTimeout(timeout);
         resolve(t?.value || null);
@@ -325,6 +344,7 @@ async function enableNativePushNotifications(
   role?: string | null,
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
   try {
+    await disableWebPushInNativeShell();
     const { PushNotifications } = await import("@capacitor/push-notifications");
 
     let permStatus = await PushNotifications.checkPermissions();
@@ -369,6 +389,9 @@ async function enableWebPushNotifications(
   userId: string,
   role?: string | null,
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
+  if (isNativeShell()) {
+    return enableNativePushNotifications(userId, role);
+  }
   if (typeof window === "undefined" || !("Notification" in window)) {
     return { ok: false, error: "Notifications are not supported in this browser" };
   }
@@ -452,14 +475,18 @@ export async function refreshPushLastSeen(userId: string): Promise<void> {
   }
 }
 
+/** Called from AppShell on session — native only, never web FCM. */
 export async function initNativePushIfNeeded(
-  _userId?: string | null,
-  _role?: string | null,
+  userId?: string | null,
+  role?: string | null,
 ): Promise<void> {
   if (!isNativeShell()) return;
   try {
     await disableWebPushInNativeShell();
     await refreshNativePushPermissionState();
+    if (userId && nativePermissionCache === "granted") {
+      void enableNativePushNotifications(userId, role);
+    }
   } catch {
     /* never crash startup */
   }
