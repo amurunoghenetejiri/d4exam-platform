@@ -21,7 +21,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
     <div className="relative flex min-h-dvh flex-col bg-white">
       <Watermark opacity={0.1} size="xl" />
 
-      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="d4-public-header sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-[1180px] items-center justify-between gap-4 px-4 sm:h-[4.5rem] sm:px-6">
           <Link to="/" aria-label="D4EXAM home" className="shrink-0">
             <span className="inline-flex lg:hidden">
@@ -56,7 +56,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
 
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
-              <Button variant="outline" size="icon" className="lg:hidden" aria-label="Open menu">
+              <Button variant="outline" size="icon" className="d4-public-menu lg:hidden" aria-label="Open menu">
                 <Menu className="h-5 w-5" />
               </Button>
             </SheetTrigger>
