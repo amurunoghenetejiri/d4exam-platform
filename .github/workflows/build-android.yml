@@ -9,13 +9,8 @@ on:
       - "capacitor.config.ts"
       - "package.json"
       - "public/**"
-      - "scripts/generate-capacitor-index.mjs"
       - "src/lib/push.ts"
-      - "src/lib/offline-*.ts"
-      - "src/lib/require-online.ts"
       - "src/native/**"
-      - "src/components/OfflineBootstrap.tsx"
-      - "src/components/NetworkBanner.tsx"
       - ".github/workflows/build-android.yml"
       - "DEPLOY_TRIGGER.txt"
 
@@ -48,25 +43,17 @@ jobs:
           set -euo pipefail
           npm run build
 
-      - name: Prepare Capacitor dist/ with REAL SPA index (not stub)
+      - name: Prepare Capacitor dist/
         run: |
           set -euo pipefail
           mkdir -p dist
-          if [ ! -d .output/public ]; then
-            echo "ERROR: .output/public missing after build"
-            exit 1
-          fi
-          cp -a .output/public/. dist/
+          if [ -d .output/public ]; then cp -a .output/public/. dist/; else echo "ERROR: .output/public missing"; exit 1; fi
           cp -f public/offline.html dist/offline.html
           cp -f public/firebase-messaging-sw.js dist/firebase-messaging-sw.js 2>/dev/null || true
-          node scripts/generate-capacitor-index.mjs
-          test -f dist/index.html
-          grep -q 'type="module"' dist/index.html || { echo "FATAL: index.html has no module script"; exit 1; }
-          grep -q 'assets/index-' dist/index.html || { echo "FATAL: index.html missing entry chunk"; exit 1; }
-          echo "=== index.html (first 30 lines) ==="
-          head -30 dist/index.html
-          echo "=== dist top ==="
-          ls -la dist/ | head -25
+          if [ ! -f dist/index.html ]; then
+            printf '%s\n' '<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta http-equiv="refresh" content="0;url=https://d4exam-platform.vercel.app/"/><title>D4EXAM</title></head><body style="background:#0b1b3a;color:#fff;display:grid;place-items:center;min-height:100vh;font-family:system-ui">Opening D4EXAM…</body></html>' > dist/index.html
+          fi
+          ls -la dist/offline.html dist/index.html 2>/dev/null || true
 
       - name: Ensure complete Android platform
         run: |
@@ -76,7 +63,7 @@ jobs:
           test -f android/gradlew
           chmod +x android/gradlew
 
-      - name: Apply D4EXAM permissions, version 2.1.0, branding, immersive
+      - name: Apply D4EXAM permissions, version 2.2.0, branding
         run: |
           set -euo pipefail
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -95,24 +82,8 @@ jobs:
             '    <color name="ic_launcher_background">#00000000</color>' \
             '</resources>' > android/app/src/main/res/values/colors.xml
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
-          sed -i 's/versionCode [0-9]*/versionCode 21/' android/app/build.gradle || true
-          sed -i 's/versionName "[^"]*"/versionName "2.1.0"/' android/app/build.gradle || true
-          mkdir -p android/app/src/main/java/com/d4exam/app
-          printf '%s\n' \
-            'package com.d4exam.app;' \
-            '' \
-            'import android.os.Bundle;' \
-            'import android.view.WindowManager;' \
-            'import com.getcapacitor.BridgeActivity;' \
-            '' \
-            'public class MainActivity extends BridgeActivity {' \
-            '  @Override' \
-            '  public void onCreate(Bundle savedInstanceState) {' \
-            '    super.onCreate(savedInstanceState);' \
-            '    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);' \
-            '  }' \
-            '}' \
-            > android/app/src/main/java/com/d4exam/app/MainActivity.java
+          sed -i 's/versionCode [0-9]*/versionCode 22/' android/app/build.gradle || true
+          sed -i 's/versionName "[^"]*"/versionName "2.2.0"/' android/app/build.gradle || true
 
       - name: Optional google-services.json from secret
         env:
@@ -121,37 +92,18 @@ jobs:
           set -euo pipefail
           if [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
             printf '%s\n' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
-            echo "google-services.json written"
-          else
-            echo "No FIREBASE_GOOGLE_SERVICES_JSON secret"
           fi
 
       - name: Capacitor sync
         run: npx cap sync android
 
-      - name: VERIFY local shell (no server.url + real index)
+      - name: VERIFY live Vercel server.url
         run: |
           set -euo pipefail
           CFG="android/app/src/main/assets/capacitor.config.json"
-          PUB="android/app/src/main/assets/public"
-          test -f "$CFG"
-          echo "=== capacitor.config.json ==="
           cat "$CFG"
-          python3 - <<'PY'
-          import json, sys
-          c = json.load(open("android/app/src/main/assets/capacitor.config.json"))
-          s = c.get("server") or {}
-          if s.get("url"):
-              print("FATAL: server.url set to", s["url"])
-              sys.exit(1)
-          print("OK: no server.url")
-          PY
-          test -f "$PUB/index.html"
-          grep -q 'type="module"' "$PUB/index.html"
-          grep -q 'assets/index-' "$PUB/index.html"
-          test -d "$PUB/assets"
-          ls "$PUB/assets"/index-*.js | head -1
-          echo "VERIFY PASSED — real SPA index bundled"
+          python3 -c "import json,sys; c=json.load(open('android/app/src/main/assets/capacitor.config.json')); u=(c.get('server') or {}).get('url') or ''; assert 'd4exam-platform.vercel.app' in u, u; print('OK', u)"
+          test -f android/app/src/main/assets/public/offline.html
 
       - name: Generate D4EXAM icons + splash
         run: |
@@ -160,7 +112,7 @@ jobs:
           SRC=""
           if [ -f public/logo.png ]; then SRC=public/logo.png
           elif [ -f public/icon-512.png ]; then SRC=public/icon-512.png
-          else echo "WARNING: no logo"; exit 0; fi
+          else exit 0; fi
           for density_size in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
             density=${density_size%%:*}; size=${density_size##*:}
             dir="android/app/src/main/res/mipmap-${density}"; mkdir -p "$dir"
@@ -169,23 +121,13 @@ jobs:
             fsize=$((size * 2)); safe=$((fsize * 66 / 100))
             convert "$SRC" -resize "${safe}x${safe}" -background none -gravity center -extent "${fsize}x${fsize}" PNG32:"$dir/ic_launcher_foreground.png"
           done
-          mkdir -p android/app/src/main/res/drawable
-          convert "$SRC" -resize 128x128 -background none -gravity center -extent 128x128 PNG32:android/app/src/main/res/drawable/ic_stat_d4exam.png || true
-          find android/app/src/main/res -type f \( -name 'splash*' -o -name 'splash_dark*' \) -delete || true
-          convert -size 1080x1920 xc:"#0b1b3a" \
-            \( "$SRC" -resize 480x480 \) -gravity center -geometry +0-120 -compose over -composite \
-            -gravity south -fill white -font DejaVu-Sans-Bold -pointsize 42 -annotate +0+280 "D4EXAM" \
-            -gravity south -fill "#93c5fd" -font DejaVu-Sans -pointsize 28 -annotate +0+210 "Smart. Secure. Seamless." \
-            -gravity south -fill "#cbd5e1" -font DejaVu-Sans -pointsize 22 -annotate +0+150 "Works offline" \
-            PNG32:android/app/src/main/res/drawable/d4_splash.png 2>/dev/null || \
+          mkdir -p android/app/src/main/res/drawable android/app/src/main/res/mipmap-anydpi-v26
           convert -size 1080x1920 xc:"#0b1b3a" \( "$SRC" -resize 480x480 \) -gravity center -compose over -composite PNG32:android/app/src/main/res/drawable/d4_splash.png
-          mkdir -p android/app/src/main/res/mipmap-anydpi-v26
           printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">' '    <background android:drawable="@color/ic_launcher_background"/>' '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>' '</adaptive-icon>' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           cp android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
           if [ -f android/app/src/main/res/values/styles.xml ]; then
             sed -i 's|android:windowBackground">@[^<]*|android:windowBackground">@drawable/d4_splash|' android/app/src/main/res/values/styles.xml || true
           fi
-          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<bitmap xmlns:android="http://schemas.android.com/apk/res/android"' '    android:src="@drawable/d4_splash"' '    android:gravity="fill" />' > android/app/src/main/res/drawable/splash.xml
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
@@ -211,7 +153,6 @@ jobs:
           APK="android/app/build/outputs/apk/debug/app-debug.apk"
           test -f "$APK"
           mkdir -p artifacts && cp "$APK" artifacts/D4EXAM-debug.apk
-          unzip -l "$APK" | grep -E 'assets/public/(index\.html|assets/index-)' | head -10 || true
 
       - name: Upload D4EXAM Android APK artifact
         uses: actions/upload-artifact@v4
@@ -223,6 +164,5 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### D4EXAM Android APK v2.1.0 — SPA index + offline shell" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Real client index.html (no stuck Loading stub)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- No server.url — local assets; Uninstall old app before install" >> "$GITHUB_STEP_SUMMARY"
+          echo "### D4EXAM Android APK v2.2.0 — LIVE Vercel shell restored" >> "$GITHUB_STEP_SUMMARY"
+          echo "- server.url = https://d4exam-platform.vercel.app" >> "$GITHUB_STEP_SUMMARY"
