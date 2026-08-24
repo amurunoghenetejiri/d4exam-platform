@@ -268,14 +268,14 @@ export function AppShell({
         )}
         style={{ position: "fixed" }}
       >
-        <div className="mx-auto grid h-11 max-w-[1400px] grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 px-2 sm:h-14 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-6 lg:h-16 lg:px-8">
+        <div className="mx-auto grid h-12 max-w-[1400px] grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 px-2.5 sm:h-16 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
                 <Button
                   variant="outline"
                   size="icon"
-                  className="h-8 w-8 shrink-0 lg:hidden"
+                  className="h-9 w-9 shrink-0 lg:hidden"
                   aria-label="Open menu"
                 >
                   <Menu className="h-5 w-5" />
@@ -443,7 +443,7 @@ export function AppShell({
         </div>
       </header>
 
-      <div className="relative z-10 pt-11 sm:pt-14 lg:pt-16 lg:pl-64">
+      <div className="relative z-10 pt-12 sm:pt-16 lg:pl-64">
         <main className="mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:max-w-[1400px] lg:px-8 lg:pb-12 lg:pt-8 xl:max-w-[1480px]">
           <div className="min-w-0 w-full">{children}</div>
         </main>

@@ -18,11 +18,10 @@ export function NetworkBanner() {
       style={{
         paddingTop: "max(0.35rem, env(safe-area-inset-top))",
       }}
-      data-network-banner=""
       role="status"
     >
       <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      <span>You're offline. Cached content is available; some actions need Internet.</span>
+      <span>You&apos;re offline. Cached content is available; some actions need Internet.</span>
     </div>
   );
 }

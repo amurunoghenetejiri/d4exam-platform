@@ -554,14 +554,14 @@ export function CbtExamPage() {
   const mm = String(Math.floor((seconds ?? 0) / 60)).padStart(2, "0");
   const ss = String((seconds ?? 0) % 60).padStart(2, "0");
   return (
-    <div className="d4-cbt-session select-none">
+    <div className="flex min-h-dvh flex-col bg-slate-50 select-none">
       {previewMode && (
         <div className="bg-amber-500 px-3 py-1.5 text-center text-xs font-bold text-white">
           OFFICER PREVIEW — answers are not saved
         </div>
       )}
-      <header className="d4-cbt-header">
-        <div className="d4-cbt-header-inner">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-slate-200 bg-[#0b1b3a] text-white">
+        <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-3 px-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? student?.schoolName ?? session?.schoolName} size="md" className="bg-transparent" />
             <p className="hidden truncate text-sm font-bold sm:block">{(exam as { courses?: { code?: string } }).courses?.code ?? "EXAM"} — {exam.title}</p>
@@ -572,8 +572,7 @@ export function CbtExamPage() {
           </div>
         </div>
       </header>
-      <div className="d4-cbt-body">
-      <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-4 p-3 sm:p-6 lg:grid-cols-[220px_1fr]">
+      <div className="mx-auto grid w-full max-w-[1200px] flex-1 grid-cols-1 gap-4 p-3 pt-[calc(4rem+0.75rem)] sm:p-6 sm:pt-[calc(4rem+1.5rem)] lg:grid-cols-[220px_1fr]">
         <aside className="order-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:order-1">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Questions</p>
           <div className="mt-3 grid grid-cols-5 gap-2">
@@ -635,7 +634,6 @@ export function CbtExamPage() {
           </div>
         </section>
       </div>
-      </div>
       {started && !done && security.requireCamera && (
         <ExamCameraPip
           enabled={started && !done}
@@ -647,7 +645,7 @@ export function CbtExamPage() {
         />
       )}
       {warnBanner && started && !done && (
-        <div className="fixed inset-x-0 top-[calc(2.75rem+env(safe-area-inset-top,0px))] z-[150] flex justify-center px-3 pointer-events-none sm:top-[calc(3rem+env(safe-area-inset-top,0px))]">
+        <div className="fixed inset-x-0 top-16 z-[150] flex justify-center px-3 pointer-events-none">
           <div className="max-w-md rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-900 shadow-lg">
             Exam Integrity Warning — {warnBanner}
           </div>
