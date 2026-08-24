@@ -1,12 +1,10 @@
 name: Apply CBT engine fix
 
 on:
+  push:
+    paths:
+      - ".github/workflows/apply-cbt-fix.yml"
   workflow_dispatch:
-    inputs:
-      reason:
-        description: "Why run"
-        required: false
-        default: "restore"
 
 jobs:
   apply:
@@ -18,7 +16,6 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Restore styles + immersive
         run: |
@@ -48,20 +45,6 @@ print('pip ok', len(c))
 "
 
       - name: Teacher maxQuestions
-        run: |
-          python3 -c "
-from pathlib import Path
-p = Path('src/routes/teacher.examinations.tsx')
-c = p.read_text()
-old = 'maxQuestions: null,'
-if old not in c:
-  print('skip teacher')
-else:
-  c = c.replace(old, 'maxQuestions: questionsToAnswer > 0 ? questionsToAnswer : null,', 1)
-  c = c.replace(old, 'maxQuestions: (meta.questionsToAnswer and meta.questionsToAnswer > 0) and meta.questionsToAnswer or None,'.replace('and', '&&').replace('or None', ': null').replace('meta.questionsToAnswer && meta.questionsToAnswer > 0 && meta.questionsToAnswer', '(meta.questionsToAnswer && meta.questionsToAnswer > 0) ? meta.questionsToAnswer'))
-"
-
-      - name: Teacher maxQuestions v2
         run: |
           python3 << 'PY'
 from pathlib import Path
