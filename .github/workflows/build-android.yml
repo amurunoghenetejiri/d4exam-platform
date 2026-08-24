@@ -43,17 +43,30 @@ jobs:
           set -euo pipefail
           npm run build
 
-      - name: Prepare Capacitor dist/
+      - name: Prepare Capacitor dist/ (local SPA shell)
         run: |
           set -euo pipefail
           mkdir -p dist
-          if [ -d .output/public ]; then cp -a .output/public/. dist/; else echo "ERROR: .output/public missing"; exit 1; fi
-          cp -f public/offline.html dist/offline.html
-          cp -f public/firebase-messaging-sw.js dist/firebase-messaging-sw.js 2>/dev/null || true
-          if [ ! -f dist/index.html ]; then
-            printf '%s\n' '<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta http-equiv="refresh" content="0;url=https://d4exam-platform.vercel.app/"/><title>D4EXAM</title></head><body style="background:#0b1b3a;color:#fff;display:grid;place-items:center;min-height:100vh;font-family:system-ui">Opening D4EXAM…</body></html>' > dist/index.html
+          if [ -d .output/public ]; then
+            cp -a .output/public/. dist/
+          elif [ -d dist ] && [ -f dist/index.html ]; then
+            echo "dist already has index.html"
+          else
+            echo "ERROR: no client build output found"
+            ls -la .output 2>/dev/null || true
+            ls -la dist 2>/dev/null || true
+            exit 1
           fi
-          ls -la dist/offline.html dist/index.html 2>/dev/null || true
+          cp -f public/offline.html dist/offline.html 2>/dev/null || true
+          cp -f public/firebase-messaging-sw.js dist/firebase-messaging-sw.js 2>/dev/null || true
+          cp -f public/site.webmanifest dist/site.webmanifest 2>/dev/null || true
+          if [ ! -f dist/index.html ]; then
+            echo "ERROR: dist/index.html missing after build — cannot ship offline APK"
+            exit 1
+          fi
+          # Never inject a meta-refresh to Vercel — that forced remote dependency.
+          ls -la dist/index.html dist/offline.html 2>/dev/null || true
+          echo "dist file count: $(find dist -type f | wc -l)"
 
       - name: Ensure complete Android platform
         run: |
@@ -63,7 +76,7 @@ jobs:
           test -f android/gradlew
           chmod +x android/gradlew
 
-      - name: Apply D4EXAM permissions, version 2.3.0, branding
+      - name: Apply D4EXAM permissions, version 2.4.0, branding
         run: |
           set -euo pipefail
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -82,8 +95,8 @@ jobs:
             '    <color name="ic_launcher_background">#00000000</color>' \
             '</resources>' > android/app/src/main/res/values/colors.xml
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
-          sed -i 's/versionCode [0-9]*/versionCode 23/' android/app/build.gradle || true
-          sed -i 's/versionName "[^"]*"/versionName "2.3.0"/' android/app/build.gradle || true
+          sed -i 's/versionCode [0-9]*/versionCode 24/' android/app/build.gradle || true
+          sed -i 's/versionName "[^"]*"/versionName "2.4.0"/' android/app/build.gradle || true
 
       - name: Optional google-services.json from secret
         env:
@@ -97,13 +110,23 @@ jobs:
       - name: Capacitor sync
         run: npx cap sync android
 
-      - name: VERIFY live Vercel server.url
+      - name: VERIFY local shell (no remote server.url)
         run: |
           set -euo pipefail
           CFG="android/app/src/main/assets/capacitor.config.json"
           cat "$CFG"
-          python3 -c "import json,sys; c=json.load(open('android/app/src/main/assets/capacitor.config.json')); u=(c.get('server') or {}).get('url') or ''; assert 'd4exam-platform.vercel.app' in u, u; print('OK', u)"
-          test -f android/app/src/main/assets/public/offline.html
+          python3 -c "
+import json,sys
+c=json.load(open('android/app/src/main/assets/capacitor.config.json'))
+s=c.get('server') or {}
+u=s.get('url')
+if u:
+  print('ERROR: server.url must be absent for offline APK, got', u)
+  sys.exit(1)
+print('OK local shell — no server.url')
+"
+          test -f android/app/src/main/assets/public/index.html
+          echo "public assets: $(find android/app/src/main/assets/public -type f | wc -l)"
 
       - name: Generate D4EXAM icons + splash
         run: |
@@ -164,5 +187,7 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### D4EXAM Android APK v2.3.0 — LIVE Vercel shell restored" >> "$GITHUB_STEP_SUMMARY"
-          echo "- server.url = https://d4exam-platform.vercel.app" >> "$GITHUB_STEP_SUMMARY"
+          echo "### D4EXAM Android APK v2.4.0 — LOCAL offline shell" >> "$GITHUB_STEP_SUMMARY"
+          echo "- No server.url (loads from APK assets)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Student pages work offline from cache after first online login" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Exam writing still requires Internet" >> "$GITHUB_STEP_SUMMARY"
