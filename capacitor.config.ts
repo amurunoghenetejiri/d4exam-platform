@@ -1,26 +1,25 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
- * D4EXAM Capacitor config
+ * D4EXAM Capacitor config — LOCAL web assets (full offline student shell)
  *
- * Live server: Android WebView loads production Vercel so the full SSR app UI
- * works. Native plugins (push, camera, status bar) still run in the shell.
+ * The APK loads the built SPA from webDir (dist), NOT from Vercel.
+ * That means:
+ * - Cold start works offline (no "Webpage not available")
+ * - Student dashboard / pages use IndexedDB cache when offline
+ * - Writing an exam still needs Internet (assertOnline gate)
+ * - Login and live data still use Supabase when online
  *
- * When offline, Capacitor serves errorPath from APK-bundled assets.
- *
- * StatusBar.overlaysWebView MUST be false so the system reserves space for the
- * status bar and the WebView content is not clipped under it.
+ * StatusBar.overlaysWebView MUST be false so content is not clipped.
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
   appName: "D4EXAM",
   webDir: "dist",
   server: {
-    // Live production app — required for TanStack Start SSR UI to render.
-    url: "https://d4exam-platform.vercel.app",
+    // Local assets only — do NOT set url (that forced remote Vercel and broke offline).
     androidScheme: "https",
-    // Bundled fallback when the device cannot reach Vercel (offline).
-    errorPath: "offline.html",
+    hostname: "localhost",
     allowNavigation: [
       "d4exam-platform.vercel.app",
       "*.vercel.app",
@@ -29,6 +28,7 @@ const config: CapacitorConfig = {
       "*.gstatic.com",
       "*.firebaseio.com",
       "*.firebasestorage.app",
+      "*.firebaseapp.com",
     ],
   },
   android: {

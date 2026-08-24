@@ -1,6 +1,7 @@
 /**
  * Online reconnection + background sync for offline-first reads.
  * Does not mutate UI layout. Safe to call from root bootstrap.
+ * No visible offline banners.
  */
 
 import { getNetworkStatus, subscribeNetworkStatus, probeConnectivity } from "@/native/networkService";
@@ -105,8 +106,9 @@ export function bootstrapOfflineSync(getCtx: () => {
   };
 }
 
+/** Short in-app message for online-only actions (exam start, etc.). Never a page crash. */
 export function requireOnlineMessage(): string {
-  return "You're currently offline. Connect to the Internet to use this feature.";
+  return "Internet connection required for this action.";
 }
 
 export function isOnlineNow(): boolean {

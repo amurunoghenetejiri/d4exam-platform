@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b1b3a" />
-    <title>D4EXAM — Offline</title>
+    <title>D4EXAM</title>
     <style>
       * { box-sizing: border-box; }
       body {
@@ -30,19 +30,21 @@
   <body>
     <div>
       <div class="mark">D4</div>
-      <h1>You're offline</h1>
-      <p>Connect to the Internet, then tap Retry to open D4EXAM.</p>
-      <button type="button" id="retry">Retry</button>
+      <h1>D4EXAM</h1>
+      <p>Opening the app…</p>
+      <button type="button" id="retry">Open app</button>
     </div>
     <script>
       (function () {
-        var LIVE = "https://d4exam-platform.vercel.app/";
         function go() {
-          try { location.replace(LIVE); } catch (e) { location.href = LIVE; }
+          try {
+            location.replace("./");
+          } catch (e) {
+            location.href = "./";
+          }
         }
         document.getElementById("retry").onclick = go;
-        window.addEventListener("online", go);
-        if (navigator.onLine) setTimeout(go, 400);
+        setTimeout(go, 300);
       })();
     </script>
   </body>

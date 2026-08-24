@@ -2,8 +2,8 @@ import { useEffect } from "react";
 import { subscribeNetworkStatus } from "@/native/networkService";
 
 /**
- * Student offline mode: no blocking "no internet" banner.
- * App stays usable from cache; exam write still requires online separately.
+ * Intentionally silent — student offline mode must never show a website-style
+ * "You're offline" strip. Exam write still uses assertOnline separately.
  */
 export function NetworkBanner() {
   useEffect(() => {
