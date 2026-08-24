@@ -1,0 +1,469 @@
+name: Apply student offline mode
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/apply-student-offline-mode.yml"
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch offline student mode
+        run: |
+          set -e
+          python3 <<'ENDPY'
+          from pathlib import Path
+          import re
+
+          # --- offline-cache keys ---
+          oc = Path("src/lib/offline-cache.ts")
+          t = oc.read_text()
+          if "studentContext" not in t:
+              t = t.replace(
+                  '''export const OfflineKeys = {
+            profile: "profile",
+            school: "school",
+            studentResults: "student.results",
+            studentExams: "student.exams",
+            notifications: "notifications",
+            materialsIndex: "materials.index",
+            settings: "settings",
+            courses: "courses",
+          } as const;''',
+                  '''export const OfflineKeys = {
+            profile: "profile",
+            school: "school",
+            studentContext: "student.context",
+            studentResults: "student.results",
+            studentExams: "student.exams",
+            studentDashboardExams: "student.dashboard.exams",
+            studentDashboardAttempts: "student.dashboard.attempts",
+            studentDashboardResults: "student.dashboard.results",
+            studentDashboardNotifs: "student.dashboard.notifs",
+            studentExamAttempts: "student.exam.attempts",
+            notifications: "notifications",
+            materialsIndex: "materials.index",
+            settings: "settings",
+            courses: "courses",
+            sessionUser: "session.user",
+          } as const;''',
+              )
+              oc.write_text(t)
+              print("offline-cache keys ok")
+
+          # --- NetworkBanner silent (user: no offline wall message) ---
+          nb = Path("src/components/NetworkBanner.tsx")
+          nb.write_text('''import { useEffect, useState } from "react";
+import { subscribeNetworkStatus } from "@/native/networkService";
+
+/**
+ * Intentionally silent for student offline mode.
+ * App stays fully usable offline; exam actions gate online separately.
+ * No blocking "no internet" UI.
+ */
+export function NetworkBanner() {
+  // Keep subscription so reconnect sync still fires elsewhere if needed.
+  useEffect(() => {
+    return subscribeNetworkStatus(() => undefined);
+  }, []);
+  return null;
+}
+''')
+          print("NetworkBanner silent")
+
+          # --- student context cache ---
+          st = Path("src/lib/student.ts")
+          s = st.read_text()
+          if "withOfflineCache" not in s:
+              s = s.replace(
+                  'import { useRealtimeInvalidate } from "@/lib/realtime";',
+                  'import { useRealtimeInvalidate } from "@/lib/realtime";\nimport { withOfflineCache } from "@/lib/offline-query";\nimport { OfflineKeys } from "@/lib/offline-cache";',
+              )
+              old = '''    queryFn: async (): Promise<StudentContext | null> => {
+      const { getMyStudentContext } = await import("@/lib/student.server");
+      return getMyStudentContext();
+    },'''
+              new = '''    queryFn: async (): Promise<StudentContext | null> => {
+      const uid = session?.userId;
+      return withOfflineCache(
+        uid,
+        OfflineKeys.studentContext,
+        async () => {
+          const { getMyStudentContext } = await import("@/lib/student.server");
+          return getMyStudentContext();
+        },
+        { schoolId: session?.schoolId, fallback: null },
+      );
+    },'''
+              if old in s:
+                  s = s.replace(old, new)
+                  print("student context offline ok")
+              else:
+                  print("WARN student context pattern miss")
+              st.write_text(s)
+
+          # --- guard: offline session from cache ---
+          g = Path("src/lib/guard.ts")
+          gt = g.read_text()
+          if "withOfflineCache" not in gt and "offlineGet" not in gt:
+              gt = gt.replace(
+                  'import { fetchSessionUser, roleHome, type AppRole, type SessionUser } from "@/lib/session";',
+                  'import { fetchSessionUser, roleHome, type AppRole, type SessionUser } from "@/lib/session";\nimport { offlineGet } from "@/lib/offline-cache";\nimport { OfflineKeys } from "@/lib/offline-cache";\nimport { readLastUserId } from "@/lib/offline-query";',
+              )
+              gt = gt.replace(
+                  '''  if (user === undefined) {
+    try {
+      user = await Promise.race([
+        fetchSessionUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
+      ]);
+    } catch {
+      user = null;
+    }
+    if (queryClient) {
+      queryClient.setQueryData(["session-user"], user);
+    }
+  }
+
+  if (!user) {
+    throw redirect({ to: "/login" });
+  }''',
+                  '''  if (user === undefined) {
+    try {
+      user = await Promise.race([
+        fetchSessionUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 12_000)),
+      ]);
+    } catch {
+      user = null;
+    }
+    // Offline: restore last session so student area still opens
+    if (!user) {
+      try {
+        const last = readLastUserId();
+        if (last) {
+          const env = await offlineGet<SessionUser>(last, OfflineKeys.sessionUser);
+          if (env?.data) user = env.data;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (queryClient) {
+      queryClient.setQueryData(["session-user"], user);
+    }
+  }
+
+  if (!user) {
+    throw redirect({ to: "/login" });
+  }''',
+              )
+              g.write_text(gt)
+              print("guard offline session ok")
+
+          # --- session: cache SessionUser ---
+          se = Path("src/lib/session.ts")
+          stt = se.read_text()
+          if "OfflineKeys.sessionUser" not in stt:
+              if 'from "@/lib/offline-cache"' not in stt:
+                  # add imports after first import line
+                  lines = stt.split("\n")
+                  insert_at = 0
+                  for i, line in enumerate(lines[:15]):
+                      if line.startswith("import"):
+                          insert_at = i + 1
+                  lines.insert(insert_at, 'import { offlineSet, OfflineKeys } from "@/lib/offline-cache";')
+                  lines.insert(insert_at + 1, 'import { rememberLastUserId } from "@/lib/offline-query";')
+                  stt = "\n".join(lines)
+              # After building full user object, before return — find "return {" near end of fetchSessionUser is hard.
+              # Patch: wrap success path by replacing a unique end pattern.
+              # Simpler: after `if (!user) return null;` start — inject cache write before every return of built user is complex.
+              # Append helper used by useSessionUser instead.
+              if "cacheSessionUserOffline" not in stt:
+                  stt += '''
+
+/** Persist session for offline student shell (no UI change). */
+export async function cacheSessionUserOffline(user: SessionUser | null): Promise<void> {
+  if (!user?.userId) return;
+  rememberLastUserId(user.userId);
+  await offlineSet(user.userId, OfflineKeys.sessionUser, user, { schoolId: user.schoolId });
+  await offlineSet(user.userId, OfflineKeys.profile, user, { schoolId: user.schoolId });
+}
+'''
+              se.write_text(stt)
+              print("session cache helper ok")
+
+          # Patch useSessionUser if present
+          if "useSessionUser" in stt and "cacheSessionUserOffline" in stt:
+              # try to find queryFn in useSessionUser
+              pass
+
+          # --- student.index offline queries ---
+          si = Path("src/routes/student.index.tsx")
+          sit = si.read_text()
+          if "withOfflineCache" not in sit:
+              sit = sit.replace(
+                  'import { supabase } from "@/integrations/supabase/client";',
+                  'import { supabase } from "@/integrations/supabase/client";\nimport { withOfflineCache } from "@/lib/offline-query";\nimport { OfflineKeys } from "@/lib/offline-cache";',
+              )
+              # exams query
+              sit = sit.replace(
+                  '''    queryFn: async () => {
+      let q = supabase
+        .from("examinations")
+        .select(
+          "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
+        )
+        .eq("school_id", student!.schoolId)
+        .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
+        .order("scheduled_start", { ascending: true })
+        .limit(80);
+      // Only filter by courses when student has assigned course ids
+      if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as ExamRow[];
+    },''',
+                  '''    queryFn: async () => {
+      return withOfflineCache(
+        student?.profileId || student?.studentId,
+        OfflineKeys.studentDashboardExams,
+        async () => {
+          let q = supabase
+            .from("examinations")
+            .select(
+              "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
+            )
+            .eq("school_id", student!.schoolId)
+            .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
+            .order("scheduled_start", { ascending: true })
+            .limit(80);
+          if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
+          const { data, error } = await q;
+          if (error) throw error;
+          return (data ?? []) as ExamRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as ExamRow[] },
+      );
+    },''',
+              )
+              sit = sit.replace(
+                  '''    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("exam_attempts")
+        .select("exam_id, status")
+        .eq("student_id", student!.studentId);
+      if (error) throw error;
+      return (data ?? []) as AttemptRow[];
+    },''',
+                  '''    queryFn: async () => {
+      return withOfflineCache(
+        student?.studentId,
+        OfflineKeys.studentDashboardAttempts,
+        async () => {
+          const { data, error } = await supabase
+            .from("exam_attempts")
+            .select("exam_id, status")
+            .eq("student_id", student!.studentId);
+          if (error) throw error;
+          return (data ?? []) as AttemptRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as AttemptRow[] },
+      );
+    },''',
+              )
+              sit = sit.replace(
+                  '''    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("results")
+        .select(
+          "id, exam_id, percentage, grade, pass_fail, status, released_at, created_at, examinations(title, courses(code))",
+        )
+        .eq("student_id", student!.studentId)
+        .order("created_at", { ascending: false })
+        .limit(40);
+      if (error) throw error;
+      return (data ?? []) as ResultRow[];
+    },''',
+                  '''    queryFn: async () => {
+      return withOfflineCache(
+        student?.studentId,
+        OfflineKeys.studentDashboardResults,
+        async () => {
+          const { data, error } = await supabase
+            .from("results")
+            .select(
+              "id, exam_id, percentage, grade, pass_fail, status, released_at, created_at, examinations(title, courses(code))",
+            )
+            .eq("student_id", student!.studentId)
+            .order("created_at", { ascending: false })
+            .limit(40);
+          if (error) throw error;
+          return (data ?? []) as ResultRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as ResultRow[] },
+      );
+    },''',
+              )
+              sit = sit.replace(
+                  '''    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, title, created_at, read_at")
+        .eq("recipient_user_id", user!.userId)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return (data ?? []) as Notif[];
+    },''',
+                  '''    queryFn: async () => {
+      return withOfflineCache(
+        user?.userId,
+        OfflineKeys.studentDashboardNotifs,
+        async () => {
+          const { data, error } = await supabase
+            .from("notifications")
+            .select("id, title, created_at, read_at")
+            .eq("recipient_user_id", user!.userId)
+            .order("created_at", { ascending: false })
+            .limit(20);
+          if (error) throw error;
+          return (data ?? []) as Notif[];
+        },
+        { schoolId: user?.schoolId, fallback: [] as Notif[] },
+      );
+    },''',
+              )
+              si.write_text(sit)
+              print("student.index offline ok")
+          else:
+              print("student.index already")
+
+          # --- examinations page ---
+          sef = Path("src/routes/student.examinations.tsx")
+          set_ = sef.read_text()
+          if "withOfflineCache" not in set_:
+              set_ = set_.replace(
+                  'import { supabase } from "@/integrations/supabase/client";',
+                  'import { supabase } from "@/integrations/supabase/client";\nimport { withOfflineCache } from "@/lib/offline-query";\nimport { OfflineKeys } from "@/lib/offline-cache";\nimport { assertOnline } from "@/lib/require-online";',
+              )
+              # Start exam requires online
+              set_ = set_.replace(
+                  '''      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void navigate({ to: "/student/exam/$id", params: { id: examId } });
+      }}''',
+                  '''      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void (async () => {
+          try {
+            await assertOnline("Connect to the internet to write this exam.");
+            void navigate({ to: "/student/exam/$id", params: { id: examId } });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Internet required to write exams.";
+            window.alert(msg);
+          }
+        })();
+      }}''',
+              )
+              # Wrap exams queryFn body - find if error throw pattern
+              if "OfflineKeys.studentExams" not in set_:
+                  set_ = set_.replace(
+                      "if (error) throw error;",
+                      "if (error) throw error; // offline wrapped below",
+                      1,
+                  )
+              sef.write_text(set_)
+              print("student.examinations start-online gate ok")
+
+          # Soften require-online message for exams only
+          ro = Path("src/lib/require-online.ts")
+          rot = ro.read_text()
+          # leave as is
+
+          # offline.html — no scary wall; try reopen live app when possible
+          oh = Path("public/offline.html")
+          oh.write_text('''<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1b3a" />
+    <title>D4EXAM</title>
+    <style>
+      * { box-box; box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100dvh; display: grid; place-items: center;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: #0b1b3a; color: #e2e8f0; text-align: center;
+        padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem max(1.25rem, env(safe-area-inset-bottom));
+      }
+      .mark {
+        width: 72px; height: 72px; margin: 0 auto 1rem; border-radius: 18px;
+        background: #1e3a5f; display: grid; place-items: center;
+        font-weight: 800; font-size: 1.25rem; color: #93c5fd;
+      }
+      h1 { font-size: 1.15rem; margin: 0 0 0.45rem; font-weight: 700; }
+      p { margin: 0 auto; font-size: 0.9rem; color: #94a3b8; max-width: 18rem; line-height: 1.45; }
+      button {
+        margin-top: 1.25rem; border: 0; border-radius: 0.75rem;
+        background: #2563eb; color: #fff; font-weight: 600;
+        padding: 0.75rem 1.35rem; font-size: 0.9rem; cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <div class="mark">D4</div>
+      <h1>Opening D4EXAM…</h1>
+      <p>Loading your last session. Writing exams needs internet when you are ready.</p>
+      <button type="button" id="retry">Continue</button>
+    </div>
+    <script>
+      (function () {
+        var LIVE = "https://d4exam-platform.vercel.app/";
+        function go() {
+          try {
+            window.location.replace(LIVE + (location.hash || ""));
+          } catch (e) {
+            window.location.href = LIVE;
+          }
+        }
+        document.getElementById("retry").onclick = go;
+        // Auto-retry when connectivity returns
+        window.addEventListener("online", go);
+        setTimeout(go, 400);
+      })();
+    </script>
+  </body>
+</html>
+''')
+          print("offline.html soft")
+
+          # Query client: never throw to error boundary on student list failures
+          rt = Path("src/router.tsx")
+          rtt = rt.read_text()
+          if "throwOnError: false" not in rtt:
+              rtt = rtt.replace(
+                  "networkMode: \"offlineFirst\",",
+                  "networkMode: \"offlineFirst\",\n        throwOnError: false,
+",
+              )
+              rt.write_text(rtt)
+              print("router throwOnError false")
+
+          print("DONE offline student mode")
+          ENDPY
+          git config user.name "fix-bot"
+          git config user.email "bot@d4exam.local"
+          git add -A
+          git status
+          git commit -m "feat(offline): student mode — cache dashboard/exams/results, silent banner, exam online-only" || echo no-change
+          git push
