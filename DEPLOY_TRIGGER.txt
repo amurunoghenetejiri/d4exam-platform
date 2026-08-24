@@ -1,1 +1,1 @@
-redeploy 20260824030500 all broken CI workflows disabled green status
+redeploy 20260824033000 offline-first shell+sync no UI change
