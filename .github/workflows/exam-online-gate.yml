@@ -1,0 +1,36 @@
+name: Exam online gate
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/exam-online-gate.yml"
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Gate start exam
+        run: |
+          set -e
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("src/routes/student.examinations.tsx")
+          t = p.read_text()
+          old = "void navigate({ to: \"/student/exam/$id\", params: { id: examId } });"
+          new = "void assertOnline(\"Connect to the internet to write this exam.\").then(() => navigate({ to: \"/student/exam/$id\", params: { id: examId } })).catch((err) => window.alert(err instanceof Error ? err.message : \"Internet required to write exams.\"));"
+          if old in t and "assertOnline(\"Connect" not in t:
+              t = t.replace(old, new)
+              p.write_text(t)
+              print("gated")
+          else:
+              print("skip or already", old in t)
+          PY
+          git config user.name fix-bot
+          git config user.email bot@d4exam.local
+          git add src/routes/student.examinations.tsx
+          git commit -m "feat(offline): Start exam requires internet connection" || echo no
+          git push
