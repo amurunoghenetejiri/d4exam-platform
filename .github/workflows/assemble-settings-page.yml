@@ -1,29 +1,9 @@
-name: assemble-settings-page
+name: DISABLED assemble-settings-page
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - src/components/pages/_settings_p1.txt
-      - src/components/pages/_settings_p2.txt
-      - .github/workflows/assemble-settings-page.yml
 jobs:
-  apply:
+  noop:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Assemble
-        run: |
-          cat src/components/pages/_settings_p1.txt src/components/pages/_settings_p2.txt > src/components/pages/SettingsPage.tsx
-          wc -c src/components/pages/SettingsPage.tsx
-      - name: Commit
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/components/pages/SettingsPage.tsx
-          if git diff --cached --quiet; then echo No changes; else
-            git commit -m "feat(settings): live password change and persistent prefs UI"
-            git push
-          fi
+      - name: Always pass
+        run: echo "Temporary workflow disabled so commit status stays green."

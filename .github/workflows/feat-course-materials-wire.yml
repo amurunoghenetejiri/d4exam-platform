@@ -1,89 +1,9 @@
-name: feat-course-materials-wire
+name: DISABLED feat-course-materials-wire
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/feat-course-materials-wire.yml'
 jobs:
-  apply:
+  noop:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Write panel and wire nav/routes
-        run: |
-          mkdir -p src/components/materials
-          # Panel is large — write via python heredoc from existing if present, else skip
-          python3 << 'PY'
-          from pathlib import Path
-
-          # nav
-          p = Path('src/components/navigation/navConfig.ts')
-          t = p.read_text()
-          if 'FolderOpen' not in t:
-              t = t.replace('BookOpen,', 'BookOpen, FolderOpen,')
-          if '/student/materials' not in t:
-              t = t.replace(
-                  '{ label: "My Courses", to: "/student/courses", icon: BookOpen },',
-                  '{ label: "My Courses", to: "/student/courses", icon: BookOpen },\n        { label: "Materials", to: "/student/materials", icon: FolderOpen },',
-              )
-          if '/teacher/materials' not in t:
-              t = t.replace(
-                  '{ label: "My Courses", to: "/teacher/courses", icon: BookOpen },',
-                  '{ label: "My Courses", to: "/teacher/courses", icon: BookOpen },\n        { label: "Materials", to: "/teacher/materials", icon: FolderOpen },',
-              )
-          p.write_text(t)
-
-          # routeTree minimal wiring
-          rt = Path('src/routeTree.gen.ts')
-          t = rt.read_text()
-          if 'student.materials' not in t:
-              t = t.replace(
-                  "import { Route as StudentCoursesRouteImport } from './routes/student.courses'\n",
-                  "import { Route as StudentCoursesRouteImport } from './routes/student.courses'\nimport { Route as StudentMaterialsRouteImport } from './routes/student.materials'\n",
-              )
-              t = t.replace(
-                  "import { Route as TeacherCoursesRouteImport } from './routes/teacher.courses'\n",
-                  "import { Route as TeacherCoursesRouteImport } from './routes/teacher.courses'\nimport { Route as TeacherMaterialsRouteImport } from './routes/teacher.materials'\n",
-              )
-              t = t.replace(
-                  "const StudentCoursesRoute = StudentCoursesRouteImport.update({\n  id: '/courses',\n  path: '/courses',\n  getParentRoute: () => StudentRoute,\n} as any)",
-                  "const StudentCoursesRoute = StudentCoursesRouteImport.update({\n  id: '/courses',\n  path: '/courses',\n  getParentRoute: () => StudentRoute,\n} as any)\nconst StudentMaterialsRoute = StudentMaterialsRouteImport.update({\n  id: '/materials',\n  path: '/materials',\n  getParentRoute: () => StudentRoute,\n} as any)",
-              )
-              t = t.replace(
-                  "const TeacherCoursesRoute = TeacherCoursesRouteImport.update({\n  id: '/courses',\n  path: '/courses',\n  getParentRoute: () => TeacherRoute,\n} as any)",
-                  "const TeacherCoursesRoute = TeacherCoursesRouteImport.update({\n  id: '/courses',\n  path: '/courses',\n  getParentRoute: () => TeacherRoute,\n} as any)\nconst TeacherMaterialsRoute = TeacherMaterialsRouteImport.update({\n  id: '/materials',\n  path: '/materials',\n  getParentRoute: () => TeacherRoute,\n} as any)",
-              )
-              t = t.replace(
-                  'StudentCoursesRoute: typeof StudentCoursesRoute',
-                  'StudentCoursesRoute: typeof StudentCoursesRoute\n  StudentMaterialsRoute: typeof StudentMaterialsRoute',
-              )
-              t = t.replace(
-                  'TeacherCoursesRoute: typeof TeacherCoursesRoute',
-                  'TeacherCoursesRoute: typeof TeacherCoursesRoute\n  TeacherMaterialsRoute: typeof TeacherMaterialsRoute',
-              )
-              t = t.replace(
-                  'StudentCoursesRoute: StudentCoursesRoute,',
-                  'StudentCoursesRoute: StudentCoursesRoute,\n  StudentMaterialsRoute: StudentMaterialsRoute,',
-              )
-              t = t.replace(
-                  'TeacherCoursesRoute: TeacherCoursesRoute,',
-                  'TeacherCoursesRoute: TeacherCoursesRoute,\n  TeacherMaterialsRoute: TeacherMaterialsRoute,',
-              )
-              rt.write_text(t)
-              print('routeTree wired')
-          else:
-              print('routeTree already')
-          print('nav done')
-          PY
-      - name: Commit
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/components/navigation/navConfig.ts src/routeTree.gen.ts
-          if git diff --cached --quiet; then echo No changes; else
-            git commit -m 'feat: wire Materials nav for teacher and student'
-            git push
-          fi
+      - name: Always pass
+        run: echo "Temporary workflow disabled so commit status stays green."

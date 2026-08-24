@@ -1,31 +1,9 @@
-name: assemble-notif-fixes
+name: DISABLED assemble-notif-fixes
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - src/lib/_notify_p1.txt
-      - src/lib/_notify_p2.txt
-      - src/lib/_notify_p3.txt
-      - .github/workflows/assemble-notif-fixes.yml
 jobs:
-  apply:
+  noop:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Assemble
-        run: |
-          cat src/lib/_notify_p1.txt src/lib/_notify_p2.txt src/lib/_notify_p3.txt > src/lib/notify.ts
-          wc -c src/lib/notify.ts
-          grep -c "notifyOfficersExamSubmitted\|notifyStudentsResultsReleased\|resolveAuthUserIds" src/lib/notify.ts
-      - name: Commit
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/lib/notify.ts
-          if git diff --cached --quiet; then echo No changes; else
-            git commit -m "fix(build): restore full notify.ts exports for all roles"
-            git push
-          fi
+      - name: Always pass
+        run: echo "Temporary workflow disabled so commit status stays green."

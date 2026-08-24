@@ -1,4 +1,4 @@
-name: DISABLED fix-session-touch
+name: DISABLED force-vibration-keepalive
 on:
   workflow_dispatch:
 jobs:

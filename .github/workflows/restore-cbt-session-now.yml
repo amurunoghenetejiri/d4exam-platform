@@ -1,4 +1,4 @@
-name: DISABLED restore-officer-pages
+name: DISABLED restore-cbt-session-now
 on:
   workflow_dispatch:
 jobs:

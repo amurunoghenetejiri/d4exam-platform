@@ -1,71 +1,9 @@
-name: fix-notify-insert
+name: DISABLED fix-notify-insert
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fix-notify-insert.yml'
 jobs:
-  apply:
+  noop:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Patch notify.ts
-        run: |
-          python3 << 'PY'
-          from pathlib import Path
-          nt = Path('src/lib/notify.ts').read_text()
-          nt = nt.replace(
-          '''    if (p.schoolId) row.school_id = p.schoolId;
-    if (p.link) row.link = p.link;
-    if (p.entityType) row.entity_type = p.entityType;
-    if (p.entityId) row.entity_id = p.entityId;''',
-          '''    if (p.schoolId) row.school_id = p.schoolId;
-    if (p.link) {
-      row.link = p.link;
-      row.action_url = p.link;
-    }
-    if (p.entityType) row.entity_type = p.entityType;
-    if (p.entityId) row.entity_id = p.entityId;''',
-          )
-          old = '''    const { data, error } = await supabase.from("notifications").insert(row as never).select("id").maybeSingle();
-    if (error) {
-      console.warn("[notify] insert failed", error.message);
-      return null;
-    }
-    return (data?.id as string) ?? null;'''
-          new = '''    let { data, error } = await supabase.from("notifications").insert(row as never).select("id").maybeSingle();
-    if (error) {
-      const minimal = {
-        recipient_user_id: p.recipientUserId,
-        title: p.title,
-        message: p.message,
-        type: p.type || "info",
-      };
-      const retry = await supabase.from("notifications").insert(minimal as never).select("id").maybeSingle();
-      if (retry.error) {
-        console.warn("[notify] insert failed", error.message, retry.error.message);
-        return null;
-      }
-      data = retry.data;
-      error = null;
-    }
-    return (data?.id as string) ?? null;'''
-          if old in nt:
-              nt = nt.replace(old, new)
-              print('patched insert')
-          else:
-              print('insert block miss or already patched', 'action_url' in nt)
-          Path('src/lib/notify.ts').write_text(nt)
-          PY
-      - name: Commit
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/lib/notify.ts
-          if git diff --cached --quiet; then echo No changes; else
-            git commit -m 'fix(notify): write action_url + resilient insert retry'
-            git push
-          fi
+      - name: Always pass
+        run: echo "Temporary fix workflow disabled so commit status stays green."
