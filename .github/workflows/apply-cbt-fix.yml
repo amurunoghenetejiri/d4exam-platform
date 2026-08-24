@@ -1,6 +1,13 @@
 name: Apply CBT engine fix
+
 on:
   workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why run"
+        required: false
+        default: "restore"
+
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -11,69 +18,73 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Restore styles from good commit and add immersive
-        run: |
-          git show 0c3a012b7149f970cf40c0f2f18545a62b2d580f:src/styles.css > src/styles.css
-          if ! grep -q 'd4-exam-immersive' src/styles.css; then
-            cat >> src/styles.css << 'CSS'
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-/* CBT immersive exam — hide scroll bounce chrome; pair with StatusBar.hide */
-html.d4-exam-immersive,
-body.d4-exam-immersive {
-  overscroll-behavior: none;
-  min-height: 100dvh;
-}
-CSS
+      - name: Restore styles + immersive
+        run: |
+          set -e
+          git show 0c3a012b7149f970cf40c0f2f18545a62b2d580f:src/styles.css > src/styles.css
+          if ! grep -q d4-exam-immersive src/styles.css; then
+            printf '\n/* CBT immersive */\nhtml.d4-exam-immersive,\nbody.d4-exam-immersive {\n  overscroll-behavior: none;\n  min-height: 100dvh;\n}\n' >> src/styles.css
           fi
-      - name: Restore ExamCameraPip from good commit and shrink
+          wc -c src/styles.css
+
+      - name: Restore and shrink ExamCameraPip
         run: |
+          set -e
           git show 0c3a012b7149f970cf40c0f2f18545a62b2d580f:src/components/cbt/ExamCameraPip.tsx > src/components/cbt/ExamCameraPip.tsx
-          python3 - << 'PY'
+          python3 -c "
 from pathlib import Path
-p = Path("src/components/cbt/ExamCameraPip.tsx")
+p = Path('src/components/cbt/ExamCameraPip.tsx')
 c = p.read_text()
-c = c.replace(
-  '"fixed z-[80] w-[132px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[150px]"',
-  '"fixed z-[80] w-[72px] overflow-hidden rounded-lg border border-white/25 bg-slate-950 shadow-lg sm:w-[88px]"',
-)
-c = c.replace(
-  'className="flex items-center gap-1 bg-black/80 px-2 py-1 text-[10px] font-semibold text-white"',
-  'className="flex items-center gap-0.5 bg-black/85 px-1 py-0.5 text-[8px] font-semibold text-white"',
-)
-c = c.replace(">Camera active</span>", ">Cam</span>")
-c = c.replace(
-  'className="relative aspect-[3/4] bg-slate-900 pointer-events-none"',
-  'className="relative aspect-[4/5] bg-slate-900 pointer-events-none"',
-)
+c = c.replace('w-[132px]', 'w-[72px]').replace('sm:w-[150px]', 'sm:w-[88px]')
+c = c.replace('rounded-xl border border-white/20', 'rounded-lg border border-white/25')
+c = c.replace('shadow-xl', 'shadow-lg')
+c = c.replace('aspect-[3/4]', 'aspect-[4/5]')
+c = c.replace('Camera active', 'Cam')
 p.write_text(c)
-assert "w-[72px]" in c
-assert "PLACEHOLDER" not in c
-print("pip ok")
-PY
-      - name: Teacher maxQuestions fix
+assert 'w-[72px]' in c and 'PLACEHOLDER' not in c
+print('pip ok', len(c))
+"
+
+      - name: Teacher maxQuestions
         run: |
-          python3 - << 'PY'
+          python3 -c "
+from pathlib import Path
+p = Path('src/routes/teacher.examinations.tsx')
+c = p.read_text()
+old = 'maxQuestions: null,'
+if old not in c:
+  print('skip teacher')
+else:
+  c = c.replace(old, 'maxQuestions: questionsToAnswer > 0 ? questionsToAnswer : null,', 1)
+  c = c.replace(old, 'maxQuestions: (meta.questionsToAnswer and meta.questionsToAnswer > 0) and meta.questionsToAnswer or None,'.replace('and', '&&').replace('or None', ': null').replace('meta.questionsToAnswer && meta.questionsToAnswer > 0 && meta.questionsToAnswer', '(meta.questionsToAnswer && meta.questionsToAnswer > 0) ? meta.questionsToAnswer'))
+"
+
+      - name: Teacher maxQuestions v2
+        run: |
+          python3 << 'PY'
 from pathlib import Path
 p = Path("src/routes/teacher.examinations.tsx")
 c = p.read_text()
 old = "maxQuestions: null,"
 if old not in c:
-  print("no maxQuestions: null — skip")
+    print("skip")
 else:
-  # first occurrence uses questionsToAnswer from form state
-  c = c.replace(old, "maxQuestions: questionsToAnswer > 0 ? questionsToAnswer : null,", 1)
-  # remaining (submit existing) use meta
-  c = c.replace(old, "maxQuestions: (meta.questionsToAnswer && meta.questionsToAnswer > 0) ? meta.questionsToAnswer : null,")
-  p.write_text(c)
-  print("teacher updated")
+    c = c.replace(old, "maxQuestions: questionsToAnswer > 0 ? questionsToAnswer : null,", 1)
+    c = c.replace(old, "maxQuestions: (meta.questionsToAnswer && meta.questionsToAnswer > 0) ? meta.questionsToAnswer : null,")
+    p.write_text(c)
+    print("teacher ok")
 PY
-      - name: Bump deploy trigger
-        run: echo "redeploy $(date -u +%Y%m%d%H%M%S) cbt-fix-via-workflow" > DEPLOY_TRIGGER.txt
+
+      - name: Deploy trigger
+        run: echo "redeploy $(date -u +%Y%m%d%H%M%S) cbt-fix-workflow" > DEPLOY_TRIGGER.txt
+
       - name: Commit and push
         run: |
           git config user.name "d4exam-bot"
           git config user.email "bot@d4exam.app"
           git add -A
-          git diff --cached --stat
-          git commit -m "fix(cbt): restore styles+PiP, shrink camera, teacher maxQuestions" || echo "nothing to commit"
+          git status
+          git commit -m "fix(cbt): restore styles+PiP, shrink camera, teacher maxQuestions" || exit 0
           git push origin HEAD:main
