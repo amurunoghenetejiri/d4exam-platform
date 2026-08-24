@@ -18,11 +18,11 @@ export const getRouter = () => {
         staleTime: 5 * 60_000,
         gcTime: 30 * 60_000,
         refetchOnWindowFocus: false,
-        refetchOnReconnect: false,
+        refetchOnReconnect: true,
         refetchOnMount: true,
         retry: 1,
         retryDelay: 400,
-        networkMode: "online",
+        networkMode: "offlineFirst",
       },
       mutations: {
         retry: 0,
@@ -37,7 +37,6 @@ export const getRouter = () => {
     scrollRestoration: true,
     defaultPreloadStaleTime: 5 * 60_000,
     defaultPreload: "intent",
-    // Show feedback as soon as a navigation starts so the UI never looks "stuck"
     defaultPendingMs: 0,
     defaultPendingMinMs: 120,
     defaultPendingComponent: DefaultPending,
