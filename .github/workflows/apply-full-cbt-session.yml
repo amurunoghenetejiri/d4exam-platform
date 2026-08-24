@@ -1,0 +1,28 @@
+name: Apply full CBT session
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/cbt-session-z/**
+      - scripts/apply-cbt-session-z.sh
+      - .github/workflows/apply-full-cbt-session.yml
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install full CbtExamSession
+        run: |
+          set -eux
+          bash scripts/apply-cbt-session-z.sh
+          date -u +"redeploy %Y%m%d%H%M%S full-cbt-session" > DEPLOY_TRIGGER.txt
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.app
+          git add src/components/cbt/CbtExamSession.impl.tsx DEPLOY_TRIGGER.txt
+          git status
+          git commit -m "fix(cbt): full exam session - immersive, integrity, stable questions" || exit 0
+          git push origin HEAD:main
