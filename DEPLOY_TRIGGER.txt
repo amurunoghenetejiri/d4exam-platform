@@ -1,1 +1,1 @@
-redeploy 20260824033500 offline-first SW v3 complete
+redeploy 20260824034200 green production offline-first complete
