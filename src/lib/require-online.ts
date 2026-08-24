@@ -1,6 +1,7 @@
 /**
  * Helpers for online-only actions (CBT start, approvals, password change, etc.).
  * Never pretend a server mutation succeeded offline.
+ * Never show browser "Webpage not available" — callers show toast / soft UI only.
  */
 
 import { isOnlineNow, requireOnlineMessage } from "@/lib/offline-sync";
