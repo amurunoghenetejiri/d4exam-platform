@@ -106,7 +106,7 @@ export function bootstrapOfflineSync(getCtx: () => {
 }
 
 export function requireOnlineMessage(): string {
-  return "Internet connection required for this action. Please reconnect and try again.";
+  return "You're currently offline. Connect to the Internet to use this feature.";
 }
 
 export function isOnlineNow(): boolean {
