@@ -23,6 +23,7 @@ export const getRouter = () => {
         retry: 1,
         retryDelay: 400,
         networkMode: "offlineFirst",
+        throwOnError: false,
       },
       mutations: {
         retry: 0,
