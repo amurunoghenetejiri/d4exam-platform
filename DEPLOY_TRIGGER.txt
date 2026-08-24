@@ -1,1 +1,1 @@
-offline-first-local-shell-20260824041500
+offline-first-v1.4.0-apk-rebuild
