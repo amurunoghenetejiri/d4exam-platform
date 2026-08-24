@@ -3,7 +3,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* CBT immersive exam — hide scroll bounce chrome; pair with StatusBar.hide */
+/* placeholder will be replaced - loading full from next call */
 html.d4-exam-immersive,
 body.d4-exam-immersive {
   overscroll-behavior: none;
