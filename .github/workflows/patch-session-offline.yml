@@ -1,0 +1,257 @@
+name: Patch session offline
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/patch-session-offline.yml"
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch
+        run: |
+          set -e
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("src/lib/session.ts")
+          t = p.read_text()
+          if "withOfflineCache" not in t:
+              t = t.replace(
+                  'import { useQuery, useQueryClient } from "@tanstack/react-query";',
+                  'import { useQuery, useQueryClient } from "@tanstack/react-query";\nimport { offlineSet, OfflineKeys } from "@/lib/offline-cache";\nimport { rememberLastUserId, readLastUserId, withOfflineCache } from "@/lib/offline-query";',
+              )
+              old = '''  return useQuery({
+    queryKey: ["session-user"],
+    queryFn: () => withTimeout(fetchSessionUser(), 18_000, "session"),
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+    retryDelay: 1_500,
+  });'''
+              new = '''  return useQuery({
+    queryKey: ["session-user"],
+    queryFn: async () => {
+      const last = readLastUserId();
+      return withOfflineCache(
+        last,
+        OfflineKeys.sessionUser,
+        async () => {
+          const u = await withTimeout(fetchSessionUser(), 18_000, "session");
+          if (u?.userId) {
+            rememberLastUserId(u.userId);
+            await offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
+          }
+          return u;
+        },
+        { fallback: null },
+      );
+    },
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+    retryDelay: 1_500,
+  });'''
+              if old not in t:
+                  raise SystemExit("session pattern miss")
+              t = t.replace(old, new)
+              p.write_text(t)
+              print("session ok")
+          else:
+              print("session skip")
+
+          si = Path("src/routes/student.index.tsx")
+          sit = si.read_text()
+          if "withOfflineCache" not in sit:
+              sit = sit.replace(
+                  'import { supabase } from "@/integrations/supabase/client";',
+                  'import { supabase } from "@/integrations/supabase/client";\nimport { withOfflineCache } from "@/lib/offline-query";\nimport { OfflineKeys } from "@/lib/offline-cache";',
+              )
+              sit = sit.replace(
+                  '''    queryFn: async () => {
+      let q = supabase
+        .from("examinations")
+        .select(
+          "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
+        )
+        .eq("school_id", student!.schoolId)
+        .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
+        .order("scheduled_start", { ascending: true })
+        .limit(80);
+      // Only filter by courses when student has assigned course ids
+      if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as ExamRow[];
+    },''',
+                  '''    queryFn: async () => {
+      return withOfflineCache(
+        student?.profileId or student?.studentId,
+        OfflineKeys.studentDashboardExams,
+        async () => {
+          let q = supabase
+            .from("examinations")
+            .select(
+              "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
+            )
+            .eq("school_id", student!.schoolId)
+            .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
+            .order("scheduled_start", { ascending: true })
+            .limit(80);
+          if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
+          const { data, error } = await q;
+          if (error) throw error;
+          return (data ?? []) as ExamRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as ExamRow[] },
+      );
+    },''',
+              )
+              # fix python or -> js ||
+              sit = sit.replace("student?.profileId or student?.studentId", "student?.profileId || student?.studentId")
+              sit = sit.replace(
+                  '''    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("exam_attempts")
+        .select("exam_id, status")
+        .eq("student_id", student!.studentId);
+      if (error) throw error;
+      return (data ?? []) as AttemptRow[];
+    },''',
+                  '''    queryFn: async () => {
+      return withOfflineCache(
+        student?.studentId,
+        OfflineKeys.studentDashboardAttempts,
+        async () => {
+          const { data, error } = await supabase
+            .from("exam_attempts")
+            .select("exam_id, status")
+            .eq("student_id", student!.studentId);
+          if (error) throw error;
+          return (data ?? []) as AttemptRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as AttemptRow[] },
+      );
+    },''',
+              )
+              sit = sit.replace(
+                  '''    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("results")
+        .select(
+          "id, exam_id, percentage, grade, pass_fail, status, released_at, created_at, examinations(title, courses(code))",
+        )
+        .eq("student_id", student!.studentId)
+        .order("created_at", { ascending: false })
+        .limit(40);
+      if (error) throw error;
+      return (data ?? []) as ResultRow[];
+    },''',
+                  '''    queryFn: async () => {
+      return withOfflineCache(
+        student?.studentId,
+        OfflineKeys.studentDashboardResults,
+        async () => {
+          const { data, error } = await supabase
+            .from("results")
+            .select(
+              "id, exam_id, percentage, grade, pass_fail, status, released_at, created_at, examinations(title, courses(code))",
+            )
+            .eq("student_id", student!.studentId)
+            .order("created_at", { ascending: false })
+            .limit(40);
+          if (error) throw error;
+          return (data ?? []) as ResultRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as ResultRow[] },
+      );
+    },''',
+              )
+              sit = sit.replace(
+                  '''    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, title, created_at, read_at")
+        .eq("recipient_user_id", user!.userId)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return (data ?? []) as Notif[];
+    },''',
+                  '''    queryFn: async () => {
+      return withOfflineCache(
+        user?.userId,
+        OfflineKeys.studentDashboardNotifs,
+        async () => {
+          const { data, error } = await supabase
+            .from("notifications")
+            .select("id, title, created_at, read_at")
+            .eq("recipient_user_id", user!.userId)
+            .order("created_at", { ascending: false })
+            .limit(20);
+          if (error) throw error;
+          return (data ?? []) as Notif[];
+        },
+        { schoolId: user?.schoolId, fallback: [] as Notif[] },
+      );
+    },''',
+              )
+              si.write_text(sit)
+              print("student.index", "withOfflineCache" in sit)
+          else:
+              print("student.index skip")
+
+          se = Path("src/routes/student.examinations.tsx")
+          t = se.read_text()
+          if "assertOnline" not in t:
+              t = t.replace(
+                  'import { supabase } from "@/integrations/supabase/client";',
+                  'import { supabase } from "@/integrations/supabase/client";\nimport { assertOnline } from "@/lib/require-online";',
+              )
+              t = t.replace(
+                  '''      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void navigate({ to: "/student/exam/$id", params: { id: examId } });
+      }}''',
+                  '''      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void (async () => {
+          try {
+            await assertOnline("Connect to the internet to write this exam.");
+            void navigate({ to: "/student/exam/$id", params: { id: examId } });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Internet required to write exams.";
+            window.alert(msg);
+          }
+        })();
+      }}''',
+              )
+              se.write_text(t)
+              print("exam gate ok")
+
+          r = Path("src/router.tsx")
+          rt = r.read_text()
+          if "throwOnError" not in rt:
+              rt = rt.replace(
+                  'networkMode: "offlineFirst",',
+                  'networkMode: "offlineFirst",\n        throwOnError: false,',
+              )
+              r.write_text(rt)
+              print("router ok")
+          print("DONE")
+          PY
+          git config user.name fix-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          git status
+          git commit -m "feat(offline): session cache, student dashboard cache, exam online-only gate" || echo no
+          git push
