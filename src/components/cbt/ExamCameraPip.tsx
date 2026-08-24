@@ -18,10 +18,10 @@ function haptic(kind: SecurityAlertKind) {
 }
 
 const ALERT_COOLDOWN_MS = 1800;
-/** ~2 ticks/sec */
-const FACE_TICK_MS = 400;
-/** Face-loss / multi-face must hold ~1.5s before UI/violation changes */
-const STABILITY_MS = 1500;
+/** Production: process frames ~every 500ms */
+const FACE_TICK_MS = 500;
+/** Brief face loss grace (~0.5s) before AMBER */
+const STABILITY_MS = 500;
 const ENGINE_TIMEOUT_MS = 4000;
 
 const ALERT_COPY: Record<
@@ -377,7 +377,6 @@ export function ExamCameraPip({
       else if (next === "multi") fireAlert("multi", faceCount);
     };
 
-    /** Time-based stability: hold candidate state for STABILITY_MS before commit (except ok can go faster). */
     const proposeState = (next: FaceState, faceCount: number | null) => {
       if (cancelled) return;
       const now = Date.now();
@@ -385,7 +384,6 @@ export function ExamCameraPip({
         pendingRef.current = null;
         return;
       }
-      // One face: commit after one solid tick once engine is ready (immediate monitoring)
       if (next === "ok" && engineReady) {
         commitState("ok", faceCount);
         return;
@@ -547,11 +545,11 @@ export function ExamCameraPip({
         : effectiveConn === "unavailable"
           ? "Camera error"
           : displayFaceStatus === "multi"
-            ? "Multiple faces detected"
+            ? "Multiple Faces Detected"
             : displayFaceStatus === "none"
-              ? "Face not seen"
+              ? "Face Not Detected"
               : displayFaceStatus === "ok"
-                ? "1 face detected · Monitoring"
+                ? "1 Face Detected — Monitoring"
                 : displayFaceStatus === "starting"
                   ? "Detecting…"
                   : displayFaceStatus === "unavailable"
