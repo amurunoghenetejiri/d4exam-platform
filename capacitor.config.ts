@@ -6,6 +6,9 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * Live server: the Android WebView loads production Vercel so web deploys
  * appear without reinstalling the APK. Native plugins (push, camera, status bar)
  * still run inside the shell.
+ *
+ * When offline, Capacitor serves errorPath from the APK-bundled assets
+ * (must be relative, no leading slash).
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
@@ -19,7 +22,8 @@ const config: CapacitorConfig = {
       "*.vercel.app",
       "*.supabase.co",
     ],
-    errorPath: "/offline.html",
+    // Relative to webDir / APK assets — NOT a remote URL
+    errorPath: "offline.html",
   },
   android: {
     allowMixedContent: false,

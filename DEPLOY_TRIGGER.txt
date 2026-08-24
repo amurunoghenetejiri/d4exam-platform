@@ -1,1 +1,1 @@
-redeploy 20260824034200 green production offline-first complete
+redeploy 20260824034600 android offline fallback fix

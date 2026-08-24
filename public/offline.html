@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#0b1b3a" />
     <title>Offline — D4EXAM</title>
     <style>
+      * { box-sizing: border-box; }
       body {
         margin: 0;
         min-height: 100dvh;
@@ -18,27 +19,61 @@
           max(1.25rem, env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left));
         text-align: center;
       }
-      img { width: 72px; height: 72px; object-fit: contain; margin-bottom: 1rem; }
-      h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
-      p { margin: 0; font-size: 0.9rem; color: #94a3b8; max-width: 20rem; line-height: 1.45; }
+      .mark {
+        width: 64px; height: 64px; margin: 0 auto 1rem;
+        border-radius: 16px; background: #1e3a5f;
+        display: grid; place-items: center;
+        font-weight: 800; font-size: 1.25rem; color: #93c5fd;
+        letter-spacing: -0.02em;
+      }
+      h1 { font-size: 1.25rem; margin: 0 0 0.5rem; font-weight: 700; }
+      p { margin: 0 auto; font-size: 0.9rem; color: #94a3b8; max-width: 20rem; line-height: 1.45; }
       button {
         margin-top: 1.25rem; border: 0; border-radius: 0.75rem;
         background: #2563eb; color: #fff; font-weight: 600;
-        padding: 0.7rem 1.25rem; font-size: 0.9rem;
+        padding: 0.75rem 1.35rem; font-size: 0.9rem;
+        cursor: pointer;
       }
+      button:active { opacity: 0.9; }
+      .hint { margin-top: 0.85rem; font-size: 0.75rem; color: #64748b; }
     </style>
   </head>
   <body>
     <div>
-      <img src="/icon-192.png" alt="D4EXAM" onerror="this.style.display='none'" />
+      <div class="mark" aria-hidden="true">D4</div>
       <h1>You are offline</h1>
-      <p>D4EXAM needs a connection for exams, results and live updates. Cached pages may still work. Check your network and try again.</p>
-      <button type="button" onclick="location.href='/'">Retry</button>
+      <p>
+        D4EXAM needs an internet connection for exams, results and live updates.
+        Reconnect and tap Retry.
+      </p>
+      <button type="button" id="retry">Retry</button>
+      <p class="hint">Connection will resume automatically when available.</p>
     </div>
     <script>
-      window.addEventListener("online", function () {
-        location.href = "/";
-      });
+      (function () {
+        var LIVE = "https://d4exam-platform.vercel.app/";
+
+        function goLive() {
+          try {
+            window.location.replace(LIVE);
+          } catch (e) {
+            window.location.href = LIVE;
+          }
+        }
+
+        document.getElementById("retry").addEventListener("click", function () {
+          goLive();
+        });
+
+        window.addEventListener("online", function () {
+          goLive();
+        });
+
+        // If we somehow opened while online, leave this page
+        if (typeof navigator !== "undefined" && navigator.onLine) {
+          setTimeout(goLive, 400);
+        }
+      })();
     </script>
   </body>
 </html>
