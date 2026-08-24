@@ -133,7 +133,7 @@ export const adminNav: RoleConfig = {
         { label: "Users", to: "/admin/users", icon: Users },
         { label: "Students", to: "/admin/students", icon: GraduationCap },
         { label: "Teachers & Courses", to: "/admin/teachers", icon: Users },
-        { label: "Examination Officers", to: "/admin/officers", icon: ShieldCheck },
+        { label: "Departmental Officers", to: "/admin/officers", icon: ShieldCheck },
       ],
     },
     {
@@ -175,7 +175,7 @@ export const adminNav: RoleConfig = {
 
 export const officerNav: RoleConfig = {
   role: "officer",
-  label: "Examination Officer",
+  label: "Departmental Officer",
   home: "/officer",
   groups: [
     {
