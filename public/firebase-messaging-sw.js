@@ -1,4 +1,4 @@
-/* D4EXAM Firebase Messaging + light offline shell */
+/* D4EXAM Firebase Messaging + offline-first app shell */
 /* global importScripts, firebase */
 importScripts("https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/11.0.2/firebase-messaging-compat.js");
@@ -15,8 +15,18 @@ firebase.initializeApp({
 
 var messaging = firebase.messaging();
 
-var SHELL_CACHE = "d4exam-shell-v2";
-var SHELL_URLS = ["/", "/offline.html", "/icon-192.png", "/logo.png", "/favicon.png", "/site.webmanifest"];
+var SHELL_CACHE = "d4exam-shell-v3";
+var RUNTIME_CACHE = "d4exam-runtime-v3";
+var SHELL_URLS = [
+  "/",
+  "/offline.html",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/logo.png",
+  "/favicon.png",
+  "/apple-touch-icon.png",
+  "/site.webmanifest",
+];
 
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -32,7 +42,11 @@ self.addEventListener("activate", function (event) {
     caches.keys().then(function (keys) {
       return Promise.all(
         keys.map(function (k) {
-          if (k !== SHELL_CACHE && k.indexOf("d4exam-shell-") === 0) {
+          if (
+            k !== SHELL_CACHE &&
+            k !== RUNTIME_CACHE &&
+            (k.indexOf("d4exam-shell-") === 0 || k.indexOf("d4exam-runtime-") === 0)
+          ) {
             return caches.delete(k);
           }
         }),
@@ -42,12 +56,73 @@ self.addEventListener("activate", function (event) {
   self.clients.claim();
 });
 
+function isStaticAsset(pathname) {
+  return (
+    pathname.indexOf("/assets/") === 0 ||
+    pathname.endsWith(".js") ||
+    pathname.endsWith(".css") ||
+    pathname.endsWith(".woff2") ||
+    pathname.endsWith(".woff") ||
+    pathname.endsWith(".png") ||
+    pathname.endsWith(".svg") ||
+    pathname.endsWith(".ico") ||
+    pathname.endsWith(".webp")
+  );
+}
+
 self.addEventListener("fetch", function (event) {
   var req = event.request;
   if (req.method !== "GET") return;
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.indexOf("/api") === 0 || url.pathname.indexOf("/auth") === 0) return;
+  if (url.pathname.indexOf("/api") === 0) return;
+
+  if (req.mode === "navigate") {
+    event.respondWith(
+      fetch(req)
+        .then(function (res) {
+          try {
+            var copy = res.clone();
+            caches.open(RUNTIME_CACHE).then(function (c) {
+              c.put(req, copy);
+            });
+          } catch (e) {}
+          return res;
+        })
+        .catch(function () {
+          return caches.match(req).then(function (cached) {
+            if (cached) return cached;
+            return caches.match("/").then(function (root) {
+              if (root) return root;
+              return caches.match("/offline.html");
+            });
+          });
+        }),
+    );
+    return;
+  }
+
+  if (isStaticAsset(url.pathname)) {
+    event.respondWith(
+      caches.match(req).then(function (cached) {
+        var fetchPromise = fetch(req)
+          .then(function (res) {
+            if (res && res.ok) {
+              var copy = res.clone();
+              caches.open(RUNTIME_CACHE).then(function (c) {
+                c.put(req, copy);
+              });
+            }
+            return res;
+          })
+          .catch(function () {
+            return cached;
+          });
+        return cached || fetchPromise;
+      }),
+    );
+    return;
+  }
 
   event.respondWith(
     fetch(req)
@@ -104,7 +179,6 @@ messaging.onBackgroundMessage(function (payload) {
 });
 
 self.addEventListener("push", function (event) {
-  // Backup path if FCM delivers a raw push event
   try {
     var raw = event.data ? event.data.json() : {};
     event.waitUntil(showD4Notification(raw));
