@@ -39,28 +39,22 @@
   <body>
     <div>
       <div class="mark">D4</div>
-      <h1>Opening D4EXAM…</h1>
-      <p>Loading the local app. If this screen stays, tap Try again.</p>
-      <button type="button" id="retry">Try again</button>
-      <p class="hint">Cached pages and materials still work offline.</p>
+      <h1>D4EXAM is ready offline</h1>
+      <p>Your app shell is local. Tap below to open the app.</p>
+      <button type="button" id="retry">Open app</button>
+      <p class="hint">Cached pages work without Internet. Some actions need a connection.</p>
     </div>
     <script>
       (function () {
         function goHome() {
           try {
-            var origin = location.origin || "";
-            if (origin.indexOf("http") === 0) {
-              location.replace(origin + "/index.html");
-            } else {
-              location.replace("./index.html");
-            }
+            location.replace("./index.html");
           } catch (e) {
             location.href = "index.html";
           }
         }
         document.getElementById("retry").onclick = goHome;
-        setTimeout(goHome, 400);
-        window.addEventListener("online", goHome);
+        setTimeout(goHome, 300);
       })();
     </script>
   </body>
