@@ -123,8 +123,8 @@ function LoginPage() {
   async function goHomeAfterSession() {
     const deadline = Date.now() + 12_000;
     let user = await fetchSessionUser().catch(() => null);
-    for (let i = 0; i < 4 && !user?.role && Date.now() < deadline; i++) {
-      await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+    for (let i = 0; i < 6 && !user?.role && Date.now() < deadline; i++) {
+      await new Promise((r) => setTimeout(r, 150 * (i + 1)));
       user = await fetchSessionUser().catch(() => null);
     }
     if (user?.role && user.role in roleHome) {
@@ -158,6 +158,7 @@ function LoginPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    e.stopPropagation();
     if (inFlight.current || loading) return;
     setError("");
     if (!identifier.trim() || !password.trim()) {
@@ -166,13 +167,14 @@ function LoginPage() {
     }
     inFlight.current = true;
     setLoading(true);
+    let navigated = false;
     let lastServerMsg = "";
     const loginTimeout = window.setTimeout(() => {
-      if (!inFlight.current) return;
+      if (!inFlight.current || navigated) return;
       setLoading(false);
       inFlight.current = false;
       setError("Login is taking longer than expected. Check your connection and try again.");
-    }, 25_000);
+    }, 28_000);
     try {
       const schoolCode = code.trim().toUpperCase();
       const ident = identifier.trim();
@@ -194,10 +196,14 @@ function LoginPage() {
           });
           if (!sessErr) {
             if (result.role && result.role in roleHome) {
+              navigated = true;
               navigate({ to: roleHome[result.role as keyof typeof roleHome] as never });
               return;
             }
-            if (await goHomeAfterSession()) return;
+            if (await goHomeAfterSession()) {
+              navigated = true;
+              return;
+            }
           }
         }
         if (result && "error" in result && result.error) {
@@ -232,7 +238,10 @@ function LoginPage() {
           password: pass,
         });
         if (!authErr && data.session) {
-          if (await goHomeAfterSession()) return;
+          if (await goHomeAfterSession()) {
+            navigated = true;
+            return;
+          }
         }
       }
 
@@ -251,7 +260,11 @@ function LoginPage() {
               password: pass,
             });
             if (!againErr && again.session) {
-              if (await goHomeAfterSession()) return;
+              if (await goHomeAfterSession()) {
+                navigated = true;
+                return;
+              }
+              navigated = true;
               navigate({ to: roleHome.school_admin as never });
               return;
             }
@@ -274,8 +287,11 @@ function LoginPage() {
       setError(friendlyLoginError(err));
     } finally {
       window.clearTimeout(loginTimeout);
-      setLoading(false);
-      inFlight.current = false;
+      // Stay in loading state after successful navigate so the button cannot be re-pressed
+      if (!navigated) {
+        setLoading(false);
+        inFlight.current = false;
+      }
     }
   }
 
@@ -320,7 +336,7 @@ function LoginPage() {
               </Alert>
             ) : null}
 
-            <form onSubmit={submit} className="mt-6 space-y-4">
+            <form onSubmit={submit} className="mt-6 space-y-4" noValidate>
               <div className="space-y-1.5">
                 <Label htmlFor="school-code">School code</Label>
                 <Input
@@ -330,6 +346,7 @@ function LoginPage() {
                   placeholder="e.g. ABC123"
                   className="h-11"
                   autoComplete="organization"
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-1.5">
@@ -342,6 +359,7 @@ function LoginPage() {
                   className="h-11"
                   autoComplete="username"
                   required
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-1.5">
@@ -363,12 +381,14 @@ function LoginPage() {
                     className="h-11 pr-10"
                     autoComplete="current-password"
                     required
+                    disabled={loading}
                   />
                   <button
                     type="button"
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
                     onClick={() => setShowPassword((v) => !v)}
                     tabIndex={-1}
+                    disabled={loading}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -379,6 +399,7 @@ function LoginPage() {
                   id="remember"
                   checked={remember}
                   onCheckedChange={(v) => setRemember(v === true)}
+                  disabled={loading}
                 />
                 <Label htmlFor="remember" className="text-sm font-normal text-slate-600">
                   Remember this device
