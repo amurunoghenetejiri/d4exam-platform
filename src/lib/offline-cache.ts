@@ -129,12 +129,19 @@ export async function offlineClearUser(userId: string): Promise<void> {
 export const OfflineKeys = {
   profile: "profile",
   school: "school",
+  studentContext: "student.context",
   studentResults: "student.results",
   studentExams: "student.exams",
+  studentDashboardExams: "student.dashboard.exams",
+  studentDashboardAttempts: "student.dashboard.attempts",
+  studentDashboardResults: "student.dashboard.results",
+  studentDashboardNotifs: "student.dashboard.notifs",
+  studentExamAttempts: "student.exam.attempts",
   notifications: "notifications",
   materialsIndex: "materials.index",
   settings: "settings",
   courses: "courses",
+  sessionUser: "session.user",
 } as const;
 
 export function formatLastSynced(ts: number | null | undefined): string | null {
