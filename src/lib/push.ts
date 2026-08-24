@@ -2,11 +2,6 @@
  * Client-side push registration.
  * - Web/PWA: Firebase Cloud Messaging (browser)
  * - Android Capacitor: @capacitor/push-notifications (native FCM)
- *
- * IMPORTANT (Android):
- * PushNotifications.register() talks to native FCM. Without google-services.json
- * in the APK, the native layer can kill the process — JS try/catch cannot stop that.
- * Therefore we never auto-register on every app open after a failed/crashing attempt.
  */
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getMessaging, getToken, isSupported, onMessage, type Messaging } from "firebase/messaging";
@@ -94,40 +89,74 @@ export async function refreshNativePushPermissionState(): Promise<PushPermission
   }
 }
 
+/**
+ * Save device token without hitting unique constraint errors.
+ * Strategy: update-by-token first; if no row, insert; if insert races, update again.
+ */
 async function upsertPushDevice(
   userId: string,
   token: string,
   role?: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
+  if (!userId || !token) return { ok: false, error: "Missing user or token" };
+
   const ua =
     typeof navigator !== "undefined"
       ? `${navigator.userAgent} | platform=${getRuntimePlatform()}`
       : `platform=${getRuntimePlatform()}`;
+
+  const row = {
+    user_id: userId,
+    token,
+    role: role || null,
+    user_agent: ua.slice(0, 400),
+    enabled: true,
+    last_seen_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
   try {
-    const { error } = await supabase.from("push_devices").upsert(
-      {
+    // 1) Prefer update existing token row (handles re-enable / same device)
+    const upd = await supabase
+      .from("push_devices")
+      .update({
         user_id: userId,
-        token,
         role: role || null,
         user_agent: ua.slice(0, 400),
         enabled: true,
-        last_seen_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      } as never,
-      { onConflict: "token" },
-    );
-    if (error) {
-      const ins = await supabase.from("push_devices").insert({
-        user_id: userId,
-        token,
-        role: role || null,
-        user_agent: ua.slice(0, 400),
-        enabled: true,
-        last_seen_at: new Date().toISOString(),
-      } as never);
-      if (ins.error) return { ok: false, error: ins.error.message };
+        last_seen_at: row.last_seen_at,
+        updated_at: row.updated_at,
+      } as never)
+      .eq("token", token)
+      .select("id");
+
+    if (!upd.error && upd.data && (upd.data as { id: string }[]).length > 0) {
+      return { ok: true };
     }
-    return { ok: true };
+
+    // 2) Insert new token
+    const ins = await supabase.from("push_devices").insert(row as never).select("id");
+    if (!ins.error) return { ok: true };
+
+    const msg = ins.error.message || "";
+    // 3) Race / unique: token already exists — update again
+    if (/duplicate|unique|push_devices_token/i.test(msg)) {
+      const again = await supabase
+        .from("push_devices")
+        .update({
+          user_id: userId,
+          role: role || null,
+          user_agent: ua.slice(0, 400),
+          enabled: true,
+          last_seen_at: row.last_seen_at,
+          updated_at: row.updated_at,
+        } as never)
+        .eq("token", token);
+      if (!again.error) return { ok: true };
+      return { ok: false, error: again.error.message };
+    }
+
+    return { ok: false, error: msg };
   } catch (e) {
     return { ok: false, error: (e as Error).message || "Could not save device" };
   }
@@ -183,7 +212,6 @@ async function bindNativePushListeners(userId: string, role?: string | null) {
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
 
-    // Avoid duplicate listeners across re-logins
     try {
       await PushNotifications.removeAllListeners();
     } catch {
@@ -230,7 +258,6 @@ async function bindNativePushListeners(userId: string, role?: string | null) {
   }
 }
 
-/** Soft FCM register — never throws; may no-op if previously unsafe. */
 async function safeNativeRegister(): Promise<{ ok: boolean; token?: string; error?: string }> {
   if (shouldSkipNativeRegister()) {
     return {
@@ -266,15 +293,12 @@ async function safeNativeRegister(): Promise<{ ok: boolean; token?: string; erro
       });
     });
 
-    // Native FCM register — if google-services.json is missing this can kill the process.
-    // We still call it once when the user explicitly enables notifications.
     await PushNotifications.register();
     const token = await tokenPromise;
     if (token) {
       clearNativeRegisterSkip();
       return { ok: true, token };
     }
-    // No token within timeout — do not mark skip permanently (FCM may be slow)
     return { ok: true };
   } catch (e) {
     markNativeRegisterUnsafe();
@@ -314,10 +338,7 @@ async function enableNativePushNotifications(
       };
     }
 
-    // Permission alone is enough for OS dialogs; FCM register is optional/best-effort
     await bindNativePushListeners(userId, role);
-
-    // User explicitly enabled — allow one more attempt even if previously marked unsafe
     clearNativeRegisterSkip();
     const reg = await safeNativeRegister();
     if (reg.token) {
@@ -325,11 +346,7 @@ async function enableNativePushNotifications(
       if (!saved.ok) return { ok: false, error: saved.error };
       return { ok: true, token: reg.token };
     }
-    // Granted permission counts as success for UX even if FCM token missing
-    return {
-      ok: true,
-      error: reg.error,
-    };
+    return { ok: true, error: reg.error };
   } catch (e) {
     markNativeRegisterUnsafe();
     return { ok: false, error: (e as Error).message || "Native push registration failed" };
@@ -422,12 +439,6 @@ export async function refreshPushLastSeen(userId: string): Promise<void> {
   }
 }
 
-/**
- * Startup hook for Capacitor.
- * Only reads permission + attaches listeners.
- * Does NOT call PushNotifications.register() automatically — that was causing
- * the reopen crash loop when FCM/google-services.json was missing from the APK.
- */
 export async function initNativePushIfNeeded(
   _userId?: string | null,
   _role?: string | null,
@@ -435,7 +446,6 @@ export async function initNativePushIfNeeded(
   if (!isNativeShell()) return;
   try {
     await refreshNativePushPermissionState();
-    // Intentionally no register() on cold start.
   } catch {
     /* never crash startup */
   }
