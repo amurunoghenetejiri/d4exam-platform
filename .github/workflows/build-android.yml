@@ -9,6 +9,7 @@ on:
       - "capacitor.config.ts"
       - "package.json"
       - "public/**"
+      - "scripts/generate-capacitor-index.mjs"
       - "src/lib/push.ts"
       - "src/native/**"
       - ".github/workflows/build-android.yml"
@@ -43,29 +44,28 @@ jobs:
           set -euo pipefail
           npm run build
 
-      - name: Prepare Capacitor dist local SPA shell
+      - name: Prepare Capacitor dist with real SPA index
         run: |
           set -euo pipefail
           mkdir -p dist
-          if [ -d .output/public ]; then
-            cp -a .output/public/. dist/
-          elif [ -f dist/index.html ]; then
-            echo "dist already has index.html"
-          else
-            echo "ERROR: no client build output found"
+          if [ ! -d .output/public ]; then
+            echo "ERROR: .output/public missing after build"
             ls -la .output 2>/dev/null || true
-            ls -la dist 2>/dev/null || true
             exit 1
           fi
+          cp -a .output/public/. dist/
           cp -f public/offline.html dist/offline.html 2>/dev/null || true
           cp -f public/firebase-messaging-sw.js dist/firebase-messaging-sw.js 2>/dev/null || true
           cp -f public/site.webmanifest dist/site.webmanifest 2>/dev/null || true
-          if [ ! -f dist/index.html ]; then
-            echo "ERROR: dist/index.html missing after build"
-            exit 1
-          fi
-          ls -la dist/index.html dist/offline.html 2>/dev/null || true
+          # TanStack Start is SSR-only — generate client index.html for Capacitor
+          node scripts/generate-capacitor-index.mjs
+          test -f dist/index.html
+          grep -q 'type="module"' dist/index.html || { echo "FATAL: index.html has no module script"; exit 1; }
+          grep -q 'assets/index-' dist/index.html || { echo "FATAL: index.html missing entry chunk"; exit 1; }
+          echo "=== index.html (first 25 lines) ==="
+          head -25 dist/index.html
           echo "dist file count: $(find dist -type f | wc -l)"
+          ls dist/assets/index-*.js | head -3
 
       - name: Ensure complete Android platform
         run: |
@@ -113,14 +113,19 @@ jobs:
         run: |
           set -euo pipefail
           CFG="android/app/src/main/assets/capacitor.config.json"
+          PUB="android/app/src/main/assets/public"
           cat "$CFG"
           if grep -q '"url"' "$CFG"; then
             echo "ERROR: server.url must be absent for offline APK"
             exit 1
           fi
           echo "OK local shell — no server.url"
-          test -f android/app/src/main/assets/public/index.html
-          echo "public assets: $(find android/app/src/main/assets/public -type f | wc -l)"
+          test -f "$PUB/index.html"
+          grep -q 'type="module"' "$PUB/index.html"
+          grep -q 'assets/index-' "$PUB/index.html"
+          test -d "$PUB/assets"
+          ls "$PUB/assets"/index-*.js | head -1
+          echo "VERIFY PASSED — real SPA index bundled"
 
       - name: Generate D4EXAM icons and splash
         run: |
@@ -182,6 +187,6 @@ jobs:
       - name: Summary
         run: |
           echo "### D4EXAM Android APK v2.4.0 — LOCAL offline shell" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Real SPA index.html generated for Capacitor" >> "$GITHUB_STEP_SUMMARY"
           echo "- No server.url (loads from APK assets)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Student pages work offline from cache after first online login" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Exam writing still requires Internet" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Student pages offline from cache after first online login" >> "$GITHUB_STEP_SUMMARY"
