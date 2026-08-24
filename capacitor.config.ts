@@ -1,12 +1,9 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
- * D4EXAM Capacitor — TRUE offline-first native shell.
- *
- * CRITICAL: Do NOT set server.url. The WebView must load from LOCALLY BUNDLED
- * assets in the APK (webDir: dist). Remote URL makes offline impossible.
- *
- * Web/browser users still use Vercel. Native uses this local shell only.
+ * D4EXAM Capacitor — offline-first native shell.
+ * Loads LOCALLY BUNDLED assets (webDir: dist). No server.url.
+ * Web/browser still uses Vercel separately.
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
@@ -15,8 +12,6 @@ const config: CapacitorConfig = {
   server: {
     androidScheme: "https",
     hostname: "localhost",
-    // No errorPath — broken errorPath caused https://localhost//offline.html
-    // Chrome "Webpage not available". Local index.html is the only entry.
     allowNavigation: [
       "d4exam-platform.vercel.app",
       "*.vercel.app",
@@ -34,7 +29,7 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 2800,
+      launchShowDuration: 2200,
       launchAutoHide: true,
       backgroundColor: "#0b1b3a",
       showSpinner: false,

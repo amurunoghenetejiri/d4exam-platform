@@ -1,11 +1,20 @@
 /**
  * Android status bar theming for Capacitor.
- * Uses D4EXAM navy (#0b1b3a) to match the app shell sidebar.
- * During CBT exams, enterExamImmersive() hides the status bar for a fuller screen.
+ * During CBT exams, enterExamImmersive() hides status + navigation bars.
  */
 import { isNativeShell } from "@/native/platform";
 
 export const D4EXAM_STATUS_BAR = "#0b1b3a";
+
+function setImmersiveCss(on: boolean) {
+  if (typeof document === "undefined") return;
+  try {
+    document.documentElement.classList.toggle("d4-exam-immersive", on);
+    document.body.classList.toggle("d4-exam-immersive", on);
+  } catch {
+    /* ignore */
+  }
+}
 
 export async function applyNativeStatusBar(): Promise<void> {
   if (!isNativeShell()) return;
@@ -20,9 +29,10 @@ export async function applyNativeStatusBar(): Promise<void> {
   }
 }
 
-/** Hide system status bar during a locked CBT session (best-effort immersive). */
+/** Hide system chrome during a locked CBT session (status bar + best-effort nav). */
 export async function enterExamImmersive(): Promise<void> {
   if (!isNativeShell()) return;
+  setImmersiveCss(true);
   try {
     const { StatusBar } = await import("@capacitor/status-bar");
     try {
@@ -34,11 +44,30 @@ export async function enterExamImmersive(): Promise<void> {
   } catch (e) {
     console.warn("[D4EXAM] enterExamImmersive", e);
   }
+  // Best-effort browser fullscreen (covers more system UI on some devices)
+  try {
+    const el = document.documentElement as HTMLElement & {
+      requestFullscreen?: () => Promise<void>;
+      webkitRequestFullscreen?: () => void;
+    };
+    if (!document.fullscreenElement) {
+      if (el.requestFullscreen) await el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    }
+  } catch {
+    /* blocked */
+  }
 }
 
 /** Restore normal status bar after exam ends or is left. */
 export async function exitExamImmersive(): Promise<void> {
   if (!isNativeShell()) return;
+  setImmersiveCss(false);
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen?.();
+  } catch {
+    /* ignore */
+  }
   try {
     const { StatusBar, Style } = await import("@capacitor/status-bar");
     try {
