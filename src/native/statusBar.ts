@@ -1,6 +1,7 @@
 /**
  * Android status bar theming for Capacitor.
- * During CBT exams, enterExamImmersive() hides status + navigation bars.
+ * Normal: overlays WebView with navy so header sits compact under system icons.
+ * CBT: enterExamImmersive() hides status (+ best-effort nav) for true exam fullscreen.
  */
 import { isNativeShell } from "@/native/platform";
 
@@ -20,7 +21,12 @@ export async function applyNativeStatusBar(): Promise<void> {
   if (!isNativeShell()) return;
   try {
     const { StatusBar, Style } = await import("@capacitor/status-bar");
-    await StatusBar.setOverlaysWebView({ overlay: false });
+    // Overlay so safe-area padding is our only inset — avoids double gap
+    try {
+      await StatusBar.setOverlaysWebView({ overlay: true });
+    } catch {
+      /* older plugin */
+    }
     await StatusBar.setBackgroundColor({ color: D4EXAM_STATUS_BAR });
     await StatusBar.setStyle({ style: Style.Dark });
     await StatusBar.show();
@@ -29,7 +35,7 @@ export async function applyNativeStatusBar(): Promise<void> {
   }
 }
 
-/** Hide system chrome during a locked CBT session (status bar + best-effort nav). */
+/** Hide system chrome during a locked CBT session. */
 export async function enterExamImmersive(): Promise<void> {
   if (!isNativeShell()) return;
   setImmersiveCss(true);
@@ -44,7 +50,6 @@ export async function enterExamImmersive(): Promise<void> {
   } catch (e) {
     console.warn("[D4EXAM] enterExamImmersive", e);
   }
-  // Best-effort browser fullscreen (covers more system UI on some devices)
   try {
     const el = document.documentElement as HTMLElement & {
       requestFullscreen?: () => Promise<void>;
@@ -55,7 +60,7 @@ export async function enterExamImmersive(): Promise<void> {
       else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
     }
   } catch {
-    /* blocked */
+    /* device may block — continue without crash */
   }
 }
 
@@ -71,7 +76,7 @@ export async function exitExamImmersive(): Promise<void> {
   try {
     const { StatusBar, Style } = await import("@capacitor/status-bar");
     try {
-      await StatusBar.setOverlaysWebView({ overlay: false });
+      await StatusBar.setOverlaysWebView({ overlay: true });
     } catch {
       /* older plugin */
     }
