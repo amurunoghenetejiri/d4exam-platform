@@ -118,7 +118,7 @@ function Page() {
       // Only filter by courses when student has assigned course ids
       if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
       const { data, error } = await q;
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       return (data ?? []) as ExamRow[];
     },
   });
@@ -134,7 +134,7 @@ function Page() {
         .from("exam_attempts")
         .select("exam_id, status")
         .eq("student_id", student!.studentId);
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       return (data ?? []) as AttemptRow[];
     },
   });
@@ -154,7 +154,7 @@ function Page() {
         .eq("student_id", student!.studentId)
         .order("created_at", { ascending: false })
         .limit(40);
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       return (data ?? []) as ResultRow[];
     },
   });
@@ -171,7 +171,7 @@ function Page() {
         .eq("recipient_user_id", user!.userId)
         .order("created_at", { ascending: false })
         .limit(20);
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       return (data ?? []) as Notif[];
     },
   });

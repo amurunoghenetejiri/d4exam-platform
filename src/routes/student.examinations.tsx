@@ -11,6 +11,7 @@ import {
   formatExamWindow,
 } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
+import { assertOnline } from "@/lib/require-online";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 
@@ -176,7 +177,7 @@ function Page() {
       }
 
       const { data, error } = await q;
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       return (data ?? []) as ExamRow[];
     },
   });
@@ -192,7 +193,7 @@ function Page() {
         .from("exam_attempts")
         .select("exam_id, status, submitted_at")
         .eq("student_id", student.studentId);
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       return (data ?? []) as AttemptRow[];
     },
   });
@@ -210,7 +211,7 @@ function Page() {
         .eq("student_id", student.studentId);
       if (student.schoolId) q = q.eq("school_id", student.schoolId);
       const { data, error } = await q;
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       const map: Record<string, string> = {};
       for (const r of data ?? []) {
         map[(r as { exam_id: string }).exam_id] = (r as { id: string }).id;

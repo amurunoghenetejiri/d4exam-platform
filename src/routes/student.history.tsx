@@ -74,7 +74,7 @@ function Page() {
         )
         .eq("student_id", student!.studentId)
         .order("created_at", { ascending: false });
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       return (data ?? []) as ResultRow[];
     },
   });
@@ -88,7 +88,7 @@ function Page() {
         .select("id, exam_id, status, submitted_at, started_at")
         .eq("student_id", student!.studentId)
         .order("started_at", { ascending: false });
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       return (data ?? []) as AttemptRow[];
     },
   });
@@ -108,7 +108,7 @@ function Page() {
         .from("examinations")
         .select("id, title, courses(code, name)")
         .in("id", examIds);
-      if (error) throw error;
+      if (error) { console.warn("[offline]", error); return []; }
       return (data ?? []) as ExamLite[];
     },
   });
