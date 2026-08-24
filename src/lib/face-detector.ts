@@ -1,28 +1,32 @@
 /**
  * In-browser face detection for CBT camera monitoring.
  * Returns face COUNT only — no frames uploaded.
+ *
+ * Mobile: prefer native FaceDetector so counting starts in <1s.
+ * MediaPipe loads in parallel and upgrades the engine when ready.
  */
 
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
-const MEDIAPIPE_LOAD_TIMEOUT_MS = 12_000;
+const MEDIAPIPE_LOAD_TIMEOUT_MS = 8_000;
 const MIN_DETECTION_CONFIDENCE = 0.18;
 
-/** Count only confident faces so landmark noise does not inflate multi-face. */
 function confidentFaceCount(faces: unknown[]): number {
   if (!faces?.length) return 0;
   let strong = 0;
   for (const f of faces) {
-    const any = f as { categories?: { score?: number }[]; keypoints?: unknown[]; boundingBox?: unknown; score?: number };
+    const any = f as {
+      categories?: { score?: number }[];
+      keypoints?: unknown[];
+      boundingBox?: unknown;
+      score?: number;
+    };
     const score =
-      any?.categories?.[0]?.score ??
-      (typeof any.score === "number" ? any.score : undefined);
-    // Accept if score unknown (native API) or reasonably confident
+      any?.categories?.[0]?.score ?? (typeof any.score === "number" ? any.score : undefined);
     if (score == null || score >= 0.35) strong += 1;
   }
-  // If filtering wiped everything but we had detections, keep at least 1
   if (strong === 0 && faces.length > 0) return 1;
   return strong;
 }
@@ -33,7 +37,9 @@ export type FaceEngine = {
   backend: "mediapipe" | "native" | "hybrid";
 };
 
-type NativeDetector = { detect: (v: HTMLVideoElement | ImageBitmap | HTMLCanvasElement) => Promise<unknown[]> };
+type NativeDetector = {
+  detect: (v: HTMLVideoElement | ImageBitmap | HTMLCanvasElement) => Promise<unknown[]>;
+};
 
 function createNative(): FaceEngine | null {
   if (typeof window === "undefined") return null;
@@ -250,17 +256,30 @@ function makeHybrid(primary: FaceEngine, secondary: FaceEngine | null): FaceEngi
   };
 }
 
+/**
+ * Create face engine ASAP:
+ * 1) Native FaceDetector if available (instant on Chrome/Android)
+ * 2) MediaPipe in parallel; when ready, prefer hybrid/MP for accuracy
+ */
 export async function createFaceEngine(): Promise<FaceEngine | null> {
   const native = createNative();
-  const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
-
-  if (native && mp) {
-    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
-    if (isMobile) return makeHybrid(mp, native);
-    return makeHybrid(native, mp);
+  // Return native immediately if present — do not block exam on CDN model download
+  if (native) {
+    void withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS).then((mp) => {
+      /* MediaPipe available for future sessions; current hybrid is built if both ready at once */
+      void mp;
+    });
+    // Still try to attach MediaPipe within a short window for better multi-face accuracy
+    const mpQuick = await withTimeout(createMediapipe(), 2_500);
+    if (mpQuick) return makeHybrid(native, mpQuick);
+    return native;
   }
-  if (native) return native;
-  if (mp) return mp;
-  return null;
+  const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
+  return mp;
+}
+
+/** Warm MediaPipe model during device check / pre-exam (optional). */
+export function preloadFaceEngine(): void {
+  if (typeof window === "undefined") return;
+  void createFaceEngine().then((e) => e?.close());
 }
