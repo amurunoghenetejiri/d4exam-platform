@@ -19,6 +19,24 @@ let nativeRegisterInFlight = false;
 
 const NATIVE_PUSH_SKIP_KEY = "d4_native_push_skip_register";
 
+async function disableWebPushInNativeShell(): Promise<void> {
+  if (typeof window === "undefined" || !isNativeShell()) return;
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) {
+        try {
+          await r.unregister();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function shouldSkipNativeRegister(): boolean {
   try {
     return localStorage.getItem(NATIVE_PUSH_SKIP_KEY) === "1";
@@ -89,10 +107,6 @@ export async function refreshNativePushPermissionState(): Promise<PushPermission
   }
 }
 
-/**
- * Save device token without hitting unique constraint errors.
- * Strategy: update-by-token first; if no row, insert; if insert races, update again.
- */
 async function upsertPushDevice(
   userId: string,
   token: string,
@@ -116,7 +130,6 @@ async function upsertPushDevice(
   };
 
   try {
-    // 1) Prefer update existing token row (handles re-enable / same device)
     const upd = await supabase
       .from("push_devices")
       .update({
@@ -134,12 +147,10 @@ async function upsertPushDevice(
       return { ok: true };
     }
 
-    // 2) Insert new token
     const ins = await supabase.from("push_devices").insert(row as never).select("id");
     if (!ins.error) return { ok: true };
 
     const msg = ins.error.message || "";
-    // 3) Race / unique: token already exists — update again
     if (/duplicate|unique|push_devices_token/i.test(msg)) {
       const again = await supabase
         .from("push_devices")
@@ -164,6 +175,7 @@ async function upsertPushDevice(
 
 function showLocalNotification(title: string, body: string, link?: string) {
   if (typeof window === "undefined" || !("Notification" in window)) return;
+  if (isNativeShell()) return;
   if (Notification.permission !== "granted") return;
   const icon = `${window.location.origin}/icon-192.png`;
   try {
@@ -412,6 +424,7 @@ export async function enablePushNotifications(
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
   if (!userId) return { ok: false, error: "Sign in required" };
   if (isNativeShell()) {
+    await disableWebPushInNativeShell();
     return enableNativePushNotifications(userId, role);
   }
   return enableWebPushNotifications(userId, role);
@@ -445,6 +458,7 @@ export async function initNativePushIfNeeded(
 ): Promise<void> {
   if (!isNativeShell()) return;
   try {
+    await disableWebPushInNativeShell();
     await refreshNativePushPermissionState();
   } catch {
     /* never crash startup */
