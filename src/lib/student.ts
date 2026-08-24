@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useSessionUser } from "@/lib/session";
 import { useRealtimeInvalidate } from "@/lib/realtime";
+import { withOfflineCache } from "@/lib/offline-query";
+import { OfflineKeys } from "@/lib/offline-cache";
 
 export type StudentCourse = {
   id: string;
@@ -59,8 +61,16 @@ export function useStudentContext() {
     ),
     staleTime: 5 * 60_000,
     queryFn: async (): Promise<StudentContext | null> => {
-      const { getMyStudentContext } = await import("@/lib/student.server");
-      return getMyStudentContext();
+      const uid = session?.userId;
+      return withOfflineCache(
+        uid,
+        OfflineKeys.studentContext,
+        async () => {
+          const { getMyStudentContext } = await import("@/lib/student.server");
+          return getMyStudentContext();
+        },
+        { schoolId: session?.schoolId, fallback: null },
+      );
     },
   });
 }
