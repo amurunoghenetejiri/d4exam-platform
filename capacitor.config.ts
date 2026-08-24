@@ -7,6 +7,9 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * works. Native plugins (push, camera, status bar) still run in the shell.
  *
  * When offline, Capacitor serves errorPath from APK-bundled assets.
+ *
+ * StatusBar.overlaysWebView MUST be false so the system reserves space for the
+ * status bar and the WebView content is not clipped under it.
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
@@ -45,7 +48,7 @@ const config: CapacitorConfig = {
     StatusBar: {
       style: "DARK",
       backgroundColor: "#0b1b3a",
-      overlaysWebView: true,
+      overlaysWebView: false,
     },
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"],
