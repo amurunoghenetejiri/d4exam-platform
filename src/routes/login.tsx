@@ -9,7 +9,6 @@ import { ensureLoginAccount } from "@/lib/ensure-login.functions";
 import {
   Eye,
   EyeOff,
-  Loader2,
   ShieldCheck,
   Zap,
   Users,
@@ -32,12 +31,21 @@ export const Route = createFileRoute("/login")({
   }),
   beforeLoad: async () => {
     try {
-      const user = await fetchSessionUser();
-      if (user?.role) {
+      const user = await Promise.race([
+        fetchSessionUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+      ]);
+      if (user?.role && user.role in roleHome) {
         throw redirect({ to: roleHome[user.role] as never });
       }
     } catch (e) {
-      if (e && typeof e === "object" && "to" in e) throw e;
+      if (
+        e &&
+        typeof e === "object" &&
+        ("to" in e || (e as { isRedirect?: boolean }).isRedirect)
+      ) {
+        throw e;
+      }
     }
   },
   component: LoginPage,
@@ -66,7 +74,6 @@ const features = [
   },
 ];
 
-/** Never show HTML error pages in the login alert. */
 function friendlyLoginError(raw: unknown): string {
   const msg = raw instanceof Error ? raw.message : String(raw ?? "");
   if (!msg) return "Unable to sign in. Please try again.";
@@ -380,7 +387,8 @@ function LoginPage() {
               <Button type="submit" className="h-11 w-full font-semibold" disabled={loading}>
                 {loading ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Signing in…
+                    <img src="/logo.png" alt="" className="mr-2 h-5 w-5 object-contain opacity-90" />{" "}
+                    Signing in…
                   </>
                 ) : (
                   <>
