@@ -63,7 +63,7 @@ jobs:
           test -f android/gradlew
           chmod +x android/gradlew
 
-      - name: Apply D4EXAM permissions, version 2.2.0, branding
+      - name: Apply D4EXAM permissions, version 2.3.0, branding
         run: |
           set -euo pipefail
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -82,8 +82,8 @@ jobs:
             '    <color name="ic_launcher_background">#00000000</color>' \
             '</resources>' > android/app/src/main/res/values/colors.xml
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
-          sed -i 's/versionCode [0-9]*/versionCode 22/' android/app/build.gradle || true
-          sed -i 's/versionName "[^"]*"/versionName "2.2.0"/' android/app/build.gradle || true
+          sed -i 's/versionCode [0-9]*/versionCode 23/' android/app/build.gradle || true
+          sed -i 's/versionName "[^"]*"/versionName "2.3.0"/' android/app/build.gradle || true
 
       - name: Optional google-services.json from secret
         env:
@@ -164,5 +164,5 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### D4EXAM Android APK v2.2.0 — LIVE Vercel shell restored" >> "$GITHUB_STEP_SUMMARY"
+          echo "### D4EXAM Android APK v2.3.0 — LIVE Vercel shell restored" >> "$GITHUB_STEP_SUMMARY"
           echo "- server.url = https://d4exam-platform.vercel.app" >> "$GITHUB_STEP_SUMMARY"
