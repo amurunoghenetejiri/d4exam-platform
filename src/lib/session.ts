@@ -1,4 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { offlineSet, OfflineKeys } from "@/lib/offline-cache";
+import { rememberLastUserId, readLastUserId, withOfflineCache } from "@/lib/offline-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -81,7 +83,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
           .filter(Boolean);
       }
     } catch {
-      /* ignore until migration applied */
+      /* ignore */
     }
   }
   if (!roles.includes("super_admin")) {
@@ -140,34 +142,6 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
             .eq("profile_id", profile.id)
             .maybeSingle();
           identifier = s?.matric_number ?? s?.student_id ?? null;
-          if (!identifier && profile.email && profile.school_id) {
-            const local = String(profile.email).split("@")[0] || "";
-            if (local.length >= 3) {
-              try {
-                const { data: byMatric } = await supabase
-                  .from("students")
-                  .select("id, matric_number, student_id")
-                  .eq("school_id", profile.school_id)
-                  .ilike("matric_number", local)
-                  .limit(5);
-                const hit = byMatric?.[0];
-                if (hit) {
-                  identifier = hit.matric_number ?? hit.student_id ?? null;
-                } else {
-                  const { data: bySid } = await supabase
-                    .from("students")
-                    .select("id, matric_number, student_id")
-                    .eq("school_id", profile.school_id)
-                    .ilike("student_id", local)
-                    .limit(5);
-                  const hit2 = bySid?.[0];
-                  if (hit2) identifier = hit2.matric_number ?? hit2.student_id ?? null;
-                }
-              } catch {
-                /* ignore identifier resolve */
-              }
-            }
-          }
           identifierLabel = "Matric number";
         })(),
       );
@@ -246,7 +220,22 @@ export function useSessionUser() {
 
   return useQuery({
     queryKey: ["session-user"],
-    queryFn: () => withTimeout(fetchSessionUser(), 18_000, "session"),
+    queryFn: async () => {
+      const last = readLastUserId();
+      return withOfflineCache(
+        last,
+        OfflineKeys.sessionUser,
+        async () => {
+          const u = await withTimeout(fetchSessionUser(), 18_000, "session");
+          if (u?.userId) {
+            rememberLastUserId(u.userId);
+            await offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
+          }
+          return u;
+        },
+        { fallback: null },
+      );
+    },
     staleTime: 10 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
