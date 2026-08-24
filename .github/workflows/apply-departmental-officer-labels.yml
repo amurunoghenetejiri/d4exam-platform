@@ -11,99 +11,41 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Apply renames and Clear all
+      - name: Sed renames + clear all
         run: |
-          set -e
-          python3 << 'PY'
+          set -euo pipefail
+          # Display labels only — keep machine role examination_officer
+          sed -i 's/label: "Exam Officer"/label: "Departmental Officer"/g' src/components/layout/AppShell.tsx || true
+          sed -i 's/"Examination Officer"/"Departmental Officer"/g' src/components/pages/ProfilePage.tsx || true
+          sed -i 's/label: "Examination Officers"/label: "Departmental Officers"/g' src/components/navigation/navConfig.ts || true
+          sed -i 's/label: "Examination Officer"/label: "Departmental Officer"/g' src/components/navigation/navConfig.ts || true
+          sed -i 's/Examination Officer Dashboard/Departmental Officer Dashboard/g' src/routes/officer.index.tsx || true
+          sed -i 's/, Examination Officer/, Departmental Officer/g' src/routes/officer.index.tsx || true
+          sed -i 's/Examination officer dashboard/Departmental officer dashboard/g' src/routes/officer.index.tsx || true
+          sed -i 's/Examination Officers — D4EXAM/Departmental Officers — D4EXAM/g' src/routes/admin.officers.tsx || true
+          sed -i 's/title="Examination Officers"/title="Departmental Officers"/g' src/routes/admin.officers.tsx || true
+          sed -i 's/Add examination officer/Add departmental officer/g' src/routes/admin.officers.tsx || true
+          sed -i 's/No examination officers yet/No departmental officers yet/g' src/routes/admin.officers.tsx || true
+          sed -i 's/Create officers who approve/Create departmental officers who approve/g' src/routes/admin.officers.tsx || true
+          sed -i 's/How officers sign in/How departmental officers sign in/g' src/routes/admin.officers.tsx || true
+          sed -i 's/Create the first officer with/Create the first departmental officer with/g' src/routes/admin.officers.tsx || true
+          sed -i 's/title: "Exam Officers"/title: "Departmental Officers"/g' src/routes/index.tsx || true
+          sed -i 's/Examination Officer/Departmental Officer/g' src/routes/student.results.tsx src/routes/student.results.\$id.tsx src/routes/student.examinations.tsx || true
+          sed -i 's/examination officer/departmental officer/g' src/routes/student.results.tsx src/routes/officer.settings.tsx src/routes/officer.notifications.tsx src/routes/support.tsx src/routes/about.tsx || true
+          sed -i 's/Examination officer workflow/Departmental officer workflow/g' src/routes/pricing.tsx || true
+          sed -i 's/scope="examination officer"/scope="departmental officer"/g' src/routes/officer.settings.tsx || true
+          sed -i 's/An examination officer sent you a warning/A departmental officer sent you a warning/g' src/lib/notify.ts || true
+          sed -i 's/role: "Examination Officer"/role: "Departmental Officer"/g' src/data/mock/index.ts || true
+          sed -i 's/by the examination officer\./by the departmental officer./g' src/data/mock/index.ts || true
+          sed -i 's/Examination officer/Departmental officer/g' docs/NOTIFICATIONS.md || true
+
+          # Clear all on NotificationsPage if missing
+          if ! grep -q clearAllNotifications src/components/pages/NotificationsPage.tsx; then
+            python3 - <<'PY'
           from pathlib import Path
-
-          replacements = {
-            "src/components/layout/AppShell.tsx": [
-              ('examination_officer: { label: "Exam Officer", icon: Shield}',
-               'examination_officer: { label: "Departmental Officer", icon: Shield}'),
-            ],
-            "src/components/pages/ProfilePage.tsx": [
-              ('examination_officer: "Examination Officer"', 'examination_officer: "Departmental Officer"'),
-            ],
-            "src/components/navigation/navConfig.ts": [
-              ('label: "Examination Officers"', 'label: "Departmental Officers"'),
-              ('label: "Examination Officer"', 'label: "Departmental Officer"'),
-            ],
-            "src/routes/officer.index.tsx": [
-              ("Examination Officer Dashboard", "Departmental Officer Dashboard"),
-              (", Examination Officer", ", Departmental Officer"),
-              ("Examination officer dashboard", "Departmental officer dashboard"),
-            ],
-            "src/routes/admin.officers.tsx": [
-              ("Examination Officers — D4EXAM", "Departmental Officers — D4EXAM"),
-              ('title="Examination Officers"', 'title="Departmental Officers"'),
-              ("Add examination officer", "Add departmental officer"),
-              ("No examination officers yet", "No departmental officers yet"),
-              ("Create officers who approve", "Create departmental officers who approve"),
-              ("How officers sign in", "How departmental officers sign in"),
-              ("Create the first officer with", "Create the first departmental officer with"),
-            ],
-            "src/routes/index.tsx": [
-              ('title: "Exam Officers"', 'title: "Departmental Officers"'),
-            ],
-            "src/routes/student.results.tsx": [
-              ("Examination Officer", "Departmental Officer"),
-              ("examination officer", "departmental officer"),
-            ],
-            "src/routes/student.results.$id.tsx": [
-              ("Examination Officer", "Departmental Officer"),
-            ],
-            "src/routes/student.examinations.tsx": [
-              ("Examination Officer", "Departmental Officer"),
-            ],
-            "src/routes/officer.settings.tsx": [
-              ("examination officer account", "departmental officer account"),
-              ('scope="examination officer"', 'scope="departmental officer"'),
-            ],
-            "src/routes/officer.notifications.tsx": [
-              ("examination officer account", "departmental officer account"),
-            ],
-            "src/routes/pricing.tsx": [
-              ("Examination officer workflow", "Departmental officer workflow"),
-            ],
-            "src/routes/support.tsx": [
-              ("examination officer approval", "departmental officer approval"),
-            ],
-            "src/routes/about.tsx": [
-              ("examination officer structures", "departmental officer structures"),
-            ],
-            "src/lib/notify.ts": [
-              ("An examination officer sent you a warning", "A departmental officer sent you a warning"),
-            ],
-            "src/lib/access-control.ts": [
-              ("// examination officer owns approval workflow",
-               "// departmental officer (examination_officer) owns approval workflow"),
-            ],
-            "src/data/mock/index.ts": [
-              ('role: "Examination Officer"', 'role: "Departmental Officer"'),
-              ("by the examination officer.", "by the departmental officer."),
-            ],
-            "docs/NOTIFICATIONS.md": [
-              ("Examination officer", "Departmental officer"),
-            ],
-          }
-
-          for path, pairs in replacements.items():
-            p = Path(path)
-            if not p.exists():
-              print("skip missing", path)
-              continue
-            text = p.read_text(encoding="utf-8")
-            for old, new in pairs:
-              text = text.replace(old, new)
-            p.write_text(text, encoding="utf-8")
-            print("updated", path)
-
-          np = Path("src/components/pages/NotificationsPage.tsx")
-          if np.exists():
-            t = np.read_text(encoding="utf-8")
-            if "clearAllNotifications" not in t and "async function markAllRead" in t:
-              old = '''  async function markAllRead() {
+          p = Path("src/components/pages/NotificationsPage.tsx")
+          t = p.read_text()
+          old = '''  async function markAllRead() {
     if (!user?.userId) return;
     setBusy(true);
     try {
@@ -121,7 +63,7 @@ jobs:
       setBusy(false);
     }
   }'''
-              new = old + '''
+          new = old + '''
 
   async function clearAllNotifications() {
     if (!user?.userId) return;
@@ -142,9 +84,9 @@ jobs:
       setBusy(false);
     }
   }'''
-              if old in t:
-                t = t.replace(old, new)
-              old_act = '''        actions={
+          if old in t:
+            t = t.replace(old, new)
+          old_act = '''        actions={
           <Button
             type="button"
             variant="outline"
@@ -156,7 +98,7 @@ jobs:
             Mark all read
           </Button>
         }'''
-              new_act = '''        actions={
+          new_act = '''        actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -180,25 +122,21 @@ jobs:
             </Button>
           </div>
         }'''
-              if old_act in t:
-                t = t.replace(old_act, new_act)
-              np.write_text(t, encoding="utf-8")
-              print("NotificationsPage clear-all applied")
-            else:
-              print("NotificationsPage skip")
-
-          mig = Path("supabase/migrations/20260824120000_departmental_officer_labels.sql")
-          if not mig.exists():
-            mig.write_text("""-- D4EXAM: Departmental Officer display name for role examination_officer.
--- Machine value stays examination_officer. No data rewrite.
-
-COMMENT ON TABLE public.examination_officers IS
-  'Departmental officers (DB role examination_officer).';
-
-ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS priority text DEFAULT 'normal';
-""", encoding="utf-8")
-            print("wrote migration")
+          if old_act in t:
+            t = t.replace(old_act, new_act)
+          p.write_text(t)
+          print("clear-all applied")
           PY
+          fi
+
+          if [ ! -f supabase/migrations/20260824120000_departmental_officer_labels.sql ]; then
+            cat > supabase/migrations/20260824120000_departmental_officer_labels.sql << 'SQL'
+          -- Display name: Departmental Officer. DB role remains examination_officer.
+          COMMENT ON TABLE public.examination_officers IS
+            'Departmental officers (DB role examination_officer).';
+          ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS priority text DEFAULT 'normal';
+          SQL
+          fi
       - name: Commit
         run: |
           git config user.name "github-actions[bot]"
