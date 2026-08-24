@@ -1,27 +1,13 @@
-import { useEffect, useState } from "react";
-import { WifiOff } from "lucide-react";
+import { useEffect } from "react";
 import { subscribeNetworkStatus } from "@/native/networkService";
 
-/** Thin top banner when the device is offline — does not change routes or data. */
+/**
+ * Student offline mode: no blocking "no internet" banner.
+ * App stays usable from cache; exam write still requires online separately.
+ */
 export function NetworkBanner() {
-  const [offline, setOffline] = useState(false);
-
   useEffect(() => {
-    return subscribeNetworkStatus((s) => setOffline(!s.connected));
+    return subscribeNetworkStatus(() => undefined);
   }, []);
-
-  if (!offline) return null;
-
-  return (
-    <div
-      className="fixed inset-x-0 top-0 z-[90] flex items-center justify-center gap-2 bg-amber-600 px-3 py-1.5 text-center text-xs font-semibold text-white"
-      style={{
-        paddingTop: "max(0.35rem, env(safe-area-inset-top))",
-      }}
-      role="status"
-    >
-      <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      <span>You&apos;re offline. Cached content is available; some actions need Internet.</span>
-    </div>
-  );
+  return null;
 }
