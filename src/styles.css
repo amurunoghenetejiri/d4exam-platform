@@ -298,7 +298,6 @@ html {
   }
 }
 
-/* Capacitor shell offsets */
 .d4-shell-main-offset {
   padding-top: calc(3rem + env(safe-area-inset-top, 0px));
 }
@@ -312,7 +311,6 @@ html.d4-native body {
   background-color: #0b1b3a;
 }
 
-/* Native Android: continuous navy under status bar + safe-area (web UI unchanged) */
 html.d4-native header.fixed.top-0,
 html.d4-native header[class*="fixed"][class*="top-0"] {
   padding-top: env(safe-area-inset-top, 0px) !important;
@@ -360,7 +358,6 @@ html.d4-native nav[aria-label="Primary"] {
   padding-bottom: env(safe-area-inset-bottom, 0px) !important;
 }
 
-/* Native Android: clean hamburger — no white square/card around the menu icon */
 html.d4-native header button[aria-label="Open menu"],
 html.d4-native header [aria-label="Open menu"] {
   background: transparent !important;
@@ -379,4 +376,49 @@ html.d4-native header button[aria-label="Open menu"] svg,
 html.d4-native header [aria-label="Open menu"] svg {
   color: #f8fafc !important;
   stroke: #f8fafc !important;
+}
+
+/* Native Android: public/marketing header — navy sticky, white menu, logo+wordmark visible */
+html.d4-native header.d4-public-header {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 50 !important;
+  padding-top: env(safe-area-inset-top, 0px) !important;
+  background-color: #0b1b3a !important;
+  background-image: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #f8fafc !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.d4-native header.d4-public-header .text-primary,
+html.d4-native header.d4-public-header [class*="text-primary"] {
+  color: #f8fafc !important;
+}
+html.d4-native header.d4-public-header a,
+html.d4-native header.d4-public-header span {
+  color: #f8fafc !important;
+}
+html.d4-native header.d4-public-header button.d4-public-menu,
+html.d4-native header.d4-public-header button[aria-label="Open menu"] {
+  display: inline-flex !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  border: 1px solid rgba(255, 255, 255, 0.35) !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+html.d4-native header.d4-public-header button.d4-public-menu svg,
+html.d4-native header.d4-public-header button[aria-label="Open menu"] svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+  width: 1.35rem !important;
+  height: 1.35rem !important;
+  opacity: 1 !important;
+}
+html.d4-native header.d4-public-header img {
+  filter: none;
+  opacity: 1;
 }
