@@ -83,7 +83,7 @@ function StartExamButton({ examId }: { examId: string }) {
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        void navigate({ to: "/student/exam/$id", params: { id: examId } });
+        void assertOnline("Connect to the internet to write this exam.").then(() => navigate({ to: "/student/exam/$id", params: { id: examId } })).catch((err) => window.alert(err instanceof Error ? err.message : "Internet required to write exams."));
       }}
     >
       Start exam
