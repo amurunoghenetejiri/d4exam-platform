@@ -13,6 +13,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeColorSync } from "@/components/ThemeColorSync";
+import { OfflineBootstrap } from "@/components/OfflineBootstrap";
 import { useSessionUser } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
@@ -205,6 +206,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeColorSync />
+      <OfflineBootstrap />
       <Outlet />
       <NativeBootstrap />
       <Toaster />
