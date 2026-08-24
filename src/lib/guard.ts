@@ -1,6 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { redirect } from "@tanstack/react-router";
 import { fetchSessionUser, roleHome, type AppRole, type SessionUser } from "@/lib/session";
+import { offlineGet, OfflineKeys } from "@/lib/offline-cache";
+import { readLastUserId } from "@/lib/offline-query";
 
 /**
  * Client-side gate for a role area.
@@ -8,6 +10,7 @@ import { fetchSessionUser, roleHome, type AppRole, type SessionUser } from "@/li
  *
  * Uses the React Query cache when available so sibling navigations (e.g.
  * /student → /student/results) do not re-hit Supabase and stall the page.
+ * Offline: falls back to last cached SessionUser so the student shell still opens.
  */
 export async function requireRole(role: AppRole | AppRole[], queryClient?: QueryClient) {
   const allowed = Array.isArray(role) ? role : [role];
@@ -20,10 +23,21 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     try {
       user = await Promise.race([
         fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 12_000)),
       ]);
     } catch {
       user = null;
+    }
+    if (!user) {
+      try {
+        const last = readLastUserId();
+        if (last) {
+          const env = await offlineGet<SessionUser>(last, OfflineKeys.sessionUser);
+          if (env?.data) user = env.data;
+        }
+      } catch {
+        /* ignore */
+      }
     }
     if (queryClient) {
       queryClient.setQueryData(["session-user"], user);
