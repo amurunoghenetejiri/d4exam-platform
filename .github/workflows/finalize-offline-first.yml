@@ -1,0 +1,72 @@
+name: Finalize offline-first
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/finalize-offline-first.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wire assertOnline into exam start
+        run: |
+          set -eux
+          f=src/components/cbt/CbtExamSession.impl.tsx
+          if ! grep -q 'assertOnline' "$f"; then
+            if ! grep -q 'from "@/lib/require-online"' "$f"; then
+              sed -i '1a import { assertOnline } from "@/lib/require-online";' "$f"
+            fi
+            python3 << 'PY'
+from pathlib import Path
+p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+c = p.read_text()
+needle = "async function beginWithMedia(_opts: { skipScreenShare: boolean; caps: DeviceCapabilities }) {\n    setMediaBusy(true);"
+insert = """async function beginWithMedia(_opts: { skipScreenShare: boolean; caps: DeviceCapabilities }) {
+    if (!previewMode) {
+      try {
+        await assertOnline(\"Connect to the Internet before starting this examination.\");
+      } catch (e) {
+        toast.error((e as Error).message || \"Internet connection required\");
+        return;
+      }
+    }
+    setMediaBusy(true);"""
+if needle in c:
+    c = c.replace(needle, insert, 1)
+    p.write_text(c)
+    print("patched beginWithMedia")
+else:
+    print("pattern not found — skip")
+PY
+          fi
+          grep -n assertOnline "$f" | head -5 || true
+
+      - name: Bump SW cache version for shell
+        run: |
+          set -eux
+          f=public/firebase-messaging-sw.js
+          sed -i 's/d4exam-shell-v3/d4exam-shell-v4/g' "$f"
+          sed -i 's/d4exam-runtime-v3/d4exam-runtime-v4/g' "$f"
+          if ! grep -q '"/index.html"' "$f"; then
+            sed -i 's|"/",|"/",\n  "/index.html",|' "$f"
+          fi
+
+      - name: Expand Android build path triggers
+        run: |
+          set -eux
+          f=.github/workflows/build-android.yml
+          if ! grep -q 'public/offline.html' "$f"; then
+            sed -i '/capacitor.config.ts/a\      - "public/offline.html"' "$f"
+          fi
+
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.app
+          date -u +"redeploy %Y%m%d%H%M%S offline-first finalize" > DEPLOY_TRIGGER.txt
+          git add -A
+          git commit -m "fix(offline): exam assertOnline + SW shell v4 + android asset copy" || exit 0
+          git push origin HEAD:main
