@@ -15,10 +15,11 @@ firebase.initializeApp({
 
 var messaging = firebase.messaging();
 
-var SHELL_CACHE = "d4exam-shell-v3";
-var RUNTIME_CACHE = "d4exam-runtime-v3";
+var SHELL_CACHE = "d4exam-shell-v5";
+var RUNTIME_CACHE = "d4exam-runtime-v5";
 var SHELL_URLS = [
   "/",
+  "/index.html",
   "/offline.html",
   "/icon-192.png",
   "/icon-512.png",
@@ -92,9 +93,12 @@ self.addEventListener("fetch", function (event) {
         .catch(function () {
           return caches.match(req).then(function (cached) {
             if (cached) return cached;
-            return caches.match("/").then(function (root) {
-              if (root) return root;
-              return caches.match("/offline.html");
+            return caches.match("/index.html").then(function (idx) {
+              if (idx) return idx;
+              return caches.match("/").then(function (root) {
+                if (root) return root;
+                return caches.match("/offline.html");
+              });
             });
           });
         }),
