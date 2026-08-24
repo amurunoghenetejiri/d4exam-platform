@@ -1,25 +1,23 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
- * D4EXAM Capacitor config — LOCAL web assets (full offline student shell)
+ * D4EXAM Capacitor config
  *
- * The APK loads the built SPA from webDir (dist), NOT from Vercel.
- * That means:
- * - Cold start works offline (no "Webpage not available")
- * - Student dashboard / pages use IndexedDB cache when offline
- * - Writing an exam still needs Internet (assertOnline gate)
- * - Login and live data still use Supabase when online
+ * Live server.url is REQUIRED: TanStack Start is SSR. Loading only local assets
+ * causes a blank navy/blue screen after splash. The working product loads the
+ * production Vercel app inside the native shell (push, camera, status bar still work).
  *
- * StatusBar.overlaysWebView MUST be false so content is not clipped.
+ * When offline, errorPath shows the bundled offline page (not Chrome error).
+ * StatusBar.overlaysWebView MUST be false so content is not clipped under the bar.
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
   appName: "D4EXAM",
   webDir: "dist",
   server: {
-    // Local assets only — do NOT set url (that forced remote Vercel and broke offline).
+    url: "https://d4exam-platform.vercel.app",
     androidScheme: "https",
-    hostname: "localhost",
+    errorPath: "offline.html",
     allowNavigation: [
       "d4exam-platform.vercel.app",
       "*.vercel.app",

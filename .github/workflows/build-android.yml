@@ -9,7 +9,6 @@ on:
       - "capacitor.config.ts"
       - "package.json"
       - "public/**"
-      - "scripts/generate-capacitor-index.mjs"
       - "src/lib/push.ts"
       - "src/native/**"
       - ".github/workflows/build-android.yml"
@@ -44,28 +43,19 @@ jobs:
           set -euo pipefail
           npm run build
 
-      - name: Prepare Capacitor dist with real SPA index
+      - name: Prepare Capacitor dist
         run: |
           set -euo pipefail
           mkdir -p dist
-          if [ ! -d .output/public ]; then
-            echo "ERROR: .output/public missing after build"
-            ls -la .output 2>/dev/null || true
-            exit 1
+          if [ -d .output/public ]; then
+            cp -a .output/public/. dist/
           fi
-          cp -a .output/public/. dist/
           cp -f public/offline.html dist/offline.html 2>/dev/null || true
           cp -f public/firebase-messaging-sw.js dist/firebase-messaging-sw.js 2>/dev/null || true
-          cp -f public/site.webmanifest dist/site.webmanifest 2>/dev/null || true
-          # TanStack Start is SSR-only — generate client index.html for Capacitor
-          node scripts/generate-capacitor-index.mjs
-          test -f dist/index.html
-          grep -q 'type="module"' dist/index.html || { echo "FATAL: index.html has no module script"; exit 1; }
-          grep -q 'assets/index-' dist/index.html || { echo "FATAL: index.html missing entry chunk"; exit 1; }
-          echo "=== index.html (first 25 lines) ==="
-          head -25 dist/index.html
-          echo "dist file count: $(find dist -type f | wc -l)"
-          ls dist/assets/index-*.js | head -3
+          if [ ! -f dist/index.html ]; then
+            printf '%s\n' '<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta http-equiv="refresh" content="0;url=https://d4exam-platform.vercel.app/"/><title>D4EXAM</title></head><body style="background:#0b1b3a;color:#fff;display:grid;place-items:center;min-height:100vh;font-family:system-ui">Opening D4EXAM…</body></html>' > dist/index.html
+          fi
+          ls -la dist/offline.html dist/index.html 2>/dev/null || true
 
       - name: Ensure complete Android platform
         run: |
@@ -75,7 +65,7 @@ jobs:
           test -f android/gradlew
           chmod +x android/gradlew
 
-      - name: Apply D4EXAM permissions version 2.4.0 branding
+      - name: Apply D4EXAM permissions version 2.5.0 branding
         run: |
           set -euo pipefail
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -94,8 +84,8 @@ jobs:
             '    <color name="ic_launcher_background">#00000000</color>' \
             '</resources>' > android/app/src/main/res/values/colors.xml
           sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
-          sed -i 's/versionCode [0-9]*/versionCode 24/' android/app/build.gradle || true
-          sed -i 's/versionName "[^"]*"/versionName "2.4.0"/' android/app/build.gradle || true
+          sed -i 's/versionCode [0-9]*/versionCode 25/' android/app/build.gradle || true
+          sed -i 's/versionName "[^"]*"/versionName "2.5.0"/' android/app/build.gradle || true
 
       - name: Optional google-services.json from secret
         env:
@@ -109,23 +99,14 @@ jobs:
       - name: Capacitor sync
         run: npx cap sync android
 
-      - name: VERIFY local shell no remote server.url
+      - name: VERIFY live Vercel server.url
         run: |
           set -euo pipefail
           CFG="android/app/src/main/assets/capacitor.config.json"
-          PUB="android/app/src/main/assets/public"
           cat "$CFG"
-          if grep -q '"url"' "$CFG"; then
-            echo "ERROR: server.url must be absent for offline APK"
-            exit 1
-          fi
-          echo "OK local shell — no server.url"
-          test -f "$PUB/index.html"
-          grep -q 'type="module"' "$PUB/index.html"
-          grep -q 'assets/index-' "$PUB/index.html"
-          test -d "$PUB/assets"
-          ls "$PUB/assets"/index-*.js | head -1
-          echo "VERIFY PASSED — real SPA index bundled"
+          grep -q 'd4exam-platform.vercel.app' "$CFG" || { echo "FATAL: server.url missing"; exit 1; }
+          test -f android/app/src/main/assets/public/offline.html
+          echo "OK live Vercel shell"
 
       - name: Generate D4EXAM icons and splash
         run: |
@@ -186,7 +167,6 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### D4EXAM Android APK v2.4.0 — LOCAL offline shell" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Real SPA index.html generated for Capacitor" >> "$GITHUB_STEP_SUMMARY"
-          echo "- No server.url (loads from APK assets)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Student pages offline from cache after first online login" >> "$GITHUB_STEP_SUMMARY"
+          echo "### D4EXAM Android APK v2.5.0 — LIVE Vercel shell restored" >> "$GITHUB_STEP_SUMMARY"
+          echo "- server.url = https://d4exam-platform.vercel.app" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Fixes blank blue screen from local-only SPA" >> "$GITHUB_STEP_SUMMARY"

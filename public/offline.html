@@ -30,21 +30,19 @@
   <body>
     <div>
       <div class="mark">D4</div>
-      <h1>D4EXAM</h1>
-      <p>Opening the app…</p>
-      <button type="button" id="retry">Open app</button>
+      <h1>Internet required</h1>
+      <p>Connect to the Internet, then tap Retry to open D4EXAM.</p>
+      <button type="button" id="retry">Retry</button>
     </div>
     <script>
       (function () {
+        var LIVE = "https://d4exam-platform.vercel.app/";
         function go() {
-          try {
-            location.replace("./");
-          } catch (e) {
-            location.href = "./";
-          }
+          try { location.replace(LIVE); } catch (e) { location.href = LIVE; }
         }
         document.getElementById("retry").onclick = go;
-        setTimeout(go, 300);
+        window.addEventListener("online", go);
+        if (navigator.onLine) setTimeout(go, 400);
       })();
     </script>
   </body>
