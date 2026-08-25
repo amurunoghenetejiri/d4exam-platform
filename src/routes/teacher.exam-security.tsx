@@ -97,7 +97,7 @@ function Page() {
               onChange={(v) => toggle("tabMonitoring", v)}
             />
             <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
-              <Label className="font-semibold">Max tab switches before action</Label>
+              <Label className="font-semibold">TAB VIOLATION limit</Label>
               <Input
                 type="number"
                 min={1}
@@ -108,7 +108,7 @@ function Page() {
               />
             </div>
             <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
-              <Label className="font-semibold">When threshold is reached</Label>
+              <Label className="font-semibold">TAB VIOLATION consequence</Label>
               <Select
                 value={settings.thresholdAction}
                 onValueChange={(v) =>
@@ -119,12 +119,28 @@ function Page() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="warn">Warn candidate</SelectItem>
-                  <SelectItem value="flag">Flag for review</SelectItem>
-                  <SelectItem value="terminate">Terminate attempt</SelectItem>
+                  <SelectItem value="warn">Warning Only</SelectItem>
+                  <SelectItem value="flag">Flag for Review</SelectItem>
+                  <SelectItem value="pause">Pause Exam</SelectItem>
+                  <SelectItem value="auto_submit">Auto-Submit Exam</SelectItem>
+                  <SelectItem value="terminate">Terminate Exam</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {settings.thresholdAction === "pause" && (
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">Pause duration (seconds)</Label>
+                <Input
+                  type="number"
+                  min={30}
+                  max={3600}
+                  step={30}
+                  value={settings.pauseDurationSeconds ?? 300}
+                  onChange={(e) => toggle("pauseDurationSeconds", Math.max(30, Number(e.target.value) || 300))}
+                />
+                <p className="text-xs text-slate-500">Examples: 30, 60, 300 (5 min), 600 (10 min)</p>
+              </div>
+            )}
             <Toggle
               label="Block copy / paste"
               hint="Disable clipboard during the attempt"

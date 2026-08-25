@@ -12,8 +12,8 @@ const MODEL_URL =
 
 const MEDIAPIPE_LOAD_TIMEOUT_MS = 8_000;
 const MIN_DETECTION_CONFIDENCE = 0.42;
-const STRONG_SCORE = 0.4;
-const NMS_IOU = 0.35;
+const STRONG_SCORE = 0.45;
+const NMS_IOU = 0.40;
 
 type Box = { x: number; y: number; w: number; h: number; score: number };
 

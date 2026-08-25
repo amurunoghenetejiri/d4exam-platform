@@ -147,6 +147,30 @@ export function ExamSecurityGate({
     return "Begin examination";
   })();
 
+  const tabLimit = Math.max(1, Number(security.maxTabSwitches) || 5);
+  const tabAction = security.thresholdAction || "flag";
+  const pauseSecs = Math.max(30, Number(security.pauseDurationSeconds) || 300);
+  const tabConsequenceLabel =
+    tabAction === "terminate"
+      ? "Exam Termination"
+      : tabAction === "pause"
+        ? `Pause Exam (${Math.round(pauseSecs / 60) || 1} min)`
+        : tabAction === "auto_submit"
+          ? "Auto-Submit Exam"
+          : tabAction === "warn"
+            ? "Warning Only"
+            : "Flag for Review";
+  const tabConsequenceExplain =
+    tabAction === "terminate"
+      ? `Leaving the examination screen ${tabLimit} times will terminate your examination.`
+      : tabAction === "pause"
+        ? `Leaving the examination screen ${tabLimit} times will pause your examination for ${Math.round(pauseSecs / 60) || 1} minute(s).`
+        : tabAction === "auto_submit"
+          ? `Leaving the examination screen ${tabLimit} times will automatically submit your examination.`
+          : tabAction === "warn"
+            ? "You will receive a warning when the configured violation limit is reached."
+            : `Leaving the examination screen ${tabLimit} times will flag your examination for review.`;
+
   const secRows: { label: string; enabled: boolean; detail?: string }[] = [
     { label: "Camera monitoring", enabled: Boolean(security.requireCamera) },
     {
@@ -159,7 +183,12 @@ export function ExamSecurityGate({
     {
       label: "Tab monitoring",
       enabled: Boolean(security.tabMonitoring),
-      detail: security.tabMonitoring ? `max ${security.maxTabSwitches}` : undefined,
+      detail: security.tabMonitoring ? `max ${tabLimit}` : undefined,
+    },
+    {
+      label: "Tab violation consequence",
+      enabled: Boolean(security.tabMonitoring),
+      detail: security.tabMonitoring ? tabConsequenceLabel : undefined,
     },
     { label: "Copy/paste block", enabled: Boolean(security.blockCopyPaste) },
     {
@@ -336,7 +365,13 @@ export function ExamSecurityGate({
             {needFace && <li>• Warnings are shown if no face or multiple faces are detected.</li>}
             {needMic && <li>• Your microphone is active for the duration of the examination.</li>}
             {shareMode !== "disabled" && <li>• Screen activity may be monitored while you write.</li>}
-            {security.tabMonitoring && <li>• Leaving this tab is counted and recorded.</li>}
+            {security.tabMonitoring && (
+              <>
+                <li>• Maximum tab violations: <strong>{tabLimit}</strong></li>
+                <li>• Consequence: <strong>{tabConsequenceLabel}</strong></li>
+                <li>• {tabConsequenceExplain}</li>
+              </>
+            )}
             <li>• Security events are stored for review.</li>
           </ul>
           <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-xs text-slate-700">
@@ -345,7 +380,7 @@ export function ExamSecurityGate({
               onCheckedChange={(v) => setAcknowledgedNotice(v === true)}
               className="mt-0.5"
             />
-            <span>I have read and accept the monitoring notice and the examination rules.</span>
+            <span>I have read and understood the examination instructions and security rules.</span>
           </label>
         </div>
 

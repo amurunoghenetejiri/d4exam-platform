@@ -92,6 +92,8 @@ export function ExamCameraPip({
   const faceWarnRef = useRef(0);
   const lastAlertRef = useRef(0);
   const lastStateRef = useRef<FaceState>("unavailable");
+  const pendingRef = useRef<{ state: FaceState; since: number } | null>(null);
+  const STABILITY_MS = 200;
   const ownStreamRef = useRef<MediaStream | null>(null);
   const acquiringRef = useRef(false);
   const dragState = useRef<{
@@ -333,24 +335,32 @@ export function ExamCameraPip({
 
     const applyState = (next: FaceState, faceCount: number | null) => {
       const prev = lastStateRef.current;
-      setFaceStatus(next);
-      lastStateRef.current = next;
-
+      const now = Date.now();
       if (next === "ok") {
-        faceWarnRef.current = Math.max(0, faceWarnRef.current - 1);
+        pendingRef.current = null;
         if (prev !== "ok") {
+          setFaceStatus("ok");
+          lastStateRef.current = "ok";
+          faceWarnRef.current = Math.max(0, faceWarnRef.current - 1);
           onSecRef.current?.({ kind: "ok", faceCount, at: new Date().toISOString() });
         }
         return;
       }
-
+      const pend = pendingRef.current;
+      if (!pend || pend.state !== next) {
+        pendingRef.current = { state: next, since: now };
+        return;
+      }
+      if (now - pend.since < STABILITY_MS) return;
+      pendingRef.current = null;
+      if (prev === next) return;
+      setFaceStatus(next);
+      lastStateRef.current = next;
       faceWarnRef.current += 1;
       if (next === "none") fireAlert("none", faceCount);
       else if (next === "multi") fireAlert("multi", faceCount);
       else if (next === "unclear") fireAlert("unclear", faceCount);
-      else if (next === "unavailable") {
-        fireAlert("unclear", faceCount);
-      }
+      else if (next === "unavailable") fireAlert("unclear", faceCount);
     };
 
     const tick = async () => {

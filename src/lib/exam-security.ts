@@ -15,6 +15,7 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   maxFaceWarnings: 5,
   faceViolationAction: "flag",
   thresholdAction: "flag",
+  pauseDurationSeconds: 300,
   resultVisibility: "after_officer_release",
   questionsToAnswer: null,
 };
@@ -99,6 +100,7 @@ export function toExamSettingsRow(
     max_face_warnings: n.maxFaceWarnings ?? 5,
     face_violation_action: n.faceViolationAction ?? "flag",
     threshold_action: n.thresholdAction,
+    pause_duration_seconds: n.pauseDurationSeconds ?? 300,
     result_visibility: n.resultVisibility,
     total_marks: totalMarks,
     questions_to_answer: questionsToAnswer ?? n.questionsToAnswer,
@@ -141,6 +143,7 @@ export type ExamSettingsRow = {
   max_face_warnings?: number | null;
   face_violation_action?: string | null;
   threshold_action?: string | null;
+  pause_duration_seconds?: number | null;
   result_visibility?: string | null;
   total_marks?: number | null;
   instructions?: string | null;
@@ -203,6 +206,9 @@ export function fromExamSettingsRow(
     }
     if (row.threshold_action != null) {
       fromRow.thresholdAction = row.threshold_action as ExamSecuritySettings["thresholdAction"];
+    }
+    if (row.pause_duration_seconds != null) {
+      fromRow.pauseDurationSeconds = Number(row.pause_duration_seconds) || 300;
     }
     if (row.result_visibility != null) {
       fromRow.resultVisibility = row.result_visibility as ExamSecuritySettings["resultVisibility"];

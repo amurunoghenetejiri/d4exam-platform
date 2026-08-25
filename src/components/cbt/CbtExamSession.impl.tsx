@@ -119,7 +119,7 @@ export function CbtExamPage() {
     enabled: Boolean(id),
     queryFn: async () => {
       const { data } = await supabase.from("exam_settings")
-        .select("exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, face_detection, max_face_warnings, require_screen_share, screen_share_mode, threshold_action, face_violation_action, total_marks, instructions, result_visibility, questions_to_answer")
+        .select("exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, face_detection, max_face_warnings, require_screen_share, screen_share_mode, threshold_action, pause_duration_seconds, face_violation_action, total_marks, instructions, result_visibility, questions_to_answer")
         .eq("exam_id", id).maybeSingle();
       return data as ExamSettingsRow | null;
     },
@@ -241,19 +241,79 @@ export function CbtExamPage() {
           tab_switch_count: tabSwitchCountRef.current,
         } as never).eq("id", attemptIdRef.current);
       }
-      const max = security.maxTabSwitches ?? 5;
-      if (tabSwitchCountRef.current >= max) {
-        void applyConsequence("TAB_SWITCH", `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`);
-      } else {
+      const max = Math.max(1, Number(security.maxTabSwitches) || 5);
+      const count = tabSwitchCountRef.current;
+      void logSecurityEvent({
+        schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+        eventType: "TAB_VIOLATION", severity: count >= max ? "high" : "low",
+        description: `Tab violation ${count}/${max}.`,
+        questionIndex: index,
+        extra: { tab_switch_count: count, max_tab_switches: max, threshold_action: security.thresholdAction },
+      });
+      setWarnBanner(`Tab Violation: ${count}/${max}`);
+      window.setTimeout(() => setWarnBanner(null), 4500);
+      if (count < max) return;
+      const action = security.thresholdAction || "flag";
+      if (action === "warn") {
+        setWarnBanner("EXAMINATION WARNING — You exceeded the configured tab-violation threshold.");
         void logSecurityEvent({
           schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
-          eventType: "TAB_SWITCH", severity: "low",
-          description: `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`,
+          eventType: "TAB_WARNING", severity: "medium",
+          description: "Tab violation threshold reached (warning only).",
           questionIndex: index,
         });
-        setWarnBanner(`Stay on the exam screen. Switches: ${tabSwitchCountRef.current}/${max}`);
-        window.setTimeout(() => setWarnBanner(null), 4000);
+        return;
       }
+      if (action === "flag") {
+        setWarnBanner("Your examination has been flagged for review because of repeated tab violations.");
+        if (attemptIdRef.current) {
+          void supabase.from("exam_attempts").update({ status: "flagged" } as never).eq("id", attemptIdRef.current);
+        }
+        void logSecurityEvent({
+          schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+          eventType: "TAB_FLAGGED", severity: "high",
+          description: "Tab violation threshold — flagged for review.",
+          questionIndex: index,
+        });
+        return;
+      }
+      if (action === "pause") {
+        const secs = Math.max(30, Number((security as { pauseDurationSeconds?: number }).pauseDurationSeconds) || 300);
+        const ends = new Date(Date.now() + secs * 1000).toISOString();
+        try { sessionStorage.setItem(`d4-pause-end-${id}`, ends); } catch { /* */ }
+        if (attemptIdRef.current) {
+          void supabase.from("exam_attempts").update({ status: "paused" } as never).eq("id", attemptIdRef.current);
+        }
+        void logSecurityEvent({
+          schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+          eventType: "TAB_PAUSE", severity: "high",
+          description: `Tab violation threshold — paused ${secs}s.`,
+          questionIndex: index,
+          extra: { pause_ends_at: ends, pause_seconds: secs },
+        });
+        setPauseReason(`You exceeded the permitted number of tab violations (${count}/${max}).`);
+        setPaused(true);
+        return;
+      }
+      if (action === "auto_submit") {
+        void logSecurityEvent({
+          schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+          eventType: "TAB_AUTO_SUBMIT", severity: "high",
+          description: "Tab violation threshold — auto-submitted.",
+          questionIndex: index,
+        });
+        setDoneTerminated(true);
+        void finishAttempt(true);
+        return;
+      }
+      void logSecurityEvent({
+        schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+        eventType: "TAB_TERMINATION", severity: "high",
+        description: "Tab violation threshold — terminated.",
+        questionIndex: index,
+      });
+      setDoneTerminated(true);
+      void finishAttempt(true);
     };
     document.addEventListener("fullscreenchange", onFsChange);
     document.addEventListener("visibilitychange", onVis);
@@ -662,10 +722,10 @@ export function CbtExamPage() {
       {paused && started && !done && (
         <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-white p-6 text-center shadow-2xl">
-            <h2 className="text-lg font-extrabold text-slate-900">EXAM PAUSED</h2>
+            <h2 className="text-lg font-extrabold text-slate-900">EXAMINATION PAUSED</h2>
             <p className="mt-2 text-sm text-slate-600">Your examination has been paused because an integrity violation was detected.</p>
             {pauseReason ? <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p> : null}
-            <Button className="mt-5 w-full font-semibold" onClick={() => void restoreFullscreenFromUser()}>Resume examination</Button>
+            <PauseContinueButton examId={id} onContinue={() => { setPaused(false); setPauseReason(""); void restoreFullscreenFromUser(); }} />
           </div>
         </div>
       )}
@@ -682,6 +742,32 @@ export function CbtExamPage() {
         </div>
       )}
     </div>
+  );
+}
+
+
+function PauseContinueButton({ examId, onContinue }: { examId: string; onContinue: () => void }) {
+  const [left, setLeft] = useState(0);
+  useEffect(() => {
+    const tick = () => {
+      try {
+        const raw = sessionStorage.getItem(`d4-pause-end-${examId}`);
+        if (!raw) { setLeft(0); return; }
+        setLeft(Math.max(0, Math.ceil((new Date(raw).getTime() - Date.now()) / 1000)));
+      } catch { setLeft(0); }
+    };
+    tick();
+    const t = window.setInterval(tick, 250);
+    return () => window.clearInterval(t);
+  }, [examId]);
+  const mm = String(Math.floor(left / 60)).padStart(2, "0");
+  const ss = String(left % 60).padStart(2, "0");
+  return (
+    <>
+      <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Examination will resume in</p>
+      <p className="mt-1 font-mono text-3xl font-extrabold tabular-nums text-primary">{mm}:{ss}</p>
+      <Button className="mt-5 w-full font-semibold" disabled={left > 0} onClick={onContinue}>Continue Exam</Button>
+    </>
   );
 }
 

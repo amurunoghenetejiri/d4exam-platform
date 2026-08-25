@@ -478,3 +478,17 @@ html.d4-native .d4-shell-main-offset > main,
 html.d4-native .relative.z-10.pt-12 > main {
   padding-top: 0.75rem !important;
 }
+
+
+[data-sonner-toast].cbt-exam-toast {
+  font-size: 0.75rem !important;
+  padding: 0.5rem 0.75rem !important;
+}
+html.d4-exam-immersive [data-sonner-toaster] {
+  top: auto !important;
+  bottom: 1rem !important;
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%) !important;
+  z-index: 120 !important;
+}
