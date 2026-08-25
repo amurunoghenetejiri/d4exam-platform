@@ -31,6 +31,7 @@ export async function applyNativeStatusBar(): Promise<void> {
 
 /** Hide system chrome during a locked CBT session (status bar + best-effort nav). */
 export async function enterExamImmersive(): Promise<void> {
+  // Always apply CSS (web + native) so layout can fill the viewport.
   setImmersiveCss(true);
 
   if (isNativeShell()) {
@@ -47,6 +48,7 @@ export async function enterExamImmersive(): Promise<void> {
     }
   }
 
+  // Browser / WebView fullscreen (helps hide Android nav bar when allowed)
   try {
     const el = document.documentElement as HTMLElement & {
       requestFullscreen?: () => Promise<void>;
