@@ -1,8 +1,8 @@
-import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchSessionUser, roleHome } from "@/lib/session";
+import { fetchSessionUser, roleHome, type AppRole } from "@/lib/session";
 import { signInWithSchoolCode } from "@/lib/auth.functions";
 import { ensureLoginAccount } from "@/lib/ensure-login.functions";
 
@@ -33,7 +33,7 @@ export const Route = createFileRoute("/login")({
     try {
       const user = await Promise.race([
         fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
       ]);
       if (user?.role && user.role in roleHome) {
         throw redirect({ to: roleHome[user.role] as never });
@@ -107,8 +107,19 @@ function friendlyLoginError(raw: unknown): string {
   return cleaned || msg;
 }
 
+/** Full page load so Capacitor WebView always applies the new session. */
+function goToRoleHome(role: string) {
+  const path = roleHome[role as AppRole];
+  if (!path) return false;
+  try {
+    window.location.replace(path);
+  } catch {
+    window.location.href = path;
+  }
+  return true;
+}
+
 function LoginPage() {
-  const navigate = useNavigate();
   const loginFn = useServerFn(signInWithSchoolCode);
   const ensureLoginFn = useServerFn(ensureLoginAccount);
   const [showPassword, setShowPassword] = useState(false);
@@ -120,17 +131,20 @@ function LoginPage() {
   const [remember, setRemember] = useState(false);
   const inFlight = useRef(false);
 
-  async function goHomeAfterSession() {
-    const deadline = Date.now() + 4_000;
-    let user = await fetchSessionUser().catch(() => null);
-    for (let i = 0; i < 3 && !user?.role && Date.now() < deadline; i++) {
-      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
-      user = await fetchSessionUser().catch(() => null);
+  async function resolveRoleAndGoHome(): Promise<boolean> {
+    // Fast path: role from session APIs
+    try {
+      const user = await Promise.race([
+        fetchSessionUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_500)),
+      ]);
+      if (user?.role && user.role in roleHome) {
+        return goToRoleHome(user.role);
+      }
+    } catch {
+      /* continue */
     }
-    if (user?.role && user.role in roleHome) {
-      navigate({ to: roleHome[user.role] as never });
-      return true;
-    }
+
     try {
       const { data: myRoles } = await supabase.rpc("get_my_roles");
       const list = Array.isArray(myRoles)
@@ -146,13 +160,36 @@ function LoginPage() {
         "student",
       ] as const;
       const found = priority.find((r) => list.map((x) => x.toLowerCase()).includes(r));
-      if (found && found in roleHome) {
-        navigate({ to: roleHome[found] as never });
-        return true;
+      if (found) return goToRoleHome(found);
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user?.id) {
+        const { data: roles } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", user.id)
+          .limit(10);
+        const list = (roles ?? []).map((r) => String(r.role).toLowerCase());
+        const priority = [
+          "super_admin",
+          "school_admin",
+          "examination_officer",
+          "teacher",
+          "student",
+        ] as const;
+        const found = priority.find((r) => list.includes(r));
+        if (found) return goToRoleHome(found);
       }
     } catch {
       /* ignore */
     }
+
     return false;
   }
 
@@ -174,13 +211,15 @@ function LoginPage() {
       setLoading(false);
       inFlight.current = false;
       setError("Login is taking longer than expected. Check your connection and try again.");
-    }, 15_000);
+    }, 12_000);
+
     try {
       const schoolCode = code.trim().toUpperCase();
       const ident = identifier.trim();
       const pass = password;
       const looksEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ident);
 
+      // 1) Server login (with hard timeout)
       try {
         const result = await Promise.race([
           loginFn({
@@ -190,8 +229,9 @@ function LoginPage() {
               password: pass,
             },
           }),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
         ]);
+
         if (result && "session" in result && result.session?.access_token) {
           const { error: sessErr } = await supabase.auth.setSession({
             access_token: result.session.access_token,
@@ -200,10 +240,10 @@ function LoginPage() {
           if (!sessErr) {
             if (result.role && result.role in roleHome) {
               navigated = true;
-              navigate({ to: roleHome[result.role as keyof typeof roleHome] as never });
+              goToRoleHome(String(result.role));
               return;
             }
-            if (await goHomeAfterSession()) {
+            if (await resolveRoleAndGoHome()) {
               navigated = true;
               return;
             }
@@ -217,6 +257,7 @@ function LoginPage() {
         lastServerMsg = friendlyLoginError(serverErr);
       }
 
+      // 2) Direct Supabase client sign-in
       const emailsToTry: string[] = [];
       if (looksEmail) emailsToTry.push(ident.toLowerCase());
       if (!looksEmail && schoolCode) {
@@ -241,13 +282,14 @@ function LoginPage() {
           password: pass,
         });
         if (!authErr && data.session) {
-          if (await goHomeAfterSession()) {
+          if (await resolveRoleAndGoHome()) {
             navigated = true;
             return;
           }
         }
       }
 
+      // 3) Ensure + retry for email accounts
       if (looksEmail) {
         try {
           const fixed = await Promise.race([
@@ -258,7 +300,7 @@ function LoginPage() {
                 schoolCode: schoolCode || null,
               },
             }),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 6_000)),
           ]);
           if (fixed && "ok" in fixed && fixed.ok) {
             const { data: again, error: againErr } = await supabase.auth.signInWithPassword({
@@ -266,12 +308,12 @@ function LoginPage() {
               password: pass,
             });
             if (!againErr && again.session) {
-              if (await goHomeAfterSession()) {
+              if (await resolveRoleAndGoHome()) {
                 navigated = true;
                 return;
               }
               navigated = true;
-              navigate({ to: roleHome.school_admin as never });
+              goToRoleHome("school_admin");
               return;
             }
           }
