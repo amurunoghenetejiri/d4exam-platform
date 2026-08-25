@@ -1,9 +1,53 @@
-name: DISABLED restore-exam-camera-pip
+name: Restore ExamCameraPip
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/restore-exam-camera-pip.yml
 jobs:
-  noop:
+  restore:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Always pass
-        run: echo "Temporary restore workflow disabled so commit status stays green."
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore full ExamCameraPip + 200ms labels
+        run: |
+          set -euo pipefail
+          # Known-good full implementation (pre-placeholder)
+          git show 22985a959f3cb4d5fe4c4b74bee1539455e5e902:src/components/cbt/ExamCameraPip.tsx > src/components/cbt/ExamCameraPip.tsx
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/components/cbt/ExamCameraPip.tsx")
+          c = p.read_text()
+          assert "export function ExamCameraPip" in c
+          assert "PLACEHOLDER" not in c
+          # Faster face loop
+          c = c.replace("const ALERT_COOLDOWN_MS = 2500;", "const ALERT_COOLDOWN_MS = 1800;")
+          c = c.replace("if (!cancelled) timer = window.setTimeout(() => void tick(), 1800);", "if (!cancelled) timer = window.setTimeout(() => void tick(), 200);")
+          # Labels required by product
+          c = c.replace('? "Multiple faces"', '? "Multiple faces detected"')
+          c = c.replace('? "Face not seen"', '? "No face detected"')
+          c = c.replace('? "Monitoring · 1 face"', '? "1 face monitoring"')
+          c = c.replace('? "Face unclear"', '? "Detecting face"')
+          c = c.replace('faceStatus === "unclear"', 'faceStatus === "unclear" /* detecting */')
+          # starting state label path
+          if '"Detecting face"' not in c:
+              c = c.replace('"Face unclear"', '"Detecting face"')
+          p.write_text(c)
+          print("restored", p.stat().st_size, "FACE_TICK", "setTimeout(() => void tick(), 200)" in c)
+          print("labels", "1 face monitoring" in c, "No face detected" in c, "Multiple faces detected" in c, "Detecting face" in c)
+          PY
+          # Ensure immersive scroll CSS still present (do not redesign)
+          grep -q "d4-exam-immersive" src/styles.css
+          grep -q "overflow-y-auto" src/components/cbt/CbtExamSession.impl.tsx
+          echo "restore-exam-camera-pip-$(date -u +%Y%m%dT%H%M%SZ)" > DEPLOY_TRIGGER.txt
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.app
+          git add src/components/cbt/ExamCameraPip.tsx DEPLOY_TRIGGER.txt
+          git commit -m "fix(cbt): restore ExamCameraPip full source (200ms tick, correct labels)" || echo none
+          git push
