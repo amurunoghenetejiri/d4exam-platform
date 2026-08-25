@@ -1,0 +1,124 @@
+name: Surgical fix examinations pause UI
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/surgical-ex-pause.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix leftover and push bits
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("src/routes/teacher.examinations.tsx")
+          t = p.read_text()
+          # Remove leftover junk after min/sec UI if present
+          junk = re.compile(
+              r'(before continuing \(minimum 30 seconds\)\.\s*</p>\s*</div>\s*\)}\s*)'
+              r'/>\s*<p className="text-xs text-slate-500">Exact time the student must wait[\s\S]*?</div>\s*\)}',
+              re.M,
+          )
+          t2, n = junk.subn(r'\1', t, count=1)
+          if n:
+              p.write_text(t2)
+              print("removed leftover junk", n)
+          elif "Exact time the student must wait" in t:
+              # broader: delete from Exact time line through next closing )}
+              t2 = re.sub(
+                  r'\s*/>\s*<p className="text-xs text-slate-500">Exact time the student must wait[\s\S]*?</div>\s*\)}',
+                  '',
+                  t,
+                  count=1,
+              )
+              if t2 == t:
+                  raise SystemExit("could not remove Exact time leftover")
+              p.write_text(t2)
+              print("removed Exact time leftover (broad)")
+          else:
+              print("no Exact time leftover")
+
+          # Ensure Minutes UI exists
+          if "Minutes" not in p.read_text():
+              raise SystemExit("Minutes UI missing after cleanup")
+          print("examinations ok")
+
+          # patch_push_bits inline
+          p = Path("src/lib/push.ts")
+          t = p.read_text()
+          if 'state === "granted" || state === "default"' not in t:
+              start = t.find("export async function initNativePushIfNeeded")
+              comment = t.rfind("/**", 0, start)
+              end = t.find("\nexport ", start + 10)
+              if end < 0: end = len(t)
+              if comment < 0: comment = start
+              new_fn = (
+                  "/** Called from root NativeBootstrap on session - native only, never web FCM. */\n"
+                  "export async function initNativePushIfNeeded(\n"
+                  "  userId?: string | null,\n"
+                  "  role?: string | null,\n"
+                  "): Promise<void> {\n"
+                  "  if (!isNativeShell()) return;\n"
+                  "  try {\n"
+                  "    await disableWebPushInNativeShell();\n"
+                  "    const state = await refreshNativePushPermissionState();\n"
+                  "    if (!userId) return;\n"
+                  "    if (state === \"granted\" || state === \"default\") {\n"
+                  "      void enableNativePushNotifications(userId, role);\n"
+                  "    }\n"
+                  "  } catch {\n"
+                  "    /* never crash startup */\n"
+                  "  }\n"
+                  "}\n"
+              )
+              p.write_text(t[:comment] + new_fn + t[end:])
+              print("push.ts ok")
+          else:
+              print("push.ts skip")
+
+          p = Path("src/lib/push-send.functions.ts")
+          t = p.read_text()
+          if "PRIORITY_MAX" not in t:
+              old = '            sound: "default",\n            click_action: "FCM_PLUGIN_ACTIVITY",'
+              new = (
+                  '            sound: "default",\n'
+                  '            default_sound: true,\n'
+                  '            default_vibrate_timings: true,\n'
+                  '            notification_priority: "PRIORITY_MAX",\n'
+                  '            visibility: "PUBLIC",\n'
+                  '            click_action: "FCM_PLUGIN_ACTIVITY",'
+              )
+              if old not in t:
+                  raise SystemExit("fcm missing")
+              p.write_text(t.replace(old, new, 1))
+              print("fcm ok")
+          else:
+              print("fcm skip")
+
+          es = Path("src/lib/exam-security.ts")
+          et = es.read_text()
+          old_s = "    `On threshold: ${n.thresholdAction}`,"
+          new_s = '    `On threshold: ${n.thresholdAction}${n.thresholdAction === "pause" ? ` (${Math.floor((n.pauseDurationSeconds ?? 300) / 60)}m ${(n.pauseDurationSeconds ?? 300) % 60}s)` : ""}`,'
+          if old_s in et:
+              es.write_text(et.replace(old_s, new_s, 1))
+              print("summary ok")
+          else:
+              print("summary skip")
+          print("DONE")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add -A
+          git status
+          git commit -m "fix: surgical cleanup examinations pause UI; push heads-up" || echo no-changes
+          git pull --rebase origin main || true
+          git push origin main
