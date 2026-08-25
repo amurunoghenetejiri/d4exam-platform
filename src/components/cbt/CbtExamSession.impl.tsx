@@ -76,6 +76,7 @@ export function CbtExamPage() {
   const [started, setStarted] = useState(false);
   const [done, setDone] = useState(false);
   const [doneTerminated, setDoneTerminated] = useState(false);
+  const [terminationReason, setTerminationReason] = useState<string>("");
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
@@ -170,6 +171,7 @@ export function CbtExamPage() {
       shutdownMedia();
       setFsGate(false);
       setPaused(false);
+      setWarnBanner(null);
       void leaveExamFullscreen();
     }
   }, [done, shutdownMedia]);
@@ -302,6 +304,7 @@ export function CbtExamPage() {
           description: "Tab violation threshold — auto-submitted.",
           questionIndex: index,
         });
+        setTerminationReason("Your examination was automatically submitted because you exceeded the permitted number of tab violations.");
         setDoneTerminated(true);
         void finishAttempt(true);
         return;
@@ -312,6 +315,7 @@ export function CbtExamPage() {
         description: "Tab violation threshold — terminated.",
         questionIndex: index,
       });
+      setTerminationReason("Your examination was terminated because you exceeded the permitted number of tab violations.");
       setDoneTerminated(true);
       void finishAttempt(true);
     };
@@ -371,21 +375,16 @@ export function CbtExamPage() {
     const maxW = security.maxFaceWarnings ?? 5;
     const action = security.faceViolationAction || security.thresholdAction || "flag";
     if (!isViolation) return;
-    if (faceWarnCountRef.current < maxW) {
-      setWarnBanner(mapped.description || "Face integrity warning");
-      window.setTimeout(() => setWarnBanner(null), 5000);
-      return;
-    }
-    if (action === "warn" || action === "flag") {
-      setWarnBanner(mapped.description || "Face integrity threshold reached");
+    // Face issues: top banner only (no small toasts). Strong actions reserved for TAB VIOLATION.
+    setWarnBanner(mapped.description || "Face integrity warning");
+    window.setTimeout(() => setWarnBanner(null), 5000);
+    if (faceWarnCountRef.current < maxW) return;
+    if (action === "flag") {
+      setWarnBanner("Your examination has been flagged for review (face integrity).");
       window.setTimeout(() => setWarnBanner(null), 6000);
-    } else if (action === "pause") {
-      setPauseReason(mapped.description || "Face integrity violation");
-      setPaused(true);
-    } else if (action === "terminate") {
-      setDoneTerminated(true);
-      void finishAttempt(true);
     }
+    // Do not pause/terminate solely from face here — TAB VIOLATION owns those consequences.
+
   }, [previewMode, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId, id, security.maxFaceWarnings, security.faceViolationAction, security.thresholdAction]);
 
   async function requestSubmit() {
@@ -404,6 +403,7 @@ export function CbtExamPage() {
     shutdownMedia();
     setFsGate(false);
     setPaused(false);
+    setWarnBanner(null);
     void leaveExamFullscreen();
     if (previewMode) {
       toast.message("Preview ended — nothing was saved");
@@ -578,9 +578,21 @@ export function CbtExamPage() {
       <div className="grid min-h-dvh place-items-center bg-slate-50 p-4">
         <div className="w-full max-w-lg rounded-2xl border bg-white p-6 text-center shadow-sm">
           <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? session?.schoolName} size="lg" className="mx-auto" />
-          <h1 className="mt-4 text-2xl font-extrabold">{previewMode ? "Preview ended" : "Examination completed"}</h1>
+          <h1 className="mt-4 text-2xl font-extrabold">
+            {previewMode
+              ? "Preview ended"
+              : doneTerminated
+                ? (terminationReason.toLowerCase().includes("automatically submitted")
+                    ? "Examination auto-submitted"
+                    : "Examination terminated")
+                : "Examination completed"}
+          </h1>
           <p className="mt-2 text-sm text-slate-600">
-            {previewMode ? "Officer preview finished." : doneTerminated ? "Your attempt was closed." : "Your answers were submitted successfully."}
+            {previewMode
+              ? "Officer preview finished."
+              : doneTerminated
+                ? (terminationReason || "Your examination was closed due to a security rule.")
+                : "Your answers were submitted successfully."}
           </p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             {!previewMode && (<Button className="font-semibold" onClick={() => void goToResult()}>View Results</Button>)}

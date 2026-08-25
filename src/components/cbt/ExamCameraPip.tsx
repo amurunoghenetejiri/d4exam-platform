@@ -128,17 +128,7 @@ export function ExamCameraPip({
       /* ignore */
     }
 
-    const copy = ALERT_COPY[kind];
-    const opts = {
-      id: copy.toastId,
-      duration: 3200,
-      className: "cbt-exam-toast",
-    };
-    if (copy.level === "error") {
-      toast.error(copy.message, opts);
-    } else {
-      toast.warning(copy.message, opts);
-    }
+    // No small sonner toasts during CBT — parent shows the top integrity banner only.
     onSecRef.current?.({
       kind,
       faceCount,
@@ -177,10 +167,10 @@ export function ExamCameraPip({
         setCamConn("unavailable");
         setFaceStatus("unavailable");
         fireAlert("camera_blocked", null);
-        toast.error("Camera not available. Please allow camera access to continue the exam.", {
-          id: "cbt-cam-permission",
-          duration: 5000,
-          className: "cbt-exam-toast",
+        onSecRef.current?.({
+          kind: "camera_blocked",
+          faceCount: null,
+          at: new Date().toISOString(),
         });
       } finally {
         acquiringRef.current = false;

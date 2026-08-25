@@ -586,19 +586,41 @@ function Page() {
               <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
                 <Label className="font-semibold">Maximum face warnings</Label>
                 <Input type="number" min={1} max={50} value={security.maxFaceWarnings ?? 5} disabled={!security.faceDetection} onChange={(e) => toggleSec("maxFaceWarnings", Number(e.target.value) || 5)} />
+                <p className="text-xs text-slate-500">Face monitoring only warns the student (top banner). Strong consequences use TAB VIOLATION below.</p>
+              </div>
+              <p className="pt-2 text-xs font-bold uppercase tracking-wide text-slate-500">TAB VIOLATION</p>
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">TAB VIOLATION limit</Label>
+                <Input type="number" min={1} max={20} value={security.maxTabSwitches} disabled={!security.tabMonitoring} onChange={(e) => toggleSec("maxTabSwitches", Number(e.target.value) || 5)} />
+                <p className="text-xs text-slate-500">Before the limit: warning / flag only. At the limit: the consequence below.</p>
               </div>
               <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
-                <Label className="font-semibold">Action after repeated face violations</Label>
-                <Select value={security.faceViolationAction || "flag"} onValueChange={(v) => toggleSec("faceViolationAction", v as FaceViolationAction)}>
+                <Label className="font-semibold">TAB VIOLATION consequence (at limit)</Label>
+                <Select value={security.thresholdAction || "flag"} onValueChange={(v) => toggleSec("thresholdAction", v as ExamSecuritySettings["thresholdAction"])}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="warn">Warning only</SelectItem>
                     <SelectItem value="flag">Flag for review</SelectItem>
                     <SelectItem value="pause">Pause exam</SelectItem>
+                    <SelectItem value="auto_submit">Auto-submit exam</SelectItem>
                     <SelectItem value="terminate">Terminate exam</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              {security.thresholdAction === "pause" && (
+                <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                  <Label className="font-semibold">Pause duration (seconds)</Label>
+                  <Input
+                    type="number"
+                    min={30}
+                    max={3600}
+                    step={30}
+                    value={security.pauseDurationSeconds ?? 300}
+                    onChange={(e) => toggleSec("pauseDurationSeconds", Math.max(30, Number(e.target.value) || 300))}
+                  />
+                  <p className="text-xs text-slate-500">Exact time the student must wait (e.g. 300 = 5 minutes).</p>
+                </div>
+              )}
               <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
                 <Label className="font-semibold">Screen sharing</Label>
                 <p className="text-xs text-slate-500">Required blocks mobile/unsupported browsers. Optional allows continue without share.</p>
