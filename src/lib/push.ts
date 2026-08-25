@@ -475,7 +475,7 @@ export async function refreshPushLastSeen(userId: string): Promise<void> {
   }
 }
 
-/** Called from AppShell on session — native only, never web FCM. */
+/** Called from root NativeBootstrap on session - native only, never web FCM. */
 export async function initNativePushIfNeeded(
   userId?: string | null,
   role?: string | null,
@@ -483,8 +483,9 @@ export async function initNativePushIfNeeded(
   if (!isNativeShell()) return;
   try {
     await disableWebPushInNativeShell();
-    await refreshNativePushPermissionState();
-    if (userId && nativePermissionCache === "granted") {
+    const state = await refreshNativePushPermissionState();
+    if (!userId) return;
+    if (state === "granted" || state === "default") {
       void enableNativePushNotifications(userId, role);
     }
   } catch {

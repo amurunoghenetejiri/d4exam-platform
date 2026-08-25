@@ -608,15 +608,49 @@ function Page() {
                 </Select>
               </div>
               {security.thresholdAction === "pause" && (
-                <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
-                  <Label className="font-semibold">Pause duration (seconds)</Label>
-                  <Input
-                    type="number"
-                    min={30}
-                    max={3600}
-                    step={30}
-                    value={security.pauseDurationSeconds ?? 300}
-                    onChange={(e) => toggleSec("pauseDurationSeconds", Math.max(30, Number(e.target.value) || 300))}
+      <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+        <Label className="font-semibold">Pause duration</Label>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-slate-500">Minutes</p>
+            <Input
+              type="number"
+              min={0}
+              max={60}
+              value={Math.floor((security.pauseDurationSeconds ?? 300) / 60)}
+              onChange={(e) => {
+                const mins = Math.max(0, Math.min(60, Number(e.target.value) || 0));
+                const secs = (security.pauseDurationSeconds ?? 300) % 60;
+                toggleSec("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
+              }}
+            />
+          </div>
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-slate-500">Seconds</p>
+            <Input
+              type="number"
+              min={0}
+              max={59}
+              step={5}
+              value={(security.pauseDurationSeconds ?? 300) % 60}
+              onChange={(e) => {
+                const secs = Math.max(0, Math.min(59, Number(e.target.value) || 0));
+                const mins = Math.floor((security.pauseDurationSeconds ?? 300) / 60);
+                toggleSec("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
+              }}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-slate-500">
+          Student must wait{" "}
+          <strong>
+            {Math.floor((security.pauseDurationSeconds ?? 300) / 60)} min{" "}
+            {(security.pauseDurationSeconds ?? 300) % 60} sec
+          </strong>{" "}
+          before continuing (minimum 30 seconds).
+        </p>
+      </div>
+    )}
                   />
                   <p className="text-xs text-slate-500">Exact time the student must wait (e.g. 300 = 5 minutes).</p>
                 </div>

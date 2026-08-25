@@ -283,7 +283,7 @@ export function securitySummaryLines(s: ExamSecuritySettings): string[] {
   return [
     `Fullscreen lockdown: ${n.fullscreen ? "On" : "Off"}`,
     `Tab monitoring: ${n.tabMonitoring ? `On (max ${n.maxTabSwitches})` : "Off"}`,
-    `On threshold: ${n.thresholdAction}`,
+    `On threshold: ${n.thresholdAction}${n.thresholdAction === "pause" ? ` (${Math.floor((n.pauseDurationSeconds ?? 300) / 60)}m ${(n.pauseDurationSeconds ?? 300) % 60}s)` : ""}`,
     `Block copy/paste: ${n.blockCopyPaste ? "On" : "Off"}`,
     `Randomise questions: ${n.randomizeQuestions ? "On" : "Off"}`,
     `Randomise options: ${n.randomizeOptions ? "On" : "Off"}`,

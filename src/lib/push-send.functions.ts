@@ -142,6 +142,10 @@ async function sendFcmV1(
           notification: {
             channel_id: "d4exam_default",
             sound: "default",
+            default_sound: true,
+            default_vibrate_timings: true,
+            notification_priority: "PRIORITY_MAX",
+            visibility: "PUBLIC",
             click_action: "FCM_PLUGIN_ACTIVITY",
           },
         },
