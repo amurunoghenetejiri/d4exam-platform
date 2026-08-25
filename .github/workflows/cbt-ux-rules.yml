@@ -1,0 +1,24 @@
+name: CBT UX rules patch
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/cbt_ux_rules_patch.py
+      - .github/workflows/cbt-ux-rules.yml
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run patch
+        run: python3 scripts/cbt_ux_rules_patch.py
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.app
+          git add -A
+          git commit -m "fix(cbt): TAB VIOLATION on exam create, top banners only, clear terminate/auto-submit, post-exam cleanup" || echo none
+          git pull --rebase origin main || true
+          git push
