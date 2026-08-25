@@ -101,7 +101,10 @@ export interface ExamSecuritySettings {
   faceDetection: boolean;
   maxFaceWarnings: number;
   faceViolationAction: FaceViolationAction;
-  thresholdAction: "flag" | "terminate" | "warn";
+  /** Tab-violation consequence when max tab switches is reached */
+  thresholdAction: "flag" | "terminate" | "warn" | "pause" | "auto_submit";
+  /** Pause duration in seconds when thresholdAction is pause (default 300 = 5 min) */
+  pauseDurationSeconds?: number;
   resultVisibility: ResultVisibility;
   questionsToAnswer?: number | null;
 }
