@@ -1,1 +1,1 @@
-redeploy 20260824-v2.5.2-face500ms-native-push
+redeploy 20260825-login-face-livecam
