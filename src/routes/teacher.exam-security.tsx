@@ -128,51 +128,47 @@ function Page() {
               </Select>
             </div>
             {settings.thresholdAction === "pause" && (
-    <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
-      <Label className="font-semibold">Pause duration</Label>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-slate-500">Minutes</p>
-          <Input
-            type="number"
-            min={0}
-            max={60}
-            value={Math.floor((settings.pauseDurationSeconds ?? 300) / 60)}
-            onChange={(e) => {
-              const mins = Math.max(0, Math.min(60, Number(e.target.value) || 0));
-              const secs = (settings.pauseDurationSeconds ?? 300) % 60;
-              toggle("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
-            }}
-          />
-        </div>
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-slate-500">Seconds</p>
-          <Input
-            type="number"
-            min={0}
-            max={59}
-            step={5}
-            value={(settings.pauseDurationSeconds ?? 300) % 60}
-            onChange={(e) => {
-              const secs = Math.max(0, Math.min(59, Number(e.target.value) || 0));
-              const mins = Math.floor((settings.pauseDurationSeconds ?? 300) / 60);
-              toggle("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
-            }}
-          />
-        </div>
-      </div>
-      <p className="text-xs text-slate-500">
-        Student must wait{" "}
-        <strong>
-          {Math.floor((settings.pauseDurationSeconds ?? 300) / 60)} min{" "}
-          {(settings.pauseDurationSeconds ?? 300) % 60} sec
-        </strong>{" "}
-        before continuing (minimum 30 seconds).
-      </p>
-    </div>
-  )}
-                />
-                <p className="text-xs text-slate-500">Examples: 30, 60, 300 (5 min), 600 (10 min)</p>
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">Pause duration</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-500">Minutes</p>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={60}
+                      value={Math.floor((settings.pauseDurationSeconds ?? 300) / 60)}
+                      onChange={(e) => {
+                        const mins = Math.max(0, Math.min(60, Number(e.target.value) || 0));
+                        const secs = (settings.pauseDurationSeconds ?? 300) % 60;
+                        toggle("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-500">Seconds</p>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={59}
+                      step={5}
+                      value={(settings.pauseDurationSeconds ?? 300) % 60}
+                      onChange={(e) => {
+                        const secs = Math.max(0, Math.min(59, Number(e.target.value) || 0));
+                        const mins = Math.floor((settings.pauseDurationSeconds ?? 300) / 60);
+                        toggle("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
+                      }}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Student must wait{" "}
+                  <strong>
+                    {Math.floor((settings.pauseDurationSeconds ?? 300) / 60)} min{" "}
+                    {(settings.pauseDurationSeconds ?? 300) % 60} sec
+                  </strong>{" "}
+                  before continuing (minimum 30 seconds).
+                </p>
               </div>
             )}
             <Toggle
