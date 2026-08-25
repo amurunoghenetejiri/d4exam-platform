@@ -513,7 +513,7 @@ export function ExamCameraPip({
           camConn === "unavailable" && "bg-red-700",
           camConn === "active" && faceStatus === "multi" && "bg-red-600",
           camConn === "active" && faceStatus === "none" && "bg-amber-600",
-          camConn === "active" && faceStatus === "unclear" /* detecting */ && "bg-amber-500",
+          camConn === "active" && faceStatus === "unclear" && "bg-amber-500",
           camConn === "active" && faceStatus === "ok" && "bg-emerald-600",
           camConn === "active" && faceStatus === "unavailable" && "bg-red-700",
         )}
