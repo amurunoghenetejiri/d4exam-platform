@@ -22,9 +22,9 @@ function isStandaloneDisplay(): boolean {
  * - Chrome "Install app" dialog via beforeinstallprompt
  * - Browser notification permission dialog (not on Capacitor Android)
  *
- * Capacitor Android: never auto-request notifications here.
- * That path called PushNotifications.register() and crashed the app when FCM
- * was not packaged. Users enable push from Settings instead.
+ * Capacitor Android: request native push permission shortly after login so
+ * every in-app notification can also arrive as a heads-up system notification.
+ * Uses Capacitor PushNotifications only (never Firebase messaging SW in APK).
  */
 export function InstallAndPushPrompt() {
   const { data: session } = useSessionUser();
@@ -82,24 +82,23 @@ export function InstallAndPushPrompt() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    // CRITICAL: never auto-enable push inside the Android Capacitor app.
-    // Auto requestPermission + register was crashing the process after Allow.
-    if (isNativeShell()) return;
     if (!session?.userId) return;
     if (pushTried.current) return;
 
-    const perm = getPushPermissionState();
-    if (perm === "granted" || perm === "unsupported") return;
-    if (perm === "denied") return;
-
+    // Prompt immediately after login (any role) so D4EXAM can show heads-up
+    // push for in-app notifications. Safe on native: enablePushNotifications
+    // uses Capacitor PushNotifications only (no Firebase SW in the APK).
     pushTried.current = true;
+    const delay = isNativeShell() ? 800 : 1200;
     const t = window.setTimeout(() => {
       void enablePushNotifications(session.userId, session.role).then((r) => {
-        if (!r.ok && getPushPermissionState() === "default") {
-          pushTried.current = false;
+        // Allow one retry if user dismissed the system dialog without choosing.
+        if (!r.ok) {
+          const st = getPushPermissionState();
+          if (st === "default") pushTried.current = false;
         }
       });
-    }, 1200);
+    }, delay);
 
     return () => window.clearTimeout(t);
   }, [session?.userId, session?.role]);
