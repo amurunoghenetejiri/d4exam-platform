@@ -33,7 +33,7 @@ export const Route = createFileRoute("/login")({
     try {
       const user = await Promise.race([
         fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_000)),
       ]);
       if (user?.role && user.role in roleHome) {
         throw redirect({ to: roleHome[user.role] as never });
@@ -121,10 +121,10 @@ function LoginPage() {
   const inFlight = useRef(false);
 
   async function goHomeAfterSession() {
-    const deadline = Date.now() + 12_000;
+    const deadline = Date.now() + 4_000;
     let user = await fetchSessionUser().catch(() => null);
-    for (let i = 0; i < 6 && !user?.role && Date.now() < deadline; i++) {
-      await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+    for (let i = 0; i < 3 && !user?.role && Date.now() < deadline; i++) {
+      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
       user = await fetchSessionUser().catch(() => null);
     }
     if (user?.role && user.role in roleHome) {
@@ -174,7 +174,7 @@ function LoginPage() {
       setLoading(false);
       inFlight.current = false;
       setError("Login is taking longer than expected. Check your connection and try again.");
-    }, 28_000);
+    }, 15_000);
     try {
       const schoolCode = code.trim().toUpperCase();
       const ident = identifier.trim();
@@ -182,13 +182,16 @@ function LoginPage() {
       const looksEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ident);
 
       try {
-        const result = await loginFn({
-          data: {
-            schoolCode: schoolCode || "",
-            identifier: ident,
-            password: pass,
-          },
-        });
+        const result = await Promise.race([
+          loginFn({
+            data: {
+              schoolCode: schoolCode || "",
+              identifier: ident,
+              password: pass,
+            },
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+        ]);
         if (result && "session" in result && result.session?.access_token) {
           const { error: sessErr } = await supabase.auth.setSession({
             access_token: result.session.access_token,
@@ -247,13 +250,16 @@ function LoginPage() {
 
       if (looksEmail) {
         try {
-          const fixed = await ensureLoginFn({
-            data: {
-              email: ident.toLowerCase(),
-              password: pass,
-              schoolCode: schoolCode || null,
-            },
-          });
+          const fixed = await Promise.race([
+            ensureLoginFn({
+              data: {
+                email: ident.toLowerCase(),
+                password: pass,
+                schoolCode: schoolCode || null,
+              },
+            }),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+          ]);
           if (fixed && "ok" in fixed && fixed.ok) {
             const { data: again, error: againErr } = await supabase.auth.signInWithPassword({
               email: ident.toLowerCase(),
@@ -287,7 +293,6 @@ function LoginPage() {
       setError(friendlyLoginError(err));
     } finally {
       window.clearTimeout(loginTimeout);
-      // Stay in loading state after successful navigate so the button cannot be re-pressed
       if (!navigated) {
         setLoading(false);
         inFlight.current = false;
