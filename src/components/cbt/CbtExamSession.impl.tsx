@@ -174,6 +174,16 @@ export function CbtExamPage() {
     }
   }, [done, shutdownMedia]);
 
+  // Re-assert immersive chrome while the exam is active.
+  useEffect(() => {
+    if (!started || done) return;
+    void enterExamImmersive();
+    const t = window.setInterval(() => {
+      void enterExamImmersive();
+    }, 8000);
+    return () => window.clearInterval(t);
+  }, [started, done]);
+
   useEffect(() => () => {
     stopMediaStream(mediaStreamRef.current);
     mediaStreamRef.current = null;
@@ -415,9 +425,13 @@ export function CbtExamPage() {
           return;
         }
       }
-      if (security.fullscreen) {
+      // Always immersive during active CBT: hide phone status + system chrome.
+      {
         const ok = await requestExamFullscreen();
-        if (!ok) { toast.message("Please allow fullscreen to continue the exam"); setFsGate(true); }
+        if (security.fullscreen && !ok) {
+          toast.message("Please allow fullscreen to continue the exam");
+          setFsGate(true);
+        }
       }
       if (!previewMode && student?.studentId && examQ.data?.school_id) {
         const { data: existingFull } = await supabase
@@ -546,14 +560,14 @@ export function CbtExamPage() {
   const mm = String(Math.floor((seconds ?? 0) / 60)).padStart(2, "0");
   const ss = String((seconds ?? 0) % 60).padStart(2, "0");
   return (
-    <div className="flex min-h-dvh flex-col bg-slate-50 select-none">
+    <div className="d4-cbt-exam fixed inset-0 z-[100] flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden bg-slate-50 select-none">
       {previewMode && (
-        <div className="bg-amber-500 px-3 py-1.5 text-center text-xs font-bold text-white">
+        <div className="shrink-0 bg-amber-500 px-3 py-1.5 text-center text-xs font-bold text-white">
           OFFICER PREVIEW — answers are not saved
         </div>
       )}
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-slate-200 bg-[#0b1b3a] text-white">
-        <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-3 px-3 sm:px-6">
+      <header className="d4-cbt-header relative z-40 shrink-0 border-b border-slate-200 bg-[#0b1b3a] text-white">
+        <div className="mx-auto flex h-14 max-w-[1200px] items-center justify-between gap-3 px-3 sm:h-16 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? student?.schoolName ?? session?.schoolName} size="md" className="bg-transparent" />
             <p className="hidden truncate text-sm font-bold sm:block">{(exam as { courses?: { code?: string } }).courses?.code ?? "EXAM"} — {exam.title}</p>
@@ -564,7 +578,8 @@ export function CbtExamPage() {
           </div>
         </div>
       </header>
-      <div className="mx-auto grid w-full max-w-[1200px] flex-1 grid-cols-1 gap-4 p-3 pt-[calc(4rem+0.75rem)] sm:p-6 sm:pt-[calc(4rem+1.5rem)] lg:grid-cols-[220px_1fr]">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
+      <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-4 p-3 pb-8 sm:p-6 lg:grid-cols-[220px_1fr]">
         <aside className="order-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:order-1">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Questions</p>
           <div className="mt-3 grid grid-cols-5 gap-2">
@@ -626,6 +641,7 @@ export function CbtExamPage() {
           </div>
         </section>
       </div>
+      </div>
       {started && !done && security.requireCamera && (
         <ExamCameraPip
           enabled={started && !done}
@@ -637,7 +653,7 @@ export function CbtExamPage() {
         />
       )}
       {warnBanner && started && !done && (
-        <div className="fixed inset-x-0 top-16 z-[150] flex justify-center px-3 pointer-events-none">
+        <div className="fixed inset-x-0 top-14 z-[150] flex justify-center px-3 pointer-events-none sm:top-16">
           <div className="max-w-md rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-center text-sm font-semibold text-amber-900 shadow-lg">
             Exam Integrity Warning — {warnBanner}
           </div>
