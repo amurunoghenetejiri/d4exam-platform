@@ -31,20 +31,24 @@ export async function applyNativeStatusBar(): Promise<void> {
 
 /** Hide system chrome during a locked CBT session (status bar + best-effort nav). */
 export async function enterExamImmersive(): Promise<void> {
-  if (!isNativeShell()) return;
+  // Always apply CSS so web + native share the same full-screen layout contract.
   setImmersiveCss(true);
-  try {
-    const { StatusBar } = await import("@capacitor/status-bar");
+
+  if (isNativeShell()) {
     try {
-      await StatusBar.setOverlaysWebView({ overlay: true });
-    } catch {
-      /* older plugin */
+      const { StatusBar } = await import("@capacitor/status-bar");
+      try {
+        await StatusBar.setOverlaysWebView({ overlay: true });
+      } catch {
+        /* older plugin */
+      }
+      await StatusBar.hide();
+    } catch (e) {
+      console.warn("[D4EXAM] enterExamImmersive StatusBar", e);
     }
-    await StatusBar.hide();
-  } catch (e) {
-    console.warn("[D4EXAM] enterExamImmersive", e);
   }
-  // Best-effort browser fullscreen (covers more system UI on some devices)
+
+  // Browser / WebView fullscreen (also helps hide Android nav bar when allowed)
   try {
     const el = document.documentElement as HTMLElement & {
       requestFullscreen?: () => Promise<void>;
@@ -55,19 +59,19 @@ export async function enterExamImmersive(): Promise<void> {
       else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
     }
   } catch {
-    /* blocked */
+    /* blocked by policy */
   }
 }
 
 /** Restore normal status bar after exam ends or is left. */
 export async function exitExamImmersive(): Promise<void> {
-  if (!isNativeShell()) return;
   setImmersiveCss(false);
   try {
     if (document.fullscreenElement) await document.exitFullscreen?.();
   } catch {
     /* ignore */
   }
+  if (!isNativeShell()) return;
   try {
     const { StatusBar, Style } = await import("@capacitor/status-bar");
     try {
