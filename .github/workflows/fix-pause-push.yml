@@ -11,17 +11,209 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Apply files
+        with:
+          fetch-depth: 10
+      - name: Restore PLACEHOLDER and apply patches
         run: |
-          set -e
-          python3 scripts/apply_part0.py
-          python3 scripts/apply_part1.py
+          set -euo pipefail
+          # Restore corrupted exam-security if needed
+          if grep -qx 'PLACEHOLDER' src/routes/teacher.exam-security.tsx 2>/dev/null; then
+            git show 633e45c:src/routes/teacher.exam-security.tsx > src/routes/teacher.exam-security.tsx
+            echo restored exam-security from 633e45c
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              t = p.read_text()
+              if old not in t:
+                  if 'Minutes' in t and path.endswith('exam-security.tsx'):
+                      print(path, 'already has Minutes UI')
+                      return
+                  if 'Minutes' in t and 'examinations' in path:
+                      print(path, 'already has Minutes UI')
+                      return
+                  raise SystemExit(f'missing pattern in {path}')
+              p.write_text(t.replace(old, new, 1))
+              print('patched', path)
+
+          old_exam = '''              {security.thresholdAction === "pause" && (
+                <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                  <Label className="font-semibold">Pause duration (seconds)</Label>
+                  <Input
+                    type="number"
+                    min={30}
+                    max={3600}
+                    step={30}
+                    value={security.pauseDurationSeconds ?? 300}
+                    onChange={(e) => toggleSec("pauseDurationSeconds", Math.max(30, Number(e.target.value) || 300))}
+                  />
+                  <p className="text-xs text-slate-500">Exact time the student must wait (e.g. 300 = 5 minutes).</p>
+                </div>
+              )}'''
+
+          new_exam = '''              {security.thresholdAction === "pause" && (
+                <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                  <Label className="font-semibold">Pause duration</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-slate-500">Minutes</p>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={60}
+                        value={Math.floor((security.pauseDurationSeconds ?? 300) / 60)}
+                        onChange={(e) => {
+                          const mins = Math.max(0, Math.min(60, Number(e.target.value) || 0));
+                          const secs = (security.pauseDurationSeconds ?? 300) % 60;
+                          toggleSec("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-slate-500">Seconds</p>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={59}
+                        step={5}
+                        value={(security.pauseDurationSeconds ?? 300) % 60}
+                        onChange={(e) => {
+                          const secs = Math.max(0, Math.min(59, Number(e.target.value) || 0));
+                          const mins = Math.floor((security.pauseDurationSeconds ?? 300) / 60);
+                          toggleSec("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Student must wait{" "}
+                    <strong>
+                      {Math.floor((security.pauseDurationSeconds ?? 300) / 60)} min{" "}
+                      {(security.pauseDurationSeconds ?? 300) % 60} sec
+                    </strong>{" "}
+                    before continuing (minimum 30 seconds).
+                  </p>
+                </div>
+              )}'''
+
+          old_sec = '''            {settings.thresholdAction === "pause" && (
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">Pause duration (seconds)</Label>
+                <Input
+                  type="number"
+                  min={30}
+                  max={3600}
+                  step={30}
+                  value={settings.pauseDurationSeconds ?? 300}
+                  onChange={(e) => toggle("pauseDurationSeconds", Math.max(30, Number(e.target.value) || 300))}
+                />
+                <p className="text-xs text-slate-500">Examples: 30, 60, 300 (5 min), 600 (10 min)</p>
+              </div>
+            )}'''
+
+          new_sec = '''            {settings.thresholdAction === "pause" && (
+              <div className="space-y-2 rounded-xl border border-slate-200 px-4 py-3">
+                <Label className="font-semibold">Pause duration</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-500">Minutes</p>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={60}
+                      value={Math.floor((settings.pauseDurationSeconds ?? 300) / 60)}
+                      onChange={(e) => {
+                        const mins = Math.max(0, Math.min(60, Number(e.target.value) || 0));
+                        const secs = (settings.pauseDurationSeconds ?? 300) % 60;
+                        toggle("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-slate-500">Seconds</p>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={59}
+                      step={5}
+                      value={(settings.pauseDurationSeconds ?? 300) % 60}
+                      onChange={(e) => {
+                        const secs = Math.max(0, Math.min(59, Number(e.target.value) || 0));
+                        const mins = Math.floor((settings.pauseDurationSeconds ?? 300) / 60);
+                        toggle("pauseDurationSeconds", Math.max(30, mins * 60 + secs));
+                      }}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Student must wait{" "}
+                  <strong>
+                    {Math.floor((settings.pauseDurationSeconds ?? 300) / 60)} min{" "}
+                    {(settings.pauseDurationSeconds ?? 300) % 60} sec
+                  </strong>{" "}
+                  before continuing (minimum 30 seconds).
+                </p>
+              </div>
+            )}'''
+
+          replace_once('src/routes/teacher.examinations.tsx', old_exam, new_exam)
+          replace_once('src/routes/teacher.exam-security.tsx', old_sec, new_sec)
+
+          es = Path('src/lib/exam-security.ts')
+          et = es.read_text()
+          old_s = '    `On threshold: ${n.thresholdAction}`,'
+          new_s = '    `On threshold: ${n.thresholdAction}${n.thresholdAction === "pause" ? ` (${Math.floor((n.pauseDurationSeconds ?? 300) / 60)}m ${(n.pauseDurationSeconds ?? 300) % 60}s)` : ""}`,'
+          if old_s in et:
+              es.write_text(et.replace(old_s, new_s, 1))
+              print('summary patched')
+          elif 'pauseDurationSeconds ?? 300) / 60' in et:
+              print('summary already')
+          else:
+              raise SystemExit('summary missing')
+
+          # push.ts initNativePushIfNeeded
+          p = Path('src/lib/push.ts')
+          t = p.read_text()
+          if 'state === "granted" || state === "default"' in t:
+              print('push.ts already')
+          else:
+              start = t.find('export async function initNativePushIfNeeded')
+              if start < 0:
+                  raise SystemExit('initNativePushIfNeeded missing')
+              comment = t.rfind('/**', 0, start)
+              if comment < 0:
+                  comment = start
+              end = t.find('\nexport ', start + 10)
+              if end < 0:
+                  end = len(t)
+              new_fn = '''/** Called from root NativeBootstrap on session - native only, never web FCM. */\nexport async function initNativePushIfNeeded(\n  userId?: string | null,\n  role?: string | null,\n): Promise<void> {\n  if (!isNativeShell()) return;\n  try {\n    await disableWebPushInNativeShell();\n    const state = await refreshNativePushPermissionState();\n    if (!userId) return;\n    if (state === "granted" || state === "default") {\n      void enableNativePushNotifications(userId, role);\n    }\n  } catch {\n    /* never crash startup */\n  }\n}\n'''
+              p.write_text(t[:comment] + new_fn + t[end:])
+              print('push.ts patched')
+
+          # FCM heads-up
+          p = Path('src/lib/push-send.functions.ts')
+          t = p.read_text()
+          if 'PRIORITY_MAX' in t:
+              print('push-send already')
+          else:
+              old = '''        android: {\n          priority: "HIGH",\n          notification: {\n            channel_id: "d4exam_default",\n            sound: "default",\n            click_action: "FCM_PLUGIN_ACTIVITY",\n          },\n        },'''
+              new = '''        android: {\n          priority: "HIGH",\n          notification: {\n            channel_id: "d4exam_default",\n            sound: "default",\n            default_sound: true,\n            default_vibrate_timings: true,\n            notification_priority: "PRIORITY_MAX",\n            visibility: "PUBLIC",\n            click_action: "FCM_PLUGIN_ACTIVITY",\n          },\n        },'''
+              if old not in t:
+                  raise SystemExit('fcm block missing')
+              p.write_text(t.replace(old, new, 1))
+              print('push-send patched')
+
+          print('ALL OK')
+          PY
       - name: Commit
         run: |
           git config user.name "d4exam-bot"
           git config user.email "bot@d4exam.local"
           git add -A
+          git status
           git diff --cached --stat
-          git commit -m "fix: pause duration as minutes+seconds; prompt push permission on login for heads-up" || echo no-changes
+          git commit -m "fix: pause duration as minutes+seconds; push heads-up priority; native permission on login" || echo no-changes
           git pull --rebase origin main || true
           git push origin main
