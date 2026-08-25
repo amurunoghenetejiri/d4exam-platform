@@ -46,6 +46,7 @@ export type AccountStatus =
   | "locked";
 
 export type FaceViolationAction = "warn" | "flag" | "pause" | "terminate";
+export type TabViolationAction = "warn" | "flag" | "pause" | "terminate" | "auto_submit";
 
 /** Screen sharing policy for an examination */
 export type ScreenShareMode = "optional" | "required" | "disabled";
@@ -102,9 +103,9 @@ export interface ExamSecuritySettings {
   maxFaceWarnings: number;
   faceViolationAction: FaceViolationAction;
   /** Tab-violation consequence when max tab switches is reached */
-  thresholdAction: "flag" | "terminate" | "warn" | "pause" | "auto_submit";
-  /** Pause duration in seconds when thresholdAction is pause (default 300 = 5 min) */
-  pauseDurationSeconds?: number;
+  thresholdAction: TabViolationAction;
+  /** Pause duration in seconds when thresholdAction is pause */
+  pauseDurationSeconds: number;
   resultVisibility: ResultVisibility;
   questionsToAnswer?: number | null;
 }
