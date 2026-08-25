@@ -3,7 +3,7 @@
  * Returns face COUNT only — no frames uploaded.
  *
  * Mobile: prefer native FaceDetector so counting starts in <1s.
- * MediaPipe loads in parallel and upgrades the engine when ready.
+ * MediaPipe loads in background only (never blocks first detection).
  */
 
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
@@ -220,62 +220,20 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   });
 }
 
-function makeHybrid(primary: FaceEngine, secondary: FaceEngine | null): FaceEngine {
-  if (!secondary) return primary;
-  let nullStreak = 0;
-  return {
-    backend: "hybrid",
-    count: async (video) => {
-      const a = await primary.count(video);
-      if (a != null) {
-        nullStreak = 0;
-        return a;
-      }
-      nullStreak += 1;
-      if (nullStreak >= 1) {
-        const b = await secondary.count(video);
-        if (b != null) {
-          nullStreak = 0;
-          return b;
-        }
-      }
-      return null;
-    },
-    close: () => {
-      try {
-        primary.close();
-      } catch {
-        /* ignore */
-      }
-      try {
-        secondary.close();
-      } catch {
-        /* ignore */
-      }
-    },
-  };
-}
-
 /**
  * Create face engine ASAP:
- * 1) Native FaceDetector if available (instant on Chrome/Android)
- * 2) MediaPipe in parallel; when ready, prefer hybrid/MP for accuracy
+ * 1) Native FaceDetector if available (instant)
+ * 2) MediaPipe only if native is missing
  */
 export async function createFaceEngine(): Promise<FaceEngine | null> {
   const native = createNative();
-  // Return native immediately if present — do not block exam on CDN model download
   if (native) {
     void withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS).then((mp) => {
-      /* MediaPipe available for future sessions; current hybrid is built if both ready at once */
       void mp;
     });
-    // Still try to attach MediaPipe within a short window for better multi-face accuracy
-    const mpQuick = await withTimeout(createMediapipe(), 2_500);
-    if (mpQuick) return makeHybrid(native, mpQuick);
     return native;
   }
-  const mp = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
-  return mp;
+  return withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
 }
 
 /** Warm MediaPipe model during device check / pre-exam (optional). */
