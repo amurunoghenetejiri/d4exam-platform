@@ -1,0 +1,35 @@
+name: PATCH-EXAM-GATE-ONLY
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/PATCH-EXAM-GATE-ONLY.yml
+      - scripts/patch_exam_permissions.py
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch ExamSecurityGate only (no workflow file changes)
+        run: |
+          set -e
+          python3 scripts/patch_exam_permissions.py
+          test -f src/components/cbt/ExamSecurityGate.tsx
+          grep -q 'export function ExamSecurityGate' src/components/cbt/ExamSecurityGate.tsx
+          grep -q 'Allow camera, mic' src/components/cbt/ExamSecurityGate.tsx
+          grep -q 'requestExamMediaPermissions' src/components/cbt/ExamSecurityGate.tsx
+      - name: Commit only app source
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          # IMPORTANT: do not add .github/workflows — GitHub App cannot update workflows without workflows permission
+          git add src/components/cbt/ExamSecurityGate.tsx
+          if git diff --cached --quiet; then
+            echo No changes to ExamSecurityGate
+          else
+            git commit -m "fix(cbt): exam Allow camera/mic/screen permission UI"
+            git push
+          fi

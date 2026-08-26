@@ -1,5 +1,5 @@
+"""Patch ExamSecurityGate for media permission prompts. Do NOT touch .github/workflows."""
 from pathlib import Path
-import re
 
 g = Path("src/components/cbt/ExamSecurityGate.tsx")
 t = g.read_text()
@@ -92,6 +92,15 @@ if old in t:
 else:
     print("startPreview pattern missing or done")
 
+# Always request camera when required (do not skip if caps.camera is false)
+t2 = t.replace(
+    'if (needCam && caps.camera && previewState === "idle") void startPreview();',
+    'if (needCam && previewState === "idle") void startPreview();',
+)
+if t2 != t:
+    print("always-request camera effect updated")
+    t = t2
+
 if "Allow camera, mic & screen" not in t:
     marker = "        {totalQuestions === 0 ? ("
     panel = '''        {(needCam || needMic || shareMode !== "disabled") && (
@@ -121,19 +130,3 @@ if "Allow camera, mic & screen" not in t:
 
 g.write_text(t)
 print("gate final", len(t), "Allow camera" in t, "requestExamMediaPermissions" in t)
-
-keep = {"ci-status.yml", "build-android.yml", "APPLY-PERMS-AND-CI.yml", "RESTORE-GATE-NOW.yml", "RUN-PATCH-EXAM-PERMS.yml"}
-n = 0
-for f in Path(".github/workflows").glob("*.yml"):
-    if f.name in keep:
-        continue
-    tt = f.read_text()
-    if "push:" not in tt:
-        continue
-    m = re.search(r"\non:\n", tt)
-    m2 = re.search(r"\njobs:", tt)
-    if not m or not m2:
-        continue
-    f.write_text(tt[: m.start() + 1] + "on:\n  workflow_dispatch:\n" + tt[m2.start() :])
-    n += 1
-print("silenced", n)
