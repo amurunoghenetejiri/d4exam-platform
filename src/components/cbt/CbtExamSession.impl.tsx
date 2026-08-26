@@ -757,7 +757,7 @@ export function CbtExamPage() {
     void navigate({ to: "/student/results/$id", params: { id: targetId || id } });
   }
 
-  if (examQ.isLoading || (examQ.isFetching && !examQ.data)) {
+  if (examQ.isLoading && !examQ.data) {
     return (
       <div className="grid min-h-dvh place-items-center">
         <p className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading examination…</p>
