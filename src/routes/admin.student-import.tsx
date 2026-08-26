@@ -6,7 +6,7 @@ import { PageHeader, SectionCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createSchoolUser, importStudents } from "@/lib/auth.school-admin.functions";
+import { createSchoolUser, importStudents } from "@/lib/import-students";
 import { useSessionUser } from "@/lib/session";
 import { toast } from "sonner";
 import { Loader2, Upload, Download } from "lucide-react";
