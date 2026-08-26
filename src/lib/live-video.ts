@@ -284,3 +284,17 @@ export function isLiveCamFrameFresh(ts: number | null | undefined, now = Date.no
   if (ts == null) return false;
   return now - ts <= LIVE_CAM_STALE_MS;
 }
+
+export const LIVE_SCREEN_EVENT = "screen-frame";
+export const LIVE_SCREEN_FRAME_INTERVAL_MS = 900;
+export type LiveScreenFramePayload = { attemptId: string; studentId: string; examId: string; frame: string; ts: number; screenActive?: boolean };
+export function liveScreenChannelName(schoolId: string): string { return `live-screen:${schoolId}`; }
+export type LiveScreenPublisher = { stop: () => void };
+export function startLiveScreenPublisher(opts: { schoolId: string; attemptId: string; studentId: string; examId: string; getStream: () => MediaStream | null; intervalMs?: number; }): LiveScreenPublisher {
+  const intervalMs = opts.intervalMs ?? LIVE_SCREEN_FRAME_INTERVAL_MS;
+  let stopped = false; let channel: RealtimeChannel | null = null; let timer: ReturnType<typeof setInterval> | null = null; let publishing = false;
+  channel = supabase.channel(liveScreenChannelName(opts.schoolId), { config: { broadcast: { ack: false, self: false } } });
+  const sendFrame = async () => { if (stopped || publishing) return; const stream = opts.getStream(); if (!stream) return; publishing = true; try { const frame = await captureJpegFromStream(stream); if (stopped || !frame || !channel) return; void channel.send({ type: "broadcast", event: LIVE_SCREEN_EVENT, payload: { attemptId: opts.attemptId, studentId: opts.studentId, examId: opts.examId, frame, ts: Date.now(), screenActive: true } }); } catch (e) { console.warn("[live-screen]", e); } finally { publishing = false; } };
+  void channel.subscribe((status) => { if (status === "SUBSCRIBED" && !stopped) { void sendFrame(); timer = setInterval(() => void sendFrame(), intervalMs); } });
+  return { stop: () => { stopped = true; if (timer) clearInterval(timer); if (channel) { void supabase.removeChannel(channel); channel = null; } } };
+}

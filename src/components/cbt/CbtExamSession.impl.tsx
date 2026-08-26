@@ -167,6 +167,16 @@ export function CbtExamPage() {
     getTimeRemainingSec: () => timeRemainingRef.current,
   });
 
+  useLiveScreenPublish({
+    enabled: started && !done && !previewMode && !paused && Boolean(screenStream),
+    schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,
+    studentId: student?.studentId,
+    examId: id,
+    attemptId: liveAttemptId || attemptIdRef.current,
+    stream: screenStream,
+    getStream: () => screenStreamRef.current || screenStream,
+  });
+
   useEffect(() => {
     if (!started || done || previewMode) return;
     const tick = () => {
@@ -639,6 +649,31 @@ export function CbtExamPage() {
         } catch {
           toast.error(needCam ? "Camera is required for this examination." : "Microphone is required for this examination.");
           return;
+        }
+      }
+      // Screen share when teacher enabled and device supports it
+      if (!_opts.skipScreenShare) {
+        try {
+          const share = await startScreenShareStream();
+          if (share.ok) {
+            stopScreenShareStream(screenStreamRef.current);
+            screenStreamRef.current = share.stream;
+            setScreenStream(share.stream);
+            onScreenShareEnded(share.stream, () => {
+              toast.error("Screen sharing stopped. Re-enable to continue the exam.");
+              setPaused(true);
+              setScreenStream(null);
+              screenStreamRef.current = null;
+            });
+            toast.success("Screen sharing active");
+          } else if (share.reason === "denied") {
+            toast.error(share.message || "Screen share is required. Allow sharing to continue.");
+            return;
+          } else if (share.reason !== "unsupported") {
+            toast.message(share.message || "Screen share unavailable on this device");
+          }
+        } catch (e) {
+          console.warn("[cbt] screen share", e);
         }
       }
       // Always immersive during active CBT: hide phone status + system chrome.
