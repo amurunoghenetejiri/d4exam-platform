@@ -1,21 +1,14 @@
-import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchSessionUser, roleHome, seedPendingLoginRole, type AppRole } from "@/lib/session";
 import { signInWithSchoolCode } from "@/lib/auth.functions";
-import {
-  confirmSessionReady,
-  fetchSessionUser,
-  roleHome,
-  seedPendingLoginRole,
-  type SessionUser,
-} from "@/lib/session";
+import { ensureLoginAccount } from "@/lib/ensure-login.functions";
 
 import {
   Eye,
   EyeOff,
-  Loader2,
   ShieldCheck,
   Zap,
   Users,
@@ -23,7 +16,6 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
-import { Watermark } from "@/components/brand/Watermark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,18 +26,21 @@ export const Route = createFileRoute("/login")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Login — D4EXAM" },
-      {
-        name: "description",
-        content:
-          "Sign in to your institution's D4EXAM account with your school code and credentials.",
-      },
+      { title: "Sign in — D4EXAM" },
+      { name: "description", content: "Sign in to your D4EXAM school account." },
     ],
   }),
   beforeLoad: async () => {
-    const user = await fetchSessionUser();
-    if (user?.role) {
-      throw redirect({ to: roleHome[user.role] as never });
+    try {
+      const user = await Promise.race([
+        fetchSessionUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000)),
+      ]);
+      if (user?.role && user.role in roleHome) {
+        throw redirect({ to: roleHome[user.role] as never });
+      }
+    } catch (e) {
+      if (e && typeof e === "object" && "to" in e) throw e;
     }
   },
   component: LoginPage,
@@ -54,41 +49,133 @@ export const Route = createFileRoute("/login")({
 const features = [
   {
     icon: ShieldCheck,
-    title: "Secure by design",
-    desc: "Proctored exams with integrity controls built in.",
+    title: "Secure exams",
+    desc: "Integrity controls and live monitoring built in.",
   },
   {
     icon: Zap,
     title: "Fast CBT",
-    desc: "Smooth exam experience on phone and desktop.",
+    desc: "Smooth experience on phone and desktop.",
   },
   {
     icon: Users,
     title: "Whole school",
-    desc: "Students, teachers, officers and admins in one place.",
+    desc: "Students, teachers, officers and admins together.",
   },
   {
     icon: Cloud,
-    title: "Cloud ready",
-    desc: "Works anywhere with a stable internet connection.",
+    title: "Always available",
+    desc: "Cloud-ready access wherever you are.",
   },
 ];
 
+function friendlyLoginError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err || "");
+  const cleaned = msg.replace(/\s+/g, " ").trim();
+  if (
+    cleaned.toLowerCase().includes("<!doctype") ||
+    cleaned.toLowerCase().includes("<html") ||
+    cleaned.length > 280
+  ) {
+    return "Unable to sign in right now. Please try again in a moment.";
+  }
+  return cleaned || msg;
+}
+
+/** Full page load so Capacitor WebView always applies the new session. */
+function goToRoleHome(role: string) {
+  const path = roleHome[role as AppRole];
+  if (!path) return false;
+  try {
+    seedPendingLoginRole(role);
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.location.replace(path);
+  } catch {
+    window.location.href = path;
+  }
+  return true;
+}
+
 function LoginPage() {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [showPw, setShowPw] = useState(false);
+  const loginFn = useServerFn(signInWithSchoolCode);
+  const ensureLoginFn = useServerFn(ensureLoginAccount);
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [code, setCode] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
-  const signIn = useServerFn(signInWithSchoolCode);
   const inFlight = useRef(false);
+
+  async function resolveRoleAndGoHome(): Promise<boolean> {
+    // Fast path: role from session APIs
+    try {
+      const user = await Promise.race([
+        fetchSessionUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_500)),
+      ]);
+      if (user?.role && user.role in roleHome) {
+        return goToRoleHome(user.role);
+      }
+    } catch {
+      /* continue */
+    }
+
+    try {
+      const { data: myRoles } = await supabase.rpc("get_my_roles");
+      const list = Array.isArray(myRoles)
+        ? myRoles.map((r: { role?: string } | string) =>
+            typeof r === "string" ? r : String((r as { role?: string }).role || ""),
+          )
+        : [];
+      const priority = [
+        "super_admin",
+        "school_admin",
+        "examination_officer",
+        "teacher",
+        "student",
+      ] as const;
+      const found = priority.find((r) => list.map((x) => x.toLowerCase()).includes(r));
+      if (found) return goToRoleHome(found);
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user?.id) {
+        const { data: roles } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", user.id)
+          .limit(10);
+        const list = (roles ?? []).map((r) => String(r.role).toLowerCase());
+        const priority = [
+          "super_admin",
+          "school_admin",
+          "examination_officer",
+          "teacher",
+          "student",
+        ] as const;
+        const found = priority.find((r) => list.includes(r));
+        if (found) return goToRoleHome(found);
+      }
+    } catch {
+      /* ignore */
+    }
+
+    return false;
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    e.stopPropagation();
     if (inFlight.current || loading) return;
     setError("");
     if (!identifier.trim() || !password.trim()) {
@@ -97,263 +184,287 @@ function LoginPage() {
     }
     inFlight.current = true;
     setLoading(true);
-    try {
-      const result = await signIn({
-        data: {
-          schoolCode: code.trim(),
-          identifier: identifier.trim(),
-          password,
-        },
-      });
-      // Session may still be present even when role is missing — set it first
-      if ("session" in result && result.session) {
-        const { error: sessErr } = await supabase.auth.setSession(result.session);
-        if (sessErr) {
-          console.error("[login] setSession failed", sessErr);
-          setError(sessErr.message || "Could not establish session. Try again.");
-          return;
-        }
-      }
-
-      if ("error" in result && result.error) {
-        setError(result.error);
-        return;
-      }
-      if (!("session" in result) || !result.session) {
-        setError("Unable to sign in. Please try again.");
-        return;
-      }
-
-      // Ensure local session is readable before any guarded route runs requireRole
-      const ready = await confirmSessionReady();
-      if (!ready) {
-        setError("Session could not be established. Please try signing in again.");
-        return;
-      }
-
-      // Prefer role from server — avoids client RLS race after setSession
-      const serverRole =
-        "role" in result && result.role ? String(result.role).toLowerCase() : null;
-
-      const goHome = async (path: string, roleHint?: string, seeded?: SessionUser | null) => {
-        if (roleHint) seedPendingLoginRole(roleHint);
-        // Seed React Query so requireRole never sees a stale null after login
-        try {
-          if (seeded?.role) {
-            queryClient.setQueryData(["session-user"], seeded);
-          } else {
-            queryClient.removeQueries({ queryKey: ["session-user"] });
-          }
-        } catch {
-          /* ignore */
-        }
-        // Hard navigation avoids SPA beforeLoad races right after setSession
-        if (typeof window !== "undefined") {
-          window.location.replace(path);
-          return;
-        }
-        await navigate({ to: path as never });
-      };
-
-      if (serverRole && serverRole in roleHome) {
-        // Best-effort profile hydrate; do not block redirect on slow RLS
-        let seeded: SessionUser | null = null;
-        try {
-          seeded = await fetchSessionUser();
-        } catch {
-          /* ignore */
-        }
-        if (!seeded?.role) {
-          try {
-            const { data: sess } = await supabase.auth.getSession();
-            const u = sess.session?.user;
-            if (u) {
-              seeded = {
-                userId: u.id,
-                profileId: u.id,
-                email: u.email || "",
-                fullName: u.email || "User",
-                status: "active",
-                schoolId: null,
-                schoolName: null,
-                schoolCode: null,
-                schoolLogoUrl: null,
-                roles: [serverRole as NonNullable<SessionUser["role"]>],
-                role: serverRole as NonNullable<SessionUser["role"]>,
-                identifier: u.email || null,
-                identifierLabel: "Email",
-              };
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-        await goHome(roleHome[serverRole as keyof typeof roleHome], serverRole, seeded);
-        return;
-      }
-
-      let user = await fetchSessionUser();
-      for (let i = 0; i < 6 && !user?.role; i++) {
-        await new Promise((r) => setTimeout(r, 200 * (i + 1)));
-        user = await fetchSessionUser();
-      }
-      if (!user?.role) {
-        try {
-          const { data: isSuper } = await supabase.rpc("is_super_admin");
-          if (isSuper === true) {
-            await goHome(roleHome.super_admin, "super_admin", user);
-            return;
-          }
-        } catch {
-          /* ignore */
-        }
-        setError(
-          "Signed in, but no dashboard role was found for this account. Contact your school administrator to assign school_admin, teacher, officer, or student.",
-        );
-        return;
-      }
-      await goHome(roleHome[user.role], user.role, user);
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : "";
-      console.error("[login] sign-in failed:", err);
-      const friendly =
-        detail.includes("schoolCode") || detail.includes("too_small")
-          ? "School code is required for school accounts. Super admins leave school code blank and sign in with email only."
-          : detail
-            ? `Unable to sign in right now: ${detail}`
-            : "Unable to sign in right now. Check your connection and try again.";
-      setError(friendly);
-    } finally {
-      inFlight.current = false;
+    let navigated = false;
+    let lastServerMsg = "";
+    const loginTimeout = window.setTimeout(() => {
+      if (!inFlight.current || navigated) return;
       setLoading(false);
+      inFlight.current = false;
+      setError("Login is taking longer than expected. Check your connection and try again.");
+    }, 12_000);
+
+    try {
+      const schoolCode = code.trim().toUpperCase();
+      const ident = identifier.trim();
+      const pass = password;
+      const looksEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ident);
+
+      // 1) Server login (with hard timeout)
+      try {
+        const result = await Promise.race([
+          loginFn({
+            data: {
+              schoolCode: schoolCode || "",
+              identifier: ident,
+              password: pass,
+            },
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+        ]);
+
+        if (result && "session" in result && result.session?.access_token) {
+          const { error: sessErr } = await supabase.auth.setSession({
+            access_token: result.session.access_token,
+            refresh_token: result.session.refresh_token,
+          });
+          if (!sessErr) {
+            if (result.role && result.role in roleHome) {
+              navigated = true;
+              goToRoleHome(String(result.role));
+              return;
+            }
+            if (await resolveRoleAndGoHome()) {
+              navigated = true;
+              return;
+            }
+          }
+        }
+        if (result && "error" in result && result.error) {
+          lastServerMsg = String(result.error);
+        }
+      } catch (serverErr) {
+        console.warn("[login] server fn failed, trying client fallback", serverErr);
+        lastServerMsg = friendlyLoginError(serverErr);
+      }
+
+      // 2) Direct Supabase client sign-in
+      const emailsToTry: string[] = [];
+      if (looksEmail) emailsToTry.push(ident.toLowerCase());
+      if (!looksEmail && schoolCode) {
+        const safeCode = schoolCode.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+        const build = (raw: string) => {
+          const safe = raw.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+          const safeDot = raw.trim().toLowerCase().replace(/[^a-z0-9]+/g, ".");
+          return [
+            `${safe}@${safeCode || "school"}.student.d4exam.local`,
+            `${safeDot}@placeholder.local`,
+            `${safe}@placeholder.local`,
+          ];
+        };
+        for (const em of [...build(ident), ...build(pass)]) {
+          if (em && !emailsToTry.includes(em)) emailsToTry.push(em);
+        }
+      }
+
+      for (const email of emailsToTry) {
+        try {
+          const { data, error: authErr } = await supabase.auth.signInWithPassword({
+            email,
+            password: pass,
+          });
+          if (!authErr && data.session) {
+            if (await resolveRoleAndGoHome()) {
+              navigated = true;
+              return;
+            }
+            // Session exists but role lag — still leave login page for school admin default only if email login
+            if (looksEmail) {
+              navigated = true;
+              goToRoleHome("school_admin");
+              return;
+            }
+          }
+          if (authErr?.message) lastServerMsg = authErr.message;
+        } catch {
+          /* try next */
+        }
+      }
+
+      // 3) ensureLoginAccount repair then retry once
+      if (looksEmail) {
+        try {
+          const fixed = await Promise.race([
+            ensureLoginFn({
+              data: {
+                email: ident.toLowerCase(),
+                password: pass,
+                schoolCode: schoolCode || null,
+              },
+            }),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 6_000)),
+          ]);
+          if (fixed && "ok" in fixed && fixed.ok) {
+            const { data: again, error: againErr } = await supabase.auth.signInWithPassword({
+              email: ident.toLowerCase(),
+              password: pass,
+            });
+            if (!againErr && again.session) {
+              if (await resolveRoleAndGoHome()) {
+                navigated = true;
+                return;
+              }
+              navigated = true;
+              goToRoleHome("school_admin");
+              return;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const msg = friendlyLoginError(lastServerMsg || "Invalid login credentials.");
+      setError(
+        msg +
+          (msg.toLowerCase().includes("unable to sign in right now") ||
+          msg.toLowerCase().includes("unable to connect")
+            ? ""
+            : " Check school code, email/matric/staff ID, and password. Students: password is usually your matric number."),
+      );
+    } catch (err) {
+      console.error("[login] sign-in failed:", err);
+      setError(friendlyLoginError(err));
+    } finally {
+      window.clearTimeout(loginTimeout);
+      if (!navigated) {
+        setLoading(false);
+        inFlight.current = false;
+      }
     }
   }
 
   return (
-    <div className="relative min-h-[100dvh] overflow-hidden bg-slate-50">
-      <Watermark />
-      <div className="relative mx-auto grid min-h-[100dvh] max-w-6xl lg:grid-cols-2">
-        <aside className="hidden flex-col justify-between bg-slate-900 px-10 py-12 text-white lg:flex">
-          <div>
-            <Logo className="h-10 w-auto" />
-            <h2 className="mt-10 text-3xl font-extrabold tracking-tight">Welcome back</h2>
-            <p className="mt-3 max-w-sm text-sm leading-relaxed text-slate-300">
-              Sign in with your school code and credentials to access exams, results and admin tools.
+    <div className="min-h-screen bg-slate-50">
+      <div className="mx-auto grid min-h-screen max-w-6xl lg:grid-cols-2">
+        <div className="relative hidden overflow-hidden bg-slate-950 lg:flex lg:flex-col lg:justify-between lg:p-12">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-600/30 via-slate-950 to-slate-950" />
+          <div className="relative">
+            <Logo className="h-10 w-auto text-white" />
+            <p className="mt-8 max-w-sm text-lg font-semibold leading-snug text-white">
+              Examination platform for modern schools
+            </p>
+            <p className="mt-3 max-w-sm text-sm text-slate-300">
+              Secure CBT, results, and school operations in one place.
             </p>
           </div>
-          <ul className="space-y-4">
+          <div className="relative grid gap-4">
             {features.map((f) => (
-              <li key={f.title} className="flex gap-3">
-                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10">
-                  <f.icon className="h-4 w-4 text-sky-300" />
-                </span>
+              <div key={f.title} className="flex gap-3 rounded-xl border border-white/10 bg-white/5 p-4">
+                <f.icon className="mt-0.5 h-5 w-5 shrink-0 text-blue-300" />
                 <div>
-                  <p className="text-sm font-semibold">{f.title}</p>
-                  <p className="text-xs text-slate-400">{f.desc}</p>
+                  <p className="text-sm font-semibold text-white">{f.title}</p>
+                  <p className="text-xs text-slate-300">{f.desc}</p>
                 </div>
-              </li>
+              </div>
             ))}
-          </ul>
-        </aside>
+          </div>
+        </div>
 
-        <main className="flex items-center justify-center px-5 py-10 sm:px-10">
-          <div className="w-full max-w-md">
-            <div className="mb-8 flex items-center gap-3 lg:hidden">
+        <div className="flex flex-col justify-center px-4 py-10 sm:px-8">
+          <div className="mx-auto w-full max-w-md">
+            <div className="mb-8 flex items-center gap-2 lg:hidden">
               <Logo className="h-9 w-auto" />
             </div>
             <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Sign in</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Use your school code and account credentials.
-            </p>
+            <p className="mt-1 text-sm text-slate-500">Enter your credentials to continue.</p>
 
             {error ? (
-              <Alert variant="destructive" className="mt-5">
+              <Alert variant="destructive" className="mt-4">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
 
-            <form onSubmit={submit} className="mt-6 space-y-4">
+            <form onSubmit={submit} className="mt-6 space-y-4" noValidate>
               <div className="space-y-1.5">
                 <Label htmlFor="school-code">School code</Label>
                 <Input
                   id="school-code"
-                  autoComplete="organization"
-                  placeholder="e.g. ABC123 (leave blank for super admin)"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
+                  placeholder="e.g. ABC123"
                   className="h-11"
+                  autoComplete="organization"
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="identifier">Email / Matric / Staff ID</Label>
+                <Label htmlFor="identifier">Email / matric / staff ID</Label>
                 <Input
                   id="identifier"
-                  autoComplete="username"
-                  placeholder="email, matric or staff ID"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="you@email.com or matric number"
                   className="h-11"
+                  autoComplete="username"
                   required
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  <Link
+                    to="/forgot-password"
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
                 <div className="relative">
                   <Input
                     id="password"
-                    type={showPw ? "text" : "password"}
-                    autoComplete="current-password"
-                    placeholder="Your password"
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-11 pr-11"
+                    className="h-11 pr-10"
+                    autoComplete="current-password"
                     required
+                    disabled={loading}
                   />
                   <button
                     type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                    onClick={() => setShowPw((v) => !v)}
-                    aria-label={showPw ? "Hide password" : "Show password"}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    onClick={() => setShowPassword((v) => !v)}
+                    tabIndex={-1}
+                    disabled={loading}
                   >
-                    {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
-
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="remember"
                   checked={remember}
                   onCheckedChange={(v) => setRemember(v === true)}
+                  disabled={loading}
                 />
                 <Label htmlFor="remember" className="text-sm font-normal text-slate-600">
-                  Remember me on this device
+                  Remember this device
                 </Label>
               </div>
-
               <Button type="submit" className="h-11 w-full font-semibold" disabled={loading}>
                 {loading ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <img src="/logo.png" alt="" className="mr-2 h-5 w-5 object-contain opacity-90" />{" "}
                     Signing in…
                   </>
                 ) : (
                   <>
-                    Sign in
-                    <ArrowRight className="ml-2 h-4 w-4" />
+                    Sign in <ArrowRight className="ml-2 h-4 w-4" />
                   </>
                 )}
               </Button>
             </form>
 
             <p className="mt-6 text-center text-sm text-slate-500">
-              New school?{" "}
-              <Link to="/apply" className="font-semibold text-sky-700 hover:underline">
-                Apply for D4EXAM
+              New institution?{" "}
+              <Link to="/school-application" className="font-semibold text-primary hover:underline">
+                Apply for school
               </Link>
             </p>
           </div>
-        </main>
+        </div>
       </div>
     </div>
   );
