@@ -1,0 +1,37 @@
+name: fix-import-students-export
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-import-students-export.yml
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add missing importStudents export alias
+        run: |
+          set -euo pipefail
+          FILE=src/lib/auth.school-admin.functions.ts
+          if grep -q 'export const importStudents = importStudentsBulk' "$FILE"; then
+            echo "Alias already present"
+          elif grep -q 'export const importStudentsBulk' "$FILE"; then
+            printf '\n/** Alias used by admin.student-import route */\nexport const importStudents = importStudentsBulk;\n' >> "$FILE"
+            echo "Alias appended"
+          else
+            echo "importStudentsBulk not found" >&2
+            exit 1
+          fi
+          tail -5 "$FILE"
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/auth.school-admin.functions.ts
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(build): export importStudents alias for student-import route"
+            git push
+          fi
