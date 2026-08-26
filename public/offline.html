@@ -19,7 +19,7 @@
         font-weight: 800; font-size: 1.25rem; color: #93c5fd;
       }
       h1 { font-size: 1.15rem; margin: 0 0 0.45rem; font-weight: 700; }
-      p { margin: 0 auto; font-size: 0.9rem; color: #94a3b8; max-width: 18rem; line-height: 1.45; }
+      p { margin: 0 auto; font-size: 0.9rem; color: #94a3b8; max-width: 20rem; line-height: 1.45; }
       button {
         margin-top: 1.25rem; border: 0; border-radius: 0.75rem;
         background: #2563eb; color: #fff; font-weight: 600;
@@ -30,19 +30,24 @@
   <body>
     <div>
       <div class="mark">D4</div>
-      <h1>Internet required</h1>
-      <p>Connect to the Internet, then tap Retry to open D4EXAM.</p>
+      <h1>You're offline</h1>
+      <p>Connect to the Internet and tap Retry to open D4EXAM. After you have used the app online once, cached pages work when the connection drops.</p>
       <button type="button" id="retry">Retry</button>
     </div>
     <script>
       (function () {
         var LIVE = "https://d4exam-platform.vercel.app/";
         function go() {
-          try { location.replace(LIVE); } catch (e) { location.href = LIVE; }
+          try {
+            window.location.replace(LIVE + "?offline_retry=" + Date.now());
+          } catch (e) {
+            window.location.href = LIVE;
+          }
         }
-        document.getElementById("retry").onclick = go;
-        window.addEventListener("online", go);
-        if (navigator.onLine) setTimeout(go, 400);
+        document.getElementById("retry").addEventListener("click", go);
+        window.addEventListener("online", function () {
+          setTimeout(go, 400);
+        });
       })();
     </script>
   </body>
