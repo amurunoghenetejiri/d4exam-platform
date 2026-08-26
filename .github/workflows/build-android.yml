@@ -51,11 +51,14 @@ jobs:
           node scripts/prepare-capacitor-dist.mjs
           test -f dist/index.html
           test -d dist/assets
-          if grep -R "d4exam-platform.vercel.app" dist/index.html dist/offline.html 2>/dev/null; then
+          test -f dist/offline.html
+          if grep -F "d4exam-platform.vercel.app" dist/index.html dist/offline.html 2>/dev/null; then
             echo "FATAL: Vercel URL leaked into bundled shell"
             exit 1
           fi
-          ls -la dist/index.html dist/offline.html dist/assets | head -30
+          echo "Shell files:"
+          ls -la dist/index.html dist/offline.html
+          echo "Asset count: $(find dist/assets -type f | wc -l)"
 
       - name: Ensure complete Android platform
         run: |
@@ -85,8 +88,8 @@ jobs:
             fi
           done
           if [ -f android/app/build.gradle ]; then
-            sed -i 's/versionCode .*/versionCode 10/' android/app/build.gradle || true
-            sed -i 's/versionName .*/versionName "3.0.0"/' android/app/build.gradle || true
+            sed -i 's/versionCode .*/versionCode 11/' android/app/build.gradle || true
+            sed -i 's/versionName .*/versionName "3.0.1"/' android/app/build.gradle || true
           fi
 
       - name: Setup JDK 21
@@ -113,6 +116,7 @@ jobs:
           APK="android/app/build/outputs/apk/debug/app-debug.apk"
           test -f "$APK"
           mkdir -p artifacts && cp "$APK" artifacts/D4EXAM-debug.apk
+          ls -la artifacts/D4EXAM-debug.apk
 
       - name: Upload D4EXAM Android APK artifact
         uses: actions/upload-artifact@v4
