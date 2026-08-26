@@ -27,7 +27,18 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
   if (queryClient) {
     user = queryClient.getQueryData<SessionUser | null>(["session-user"]);
   }
-  if (user === undefined) {
+
+  // Never trust a cached null right after login — always re-resolve when missing.
+  // Also re-resolve when we only have a cached null but an auth session exists.
+  let hasAuthSession = false;
+  try {
+    const { data: sess } = await supabase.auth.getSession();
+    hasAuthSession = Boolean(sess.session?.access_token && sess.session.user?.id);
+  } catch {
+    hasAuthSession = false;
+  }
+
+  if (user === undefined || (user === null && hasAuthSession)) {
     try {
       user = await Promise.race([
         fetchSessionUser(),
@@ -36,17 +47,14 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     } catch {
       user = null;
     }
-    // Retry once if auth session exists but profile/roles were slow
-    if (!user) {
+    // Retry if auth session exists but profile/roles were slow
+    if (!user && hasAuthSession) {
       try {
-        const { data: sess } = await supabase.auth.getSession();
-        if (sess.session?.access_token) {
-          await new Promise((r) => setTimeout(r, 400));
-          user = await Promise.race([
-            fetchSessionUser(),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
-          ]);
-        }
+        await new Promise((r) => setTimeout(r, 500));
+        user = await Promise.race([
+          fetchSessionUser(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+        ]);
       } catch {
         /* ignore */
       }
@@ -62,7 +70,7 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
         /* ignore */
       }
     }
-    if (queryClient) {
+    if (queryClient && user) {
       queryClient.setQueryData(["session-user"], user);
     }
   }
@@ -89,10 +97,19 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
           identifierLabel: "Email",
         };
         if (queryClient) queryClient.setQueryData(["session-user"], minimal);
-        window.setTimeout(() => clearPendingLoginRole(), 20_000);
+        // Keep pending role longer so nested navigations still pass
+        window.setTimeout(() => clearPendingLoginRole(), 60_000);
         return { user: minimal };
       }
-    } catch {
+      // Session exists but role not yet known — use pending even if allowed list is strict
+      if (sess.session?.user && pending && pending in { student:1, teacher:1, school_admin:1, examination_officer:1, super_admin:1 }) {
+        // Wrong dashboard: send to the correct home instead of login
+        if (!allowed.includes(pending)) {
+          throw redirect({ to: roleHome[pending] as never });
+        }
+      }
+    } catch (e) {
+      if (e && typeof e === "object" && "to" in e) throw e;
       /* ignore */
     }
     throw redirect({ to: "/login" });
