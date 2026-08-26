@@ -1,0 +1,63 @@
+name: assemble-screen-share
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - src/components/cbt/_b64_session.p1.txt
+      - src/components/cbt/_b64_session.p2.txt
+      - src/components/cbt/_b64_session.p3.txt
+      - src/routes/_b64_live_monitor.p1.txt
+      - src/routes/_b64_live_monitor.p2.txt
+      - src/routes/_b64_live_monitor.p3.txt
+      - .github/workflows/assemble-screen-share.yml
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble large files from base64 parts
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import base64
+
+          def assemble(parts, dest):
+              missing = [p for p in parts if not Path(p).exists()]
+              if missing:
+                  print("skip missing", missing)
+                  return
+              b64 = "".join(Path(p).read_text().strip() for p in parts)
+              data = base64.b64decode(b64)
+              Path(dest).write_bytes(data)
+              print(dest, len(data))
+
+          assemble(
+              [
+                  "src/components/cbt/_b64_session.p1.txt",
+                  "src/components/cbt/_b64_session.p2.txt",
+                  "src/components/cbt/_b64_session.p3.txt",
+              ],
+              "src/components/cbt/CbtExamSession.impl.tsx",
+          )
+          assemble(
+              [
+                  "src/routes/_b64_live_monitor.p1.txt",
+                  "src/routes/_b64_live_monitor.p2.txt",
+                  "src/routes/_b64_live_monitor.p3.txt",
+              ],
+              "src/routes/officer.live-monitor.tsx",
+          )
+          PY
+      - name: Commit assembled files
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx || true
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "feat(screen-share): wire CBT pause + officer dual face/screen view"
+            git push
+          fi
