@@ -1,0 +1,225 @@
+name: restore-exam-gate
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/restore-exam-gate.yml
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 20
+      - name: Restore ExamSecurityGate from last good commit and apply patches
+        run: |
+          set -e
+          # Last known good before PLACEHOLDER overwrite
+          git show 2f73dfd572fec0d5d91fed9382d0827305b8566d:src/components/cbt/ExamSecurityGate.tsx > src/components/cbt/ExamSecurityGate.tsx
+          python3 << 'PY'
+          from pathlib import Path
+          g = Path('src/components/cbt/ExamSecurityGate.tsx')
+          gt = g.read_text()
+          assert 'export function ExamSecurityGate' in gt
+          if 'requestExamMediaPermissions' not in gt:
+              gt = gt.replace(
+                  'openCameraStream,\n} from "@/native/cameraService";',
+                  'openCameraStream,\n  requestExamMediaPermissions,\n} from "@/native/cameraService";\nimport { canAttemptScreenShare, startScreenShareStream, stopScreenShareStream } from "@/lib/screen-share";',
+              )
+          if 'const [permBusy, setPermBusy]' not in gt:
+              gt = gt.replace(
+                  'const [previewError, setPreviewError] = useState<string | null>(null);',
+                  'const [previewError, setPreviewError] = useState<string | null>(null);\n  const [permBusy, setPermBusy] = useState(false);\n  const [camGranted, setCamGranted] = useState(false);\n  const [micGranted, setMicGranted] = useState(false);\n  const [screenGranted, setScreenGranted] = useState(false);\n  const [permHint, setPermHint] = useState<string | null>(null);',
+              )
+          if 'requestAllExamPermissions' not in gt:
+              helper = '''\n  const requestAllExamPermissions = async () => {\n    setPermBusy(true);\n    setPermHint(null);\n    try {\n      if (needCam || needMic) {\n        const { camera, microphone } = await requestExamMediaPermissions({\n          camera: needCam,\n          microphone: needMic,\n        });\n        if (needCam) {\n          setCamGranted(Boolean(camera.granted));\n          if (!camera.granted) setPermHint(camera.error || "Allow Camera for D4EXAM to continue.");\n          else await startPreview();\n        }\n        if (needMic) {\n          setMicGranted(Boolean(microphone.granted));\n          if (!microphone.granted) setPermHint((h) => h || microphone.error || "Allow Microphone for D4EXAM if required.");\n        }\n      }\n      if (shareMode !== "disabled" && canAttemptScreenShare()) {\n        try {\n          const share = await startScreenShareStream();\n          if (share.ok) { stopScreenShareStream(share.stream); setScreenGranted(true); }\n          else if (share.reason === "denied") { setScreenGranted(false); setPermHint(share.message || "Screen share denied."); }\n        } catch: pass\n      }\n    } finally: setPermBusy(false)\n  }\n\n'''
+              # Fix python syntax - use JS in the helper string carefully
+              pass
+          # Rewrite helper cleanly in JS form
+          if 'requestAllExamPermissions' not in gt:
+              helper = (
+                  "\n  const requestAllExamPermissions = async () => {\n"
+                  "    setPermBusy(true);\n"
+                  "    setPermHint(null);\n"
+                  "    try {\n"
+                  "      if (needCam || needMic) {\n"
+                  "        const { camera, microphone } = await requestExamMediaPermissions({\n"
+                  "          camera: needCam,\n"
+                  "          microphone: needMic,\n"
+                  "        });\n"
+                  "        if (needCam) {\n"
+                  "          setCamGranted(Boolean(camera.granted));\n"
+                  "          if (!camera.granted) {\n"
+                  "            setPermHint(camera.error || \"Allow Camera for D4EXAM to continue.\");\n"
+                  "          } else {\n"
+                  "            await startPreview();\n"
+                  "          }\n"
+                  "        }\n"
+                  "        if (needMic) {\n"
+                  "          setMicGranted(Boolean(microphone.granted));\n"
+                  "          if (!microphone.granted) {\n"
+                  "            setPermHint((h) => h || microphone.error || \"Allow Microphone for D4EXAM if required.\");\n"
+                  "          }\n"
+                  "        }\n"
+                  "      }\n"
+                  "      if (shareMode !== \"disabled\" && canAttemptScreenShare()) {\n"
+                  "        try {\n"
+                  "          const share = await startScreenShareStream();\n"
+                  "          if (share.ok) {\n"
+                  "            stopScreenShareStream(share.stream);\n"
+                  "            setScreenGranted(true);\n"
+                  "          } else if (share.reason === \"denied\") {\n"
+                  "            setScreenGranted(false);\n"
+                  "            setPermHint(share.message || \"Screen share was denied.\");\n"
+                  "          }\n"
+                  "        } catch {\n"
+                  "          /* optional */\n"
+                  "        }\n"
+                  "      }\n"
+                  "    } finally {\n"
+                  "      setPermBusy(false);\n"
+                  "    }\n"
+                  "  };\n\n"
+              )
+              gt = gt.replace('  const startPreview = async () => {', helper + '  const startPreview = async () => {')
+          old_prev = '''      const camOk = await ensureCameraPermission();
+      if (!camOk.granted) throw new Error(camOk.error || "Camera permission required");
+      // When exam requires microphone, request it together with camera so the OS shows both.
+      if (needMic) {
+        try {
+          await ensureMicrophonePermission();
+        } catch {
+          /* soft — exam start may still proceed without mic if policy allows */
+        }
+      }'''
+          new_prev = '''      const { camera: camOk, microphone: micOk } = await requestExamMediaPermissions({
+        camera: true,
+        microphone: Boolean(needMic),
+      });
+      if (!camOk.granted) throw new Error(camOk.error || "Camera permission required");
+      setCamGranted(true);
+      if (needMic) setMicGranted(Boolean(micOk.granted));'''
+          if old_prev in gt:
+              gt = gt.replace(old_prev, new_prev)
+          if 'Allow camera, mic & screen' not in gt:
+              marker = '        {totalQuestions === 0 ? ('
+              panel = '''        {(needCam || needMic || shareMode !== "disabled") && (
+          <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3 sm:p-4">
+            <p className="text-sm font-extrabold text-slate-900">Allow required permissions</p>
+            <p className="mt-1 text-xs text-slate-600">
+              Tap below so the app can request Camera, Microphone, and Screen share. You must allow them before writing the exam.
+            </p>
+            <div className="mt-3">
+              <Button type="button" className="h-10 w-full rounded-xl font-bold" disabled={permBusy || busy} onClick={() => void requestAllExamPermissions()}>
+                {permBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Requesting...</>) : ("Allow camera, mic & screen")}
+              </Button>
+            </div>
+            <ul className="mt-3 space-y-1 text-xs font-semibold">
+              {needCam && (<li className={camGranted || previewState === "live" ? "text-emerald-700" : "text-amber-700"}>{(camGranted || previewState === "live") ? "OK" : "--"} Camera {(camGranted || previewState === "live") ? "allowed" : "not allowed yet"}</li>)}
+              {needMic && (<li className={micGranted ? "text-emerald-700" : "text-amber-700"}>{micGranted ? "OK" : "--"} Microphone {micGranted ? "allowed" : "not allowed yet"}</li>)}
+              {shareMode !== "disabled" && (<li className={screenGranted ? "text-emerald-700" : "text-slate-600"}>{screenGranted ? "OK" : "--"} Screen share {screenGranted ? "allowed" : screenSupported ? "will be requested at start" : "not supported on this device"}</li>)}
+            </ul>
+            {permHint && (<p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{permHint}</p>)}
+          </div>
+        )}
+
+        {totalQuestions === 0 ? ('''
+              if marker in gt:
+                  gt = gt.replace(marker, panel, 1)
+          g.write_text(gt)
+          print('gate restored+patched', len(gt))
+
+          # parallel question load
+          p = Path('src/lib/cbt-load-questions.ts')
+          t = p.read_text()
+          if 'async function withTimeout' not in t:
+              needle = 'export async function loadExamQuestionBank(opts: {'
+              idx = t.find(needle)
+              end = t.find('export async function ensureExamQuestionsLinked', idx)
+              replacement = open('/dev/stdin').read() if False else None
+          PY
+          # simpler parallel patch
+          python3 << 'PY2'
+          from pathlib import Path
+          p = Path('src/lib/cbt-load-questions.ts')
+          t = p.read_text()
+          if 'async function withTimeout' not in t:
+              needle = 'export async function loadExamQuestionBank(opts: {'
+              idx = t.find(needle)
+              end = t.find('export async function ensureExamQuestionsLinked', idx)
+              if idx < 0 or end < 0:
+                  raise SystemExit('load markers missing')
+              replacement = '''async function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function loadExamQuestionBank(opts: {
+  courseId: string;
+  schoolId?: string | null;
+  examId?: string | null;
+}): Promise<RawQ[]> {
+  const courseId = opts.courseId ? String(opts.courseId) : "";
+  const schoolId = opts.schoolId ? String(opts.schoolId) : null;
+  const examId = opts.examId ? String(opts.examId) : null;
+  let rows: RawQ[] = [];
+  if (examId) {
+    const [rpcRows, linked] = await Promise.all([
+      withTimeout(loadViaRpc(examId, courseId || null, schoolId), 4500, [] as RawQ[]),
+      withTimeout(loadFromExamQuestions(examId), 4500, [] as RawQ[]),
+    ]);
+    rows = rpcRows;
+    if (!rows.length || rows.some((r) => !hasUsableOptions(r))) {
+      if (linked.length) {
+        if (!rows.length) rows = linked;
+        else {
+          const byId = new Map(linked.map((q) => [q.id, q]));
+          rows = rows.map((q) => hasUsableOptions(q) ? q : (byId.get(q.id) ? mergeRaw(q, byId.get(q.id)!) : q));
+        }
+      }
+    }
+  }
+  if (!rows.length && courseId) {
+    rows = await withTimeout(loadFromCourseBank(courseId, schoolId), 4000, [] as RawQ[]);
+  } else if (rows.length && rows.some((r) => !hasUsableOptions(r)) && courseId) {
+    const bank = await withTimeout(loadFromCourseBank(courseId, schoolId), 4000, [] as RawQ[]);
+    if (bank.length) {
+      const byId = new Map(bank.map((q) => [q.id, q]));
+      rows = rows.map((q) => hasUsableOptions(q) ? q : (byId.get(q.id) ? mergeRaw(q, byId.get(q.id)!) : q));
+    }
+  }
+  return enrichMissingOptions(rows);
+}
+
+'''
+              p.write_text(t[:idx] + replacement + t[end:])
+              print('load patched')
+          # cbt gates
+          c = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          ct = c.read_text()
+          ct2 = ct.replace('if (examQ.isLoading || (examQ.isFetching && !examQ.data)) {', 'if (examQ.isLoading && !examQ.data) {')
+          ct2 = ct2.replace('if (questionsQ.isLoading && !questionsQ.data && !questionsQ.isError) {', 'if (questionsQ.isPending && !questionsQ.data && !questionsQ.isError && !questionsQ.isFetched) {')
+          c.write_text(ct2)
+          print('cbt gates ok')
+          PY2
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/ExamSecurityGate.tsx src/lib/cbt-load-questions.ts src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): restore exam gate + permission prompts + faster questions"
+            git push
+          fi
