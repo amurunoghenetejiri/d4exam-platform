@@ -1,0 +1,44 @@
+name: wire-named-notify
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/wire-named-notify.yml
+      - src/lib/notify-named.ts
+      - src/lib/notify-messages.ts
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wire named notification helpers
+        run: |
+          set -euo pipefail
+          # Teacher exams → named officer submit
+          sed -i 's|import { notifyOfficersExamSubmitted } from "@/lib/notify";|import { namedOfficersExamSubmitted as notifyOfficersExamSubmitted } from "@/lib/notify-named";|' src/routes/teacher.examinations.tsx || true
+          # Officer approvals → named teacher decision
+          sed -i 's|import { notifyTeacherExamDecision, notifyStudentsExamApproved } from "@/lib/notify";|import { notifyStudentsExamApproved } from "@/lib/notify";\nimport { namedTeacherExamDecision as notifyTeacherExamDecision } from "@/lib/notify-named";|' src/routes/officer.approvals.tsx || true
+          # Officer results → named student results released
+          if ! grep -q 'namedStudentsResultsReleased' src/components/officer/OfficerResultsPage.tsx; then
+            sed -i 's|notifyStudentsResultsReleased,||' src/components/officer/OfficerResultsPage.tsx || true
+            sed -i 's|from "@/lib/notify"|from "@/lib/notify";\nimport { namedStudentsResultsReleased } from "@/lib/notify-named"|' src/components/officer/OfficerResultsPage.tsx || true
+            sed -i 's|notifyStudentsResultsReleased(|namedStudentsResultsReleased(|g' src/components/officer/OfficerResultsPage.tsx || true
+          fi
+          # CTA labels
+          if ! grep -q 'OPEN APPROVALS' src/components/pages/NotificationsPage.tsx; then
+            sed -i 's|if (ty === "exam_available"|if (title.includes("submitted for review") \|\| msg.includes("for examination review") \|\| msg.includes("open approvals")) return "OPEN APPROVALS";\n  if (ty === "exam_available"|' src/components/pages/NotificationsPage.tsx || true
+          fi
+          echo "Patched:"
+          grep -n 'notify-named\|namedStudents\|namedTeacher\|namedOfficers' src/routes/teacher.examinations.tsx src/routes/officer.approvals.tsx src/components/officer/OfficerResultsPage.tsx | head -20
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/teacher.examinations.tsx src/routes/officer.approvals.tsx src/components/officer/OfficerResultsPage.tsx src/components/pages/NotificationsPage.tsx || true
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(notify): use named templates with student/teacher names and school ID"
+            git push
+          fi
