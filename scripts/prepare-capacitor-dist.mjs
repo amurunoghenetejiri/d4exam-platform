@@ -1,11 +1,8 @@
 /**
- * Prepare dist/ for Capacitor Android (bundled shell, no Vercel dependency).
- *
- * 1. Prefer Vite/Nitro client output (.output/public or dist)
- * 2. Generate a real index.html that loads the client JS bundle
- * 3. Copy offline.html and other static public assets
- *
- * Never write a meta-refresh to d4exam-platform.vercel.app.
+ * Prepare dist/ for Capacitor Android:
+ * 1) Build client-only SPA (vite.capacitor.config.ts) — no SSR / no Vercel shell
+ * 2) Write dist/index.html that mounts capacitor-app.js
+ * 3) Copy public assets + offline.html
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -14,59 +11,116 @@ import { spawnSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
-const outputPublic = path.join(root, ".output", "public");
+const distCap = path.join(root, "dist-capacitor");
 
-function copyDir(src, dest) {
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const s = path.join(src, entry.name);
-    const d = path.join(dest, entry.name);
-    if (entry.isDirectory()) copyDir(s, d);
-    else fs.copyFileSync(s, d);
-  }
+console.log("[prepare-capacitor-dist] Building Capacitor SPA (client-only)…");
+const viteBin = path.join(root, "node_modules", "vite", "bin", "vite.js");
+const build = spawnSync(
+  process.execPath,
+  [viteBin, "build", "--config", "vite.capacitor.config.ts"],
+  { cwd: root, stdio: "inherit", env: { ...process.env, NODE_ENV: "production" } },
+);
+if (build.status !== 0) {
+  console.error("FATAL: Capacitor SPA build failed");
+  process.exit(build.status || 1);
 }
 
-if (fs.existsSync(outputPublic)) {
-  console.log("[prepare-capacitor-dist] Copying .output/public → dist");
-  fs.mkdirSync(dist, { recursive: true });
-  copyDir(outputPublic, dist);
+if (!fs.existsSync(path.join(distCap, "capacitor-app.js"))) {
+  console.error("FATAL: dist-capacitor/capacitor-app.js missing");
+  process.exit(1);
+}
+
+fs.mkdirSync(dist, { recursive: true });
+fs.mkdirSync(path.join(dist, "assets"), { recursive: true });
+
+for (const name of fs.readdirSync(distCap)) {
+  const s = path.join(distCap, name);
+  if (fs.statSync(s).isFile()) {
+    fs.copyFileSync(s, path.join(dist, "assets", name));
+  }
 }
 
 const publicDir = path.join(root, "public");
 if (fs.existsSync(publicDir)) {
   for (const name of fs.readdirSync(publicDir)) {
     const s = path.join(publicDir, name);
-    const d = path.join(dist, name);
     if (fs.statSync(s).isFile()) {
-      fs.mkdirSync(path.dirname(d), { recursive: true });
-      fs.copyFileSync(s, d);
+      fs.copyFileSync(s, path.join(dist, name));
     }
   }
 }
 
-const assetsDir = path.join(dist, "assets");
-if (!fs.existsSync(assetsDir)) {
-  console.error("FATAL: dist/assets missing after build. Run `npm run build` first.");
-  process.exit(1);
-}
+const cssFile = fs.readdirSync(path.join(dist, "assets")).find((f) => f.endsWith(".css"));
+const cssLink = cssFile ? `<link rel="stylesheet" href="./assets/${cssFile}" />` : "";
 
-const gen = path.join(root, "scripts", "generate-capacitor-index.mjs");
-const r = spawnSync(process.execPath, [gen], { cwd: root, stdio: "inherit" });
-if (r.status !== 0) {
-  process.exit(r.status || 1);
-}
+const html = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1b3a" />
+    <meta name="color-scheme" content="light dark" />
+    <title>D4EXAM</title>
+    ${cssLink}
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #0b1b3a; }
+      #root { min-height: 100dvh; }
+      #d4-boot {
+        position: fixed; inset: 0; z-index: 99999; display: grid; place-items: center;
+        background: #0b1b3a; color: #e2e8f0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        text-align: center;
+        padding: max(1rem, env(safe-area-inset-top)) 1.25rem max(1rem, env(safe-area-inset-bottom));
+      }
+      #d4-boot .mark {
+        width: 72px; height: 72px; margin: 0 auto 1rem; border-radius: 18px;
+        background: #1e3a5f; display: grid; place-items: center;
+        font-weight: 800; font-size: 1.25rem; color: #93c5fd;
+      }
+      #d4-boot .spin {
+        width: 36px; height: 36px; margin: 0 auto 1rem;
+        border: 3px solid #1e3a5f; border-top-color: #3b82f6;
+        border-radius: 50%; animation: d4spin 0.8s linear infinite;
+      }
+      @keyframes d4spin { to { transform: rotate(360deg); } }
+      #d4-boot h1 { font-size: 1.15rem; margin: 0 0 0.4rem; font-weight: 700; }
+      #d4-boot p { margin: 0 auto; max-width: 18rem; font-size: 0.9rem; color: #94a3b8; line-height: 1.45; }
+      #d4-boot button {
+        margin-top: 1.1rem; border: 0; border-radius: 0.75rem;
+        background: #2563eb; color: #fff; font-weight: 600;
+        padding: 0.7rem 1.25rem; font-size: 0.9rem; cursor: pointer;
+        display: none;
+      }
+      #d4-boot.show-retry button { display: inline-block; }
+    </style>
+  </head>
+  <body>
+    <div id="d4-boot" role="status">
+      <div>
+        <div class="mark">D4</div>
+        <div class="spin" aria-hidden="true"></div>
+        <h1>Loading D4EXAM</h1>
+        <p>Starting secure examination workspace…</p>
+        <button type="button" id="d4-retry">Try again</button>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script>
+      (function () {
+        setTimeout(function () {
+          var boot = document.getElementById("d4-boot");
+          if (boot && boot.style.display !== "none") boot.classList.add("show-retry");
+        }, 15000);
+        var btn = document.getElementById("d4-retry");
+        if (btn) btn.onclick = function () { location.reload(); };
+      })();
+    </script>
+    <script type="module" src="./assets/capacitor-app.js"></script>
+  </body>
+</html>
+`;
 
-const indexPath = path.join(dist, "index.html");
-if (!fs.existsSync(indexPath)) {
-  console.error("FATAL: dist/index.html was not generated");
-  process.exit(1);
-}
-
-const indexHtml = fs.readFileSync(indexPath, "utf8");
-if (indexHtml.includes("d4exam-platform.vercel.app")) {
-  console.error("FATAL: dist/index.html still references Vercel — refusing to package");
-  process.exit(1);
-}
+fs.writeFileSync(path.join(dist, "index.html"), html, "utf8");
 
 const offlinePath = path.join(dist, "offline.html");
 if (fs.existsSync(offlinePath)) {
@@ -77,11 +131,6 @@ if (fs.existsSync(offlinePath)) {
   fs.writeFileSync(offlinePath, offline, "utf8");
 }
 
-console.log("[prepare-capacitor-dist] Ready. dist/ is a local Capacitor shell (no Vercel URL).");
-console.log(
-  "  assets:",
-  fs.readdirSync(assetsDir).length,
-  "files; index.html:",
-  fs.statSync(indexPath).size,
-  "bytes",
-);
+console.log("[prepare-capacitor-dist] SPA shell ready (no Vercel).");
+console.log("  index.html + assets/capacitor-app.js");
+console.log("  assets:", fs.readdirSync(path.join(dist, "assets")).length, "files");
