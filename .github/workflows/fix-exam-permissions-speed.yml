@@ -1,0 +1,521 @@
+name: fix-exam-permissions-speed
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-exam-permissions-speed.yml
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply permission + speed patches
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+
+          # ---- cameraService ----
+          Path('src/native/cameraService.ts').write_text(r'''/**
+ * Camera/microphone for CBT proctoring.
+ * Web: getUserMedia directly.
+ * Android Capacitor: request OS runtime permissions first, then getUserMedia in WebView.
+ */
+import { isNativeShell } from "@/native/platform";
+
+export type CameraStreamOptions = {
+  facingMode?: "user" | "environment";
+  audio?: boolean;
+};
+
+export type PermissionResult = {
+  granted: boolean;
+  deniedPermanently?: boolean;
+  error?: string;
+};
+
+async function probeGetUserMedia(
+  constraints: MediaStreamConstraints,
+): Promise<PermissionResult> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    return { granted: false, error: "Media devices are not available on this device" };
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    stream.getTracks().forEach((t) => {
+      try {
+        t.stop();
+      } catch {
+        /* ignore */
+      }
+    });
+    return { granted: true };
+  } catch (e) {
+    const name = (e as DOMException)?.name || "";
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+      return {
+        granted: false,
+        deniedPermanently: true,
+        error:
+          "Permission denied. Open Android Settings \u2192 Apps \u2192 D4EXAM \u2192 Permissions and enable Camera / Microphone.",
+      };
+    }
+    if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+      return { granted: false, error: "No camera or microphone was found on this device." };
+    }
+    return { granted: false, error: (e as Error).message || "Media unavailable" };
+  }
+}
+
+/** Request native Android camera permission (shows system dialog). */
+export async function ensureCameraPermission(): Promise<PermissionResult> {
+  if (isNativeShell()) {
+    try {
+      const { Camera } = await import("@capacitor/camera");
+      let status = await Camera.checkPermissions();
+      if (status.camera === "granted") {
+        return probeGetUserMedia({ video: true, audio: false });
+      }
+      if (status.camera === "denied") {
+        status = await Camera.requestPermissions({ permissions: ["camera"] });
+        if (status.camera !== "granted") {
+          return {
+            granted: false,
+            deniedPermanently: true,
+            error:
+              "Camera permission denied. Open Android Settings \u2192 Apps \u2192 D4EXAM \u2192 Permissions and enable Camera.",
+          };
+        }
+      } else {
+        status = await Camera.requestPermissions({ permissions: ["camera"] });
+        if (status.camera !== "granted") {
+          return {
+            granted: false,
+            deniedPermanently: status.camera === "denied",
+            error:
+              "Camera permission is required for examinations. Enable Camera in Android Settings \u2192 Apps \u2192 D4EXAM \u2192 Permissions.",
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[D4EXAM] Camera permission plugin error", e);
+    }
+  }
+  return probeGetUserMedia({ video: true, audio: false });
+}
+
+/** Request microphone via getUserMedia (WebView + browser). */
+export async function ensureMicrophonePermission(): Promise<PermissionResult> {
+  return probeGetUserMedia({ audio: true, video: false });
+}
+
+/**
+ * Request camera + microphone together so the OS shows both permission dialogs
+ * when the student enters the exam environment.
+ */
+export async function requestExamMediaPermissions(opts: {
+  camera?: boolean;
+  microphone?: boolean;
+}): Promise<{ camera: PermissionResult; microphone: PermissionResult }> {
+  const needCam = opts.camera !== false;
+  const needMic = Boolean(opts.microphone);
+
+  let camera: PermissionResult = { granted: !needCam };
+  let microphone: PermissionResult = { granted: !needMic };
+
+  if (needCam) {
+    camera = await ensureCameraPermission();
+  }
+  if (needMic) {
+    if (needCam && camera.granted) {
+      const both = await probeGetUserMedia({ video: true, audio: true });
+      if (both.granted) {
+        microphone = { granted: true };
+      } else {
+        microphone = await ensureMicrophonePermission();
+      }
+    } else {
+      microphone = await ensureMicrophonePermission();
+    }
+  }
+
+  return { camera, microphone };
+}
+
+export async function openCameraStream(
+  options: CameraStreamOptions = {},
+): Promise<MediaStream> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Camera is not available on this device");
+  }
+  const cam = await ensureCameraPermission();
+  if (!cam.granted) {
+    throw new Error(cam.error || "Camera permission required");
+  }
+  if (options.audio) {
+    try {
+      await ensureMicrophonePermission();
+    } catch {
+      /* soft */
+    }
+  }
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: options.facingMode || "user",
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+      },
+      audio: Boolean(options.audio),
+    });
+  } catch (e) {
+    if (options.audio) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: options.facingMode || "user" },
+          audio: false,
+        });
+      } catch {
+        /* fall through */
+      }
+    }
+    const name = (e as DOMException)?.name || "";
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+      throw new Error(
+        "Camera permission is required for this examination. Enable Camera in Android Settings \u2192 Apps \u2192 D4EXAM.",
+      );
+    }
+    throw e instanceof Error ? e : new Error("Could not open camera");
+  }
+}
+
+export function stopMediaStream(stream: MediaStream | null | undefined) {
+  if (!stream) return;
+  try {
+    stream.getTracks().forEach((t) => {
+      try {
+        t.stop();
+      } catch {
+        /* ignore */
+      }
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+export const stopCameraStream = stopMediaStream;
+''')
+          print('wrote cameraService')
+
+          # ---- cbt-load-questions parallel ----
+          p = Path('src/lib/cbt-load-questions.ts')
+          t = p.read_text()
+          if 'async function withTimeout' not in t:
+              old = '''export async function loadExamQuestionBank(opts: {
+  courseId: string;
+  schoolId?: string | null;
+  examId?: string | null;
+}): Promise<RawQ[]> {
+  const courseId = opts.courseId ? String(opts.courseId) : "";
+  const schoolId = opts.schoolId ? String(opts.schoolId) : null;
+  const examId = opts.examId ? String(opts.examId) : null;
+
+  let rows: RawQ[] = [];
+
+  if (examId) {
+    rows = await loadViaRpc(examId, courseId || null, schoolId);
+  }
+
+  // If RPC gave questions but no options, merge from exam_questions path
+  if (examId && (!rows.length || rows.some((r) => !hasUsableOptions(r)))) {
+    const linked = await loadFromExamQuestions(examId);
+    if (linked.length) {
+      if (!rows.length) {
+        rows = linked;
+      } else {
+        const byId = new Map(linked.map((q) => [q.id, q]));
+        rows = rows.map((q) => {
+          if (hasUsableOptions(q)) return q;
+          const f = byId.get(q.id);
+          return f ? mergeRaw(q, f) : q;
+        });
+      }
+    }
+  }
+
+  if (!rows.length && courseId) {
+    rows = await loadFromCourseBank(courseId, schoolId);
+  } else if (rows.length && rows.some((r) => !hasUsableOptions(r)) && courseId) {
+    const bank = await loadFromCourseBank(courseId, schoolId);
+    if (bank.length) {
+      const byId = new Map(bank.map((q) => [q.id, q]));
+      rows = rows.map((q) => {
+        if (hasUsableOptions(q)) return q;
+        const f = byId.get(q.id);
+        return f ? mergeRaw(q, f) : q;
+      });
+    }
+  }
+
+  return enrichMissingOptions(rows);
+}'''
+              new = '''async function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function loadExamQuestionBank(opts: {
+  courseId: string;
+  schoolId?: string | null;
+  examId?: string | null;
+}): Promise<RawQ[]> {
+  const courseId = opts.courseId ? String(opts.courseId) : "";
+  const schoolId = opts.schoolId ? String(opts.schoolId) : null;
+  const examId = opts.examId ? String(opts.examId) : null;
+
+  let rows: RawQ[] = [];
+
+  if (examId) {
+    const [rpcRows, linked] = await Promise.all([
+      withTimeout(loadViaRpc(examId, courseId || null, schoolId), 4500, [] as RawQ[]),
+      withTimeout(loadFromExamQuestions(examId), 4500, [] as RawQ[]),
+    ]);
+    rows = rpcRows;
+    if (!rows.length || rows.some((r) => !hasUsableOptions(r))) {
+      if (linked.length) {
+        if (!rows.length) {
+          rows = linked;
+        } else {
+          const byId = new Map(linked.map((q) => [q.id, q]));
+          rows = rows.map((q) => {
+            if (hasUsableOptions(q)) return q;
+            const f = byId.get(q.id);
+            return f ? mergeRaw(q, f) : q;
+          });
+        }
+      }
+    }
+  }
+
+  if (!rows.length && courseId) {
+    rows = await withTimeout(loadFromCourseBank(courseId, schoolId), 4000, [] as RawQ[]);
+  } else if (rows.length && rows.some((r) => !hasUsableOptions(r)) && courseId) {
+    const bank = await withTimeout(loadFromCourseBank(courseId, schoolId), 4000, [] as RawQ[]);
+    if (bank.length) {
+      const byId = new Map(bank.map((q) => [q.id, q]));
+      rows = rows.map((q) => {
+        if (hasUsableOptions(q)) return q;
+        const f = byId.get(q.id);
+        return f ? mergeRaw(q, f) : q;
+      });
+    }
+  }
+
+  return enrichMissingOptions(rows);
+}'''
+              if old not in t:
+                  print('WARN loadExamQuestionBank pattern missing')
+              else:
+                  p.write_text(t.replace(old, new))
+                  print('patched loadExamQuestionBank')
+          else:
+              print('withTimeout already present')
+
+          # ---- ExamSecurityGate: imports + permission panel (copy from local if available) ----
+          gate = Path('src/components/cbt/ExamSecurityGate.tsx')
+          gt = gate.read_text()
+          if 'requestExamMediaPermissions' not in gt:
+              gt = gt.replace(
+                  '''import {
+  ensureCameraPermission,
+  ensureMicrophonePermission,
+  openCameraStream,
+} from "@/native/cameraService";''',
+                  '''import {
+  ensureCameraPermission,
+  ensureMicrophonePermission,
+  openCameraStream,
+  requestExamMediaPermissions,
+} from "@/native/cameraService";
+import { canAttemptScreenShare, startScreenShareStream, stopScreenShareStream } from "@/lib/screen-share";''',
+              )
+          if 'const [permBusy, setPermBusy]' not in gt:
+              gt = gt.replace(
+                  'const [previewError, setPreviewError] = useState<string | null>(null);',
+                  '''const [previewError, setPreviewError] = useState<string | null>(null);
+  const [permBusy, setPermBusy] = useState(false);
+  const [camGranted, setCamGranted] = useState(false);
+  const [micGranted, setMicGranted] = useState(false);
+  const [screenGranted, setScreenGranted] = useState(false);
+  const [permHint, setPermHint] = useState<string | null>(null);''',
+              )
+          if 'requestAllExamPermissions' not in gt:
+              helper = '''
+  const requestAllExamPermissions = async () => {
+    setPermBusy(true);
+    setPermHint(null);
+    try {
+      if (needCam || needMic) {
+        const { camera, microphone } = await requestExamMediaPermissions({
+          camera: needCam,
+          microphone: needMic,
+        });
+        if (needCam) {
+          setCamGranted(Boolean(camera.granted));
+          if (!camera.granted) {
+            setPermHint(camera.error || "Allow Camera for D4EXAM to continue.");
+          } else {
+            await startPreview();
+          }
+        }
+        if (needMic) {
+          setMicGranted(Boolean(microphone.granted));
+          if (!microphone.granted) {
+            setPermHint((h) => h || microphone.error || "Allow Microphone for D4EXAM if required.");
+          }
+        }
+      }
+      if (shareMode !== "disabled" && canAttemptScreenShare()) {
+        try {
+          const share = await startScreenShareStream();
+          if (share.ok) {
+            stopScreenShareStream(share.stream);
+            setScreenGranted(true);
+          } else if (share.reason === "denied") {
+            setScreenGranted(false);
+            setPermHint(
+              share.message ||
+                "Screen share was denied. Allow screen capture when prompted to start the exam.",
+            );
+          }
+        } catch {
+          /* optional until start */
+        }
+      }
+    } finally {
+      setPermBusy(false);
+    }
+  };
+
+'''
+              gt = gt.replace('  const startPreview = async () => {', helper + '  const startPreview = async () => {')
+          if 'Allow camera, mic & screen' not in gt:
+              marker = '        {totalQuestions === 0 ? ('
+              panel = '''        {(needCam || needMic || shareMode !== "disabled") && (
+          <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3 sm:p-4">
+            <p className="text-sm font-extrabold text-slate-900">Allow required permissions</p>
+            <p className="mt-1 text-xs text-slate-600">
+              Tap below so the app can request Camera, Microphone, and Screen share. You must allow them before writing the exam.
+            </p>
+            <div className="mt-3">
+              <Button
+                type="button"
+                className="h-10 w-full rounded-xl font-bold"
+                disabled={permBusy || busy}
+                onClick={() => void requestAllExamPermissions()}
+              >
+                {permBusy ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Requesting\u2026
+                  </>
+                ) : (
+                  "Allow camera, mic & screen"
+                )}
+              </Button>
+            </div>
+            <ul className="mt-3 space-y-1 text-xs font-semibold">
+              {needCam && (
+                <li className={camGranted || previewState === "live" ? "text-emerald-700" : "text-amber-700"}>
+                  {(camGranted || previewState === "live") ? "\u2713" : "\u25cb"} Camera{" "}
+                  {(camGranted || previewState === "live") ? "allowed" : "not allowed yet"}
+                </li>
+              )}
+              {needMic && (
+                <li className={micGranted ? "text-emerald-700" : "text-amber-700"}>
+                  {micGranted ? "\u2713" : "\u25cb"} Microphone {micGranted ? "allowed" : "not allowed yet"}
+                </li>
+              )}
+              {shareMode !== "disabled" && (
+                <li className={screenGranted ? "text-emerald-700" : "text-slate-600"}>
+                  {screenGranted ? "\u2713" : "\u25cb"} Screen share{" "}
+                  {screenGranted
+                    ? "allowed"
+                    : screenSupported
+                      ? "will be requested at start"
+                      : "not supported on this device"}
+                </li>
+              )}
+            </ul>
+            {permHint && (
+              <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                {permHint}
+              </p>
+            )}
+          </div>
+        )}
+
+        {totalQuestions === 0 ? ('''
+              if marker in gt:
+                  gt = gt.replace(marker, panel, 1)
+                  print('inserted gate panel')
+          # Improve startPreview to use requestExamMediaPermissions
+          if 'requestExamMediaPermissions({' not in gt.split('startPreview')[1][:500] if 'startPreview' in gt else '':
+              pass
+          if 'const { camera: camOk' not in gt:
+              gt = gt.replace(
+                  '''      const camOk = await ensureCameraPermission();
+      if (!camOk.granted) throw new Error(camOk.error || "Camera permission required");
+      // When exam requires microphone, request it together with camera so the OS shows both.
+      if (needMic) {
+        try {
+          await ensureMicrophonePermission();
+        } catch {
+          /* soft — exam start may still proceed without mic if policy allows */
+        }
+      }''',
+                  '''      const { camera: camOk, microphone: micOk } = await requestExamMediaPermissions({
+        camera: true,
+        microphone: Boolean(needMic),
+      });
+      if (!camOk.granted) throw new Error(camOk.error || "Camera permission required");
+      setCamGranted(true);
+      if (needMic) setMicGranted(Boolean(micOk.granted));''',
+              )
+          gate.write_text(gt)
+          print('gate written')
+
+          # Soften CBT loading gates
+          cbt = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          ct = cbt.read_text()
+          ct = ct.replace(
+              'if (examQ.isLoading || (examQ.isFetching && !examQ.data)) {',
+              'if (examQ.isLoading && !examQ.data) {',
+          )
+          ct = ct.replace(
+              'if (questionsQ.isLoading && !questionsQ.data && !questionsQ.isError) {',
+              'if (questionsQ.isPending && !questionsQ.data && !questionsQ.isError && !questionsQ.isFetched) {',
+          )
+          cbt.write_text(ct)
+          print('cbt loading gates updated')
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/native/cameraService.ts src/lib/cbt-load-questions.ts src/components/cbt/ExamSecurityGate.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): exam media permission prompts + faster question load"
+            git push
+          fi
