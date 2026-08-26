@@ -1,1 +1,1 @@
-login-redirect-fix-2026-08-26
+login-restored-2026-08-26T21-30Z
