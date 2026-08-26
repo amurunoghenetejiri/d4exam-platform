@@ -1,6 +1,14 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { redirect } from "@tanstack/react-router";
-import { fetchSessionUser, roleHome, type AppRole, type SessionUser } from "@/lib/session";
+import {
+  fetchSessionUser,
+  readPendingLoginRole,
+  clearPendingLoginRole,
+  roleHome,
+  type AppRole,
+  type SessionUser,
+} from "@/lib/session";
+import { supabase } from "@/integrations/supabase/client";
 import { offlineGet, OfflineKeys } from "@/lib/offline-cache";
 import { readLastUserId } from "@/lib/offline-query";
 
@@ -28,6 +36,21 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     } catch {
       user = null;
     }
+    // Retry once if auth session exists but profile/roles were slow
+    if (!user) {
+      try {
+        const { data: sess } = await supabase.auth.getSession();
+        if (sess.session?.access_token) {
+          await new Promise((r) => setTimeout(r, 400));
+          user = await Promise.race([
+            fetchSessionUser(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+          ]);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     if (!user) {
       try {
         const last = readLastUserId();
@@ -45,6 +68,33 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
   }
 
   if (!user) {
+    // Last resort: valid Supabase session + role we just logged in with (avoids bounce to /login)
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const pending = readPendingLoginRole();
+      if (sess.session?.user && pending && allowed.includes(pending)) {
+        const minimal: SessionUser = {
+          userId: sess.session.user.id,
+          profileId: sess.session.user.id,
+          email: sess.session.user.email || "",
+          fullName: sess.session.user.email || "User",
+          status: "active",
+          schoolId: null,
+          schoolName: null,
+          schoolCode: null,
+          schoolLogoUrl: null,
+          roles: [pending],
+          role: pending,
+          identifier: sess.session.user.email || null,
+          identifierLabel: "Email",
+        };
+        if (queryClient) queryClient.setQueryData(["session-user"], minimal);
+        window.setTimeout(() => clearPendingLoginRole(), 20_000);
+        return { user: minimal };
+      }
+    } catch {
+      /* ignore */
+    }
     throw redirect({ to: "/login" });
   }
 
@@ -76,7 +126,7 @@ export async function requireSuperAdmin(queryClient?: QueryClient) {
   return requireRole("super_admin", queryClient);
 }
 
-/** School-scoped staff (admin, officer, or teacher). */
-export async function requireSchoolStaff(queryClient?: QueryClient) {
+/** School-scoped staff (admin, officer, teacher). */
+export async function requireStaff(queryClient?: QueryClient) {
   return requireRole(["school_admin", "examination_officer", "teacher"], queryClient);
 }
