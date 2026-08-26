@@ -1,0 +1,44 @@
+name: fix-student-import-path
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - src/lib/import-students.ts
+      - .github/workflows/fix-student-import-path.yml
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Point student-import at re-export module
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/routes/admin.student-import.tsx")
+          t = p.read_text()
+          old1 = 'import { createSchoolUser, importStudents } from "@/lib/auth.school-admin.functions";'
+          old2 = 'import { createSchoolUser, importStudentsBulk as importStudents } from "@/lib/auth.school-admin.functions";'
+          new = 'import { createSchoolUser, importStudents } from "@/lib/import-students";'
+          if new in t:
+              print("already using import-students")
+          elif old1 in t:
+              p.write_text(t.replace(old1, new, 1))
+              print("replaced old1")
+          elif old2 in t:
+              p.write_text(t.replace(old2, new, 1))
+              print("replaced old2")
+          else:
+              raise SystemExit("import not found")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/admin.student-import.tsx src/lib/import-students.ts
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(build): use import-students re-export in student-import route"
+            git push
+          fi
