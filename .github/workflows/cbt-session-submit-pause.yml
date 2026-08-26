@@ -1,0 +1,128 @@
+name: CBT session submit pause header fixes
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/cbt-session-submit-pause.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Surgical patch
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+
+          old_fs = """    const onFsChange = () => {
+      if (!security.fullscreen) return;
+      if (document.fullscreenElement) { setFsGate(false); return; }
+      fullscreenExitCountRef.current += 1;
+      setFsGate(true);"""
+          new_fs = """    const onFsChange = () => {
+      if (!security.fullscreen) return;
+      if (finishingRef.current || done) return;
+      if (document.fullscreenElement) { setFsGate(false); return; }
+      fullscreenExitCountRef.current += 1;
+      setFsGate(true);"""
+          if "finishingRef.current || done" not in t:
+              if old_fs not in t:
+                  raise SystemExit("onFsChange not found")
+              t = t.replace(old_fs, new_fs, 1)
+              print("patched onFsChange")
+          else:
+              print("onFsChange already guarded")
+
+          marker = "    finishingRef.current = true;\n    shutdownMedia();\n    setFsGate(false);\n    setPaused(false);\n    setWarnBanner(null);\n    void leaveExamFullscreen();"
+          if marker in t and "setDone(true);\n    void leaveExamFullscreen" not in t:
+              t = t.replace(
+                  marker,
+                  "    finishingRef.current = true;\n    # Stop every security activity immediately\n    shutdownMedia();\n    setFsGate(false);\n    setPaused(false);\n    setWarnBanner(null);\n    setDoneTerminated(auto);\n    setDone(true);\n    void leaveExamFullscreen();".replace("# Stop every security activity immediately", "// Stop every security activity immediately — camera, face, banners, fullscreen gate"),
+                  1,
+              )
+              old_end = "    } catch (e) { toast.error(friendlyError(e, \"Could not save result\")); }\n    setDoneTerminated(auto);\n    setDone(true);\n    shutdownMedia();\n    finishingRef.current = false;\n  }"
+              new_end = "    } catch (e) { toast.error(friendlyError(e, \"Could not save result\")); }\n    shutdownMedia();\n    finishingRef.current = false;\n  }"
+              if old_end in t:
+                  t = t.replace(old_end, new_end, 1)
+                  print("patched finishAttempt early done")
+              else:
+                  print("finishAttempt end pattern missing")
+          else:
+              print("finishAttempt already early-done or marker missing")
+
+          old_pip = """      {started && !done && security.requireCamera && (
+        <ExamCameraPip
+          enabled={started && !done}
+          faceDetection={Boolean(security.faceDetection || security.requireCamera)}"""
+          new_pip = """      {started && !done && !paused && security.requireCamera && (
+        <ExamCameraPip
+          enabled={started && !done && !paused}
+          faceDetection={Boolean(security.faceDetection || security.requireCamera)}"""
+          if "enabled={started && !done && !paused}" not in t:
+              if old_pip not in t:
+                  raise SystemExit("ExamCameraPip block not found")
+              t = t.replace(old_pip, new_pip, 1)
+              print("patched ExamCameraPip pause")
+          else:
+              print("ExamCameraPip already pauses")
+
+          old_hdr = """      <header className=\"d4-cbt-header relative z-40 shrink-0 border-b border-slate-200 bg-[#0b1b3a] text-white\">
+        <div className=\"mx-auto flex h-14 max-w-[1200px] items-center justify-between gap-3 px-3 sm:h-16 sm:px-6\">
+          <div className=\"flex min-w-0 items-center gap-3\">
+            <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? student?.schoolName ?? session?.schoolName} size=\"md\" className=\"bg-transparent\" />"""
+          new_hdr = """      <header className=\"d4-cbt-header relative z-40 shrink-0 border-b border-slate-200 bg-[#0b1b3a] text-white\">
+        <div className=\"mx-auto flex h-11 max-w-[1200px] items-center justify-between gap-2 px-2.5 sm:h-12 sm:px-4\">
+          <div className=\"flex min-w-0 items-center gap-2\">
+            <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? student?.schoolName ?? session?.schoolName} size=\"sm\" className=\"bg-transparent\" />"""
+          if "h-11 max-w-[1200px]" not in t:
+              if old_hdr not in t:
+                  raise SystemExit("header block not found")
+              t = t.replace(old_hdr, new_hdr, 1)
+              print("patched short header")
+          else:
+              print("header already short")
+
+          p.write_text(t)
+          assert "finishingRef.current || done" in t
+          assert "enabled={started && !done && !paused}" in t
+          assert "h-11 max-w-[1200px]" in t
+          print("session ok", len(t))
+
+          css = Path("src/styles.css")
+          ct = css.read_text()
+          if "Hide residual system bar insets during locked CBT" not in ct:
+              marker = "html.d4-exam-immersive [data-sonner-toaster]"
+              extra = """
+/* Hide residual system bar insets during locked CBT */
+html.d4-exam-immersive,
+html.d4-exam-immersive body {
+  overflow: hidden !important;
+}
+html.d4-exam-immersive .d4-cbt-exam {
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  padding-bottom: 0 !important;
+  margin-bottom: 0 !important;
+}
+"""
+              if marker in ct:
+                  ct = ct.replace(marker, extra + marker, 1)
+              else:
+                  ct += extra
+              css.write_text(ct)
+              print("css ok")
+          else:
+              print("css already patched")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/styles.css
+          git commit -m "fix(cbt): short header; immediate submit cleanup; pause stops face (timer ticks)" || echo no-changes
+          git pull --rebase origin main || true
+          git push origin main
