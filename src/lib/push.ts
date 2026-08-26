@@ -18,38 +18,68 @@ import { showD4ExamNativeNotification } from "@/native/localNotify";
 
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
-let onMessageBound = false;
+let nativePermissionCache: "granted" | "denied" | "default" | "unsupported" | null = null;
 let nativeListenersBound = false;
-let nativePermissionCache: PushPermissionState | null = null;
 
 const ENABLE_NATIVE_FCM_REGISTER = false;
 
-/** Kill every web push path inside the APK so Chrome never owns notifications. */
+export type PushPermissionState = "granted" | "denied" | "default" | "unsupported";
+
+export function getPushPermissionState(): PushPermissionState {
+  if (typeof window === "undefined") return "unsupported";
+  if (isNativeShell()) {
+    return nativePermissionCache || "default";
+  }
+  if (!("Notification" in window)) return "unsupported";
+  return Notification.permission as PushPermissionState;
+}
+
+export async function refreshNativePushPermissionState(): Promise<PushPermissionState> {
+  if (!isNativeShell()) return getPushPermissionState();
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    const status = await LocalNotifications.checkPermissions();
+    if (status.display === "granted") {
+      nativePermissionCache = "granted";
+      return "granted";
+    }
+    if (status.display === "denied") {
+      nativePermissionCache = "denied";
+      return "denied";
+    }
+  } catch {
+    /* fall through */
+  }
+  try {
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+    const status = await PushNotifications.checkPermissions();
+    if (status.receive === "granted") {
+      nativePermissionCache = "granted";
+      return "granted";
+    }
+    if (status.receive === "denied") {
+      nativePermissionCache = "denied";
+      return "denied";
+    }
+    nativePermissionCache = "default";
+    return "default";
+  } catch {
+    nativePermissionCache = "unsupported";
+    return "unsupported";
+  }
+}
+
 async function disableWebPushInNativeShell(): Promise<void> {
-  if (typeof window === "undefined" || !isNativeShell()) return;
+  if (!isNativeShell() || typeof window === "undefined") return;
   try {
     if ("serviceWorker" in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(
-        regs.map(async (r) => {
-          try {
-            await r.unregister();
-          } catch {
-            /* ignore */
-          }
-        }),
-      );
-    }
-    if ("caches" in window) {
-      try {
-        const keys = await caches.keys();
-        await Promise.all(
-          keys
-            .filter((k) => /firebase|messaging|fcm|workbox|d4exam/i.test(k))
-            .map((k) => caches.delete(k)),
-        );
-      } catch {
-        /* ignore */
+      for (const reg of regs) {
+        try {
+          await reg.unregister();
+        } catch {
+          /* ignore */
+        }
       }
     }
   } catch {
@@ -57,11 +87,9 @@ async function disableWebPushInNativeShell(): Promise<void> {
   }
 }
 
-/** Turn off old web/Chrome FCM device rows so server stops sending Chrome pushes. */
 async function disableWebPushDevicesForUser(userId: string): Promise<void> {
-  if (!userId) return;
+  if (!userId || !isNativeShell()) return;
   try {
-    // Disable any token not clearly marked as native Capacitor
     const { data } = await supabase
       .from("push_devices")
       .select("id, user_agent, token")
@@ -99,56 +127,178 @@ export async function getFirebaseMessaging(): Promise<Messaging | null> {
   return messaging;
 }
 
-export type PushPermissionState = "granted" | "denied" | "default" | "unsupported";
-
-export function getPushPermissionState(): PushPermissionState {
-  if (typeof window === "undefined") return "unsupported";
+function showLocalNotification(title: string, body: string, link?: string | null) {
   if (isNativeShell()) {
-    if (nativePermissionCache) return nativePermissionCache;
-    return "default";
+    void showD4ExamNativeNotification(title, body, link);
+    return;
   }
-  if (!("Notification" in window)) return "unsupported";
-  return Notification.permission as PushPermissionState;
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  try {
+    const n = new Notification(title, { body, icon: "/icon-192.png", badge: "/favicon.png" });
+    if (link) {
+      n.onclick = () => {
+        window.focus();
+        window.location.assign(link.startsWith("http") ? link : link);
+        n.close();
+      };
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
-export async function refreshNativePushPermissionState(): Promise<PushPermissionState> {
-  if (!isNativeShell()) return getPushPermissionState();
+async function ensureAndroidChannel(): Promise<void> {
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
-    const status = await PushNotifications.checkPermissions();
-    const state: PushPermissionState =
-      status.receive === "granted"
-        ? "granted"
-        : status.receive === "denied"
-          ? "denied"
-          : "default";
-    nativePermissionCache = state;
-    return state;
-  } catch {
-    // Fall back to local-notifications permission
-    try {
-      const { LocalNotifications } = await import("@capacitor/local-notifications");
-      const s = await LocalNotifications.checkPermissions();
-      const state: PushPermissionState =
-        s.display === "granted" ? "granted" : s.display === "denied" ? "denied" : "default";
-      nativePermissionCache = state;
-      return state;
-    } catch {
-      nativePermissionCache = "default";
-      return "default";
+    // @ts-expect-error createChannel exists on Android
+    if (typeof PushNotifications.createChannel === "function") {
+      // @ts-expect-error Android only
+      await PushNotifications.createChannel({
+        id: "d4exam_default",
+        name: "D4EXAM",
+        description: "Exams, results and important updates",
+        importance: 5,
+        visibility: 1,
+        sound: "default",
+        vibration: true,
+      });
     }
+  } catch {
+    /* ignore */
   }
 }
 
-async function upsertPushDevice(
+async function bindNativePushListeners(userId: string, role?: string | null): Promise<void> {
+  if (nativeListenersBound) return;
+  try {
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+
+    await PushNotifications.addListener("registration", (token) => {
+      void saveDeviceToken(userId, token.value, role);
+    });
+
+    await PushNotifications.addListener("registrationError", (err) => {
+      console.warn("[D4EXAM] push registration error", err);
+    });
+
+    await PushNotifications.addListener("pushNotificationReceived", (notification) => {
+      try {
+        const title = notification.title || "D4EXAM";
+        const body = notification.body || "";
+        toast.info(title, { description: body });
+        void showD4ExamNativeNotification(title, body);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+      try {
+        const data = action.notification?.data as Record<string, string> | undefined;
+        const link = data?.link || data?.url;
+        if (link && typeof window !== "undefined") {
+          window.location.assign(link.startsWith("http") ? link : link);
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+
+    nativeListenersBound = true;
+  } catch (e) {
+    console.warn("[D4EXAM] bindNativePushListeners failed", e);
+  }
+}
+
+async function enableNativePushNotifications(
+  userId: string,
+  role?: string | null,
+  opts?: { requestPermission?: boolean },
+): Promise<{ ok: boolean; token?: string; error?: string }> {
+  try {
+    await disableWebPushInNativeShell();
+    await disableWebPushDevicesForUser(userId);
+
+    // Prefer Local Notifications permission (shows as D4EXAM app, not Chrome)
+    try {
+      const { LocalNotifications } = await import("@capacitor/local-notifications");
+      let lp = await LocalNotifications.checkPermissions();
+      const wasGranted = lp.display === "granted";
+      if (!wasGranted && opts?.requestPermission !== false) {
+        lp = await LocalNotifications.requestPermissions();
+      }
+      if (lp.display === "granted") {
+        nativePermissionCache = "granted";
+        // Only show the one-time confirmation when the user JUST allowed notifications —
+        // never on every app open / login.
+        if (!wasGranted) {
+          try {
+            const key = `d4_notif_enabled_once:${userId}`;
+            if (typeof localStorage !== "undefined" && localStorage.getItem(key) !== "1") {
+              localStorage.setItem(key, "1");
+              await showD4ExamNativeNotification(
+                "D4EXAM notifications enabled",
+                "You will receive alerts as D4EXAM, not Chrome.",
+              );
+            }
+          } catch {
+            /* ignore storage */
+          }
+        }
+      }
+    } catch {
+      /* plugin may be missing until next APK */
+    }
+
+    try {
+      const { PushNotifications } = await import("@capacitor/push-notifications");
+      let permStatus = await PushNotifications.checkPermissions();
+      if (permStatus.receive !== "granted" && opts?.requestPermission !== false) {
+        permStatus = await PushNotifications.requestPermissions();
+      }
+      const state: PushPermissionState =
+        permStatus.receive === "granted"
+          ? "granted"
+          : permStatus.receive === "denied"
+            ? "denied"
+            : "default";
+      if (state === "granted") nativePermissionCache = "granted";
+
+      if (permStatus.receive === "granted") {
+        try {
+          await ensureAndroidChannel();
+          await bindNativePushListeners(userId, role);
+        } catch {
+          /* ignore */
+        }
+        if (ENABLE_NATIVE_FCM_REGISTER) {
+          try {
+            await PushNotifications.register();
+          } catch {
+            /* google-services may be missing */
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // Register a native device row so server can target this install
+    const token = `native-${userId}-${getRuntimePlatform()}`;
+    await saveDeviceToken(userId, token, role);
+    return { ok: true, token };
+  } catch (e) {
+    console.warn("[D4EXAM] enableNativePushNotifications failed", e);
+    return { ok: false, error: (e as Error).message || "Native push failed" };
+  }
+}
+
+async function saveDeviceToken(
   userId: string,
   token: string,
   role?: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!userId || !token) return { ok: false, error: "Missing user or token" };
-  // Never store web tokens from the APK shell
-  if (isNativeShell() && !token) return { ok: false, error: "No token" };
-
   const ua =
     typeof navigator !== "undefined"
       ? `${navigator.userAgent} | platform=${getRuntimePlatform()} | native=${isNativeShell() ? "1" : "0"}`
@@ -200,176 +350,10 @@ async function upsertPushDevice(
         } as never)
         .eq("token", token);
       if (!again.error) return { ok: true };
-      return { ok: false, error: again.error.message };
     }
-
-    if (/duplicate|unique/i.test(msg)) return { ok: true };
-    return { ok: false, error: msg };
+    return { ok: false, error: ins.error.message };
   } catch (e) {
-    return { ok: false, error: (e as Error).message || "Could not save device" };
-  }
-}
-
-function showLocalNotification(title: string, body: string, link?: string) {
-  if (typeof window === "undefined" || !("Notification" in window)) return;
-  // Never use browser Notification API inside APK (shows as Chrome)
-  if (isNativeShell()) return;
-  if (Notification.permission !== "granted") return;
-  const icon = `${window.location.origin}/logo.png`;
-  try {
-    const n = new Notification(title, {
-      body,
-      icon,
-      badge: icon,
-      tag: "d4exam-notification",
-      data: { link: link || "/" },
-    });
-    n.onclick = () => {
-      window.focus();
-      if (link) {
-        try {
-          window.location.assign(link.startsWith("http") ? link : link);
-        } catch {
-          /* ignore */
-        }
-      }
-      n.close();
-    };
-  } catch {
-    /* ignore */
-  }
-}
-
-async function ensureAndroidChannel(): Promise<void> {
-  try {
-    const { PushNotifications } = await import("@capacitor/push-notifications");
-    await PushNotifications.createChannel({
-      id: "d4exam_default",
-      name: "D4EXAM",
-      description: "Exams, results and important updates",
-      importance: 5,
-      visibility: 1,
-      sound: "default",
-      vibration: true,
-      lights: true,
-    });
-  } catch {
-    /* ignore */
-  }
-}
-
-async function bindNativePushListeners(userId: string, role?: string | null) {
-  if (nativeListenersBound) return;
-  try {
-    const { PushNotifications } = await import("@capacitor/push-notifications");
-
-    await PushNotifications.addListener("registration", (token) => {
-      if (token?.value) {
-        void upsertPushDevice(userId, token.value, role);
-      }
-    });
-
-    await PushNotifications.addListener("registrationError", (err) => {
-      console.warn("[D4EXAM] Push registration error", err);
-    });
-
-    await PushNotifications.addListener("pushNotificationReceived", (notification) => {
-      try {
-        const title = notification.title || "D4EXAM";
-        const body = notification.body || "";
-        toast.info(title, { description: body });
-        void showD4ExamNativeNotification(title, body);
-      } catch {
-        /* ignore */
-      }
-    });
-
-    await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-      try {
-        const data = action.notification?.data as Record<string, string> | undefined;
-        const link = data?.link || data?.url;
-        if (link && typeof window !== "undefined") {
-          window.location.assign(link.startsWith("http") ? link : link);
-        }
-      } catch {
-        /* ignore */
-      }
-    });
-
-    nativeListenersBound = true;
-  } catch (e) {
-    console.warn("[D4EXAM] bindNativePushListeners failed", e);
-  }
-}
-
-async function enableNativePushNotifications(
-  userId: string,
-  role?: string | null,
-  opts?: { requestPermission?: boolean },
-): Promise<{ ok: boolean; token?: string; error?: string }> {
-  try {
-    await disableWebPushInNativeShell();
-    await disableWebPushDevicesForUser(userId);
-
-    // Prefer Local Notifications permission (shows as D4EXAM app, not Chrome)
-    try {
-      const { LocalNotifications } = await import("@capacitor/local-notifications");
-      let lp = await LocalNotifications.checkPermissions();
-      if (lp.display !== "granted" && opts?.requestPermission !== false) {
-        lp = await LocalNotifications.requestPermissions();
-      }
-      if (lp.display === "granted") {
-        nativePermissionCache = "granted";
-        await showD4ExamNativeNotification(
-          "D4EXAM notifications enabled",
-          "You will receive alerts as D4EXAM, not Chrome.",
-        );
-      }
-    } catch {
-      /* plugin may be missing until next APK */
-    }
-
-    try {
-      const { PushNotifications } = await import("@capacitor/push-notifications");
-      let permStatus = await PushNotifications.checkPermissions();
-      if (permStatus.receive !== "granted" && opts?.requestPermission !== false) {
-        permStatus = await PushNotifications.requestPermissions();
-      }
-      const state: PushPermissionState =
-        permStatus.receive === "granted"
-          ? "granted"
-          : permStatus.receive === "denied"
-            ? "denied"
-            : "default";
-      if (state === "granted") nativePermissionCache = "granted";
-
-      if (permStatus.receive === "granted") {
-        try {
-          await ensureAndroidChannel();
-          await bindNativePushListeners(userId, role);
-        } catch {
-          /* ignore */
-        }
-        if (ENABLE_NATIVE_FCM_REGISTER) {
-          try {
-            await PushNotifications.register();
-          } catch (e) {
-            console.warn("[D4EXAM] FCM register skipped", e);
-          }
-        }
-      }
-    } catch {
-      /* ignore */
-    }
-
-    if (nativePermissionCache === "granted") return { ok: true };
-    return {
-      ok: false,
-      error: "Permission not granted. Enable notifications in Android Settings → Apps → D4EXAM.",
-    };
-  } catch (e) {
-    console.warn("[D4EXAM] enableNativePushNotifications failed", e);
-    return { ok: false, error: (e as Error).message || "Native push setup failed" };
+    return { ok: false, error: (e as Error).message };
   }
 }
 
@@ -377,9 +361,7 @@ async function enableWebPushNotifications(
   userId: string,
   role?: string | null,
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
-  if (isNativeShell()) {
-    return enableNativePushNotifications(userId, role, { requestPermission: true });
-  }
+  if (!userId) return { ok: false, error: "Sign in required" };
   if (typeof window === "undefined" || !("Notification" in window)) {
     return { ok: false, error: "Notifications are not supported in this browser" };
   }
@@ -408,20 +390,21 @@ async function enableWebPushNotifications(
     });
     if (!token) return { ok: false, error: "Could not get push token" };
 
-    const saved = await upsertPushDevice(userId, token, role);
-    if (!saved.ok) return { ok: false, error: saved.error };
+    const saved = await saveDeviceToken(userId, token, role);
+    if (!saved.ok) return { ok: false, error: saved.error || "Could not save device" };
 
-    if (!onMessageBound) {
-      onMessageBound = true;
-      onMessage(msg, (payload) => {
+    onMessage(msg, (payload) => {
+      try {
         const title = payload.notification?.title || payload.data?.title || "D4EXAM";
         const body =
           payload.notification?.body || payload.data?.body || payload.data?.message || "";
         const link = payload.data?.link;
         showLocalNotification(title, body, link);
         toast.info(title, { description: body });
-      });
-    }
+      } catch {
+        /* ignore */
+      }
+    });
 
     return { ok: true, token };
   } catch (e) {
@@ -432,11 +415,20 @@ async function enableWebPushNotifications(
 export async function enablePushNotifications(
   userId: string,
   role?: string | null,
+  opts?: { requestPermission?: boolean },
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
   if (!userId) return { ok: false, error: "Sign in required" };
   if (isNativeShell()) {
     await disableWebPushInNativeShell();
-    return enableNativePushNotifications(userId, role, { requestPermission: true });
+    return enableNativePushNotifications(userId, role, {
+      requestPermission: opts?.requestPermission !== false,
+    });
+  }
+  // Web: only open browser permission dialog when explicitly requested
+  if (opts?.requestPermission === false) {
+    const st = typeof Notification !== "undefined" ? Notification.permission : "denied";
+    if (st === "granted") return enableWebPushNotifications(userId, role);
+    return { ok: true };
   }
   return enableWebPushNotifications(userId, role);
 }
@@ -474,16 +466,9 @@ export async function initNativePushIfNeeded(
     if (!userId) return;
     const state = await refreshNativePushPermissionState();
     if (state === "granted") {
-      try {
-        await ensureAndroidChannel();
-        await bindNativePushListeners(userId, role);
-      } catch {
-        /* ignore */
-      }
+      await enableNativePushNotifications(userId, role, { requestPermission: false });
     }
   } catch {
-    /* never crash startup */
+    /* ignore */
   }
 }
-
-export { showD4ExamNativeNotification };
