@@ -1,0 +1,158 @@
+name: fix-login-tsx
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-login-tsx.yml
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch login.tsx
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          lp = Path("src/routes/login.tsx")
+          lt = lp.read_text()
+          if "confirmSessionReady" in lt:
+              print("already patched")
+              raise SystemExit(0)
+          if 'seedPendingLoginRole' not in lt:
+              lt = lt.replace(
+                  'import { fetchSessionUser, roleHome, type AppRole } from "@/lib/session";',
+                  'import { fetchSessionUser, roleHome, seedPendingLoginRole, type AppRole } from "@/lib/session";',
+              )
+          old_go = """/** Full page load so Capacitor WebView always applies the new session. */
+function goToRoleHome(role: string) {
+  const path = roleHome[role as AppRole];
+  if (!path) return false;
+  try {
+    window.location.replace(path);
+  } catch {
+    window.location.href = path;
+  }
+  return true;
+}"""
+          new_go = """/** Full page load so Capacitor WebView always applies the new session. */
+function goToRoleHome(role: string) {
+  const path = roleHome[role as AppRole];
+  if (!path) return false;
+  seedPendingLoginRole(role);
+  try {
+    window.location.replace(path);
+  } catch {
+    window.location.href = path;
+  }
+  return true;
+}
+
+async function confirmSessionReady(maxWaitMs = 2_500): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token && data.session.user?.id) return true;
+    } catch {
+      /* ignore */
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  try {
+    const { data } = await supabase.auth.getSession();
+    return Boolean(data.session?.access_token);
+  } catch {
+    return false;
+  }
+}"""
+          if old_go not in lt:
+              raise SystemExit("goToRoleHome pattern missing")
+          lt = lt.replace(old_go, new_go, 1)
+          old_set = """          const { error: sessErr } = await supabase.auth.setSession({
+            access_token: result.session.access_token,
+            refresh_token: result.session.refresh_token,
+          });
+          if (!sessErr) {
+            if (result.role && result.role in roleHome) {
+              navigated = true;
+              goToRoleHome(String(result.role));
+              return;
+            }
+            if (await resolveRoleAndGoHome()) {
+              navigated = true;
+              return;
+            }
+          }"""
+          new_set = """          const { error: sessErr } = await supabase.auth.setSession({
+            access_token: result.session.access_token,
+            refresh_token: result.session.refresh_token,
+          });
+          if (!sessErr) {
+            await confirmSessionReady();
+            if (result.role && result.role in roleHome) {
+              navigated = true;
+              seedPendingLoginRole(String(result.role));
+              goToRoleHome(String(result.role));
+              return;
+            }
+            if (await resolveRoleAndGoHome()) {
+              navigated = true;
+              return;
+            }
+          }"""
+          if old_set in lt:
+              lt = lt.replace(old_set, new_set, 1)
+          else:
+              print("setSession block not exact; continuing")
+          lt = lt.replace(
+              """        if (!authErr && data.session) {
+          if (await resolveRoleAndGoHome()) {
+            navigated = true;
+            return;
+          }
+        }""",
+              """        if (!authErr && data.session) {
+          await confirmSessionReady();
+          if (await resolveRoleAndGoHome()) {
+            navigated = true;
+            return;
+          }
+        }""",
+          )
+          lt = lt.replace(
+              """            if (!againErr && again.session) {
+              if (await resolveRoleAndGoHome()) {
+                navigated = true;
+                return;
+              }
+              navigated = true;
+              goToRoleHome("school_admin");
+              return;
+            }""",
+              """            if (!againErr && again.session) {
+              await confirmSessionReady();
+              if (await resolveRoleAndGoHome()) {
+                navigated = true;
+                return;
+              }
+              navigated = true;
+              goToRoleHome("school_admin");
+              return;
+            }""",
+          )
+          lp.write_text(lt)
+          assert "confirmSessionReady" in lt
+          print("login.tsx patched ok")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/login.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(auth): confirm session before role redirect on login"
+            git push
+          fi
