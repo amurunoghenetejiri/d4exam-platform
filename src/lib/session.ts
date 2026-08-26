@@ -57,19 +57,27 @@ const PENDING_ROLE_TS_KEY = "d4_pending_role_ts";
 /** Remember role for a few seconds so post-login navigation is not bounced by a slow session read. */
 export function seedPendingLoginRole(role: AppRole | string | null | undefined): void {
   if (typeof window === "undefined" || !role) return;
+  const value = String(role);
+  const ts = String(Date.now());
   try {
-    window.sessionStorage.setItem(PENDING_ROLE_KEY, String(role));
-    window.sessionStorage.setItem(PENDING_ROLE_TS_KEY, String(Date.now()));
+    window.sessionStorage.setItem(PENDING_ROLE_KEY, value);
+    window.sessionStorage.setItem(PENDING_ROLE_TS_KEY, ts);
+  } catch {
+    /* ignore */
+  }
+  try {
+    window.localStorage.setItem(PENDING_ROLE_KEY, value);
+    window.localStorage.setItem(PENDING_ROLE_TS_KEY, ts);
   } catch {
     /* ignore */
   }
 }
 
-export function readPendingLoginRole(maxAgeMs = 45_000): AppRole | null {
-  if (typeof window === "undefined") return null;
+function readPendingFrom(store: Storage | undefined, maxAgeMs: number): AppRole | null {
+  if (!store) return null;
   try {
-    const role = window.sessionStorage.getItem(PENDING_ROLE_KEY);
-    const ts = Number(window.sessionStorage.getItem(PENDING_ROLE_TS_KEY) || 0);
+    const role = store.getItem(PENDING_ROLE_KEY);
+    const ts = Number(store.getItem(PENDING_ROLE_TS_KEY) || 0);
     if (!role || !ts || Date.now() - ts > maxAgeMs) return null;
     if (role in roleHome) return role as AppRole;
   } catch {
@@ -78,13 +86,23 @@ export function readPendingLoginRole(maxAgeMs = 45_000): AppRole | null {
   return null;
 }
 
+export function readPendingLoginRole(maxAgeMs = 90_000): AppRole | null {
+  if (typeof window === "undefined") return null;
+  return (
+    readPendingFrom(window.sessionStorage, maxAgeMs) ||
+    readPendingFrom(window.localStorage, maxAgeMs)
+  );
+}
+
 export function clearPendingLoginRole(): void {
   if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.removeItem(PENDING_ROLE_KEY);
-    window.sessionStorage.removeItem(PENDING_ROLE_TS_KEY);
-  } catch {
-    /* ignore */
+  for (const store of [window.sessionStorage, window.localStorage]) {
+    try {
+      store.removeItem(PENDING_ROLE_KEY);
+      store.removeItem(PENDING_ROLE_TS_KEY);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -92,7 +110,7 @@ export function clearPendingLoginRole(): void {
  * Wait until supabase.auth reports a session (local first).
  * Call after setSession before navigating into a guarded route.
  */
-export async function confirmSessionReady(maxAttempts = 8): Promise<boolean> {
+export async function confirmSessionReady(maxAttempts = 12): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       const { data: sess } = await supabase.auth.getSession();
@@ -100,7 +118,7 @@ export async function confirmSessionReady(maxAttempts = 8): Promise<boolean> {
     } catch {
       /* retry */
     }
-    await new Promise((r) => setTimeout(r, 80 * (i + 1)));
+    await new Promise((r) => setTimeout(r, 100 * (i + 1)));
   }
   try {
     const { data } = await supabase.auth.getUser();
