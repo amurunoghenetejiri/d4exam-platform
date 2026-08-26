@@ -48,6 +48,14 @@ export function NotificationPermissionPrompt() {
       }
       if (state === "granted" || state === "denied" || state === "unsupported") {
         markPrompted(session.userId, session.role);
+        try {
+          if (state === "granted") {
+            localStorage.setItem(`d4_notif_enabled_once:${session.userId}`, "1");
+            localStorage.setItem(`d4_push_prompted:${session.userId}`, "1");
+          }
+        } catch {
+          /* ignore */
+        }
         return;
       }
 
