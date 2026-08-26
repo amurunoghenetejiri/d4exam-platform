@@ -63,7 +63,6 @@ jobs:
           if [ ! -f dist/index.html ]; then
             printf '%s\n' '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>D4EXAM</title></head><body><p>Loading…</p></body></html>' > dist/index.html
           fi
-          # Ensure logo is in dist for offline fallback
           if [ -f public/logo.png ]; then cp -f public/logo.png dist/logo.png; fi
           echo "dist ready (runtime shell = https://d4exam-platform.vercel.app)"
           ls -la dist/index.html || true
@@ -89,7 +88,11 @@ jobs:
           test -f "$LOGO"
           RES="android/app/src/main/res"
 
-          # Transparent adaptive background (no colored box behind logo)
+          # Remove any default Capacitor adaptive XML that would clash with PNGs
+          find "$RES" -type f \( -name 'ic_launcher.xml' -o -name 'ic_launcher_round.xml' -o -name 'ic_launcher_foreground.xml' \) -delete || true
+          rm -rf "$RES/mipmap-anydpi-v26" || true
+
+          # Transparent background color resource (no solid box)
           mkdir -p "$RES/values"
           cat > "$RES/values/ic_launcher_background.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -98,36 +101,45 @@ jobs:
           </resources>
           EOF
 
-          # Generate density PNGs (transparent) — full-bleed logo, bold/clear
           make_icon() {
             local size="$1" dest="$2"
             convert "$LOGO" -background none -gravity center -resize "${size}x${size}" \
               -extent "${size}x${size}" PNG32:"$dest"
           }
 
+          # PNG-only launchers (no XML in same density folder = no Duplicate resources)
           for dens in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
             name="${dens%%:*}"
             px="${dens##*:}"
             mkdir -p "$RES/mipmap-$name"
+            # Wipe old defaults first
+            rm -f "$RES/mipmap-$name/ic_launcher.png" \
+                  "$RES/mipmap-$name/ic_launcher_round.png" \
+                  "$RES/mipmap-$name/ic_launcher_foreground.png" \
+                  "$RES/mipmap-$name/ic_launcher.xml" \
+                  "$RES/mipmap-$name/ic_launcher_round.xml" || true
             make_icon "$px" "$RES/mipmap-$name/ic_launcher.png"
             make_icon "$px" "$RES/mipmap-$name/ic_launcher_round.png"
-            make_icon "$px" "$RES/mipmap-$name/ic_launcher_foreground.png"
           done
 
-          # Adaptive XML pointing at transparent FG + transparent BG color
-          for dens in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            mkdir -p "$RES/mipmap-$dens"
-            cat > "$RES/mipmap-$dens/ic_launcher.xml" <<'EOF'
+          # Adaptive icons only under anydpi-v26 (references density foreground PNGs)
+          mkdir -p "$RES/mipmap-anydpi-v26"
+          for dens in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
+            name="${dens%%:*}"
+            px="${dens##*:}"
+            mkdir -p "$RES/mipmap-$name"
+            make_icon "$px" "$RES/mipmap-$name/ic_launcher_foreground.png"
+          done
+          cat > "$RES/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
               <background android:drawable="@color/ic_launcher_background"/>
               <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
           </adaptive-icon>
           EOF
-            cp "$RES/mipmap-$dens/ic_launcher.xml" "$RES/mipmap-$dens/ic_launcher_round.xml"
-          done
+          cp "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
 
-          # Notification small icon (white silhouette works best; use logo scaled)
+          # Notification status icons (transparent logo)
           for dens in mdpi:24 hdpi:36 xhdpi:48 xxhdpi:72 xxxhdpi:96; do
             name="${dens%%:*}"
             px="${dens##*:}"
@@ -135,7 +147,8 @@ jobs:
             make_icon "$px" "$RES/drawable-$name/ic_stat_d4exam.png"
           done
 
-          echo "Launcher icons generated from public/logo.png (transparent)"
+          echo "Launcher icons OK (PNG density + adaptive anydpi-v26, no duplicates)"
+          find "$RES" -name 'ic_launcher*' | sort
 
       - name: Optional google-services.json for FCM (native push)
         env:
