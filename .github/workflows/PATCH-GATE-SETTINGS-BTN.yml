@@ -1,0 +1,63 @@
+name: PATCH-GATE-SETTINGS-BTN
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/PATCH-GATE-SETTINGS-BTN.yml
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add Open App Settings button to exam gate
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          g = Path("src/components/cbt/ExamSecurityGate.tsx")
+          t = g.read_text()
+          assert "export function ExamSecurityGate" in t
+          if "openAppPermissionSettings" not in t:
+              t = t.replace(
+                  "requestExamMediaPermissions,\n} from \"@/native/cameraService\";",
+                  "requestExamMediaPermissions,\n  openAppPermissionSettings,\n} from \"@/native/cameraService\";",
+              )
+              if "openAppPermissionSettings" not in t:
+                  t = t.replace(
+                      "openCameraStream,\n} from \"@/native/cameraService\";",
+                      "openCameraStream,\n  openAppPermissionSettings,\n} from \"@/native/cameraService\";",
+                  )
+          old = '''                {previewState === "live" ? "Restart camera" : "Enable camera"}
+              </Button>'''
+          new = '''                {previewState === "live" ? "Restart camera" : "Enable camera"}
+              </Button>
+              {previewState === "error" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="ml-2"
+                  onClick={() => void openAppPermissionSettings()}
+                >
+                  Open App Settings
+                </Button>
+              )}'''
+          if "Open App Settings" not in t and old in t:
+              t = t.replace(old, new)
+              print("settings button added")
+          else:
+              print("settings button already present or pattern missing")
+          g.write_text(t)
+          print("done", "openAppPermissionSettings" in t)
+          PY
+      - name: Commit gate only
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/ExamSecurityGate.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): Open App Settings button when camera denied"
+            git push
+          fi
