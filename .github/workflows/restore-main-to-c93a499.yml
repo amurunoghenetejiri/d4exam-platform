@@ -5,6 +5,8 @@ on:
 
 permissions:
   contents: write
+  workflows: write
+  actions: write
 
 concurrency:
   group: restore-main-hard
@@ -32,7 +34,6 @@ jobs:
           git checkout main
           git reset --hard "$TARGET"
 
-          # Confirm Capacitor still points at Vercel at this commit
           grep -q 'd4exam-platform.vercel.app' capacitor.config.ts
           echo "OK: capacitor.config has Vercel server.url"
           git log -1 --oneline
