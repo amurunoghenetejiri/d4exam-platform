@@ -15,6 +15,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { ThemeColorSync } from "@/components/ThemeColorSync";
 import { OfflineBootstrap } from "@/components/OfflineBootstrap";
 import { LocalDbBootstrap } from "@/components/LocalDbBootstrap";
+import { OfflineStatusPill } from "@/components/OfflineStatusPill";
 import { useSessionUser } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
@@ -209,6 +210,7 @@ function RootComponent() {
       <ThemeColorSync />
       <LocalDbBootstrap />
       <OfflineBootstrap />
+      <OfflineStatusPill />
       <Outlet />
       <NativeBootstrap />
       <Toaster />
