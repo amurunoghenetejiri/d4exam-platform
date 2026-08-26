@@ -1,0 +1,9 @@
+[
+  {"path": "src/lib/notify.ts", "parts": 5, "safe": "src__lib__notify.ts"},
+  {"path": "src/components/pages/NotificationsPage.tsx", "parts": 2, "safe": "src__components__pages__NotificationsPage.tsx"},
+  {"path": "src/lib/cbt-security.ts", "parts": 1, "safe": "src__lib__cbt-security.ts"},
+  {"path": "src/routes/officer.approvals.tsx", "parts": 4, "safe": "src__routes__officer.approvals.tsx"},
+  {"path": "src/routes/student.index.tsx", "parts": 3, "safe": "src__routes__student.index.tsx"},
+  {"path": "src/routes/student.examinations.tsx", "parts": 2, "safe": "src__routes__student.examinations.tsx"},
+  {"path": "src/routes/admin.index.tsx", "parts": 1, "safe": "src__routes__admin.index.tsx"}
+]
