@@ -102,69 +102,46 @@ export function studentResultReady(opts: {
     ? ` has been released by ${opts.officerName.trim()}.`
     : " has been released.";
   return {
-    title: `🎉 ${name}, YOUR RESULT IS READY!`,
-    message: `Your ${opts.examTitle} result${by}`,
+    title: `🎉 ${name}, RESULT READY`,
+    message: `Your result for ${opts.examTitle}${by}`,
   };
 }
 
-export function studentAutoSubmitted(opts: {
-  studentName: string;
-  examTitle: string;
-}): { title: string; message: string } {
-  const name = (opts.studentName || "Student").trim();
-  return {
-    title: "⚠️ EXAM AUTO-SUBMITTED",
-    message: `${name}, your ${opts.examTitle} examination was automatically submitted because the maximum allowed tab violations were reached.`,
-  };
-}
-
-export function teacherExamApproved(opts: {
+export function teacherExamDecision(opts: {
   teacherName: string;
   examTitle: string;
-  officerName?: string | null;
-  start?: string | null;
-  end?: string | null;
-}): { title: string; message: string } {
-  const name = (opts.teacherName || "Teacher").trim();
-  const by = opts.officerName?.trim()
-    ? ` by ${opts.officerName.trim()}`
-    : "";
-  let message = `Your ${opts.examTitle} examination has been approved${by}.`;
-  const date = fmtDate(opts.start);
-  const startT = fmtTime(opts.start);
-  const endT = fmtTime(opts.end);
-  if (date) message += `\n\n📅 Date: ${date}`;
-  if (startT) message += `\n⏰ Start: ${startT}`;
-  if (endT) message += `\n⏰ End: ${endT}`;
-  return {
-    title: `✅ ${name}, YOUR EXAM HAS BEEN APPROVED`,
-    message,
-  };
-}
-
-export function teacherExamRejected(opts: {
-  teacherName: string;
-  examTitle: string;
+  decision: "approved" | "rejected" | "revision";
   note?: string | null;
+  officerName?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const note = opts.note?.trim() ? ` ${opts.note.trim()}` : "";
+  const by = opts.officerName?.trim() ? ` by ${opts.officerName.trim()}` : "";
+  if (opts.decision === "approved") {
+    return {
+      title: `✅ ${name}, EXAM APPROVED`,
+      message: `Your examination “${opts.examTitle}” was approved${by}.`,
+    };
+  }
+  if (opts.decision === "rejected") {
+    return {
+      title: `❌ ${name}, EXAM NOT APPROVED`,
+      message: `Your examination “${opts.examTitle}” was not approved${by}.${opts.note ? `\n\nReason:\n${opts.note}` : ""}`,
+    };
+  }
   return {
-    title: `❌ ${name}, EXAM REJECTED`,
-    message: `Your ${opts.examTitle} examination was rejected.${note}`,
+    title: `⚠️ ${name}, REVISION REQUESTED`,
+    message: `Revision was requested for “${opts.examTitle}”${by}.${opts.note ? `\n\n${opts.note}` : ""}`,
   };
 }
 
 export function newSchoolApplication(opts: {
   schoolName: string;
   applicantName?: string | null;
-  date?: string | null;
 }): { title: string; message: string } {
-  const when = opts.date || fmtDate(new Date().toISOString());
-  const who = opts.applicantName?.trim() ? `\nApplicant: ${opts.applicantName.trim()}` : "";
+  const who = opts.applicantName?.trim() ? ` by ${opts.applicantName.trim()}` : "";
   return {
-    title: "🏫 NEW SCHOOL APPLICATION",
-    message: `A new school has submitted an application.\n\nSchool: ${opts.schoolName}${who}\nDate: ${when}`,
+    title: "🏫 New School Application",
+    message: `A new school application has been submitted for ${opts.schoolName}${who}. Please review the application.`,
   };
 }
 
@@ -172,8 +149,8 @@ export function schoolApplicationReceived(opts: {
   schoolName: string;
 }): { title: string; message: string } {
   return {
-    title: "📨 APPLICATION RECEIVED",
-    message: `Your school application for ${opts.schoolName} has been successfully received.\n\nWe will notify you when it is reviewed.`,
+    title: "🏫 School Application Submitted",
+    message: `Your D4EXAM school application for ${opts.schoolName} has been successfully submitted and is now awaiting review.\n\nWe'll notify you when your application status changes.`,
   };
 }
 
@@ -182,51 +159,35 @@ export function schoolApplicationApproved(opts: {
   schoolId: string;
   loginHint?: string | null;
 }): { title: string; message: string } {
-  const login =
-    opts.loginHint?.trim() ||
-    "Sign in with the school admin email you registered. Use your School ID at login when asked.";
+  const hint = opts.loginHint?.trim()
+    ? `\n\n${opts.loginHint.trim()}`
+    : "\n\nSign in at /login with your School ID and email.";
   return {
-    title: "🎉 APPLICATION APPROVED",
-    message: `Your school application has been approved.\n\nSchool: ${opts.schoolName}\nSchool ID: ${opts.schoolId}\n\n${login}`,
+    title: "🎉 School Application Approved!",
+    message: `Congratulations! Your school application for ${opts.schoolName} has been approved.\n\nYour D4EXAM School ID is:\n${opts.schoolId}${hint}`,
   };
 }
 
-export function weeklySchoolReport(opts: {
+export function schoolApplicationRejected(opts: {
   schoolName: string;
-  students?: number;
-  teachers?: number;
-  examsCreated?: number;
-  examsApproved?: number;
-  resultsReleased?: number;
+  reason?: string | null;
 }): { title: string; message: string } {
-  const lines: string[] = [`${opts.schoolName} this week:`];
-  if (opts.students) lines.push(`• ${opts.students} students enrolled`);
-  if (opts.teachers) lines.push(`• ${opts.teachers} teachers added`);
-  if (opts.examsCreated) lines.push(`• ${opts.examsCreated} examinations created`);
-  if (opts.examsApproved) lines.push(`• ${opts.examsApproved} examinations approved`);
-  if (opts.resultsReleased) lines.push(`• ${opts.resultsReleased} results released`);
+  const reason = (opts.reason || "Your application was not approved.").trim();
   return {
-    title: "📊 WEEKLY SCHOOL REPORT",
-    message: lines.join("\n"),
+    title: "❌ School Application Update",
+    message: `Your school application for ${opts.schoolName} was not approved.\n\nReason:\n${reason}`,
   };
 }
 
-export function examSecuritySummary(opts: {
-  examTitle: string;
-  warnings?: number;
-  limitReached?: number;
-  paused?: number;
-  autoSubmitted?: number;
-  terminated?: number;
+export function schoolApplicationNeedsChanges(opts: {
+  schoolName: string;
+  reason?: string | null;
 }): { title: string; message: string } {
-  const lines: string[] = [`During ${opts.examTitle}:`];
-  if (opts.warnings) lines.push(`• ${opts.warnings} students triggered warnings`);
-  if (opts.limitReached) lines.push(`• ${opts.limitReached} students reached the violation limit`);
-  if (opts.paused) lines.push(`• ${opts.paused} exams were paused`);
-  if (opts.autoSubmitted) lines.push(`• ${opts.autoSubmitted} exams were auto-submitted`);
-  if (opts.terminated) lines.push(`• ${opts.terminated} exams were terminated`);
+  const reason = (
+    opts.reason || "Please update your application with the requested information."
+  ).trim();
   return {
-    title: "⚠️ EXAM SECURITY ALERT",
-    message: lines.join("\n"),
+    title: "⚠️ Action Required",
+    message: `Your school application for ${opts.schoolName} requires some changes before it can be approved.\n\n${reason}`,
   };
 }
