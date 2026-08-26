@@ -26,7 +26,9 @@ import {
   ensureCameraPermission,
   ensureMicrophonePermission,
   openCameraStream,
+  requestExamMediaPermissions,
 } from "@/native/cameraService";
+import { canAttemptScreenShare, startScreenShareStream, stopScreenShareStream } from "@/lib/screen-share";
 
 type Props = {
   examTitle: string;
@@ -93,6 +95,11 @@ export function ExamSecurityGate({
   const previewStreamRef = useRef<MediaStream | null>(null);
   const [previewState, setPreviewState] = useState<"idle" | "starting" | "live" | "error">("idle");
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [permBusy, setPermBusy] = useState(false);
+  const [camGranted, setCamGranted] = useState(false);
+  const [micGranted, setMicGranted] = useState(false);
+  const [screenGranted, setScreenGranted] = useState(false);
+  const [permHint, setPermHint] = useState<string | null>(null);
 
   const shareMode = resolveScreenShareMode(security);
   const needCam = security.requireCamera;
@@ -105,20 +112,61 @@ export function ExamSecurityGate({
     if (videoRef.current) videoRef.current.srcObject = null;
   };
 
+
+  const requestAllExamPermissions = async () => {
+    setPermBusy(true);
+    setPermHint(null);
+    try {
+      if (needCam || needMic) {
+        const { camera, microphone } = await requestExamMediaPermissions({
+          camera: needCam,
+          microphone: needMic,
+        });
+        if (needCam) {
+          setCamGranted(Boolean(camera.granted));
+          if (!camera.granted) {
+            setPermHint(camera.error || "Allow Camera for D4EXAM to continue.");
+          } else {
+            await startPreview();
+          }
+        }
+        if (needMic) {
+          setMicGranted(Boolean(microphone.granted));
+          if (!microphone.granted) {
+            setPermHint((h) => h || microphone.error || "Allow Microphone for D4EXAM if required.");
+          }
+        }
+      }
+      if (shareMode !== "disabled" && canAttemptScreenShare()) {
+        try {
+          const share = await startScreenShareStream();
+          if (share.ok) {
+            stopScreenShareStream(share.stream);
+            setScreenGranted(true);
+          } else if (share.reason === "denied") {
+            setScreenGranted(false);
+            setPermHint(share.message || "Screen share denied.");
+          }
+        } catch {
+          /* optional */
+        }
+      }
+    } finally {
+      setPermBusy(false);
+    }
+  };
+
   const startPreview = async () => {
     setPreviewState("starting");
     setPreviewError(null);
     try {
-      const camOk = await ensureCameraPermission();
+      const { camera: camOk, microphone: micOk } = await requestExamMediaPermissions({
+        camera: true,
+        microphone: Boolean(needMic),
+      });
       if (!camOk.granted) throw new Error(camOk.error || "Camera permission required");
-      // When exam requires microphone, request it together with camera so the OS shows both.
-      if (needMic) {
-        try {
-          await ensureMicrophonePermission();
-        } catch {
-          /* soft — exam start may still proceed without mic if policy allows */
-        }
-      }
+      setCamGranted(true);
+      if (needMic) setMicGranted(Boolean(micOk.granted));
       const stream = await openCameraStream({
         facingMode: "user",
         audio: Boolean(needMic),
@@ -140,7 +188,7 @@ export function ExamSecurityGate({
   };
 
   useEffect(() => {
-    if (needCam && caps.camera && previewState === "idle") void startPreview();
+    if (needCam && previewState === "idle") void startPreview();
     return () => stopPreview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needCam, caps.camera]);
@@ -403,6 +451,24 @@ export function ExamSecurityGate({
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           Monitoring helps maintain exam integrity. Device and browser details are logged for authorised review.
         </p>
+
+        {(needCam || needMic || shareMode !== "disabled") && (
+          <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-3 sm:p-4">
+            <p className="text-sm font-extrabold text-slate-900">Allow required permissions</p>
+            <p className="mt-1 text-xs text-slate-600">Tap so the app can request Camera, Microphone, and Screen share.</p>
+            <div className="mt-3">
+              <Button type="button" className="h-11 w-full rounded-xl font-bold" disabled={permBusy || busy} onClick={() => void requestAllExamPermissions()}>
+                {permBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Requesting...</>) : ("Allow camera, mic & screen")}
+              </Button>
+            </div>
+            <ul className="mt-3 space-y-1 text-xs font-semibold">
+              {needCam && (<li className={camGranted || previewState === "live" ? "text-emerald-700" : "text-amber-700"}>{(camGranted || previewState === "live") ? "OK" : "--"} Camera</li>)}
+              {needMic && (<li className={micGranted ? "text-emerald-700" : "text-amber-700"}>{micGranted ? "OK" : "--"} Microphone</li>)}
+              {shareMode !== "disabled" && (<li className={screenGranted ? "text-emerald-700" : "text-slate-600"}>{screenGranted ? "OK" : "--"} Screen share</li>)}
+            </ul>
+            {permHint && (<p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{permHint}</p>)}
+          </div>
+        )}
 
         {totalQuestions === 0 ? (
           <p className="mt-4 text-sm text-amber-700">No questions on this exam paper yet.</p>
