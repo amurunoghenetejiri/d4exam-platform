@@ -42,7 +42,7 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     try {
       user = await Promise.race([
         fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 12_000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_000)),
       ]);
     } catch {
       user = null;
@@ -53,7 +53,7 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
         await new Promise((r) => setTimeout(r, 500));
         user = await Promise.race([
           fetchSessionUser(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
         ]);
       } catch {
         /* ignore */
