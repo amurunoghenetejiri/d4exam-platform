@@ -106,6 +106,15 @@ function doneStatusLabel(status: string): string {
   return "Ended";
 }
 
+function humanLiveStatus(sev: MonitorSeverity): string {
+  if (sev === "normal") return "Online";
+  if (sev === "warning") return "Warning";
+  if (sev === "violation") return "Violation";
+  if (sev === "offline") return "Offline";
+  if (sev === "completed") return "Completed";
+  return String(sev);
+}
+
 function nameFromMetadata(meta: unknown): string {
   if (!meta || typeof meta !== "object") return "";
   const m = meta as Record<string, unknown>;
@@ -214,10 +223,21 @@ function Page() {
       onFrame: (p: LiveCamFramePayload) => {
         const attemptId = p.attemptId || (p as { attempt_id?: string }).attempt_id;
         if (!attemptId || !p.frame) return;
-        setFrames((prev) => ({
-          ...prev,
-          [attemptId]: { src: p.frame, ts: p.ts || Date.now(), faceStatus: p.faceStatus, cameraActive: p.cameraActive !== false, answeredCount: p.answeredCount, totalQuestions: p.totalQuestions, timeRemainingSec: p.timeRemainingSec },
-        }));
+        const entry = {
+          src: p.frame,
+          ts: p.ts || Date.now(),
+          faceStatus: p.faceStatus,
+          cameraActive: p.cameraActive !== false,
+          answeredCount: p.answeredCount,
+          totalQuestions: p.totalQuestions,
+          timeRemainingSec: p.timeRemainingSec,
+        };
+        const sid = String(p.studentId || (p as { student_id?: string }).student_id || "");
+        setFrames((prev) => {
+          const next = { ...prev, [attemptId]: entry };
+          if (sid) next[`student:${sid}`] = entry;
+          return next;
+        });
       },
     });
     return () => sub.stop();
@@ -414,20 +434,22 @@ function Page() {
       })
       .map((a) => {
         const basePresence = parsePresence(a.metadata);
-        const frame = frames[a.id];
+        const frame = frames[a.id] || frames[`student:${a.student_id}`];
         const st = String(a.status || "").toLowerCase();
         const isDone = ["submitted", "terminated", "flagged", "completed"].includes(st);
         const hasLiveVideo = !isDone && Boolean(frame && isLiveCamFrameFresh(frame.ts, now));
-        // Prefer live Realtime frame for online/camera/face so officers never see Offline while video is live
+        // Prefer live Realtime frame — never show Offline while video frames are arriving
         const presence = { ...basePresence };
         if (hasLiveVideo && frame) {
           presence.lastSeenAt = new Date(frame.ts).toISOString();
-          presence.cameraActive = frame.cameraActive !== false;
+          presence.cameraActive = true;
           if (frame.faceStatus) {
             const fs = String(frame.faceStatus).toLowerCase();
             if (fs === "ok" || fs === "none" || fs === "multi" || fs === "unclear" || fs === "unavailable") {
               presence.faceStatus = fs as typeof presence.faceStatus;
             }
+          } else if (!presence.faceStatus || presence.faceStatus === "unknown" || presence.faceStatus === "unavailable") {
+            presence.faceStatus = "ok";
           }
           if (typeof frame.answeredCount === "number") presence.answeredCount = frame.answeredCount;
           if (typeof frame.totalQuestions === "number") presence.totalQuestions = frame.totalQuestions;
@@ -435,7 +457,13 @@ function Page() {
         } else if (frame?.ts && !presence.lastSeenAt) {
           presence.lastSeenAt = new Date(frame.ts).toISOString();
         }
-        const sev: MonitorSeverity = isDone ? "completed" : severityFromPresence(a.status, presence, now);
+        let sev: MonitorSeverity = isDone ? "completed" : severityFromPresence(a.status, presence, now);
+        if (!isDone && hasLiveVideo && sev === "offline") {
+          const fs = presence.faceStatus;
+          if (fs === "multi") sev = "violation";
+          else if (fs === "none" || fs === "unclear") sev = "warning";
+          else sev = "normal";
+        }
         const name = studentDisplayName(a);
         const matric = String(a.students?.matric_number || a.students?.student_id || "—").trim() || "—";
         const _c = a.examinations?.courses as unknown;
@@ -885,7 +913,7 @@ function Page() {
             <div className="grid grid-cols-2 gap-2 border-b border-slate-100 p-3 text-sm sm:p-4">
               <Info label="Course" value={selected.course} />
               <Info label="Exam" value={selected.title} />
-              <Info label="Status" value={selected.isDone ? doneStatusLabel(selected.a.status) : selected.sev} />
+              <Info label="Status" value={selected.isDone ? doneStatusLabel(selected.a.status) : humanLiveStatus(selected.sev)} />
               <Info
                 label="Time left"
                 value={selected.isDone ? "—" : formatDuration(selected.presence.timeRemainingSec)}
