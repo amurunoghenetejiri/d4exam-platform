@@ -1,0 +1,32 @@
+[
+  {
+    "path": "src/components/pages/NotificationsPage.tsx",
+    "safe": "src_components_pages_NotificationsPage_tsx",
+    "parts": 2
+  },
+  {
+    "path": "src/lib/notify.ts",
+    "safe": "src_lib_notify_ts",
+    "parts": 3
+  },
+  {
+    "path": "src/components/cbt/CbtExamSession.impl.tsx",
+    "safe": "src_components_cbt_CbtExamSession_impl_tsx",
+    "parts": 4
+  },
+  {
+    "path": "src/routes/officer.approvals.tsx",
+    "safe": "src_routes_officer_approvals_tsx",
+    "parts": 3
+  },
+  {
+    "path": "src/lib/exam-reminder.functions.ts",
+    "safe": "src_lib_exam-reminder_functions_ts",
+    "parts": 1
+  },
+  {
+    "path": "SQL_EXAM_REMINDERS_AND_WEEKLY.sql",
+    "safe": "SQL_EXAM_REMINDERS_AND_WEEKLY_sql",
+    "parts": 1
+  }
+]
