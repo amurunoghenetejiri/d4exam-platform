@@ -1,0 +1,29 @@
+name: fix-student-import-export
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-student-import-export.yml
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix importStudents import
+        run: |
+          set -euo pipefail
+          FILE=src/routes/admin.student-import.tsx
+          sed -i 's/import { createSchoolUser, importStudents } from "@\/lib\/auth.school-admin.functions";/import { createSchoolUser, importStudentsBulk as importStudents } from "@\/lib\/auth.school-admin.functions";/' "$FILE"
+          grep -n "importStudentsBulk as importStudents\|importStudents" "$FILE" | head -5
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/admin.student-import.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(build): import importStudentsBulk as importStudents"
+            git push
+          fi
