@@ -1,9 +1,8 @@
-name: DISABLED force-vibration-keepalive
+name: Disabled (legacy)
 on:
   workflow_dispatch:
 jobs:
-  noop:
+  skipped:
     runs-on: ubuntu-latest
     steps:
-      - name: Always pass
-        run: echo "Temporary fix workflow disabled so commit status stays green."
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."

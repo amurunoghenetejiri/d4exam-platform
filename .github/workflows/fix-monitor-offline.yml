@@ -1,28 +1,8 @@
-name: Fix monitor offline when live frames
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/fix-monitor-offline.yml"
-      - "scripts/apply_offline_fix.py"
 jobs:
-  apply:
+  skipped:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - run: |
-          set -e
-          python3 scripts/apply_offline_fix.py
-          grep -q 'presence.cameraActive = true' src/routes/officer.live-monitor.tsx
-          grep -q 'student:' src/routes/officer.live-monitor.tsx
-          grep -q 'hasLiveVideo && sev' src/routes/officer.live-monitor.tsx
-          grep -q humanLiveStatus src/routes/officer.live-monitor.tsx
-      - run: |
-          git config user.name "d4exam-bot"
-          git config user.email "bot@d4exam.local"
-          git add src/routes/officer.live-monitor.tsx
-          git commit -m "fix(monitor): live frames force Online + camera Active; never show offline while video streams" || echo no-changes
-          git pull --rebase origin main || true
-          git push origin main
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."

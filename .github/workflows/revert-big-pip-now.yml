@@ -1,59 +1,8 @@
-name: Revert solid + big PiP now
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/revert-big-pip-now.yml'
 jobs:
-  revert:
+  skipped:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Restore solid files + big PiP
-        run: |
-          set -euo pipefail
-          BASE=5f114287220800db187d368de651a0d0006a0f5a
-          for f in \
-            src/styles.css \
-            src/components/layout/AppShell.tsx \
-            src/components/cbt/CbtExamSession.impl.tsx \
-            src/components/cbt/ExamCameraPip.tsx \
-            src/native/statusBar.ts \
-            capacitor.config.ts \
-            src/components/NetworkBanner.tsx
-          do
-            git show "$BASE:$f" > "$f"
-            echo "restored $f ($(wc -l < "$f") lines)"
-          done
-          python3 << 'PY'
-          from pathlib import Path
-          p = Path('src/components/cbt/ExamCameraPip.tsx')
-          t = p.read_text()
-          t = t.replace(
-            '"fixed z-[80] w-[72px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[88px]"',
-            '"fixed z-[80] w-[132px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[150px]"',
-          )
-          t = t.replace('offsetWidth || 72', 'offsetWidth || 132')
-          p.write_text(t)
-          assert 'w-[132px]' in t
-          assert 'createFaceEngine' in t
-          print('PiP big 132/150 OK')
-          PY
-          # overlays true for mobile safe-area
-          sed -i 's/overlaysWebView: false/overlaysWebView: true/' capacitor.config.ts
-          grep -q 'd4exam-platform.vercel.app' capacitor.config.ts
-          echo "redeploy $(date -u +%Y%m%d%H%M%S) solid+bigPiP132" > DEPLOY_TRIGGER.txt
-          echo "force $(date -u +%Y%m%d%H%M%S)" > FORCE_VERCEL_REDEPLOY.txt
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No changes"
-          else
-            git commit -m "revert: solid working app from 5f11428 + big camera PiP 132/150 — notifications untouched"
-            git push origin HEAD:main
-          fi
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."
