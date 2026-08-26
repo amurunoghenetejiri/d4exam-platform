@@ -1,0 +1,141 @@
+name: emergency-restore-login
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/emergency-restore-login.yml
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore login from history and patch
+        run: |
+          set -euo pipefail
+          # Prefer last good historical version
+          if git cat-file -e 01fa108:src/routes/login.tsx 2>/dev/null; then
+            git show 01fa108:src/routes/login.tsx > src/routes/login.tsx
+            echo "restored from 01fa108"
+          elif git cat-file -e eb5e0b3:src/routes/login.tsx 2>/dev/null; then
+            git show eb5e0b3:src/routes/login.tsx > src/routes/login.tsx
+            echo "restored from eb5e0b3"
+          else
+            echo "no historical login found" >&2
+            exit 1
+          fi
+          python3 << 'PY'
+          from pathlib import Path
+          lt = Path("src/routes/login.tsx").read_text()
+          if "PLACEHOLDER" in lt or len(lt) < 500:
+              raise SystemExit("login still broken after restore")
+          if "seedPendingLoginRole" not in lt:
+              lt = lt.replace(
+                  'import { fetchSessionUser, roleHome, type AppRole } from "@/lib/session";',
+                  'import { fetchSessionUser, roleHome, seedPendingLoginRole, type AppRole } from "@/lib/session";',
+              )
+          if "confirmSessionReady" not in lt:
+              old_go = '''/** Full page load so Capacitor WebView always applies the new session. */
+function goToRoleHome(role: string) {
+  const path = roleHome[role as AppRole];
+  if (!path) return false;
+  try {
+    window.location.replace(path);
+  } catch {
+    window.location.href = path;
+  }
+  return true;
+}'''
+              new_go = '''/** Full page load so Capacitor WebView always applies the new session. */
+function goToRoleHome(role: string) {
+  const path = roleHome[role as AppRole];
+  if (!path) return false;
+  seedPendingLoginRole(role);
+  try {
+    window.location.replace(path);
+  } catch {
+    window.location.href = path;
+  }
+  return true;
+}
+
+async function confirmSessionReady(maxWaitMs = 2_500): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token && data.session.user?.id) return true;
+    } catch {
+      /* ignore */
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  try {
+    const { data } = await supabase.auth.getSession();
+    return Boolean(data.session?.access_token);
+  } catch {
+    return false;
+  }
+}'''
+              if old_go in lt:
+                  lt = lt.replace(old_go, new_go, 1)
+              lt = lt.replace(
+                  '''          if (!sessErr) {
+            if (result.role && result.role in roleHome) {
+              navigated = true;
+              goToRoleHome(String(result.role));
+              return;
+            }
+            if (await resolveRoleAndGoHome()) {
+              navigated = true;
+              return;
+            }
+          }''',
+                  '''          if (!sessErr) {
+            await confirmSessionReady();
+            if (result.role && result.role in roleHome) {
+              navigated = true;
+              seedPendingLoginRole(String(result.role));
+              goToRoleHome(String(result.role));
+              return;
+            }
+            if (await resolveRoleAndGoHome()) {
+              navigated = true;
+              return;
+            }
+          }''',
+              )
+              lt = lt.replace(
+                  '''        if (!authErr && data.session) {
+          if (await resolveRoleAndGoHome()) {
+            navigated = true;
+            return;
+          }
+        }''',
+                  '''        if (!authErr && data.session) {
+          await confirmSessionReady();
+          if (await resolveRoleAndGoHome()) {
+            navigated = true;
+            return;
+          }
+        }''',
+              )
+          Path("src/routes/login.tsx").write_text(lt)
+          print("bytes", len(lt))
+          print("confirm", "confirmSessionReady" in lt)
+          PY
+          wc -c src/routes/login.tsx
+          head -5 src/routes/login.tsx
+      - name: Commit restore
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/login.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(auth): restore login.tsx + session confirm handoff"
+            git push
+          fi
