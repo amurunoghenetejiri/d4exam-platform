@@ -1,6 +1,7 @@
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { signInWithSchoolCode } from "@/lib/auth.functions";
 import {
@@ -8,6 +9,7 @@ import {
   fetchSessionUser,
   roleHome,
   seedPendingLoginRole,
+  type SessionUser,
 } from "@/lib/session";
 
 import {
@@ -74,7 +76,8 @@ const features = [
 
 function LoginPage() {
   const navigate = useNavigate();
-  const [showPassword, setShowPassword] = useState(false);
+  const queryClient = useQueryClient();
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [code, setCode] = useState("");
@@ -132,31 +135,73 @@ function LoginPage() {
       const serverRole =
         "role" in result && result.role ? String(result.role).toLowerCase() : null;
 
-      const goHome = (path: string, roleHint?: string) => {
+      const goHome = async (path: string, roleHint?: string, seeded?: SessionUser | null) => {
         if (roleHint) seedPendingLoginRole(roleHint);
+        // Seed React Query so requireRole never sees a stale null after login
+        try {
+          if (seeded?.role) {
+            queryClient.setQueryData(["session-user"], seeded);
+          } else {
+            queryClient.removeQueries({ queryKey: ["session-user"] });
+          }
+        } catch {
+          /* ignore */
+        }
         // Hard navigation avoids SPA beforeLoad races right after setSession
         if (typeof window !== "undefined") {
-          window.location.assign(path);
+          window.location.replace(path);
           return;
         }
-        navigate({ to: path as never });
+        await navigate({ to: path as never });
       };
 
       if (serverRole && serverRole in roleHome) {
-        goHome(roleHome[serverRole as keyof typeof roleHome], serverRole);
+        // Best-effort profile hydrate; do not block redirect on slow RLS
+        let seeded: SessionUser | null = null;
+        try {
+          seeded = await fetchSessionUser();
+        } catch {
+          /* ignore */
+        }
+        if (!seeded?.role) {
+          try {
+            const { data: sess } = await supabase.auth.getSession();
+            const u = sess.session?.user;
+            if (u) {
+              seeded = {
+                userId: u.id,
+                profileId: u.id,
+                email: u.email || "",
+                fullName: u.email || "User",
+                status: "active",
+                schoolId: null,
+                schoolName: null,
+                schoolCode: null,
+                schoolLogoUrl: null,
+                roles: [serverRole as NonNullable<SessionUser["role"]>],
+                role: serverRole as NonNullable<SessionUser["role"]>,
+                identifier: u.email || null,
+                identifierLabel: "Email",
+              };
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        await goHome(roleHome[serverRole as keyof typeof roleHome], serverRole, seeded);
         return;
       }
 
       let user = await fetchSessionUser();
-      for (let i = 0; i < 5 && !user?.role; i++) {
-        await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+      for (let i = 0; i < 6 && !user?.role; i++) {
+        await new Promise((r) => setTimeout(r, 200 * (i + 1)));
         user = await fetchSessionUser();
       }
       if (!user?.role) {
         try {
           const { data: isSuper } = await supabase.rpc("is_super_admin");
           if (isSuper === true) {
-            goHome(roleHome.super_admin, "super_admin");
+            await goHome(roleHome.super_admin, "super_admin", user);
             return;
           }
         } catch {
@@ -167,7 +212,7 @@ function LoginPage() {
         );
         return;
       }
-      goHome(roleHome[user.role], user.role);
+      await goHome(roleHome[user.role], user.role, user);
     } catch (err) {
       const detail = err instanceof Error ? err.message : "";
       console.error("[login] sign-in failed:", err);
@@ -199,11 +244,11 @@ function LoginPage() {
           <ul className="space-y-4">
             {features.map((f) => (
               <li key={f.title} className="flex gap-3">
-                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/10">
+                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10">
                   <f.icon className="h-4 w-4 text-sky-300" />
                 </span>
                 <div>
-                  <p className="text-sm font-bold">{f.title}</p>
+                  <p className="text-sm font-semibold">{f.title}</p>
                   <p className="text-xs text-slate-400">{f.desc}</p>
                 </div>
               </li>
@@ -211,40 +256,40 @@ function LoginPage() {
           </ul>
         </aside>
 
-        <div className="flex items-center justify-center p-4 sm:p-8">
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-            <div className="mb-6 text-center lg:hidden">
-              <Logo className="mx-auto h-9 w-auto" />
+        <main className="flex items-center justify-center px-5 py-10 sm:px-10">
+          <div className="w-full max-w-md">
+            <div className="mb-8 flex items-center gap-3 lg:hidden">
+              <Logo className="h-9 w-auto" />
             </div>
-            <h1 className="text-xl font-extrabold text-slate-900">Sign in</h1>
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Sign in</h1>
             <p className="mt-1 text-sm text-slate-500">
-              School users need a school code. Super admins leave it blank.
+              Use your school code and account credentials.
             </p>
 
             {error ? (
-              <Alert variant="destructive" className="mt-4">
+              <Alert variant="destructive" className="mt-5">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             ) : null}
 
             <form onSubmit={submit} className="mt-6 space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="schoolCode">School code (optional for super admin)</Label>
+                <Label htmlFor="school-code">School code</Label>
                 <Input
-                  id="schoolCode"
+                  id="school-code"
                   autoComplete="organization"
-                  placeholder="e.g. D4UNI"
+                  placeholder="e.g. ABC123 (leave blank for super admin)"
                   value={code}
-                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  onChange={(e) => setCode(e.target.value)}
                   className="h-11"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="identifier">Email / matric / staff ID</Label>
+                <Label htmlFor="identifier">Email / Matric / Staff ID</Label>
                 <Input
                   id="identifier"
                   autoComplete="username"
-                  placeholder="you@school.edu or matric number"
+                  placeholder="email, matric or staff ID"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
                   className="h-11"
@@ -256,62 +301,59 @@ function LoginPage() {
                 <div className="relative">
                   <Input
                     id="password"
-                    type={showPassword ? "text" : "password"}
+                    type={showPw ? "text" : "password"}
                     autoComplete="current-password"
                     placeholder="Your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="h-11 pr-10"
+                    className="h-11 pr-11"
                     required
                   />
                   <button
                     type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1.5 text-slate-400 hover:text-slate-600"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    onClick={() => setShowPw((v) => !v)}
+                    aria-label={showPw ? "Hide password" : "Show password"}
                   >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="remember"
-                    checked={remember}
-                    onCheckedChange={(v) => setRemember(v === true)}
-                  />
-                  <label htmlFor="remember" className="text-xs text-slate-600">
-                    Remember this device
-                  </label>
-                </div>
-                <Link to="/forgot-password" className="text-sm font-medium text-primary hover:underline">
-                  Forgot password?
-                </Link>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="remember"
+                  checked={remember}
+                  onCheckedChange={(v) => setRemember(v === true)}
+                />
+                <Label htmlFor="remember" className="text-sm font-normal text-slate-600">
+                  Remember me on this device
+                </Label>
               </div>
 
               <Button type="submit" className="h-11 w-full font-semibold" disabled={loading}>
                 {loading ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Signing in…
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Signing in…
                   </>
                 ) : (
                   <>
-                    Sign in <ArrowRight className="ml-2 h-4 w-4" />
+                    Sign in
+                    <ArrowRight className="ml-2 h-4 w-4" />
                   </>
                 )}
               </Button>
             </form>
 
-            <p className="mt-6 text-center text-xs text-slate-500">
-              New institution?{" "}
-              <Link to="/school-application" className="font-semibold text-primary hover:underline">
-                Apply for school
+            <p className="mt-6 text-center text-sm text-slate-500">
+              New school?{" "}
+              <Link to="/apply" className="font-semibold text-sky-700 hover:underline">
+                Apply for D4EXAM
               </Link>
             </p>
           </div>
-        </div>
+        </main>
       </div>
     </div>
   );
