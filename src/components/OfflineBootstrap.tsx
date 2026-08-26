@@ -5,30 +5,23 @@ import { useSessionUser } from "@/lib/session";
 
 /**
  * Mounts offline sync + reconnect invalidation.
- * Starts after a short delay so login/home UI stay responsive.
+ * No visible UI — does not change layout.
  */
 export function OfflineBootstrap() {
   const queryClient = useQueryClient();
   const { data: session } = useSessionUser();
 
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    const t = window.setTimeout(() => {
-      cleanup = bootstrapOfflineSync(() => ({
-        queryClient,
-        ctx: session
-          ? {
-              userId: session.userId,
-              schoolId: session.schoolId,
-              role: session.role,
-            }
-          : null,
-      }));
-    }, 2000);
-    return () => {
-      window.clearTimeout(t);
-      cleanup?.();
-    };
+    return bootstrapOfflineSync(() => ({
+      queryClient,
+      ctx: session
+        ? {
+            userId: session.userId,
+            schoolId: session.schoolId,
+            role: session.role,
+          }
+        : null,
+    }));
   }, [queryClient, session?.userId, session?.schoolId, session?.role]);
 
   return null;

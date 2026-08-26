@@ -85,24 +85,37 @@ function friendlyLoginError(raw: unknown): string {
     lower.includes("timed out") ||
     lower.includes("timeout")
   ) {
-    return "Network error. Check your internet connection and try again.";
+    return "Unable to connect to D4EXAM. Check your internet and try again.";
   }
-  if (lower.includes("invalid login") || lower.includes("invalid email or password")) {
-    return "Invalid email or password. School accounts must enter a school code. Super admins leave school code blank.";
+  if (
+    lower.includes("<!doctype") ||
+    lower.includes("<html") ||
+    lower.includes("this page didn't load") ||
+    lower.includes("something went wrong on our end") ||
+    msg.length > 280
+  ) {
+    return "Unable to sign in right now. Please try again in a moment.";
   }
-  if (lower.includes("email not confirmed")) {
-    return "Please confirm your email before signing in.";
+  const cleaned = msg.replace(/^Unable to sign in right now:\s*/i, "").trim();
+  if (
+    cleaned.toLowerCase().includes("<!doctype") ||
+    cleaned.toLowerCase().includes("<html") ||
+    cleaned.length > 280
+  ) {
+    return "Unable to sign in right now. Please try again in a moment.";
   }
-  if (lower.includes("no role")) {
-    return "No role has been assigned to this account yet. Contact your school admin.";
-  }
-  return msg.length > 180 ? `${msg.slice(0, 180)}…` : msg;
+  return cleaned || msg;
 }
 
+/** Full page load so Capacitor WebView always applies the new session. */
 function goToRoleHome(role: string) {
   const path = roleHome[role as AppRole];
   if (!path) return false;
-  window.location.assign(path);
+  try {
+    window.location.replace(path);
+  } catch {
+    window.location.href = path;
+  }
   return true;
 }
 
@@ -112,13 +125,14 @@ function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const codeRef = useRef<HTMLInputElement>(null);
-  const identifierRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  const [code, setCode] = useState("");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
   const inFlight = useRef(false);
 
   async function resolveRoleAndGoHome(): Promise<boolean> {
+    // Fast path: role from session APIs
     try {
       const user = await Promise.race([
         fetchSessionUser(),
@@ -184,41 +198,66 @@ function LoginPage() {
     e.stopPropagation();
     if (inFlight.current || loading) return;
     setError("");
-    const code = (codeRef.current?.value ?? "").trim();
-    const identifier = (identifierRef.current?.value ?? "").trim();
-    const password = passwordRef.current?.value ?? "";
     if (!identifier.trim() || !password.trim()) {
       setError("Enter your email / name / matric and password to continue.");
       return;
     }
     inFlight.current = true;
     setLoading(true);
+    let navigated = false;
+    let lastServerMsg = "";
+    const loginTimeout = window.setTimeout(() => {
+      if (!inFlight.current || navigated) return;
+      setLoading(false);
+      inFlight.current = false;
+      setError("Login is taking longer than expected. Check your connection and try again.");
+    }, 12_000);
 
     try {
-      const schoolCode = code.toUpperCase();
-      const ident = identifier;
+      const schoolCode = code.trim().toUpperCase();
+      const ident = identifier.trim();
       const pass = password;
-      const looksEmail = ident.includes("@");
+      const looksEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ident);
 
-      let lastServerMsg = "";
+      // 1) Server login (with hard timeout)
       try {
-        const result = await loginFn({
-          data: {
-            schoolCode: schoolCode || "",
-            identifier: ident,
-            password: pass,
-          },
-        });
-        if (result?.role && result.role in roleHome) {
-          goToRoleHome(result.role);
-          return;
+        const result = await Promise.race([
+          loginFn({
+            data: {
+              schoolCode: schoolCode || "",
+              identifier: ident,
+              password: pass,
+            },
+          }),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+        ]);
+
+        if (result && "session" in result && result.session?.access_token) {
+          const { error: sessErr } = await supabase.auth.setSession({
+            access_token: result.session.access_token,
+            refresh_token: result.session.refresh_token,
+          });
+          if (!sessErr) {
+            if (result.role && result.role in roleHome) {
+              navigated = true;
+              goToRoleHome(String(result.role));
+              return;
+            }
+            if (await resolveRoleAndGoHome()) {
+              navigated = true;
+              return;
+            }
+          }
         }
-        if (await resolveRoleAndGoHome()) return;
+        if (result && "error" in result && result.error) {
+          lastServerMsg = String(result.error);
+        }
       } catch (serverErr) {
         console.warn("[login] server fn failed, trying client fallback", serverErr);
         lastServerMsg = friendlyLoginError(serverErr);
       }
 
+      // 2) Direct Supabase client sign-in
       const emailsToTry: string[] = [];
       if (looksEmail) emailsToTry.push(ident.toLowerCase());
       if (!looksEmail && schoolCode) {
@@ -243,75 +282,100 @@ function LoginPage() {
           password: pass,
         });
         if (!authErr && data.session) {
-          if (await resolveRoleAndGoHome()) return;
+          if (await resolveRoleAndGoHome()) {
+            navigated = true;
+            return;
+          }
         }
       }
 
-      try {
-        await ensureLoginFn({
-          data: {
-            schoolCode: schoolCode || "",
-            identifier: ident,
-            password: pass,
-          },
-        });
-        if (await resolveRoleAndGoHome()) return;
-      } catch {
-        /* ignore */
+      // 3) Ensure + retry for email accounts
+      if (looksEmail) {
+        try {
+          const fixed = await Promise.race([
+            ensureLoginFn({
+              data: {
+                email: ident.toLowerCase(),
+                password: pass,
+                schoolCode: schoolCode || null,
+              },
+            }),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 6_000)),
+          ]);
+          if (fixed && "ok" in fixed && fixed.ok) {
+            const { data: again, error: againErr } = await supabase.auth.signInWithPassword({
+              email: ident.toLowerCase(),
+              password: pass,
+            });
+            if (!againErr && again.session) {
+              if (await resolveRoleAndGoHome()) {
+                navigated = true;
+                return;
+              }
+              navigated = true;
+              goToRoleHome("school_admin");
+              return;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
       }
 
+      const msg = friendlyLoginError(lastServerMsg || "Invalid login credentials.");
       setError(
-        lastServerMsg ||
-          "Could not sign in. Check school code, email/matric/staff ID, and password. Students: password is usually your matric number.",
+        msg +
+          (msg.toLowerCase().includes("unable to sign in right now") ||
+          msg.toLowerCase().includes("unable to connect")
+            ? ""
+            : " Check school code, email/matric/staff ID, and password. Students: password is usually your matric number."),
       );
     } catch (err) {
+      console.error("[login] sign-in failed:", err);
       setError(friendlyLoginError(err));
     } finally {
-      inFlight.current = false;
-      setLoading(false);
+      window.clearTimeout(loginTimeout);
+      if (!navigated) {
+        setLoading(false);
+        inFlight.current = false;
+      }
     }
   }
 
   return (
-    <div className="min-h-dvh bg-slate-50">
-      <div className="mx-auto flex min-h-dvh max-w-6xl flex-col justify-center px-4 py-10 lg:flex-row lg:items-center lg:gap-16">
-        <div className="mb-10 hidden flex-1 lg:block">
-          <Logo size="lg" />
-          <h1 className="mt-8 text-3xl font-extrabold tracking-tight text-slate-900">
-            Examination platform for modern schools
-          </h1>
-          <p className="mt-3 max-w-md text-slate-600">
-            Sign in with your school credentials to access exams, results, and administration tools.
-          </p>
-          <ul className="mt-8 space-y-4">
+    <div className="min-h-screen bg-slate-50">
+      <div className="mx-auto grid min-h-screen max-w-6xl lg:grid-cols-2">
+        <div className="relative hidden overflow-hidden bg-slate-950 lg:flex lg:flex-col lg:justify-between lg:p-12">
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-600/30 via-slate-950 to-slate-950" />
+          <div className="relative">
+            <Logo className="h-10 w-auto text-white" />
+            <p className="mt-8 max-w-sm text-lg font-semibold leading-snug text-white">
+              Examination platform for modern schools
+            </p>
+            <p className="mt-3 max-w-sm text-sm text-slate-300">
+              Secure CBT, results, and school operations in one place.
+            </p>
+          </div>
+          <div className="relative grid gap-4">
             {features.map((f) => (
-              <li key={f.title} className="flex gap-3">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600">
-                  <f.icon className="h-5 w-5" />
-                </span>
-                <span>
-                  <span className="block text-sm font-semibold text-slate-900">{f.title}</span>
-                  <span className="text-sm text-slate-500">{f.desc}</span>
-                </span>
-              </li>
+              <div key={f.title} className="flex gap-3 rounded-xl border border-white/10 bg-white/5 p-4">
+                <f.icon className="mt-0.5 h-5 w-5 shrink-0 text-blue-300" />
+                <div>
+                  <p className="text-sm font-semibold text-white">{f.title}</p>
+                  <p className="text-xs text-slate-300">{f.desc}</p>
+                </div>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
 
-        <div className="w-full max-w-md">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-            <div className="mb-6 flex justify-center lg:hidden">
-              <Logo size="md" />
+        <div className="flex flex-col justify-center px-4 py-10 sm:px-8">
+          <div className="mx-auto w-full max-w-md">
+            <div className="mb-8 flex items-center gap-2 lg:hidden">
+              <Logo className="h-9 w-auto" />
             </div>
-            <div className="text-center">
-              <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-blue-50 text-blue-600">
-                <ShieldCheck className="h-6 w-6" />
-              </div>
-              <h2 className="text-xl font-bold text-slate-900">Welcome Back</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                School users need a school code. Super admins leave it blank.
-              </p>
-            </div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Sign in</h1>
+            <p className="mt-1 text-sm text-slate-500">Enter your credentials to continue.</p>
 
             {error ? (
               <Alert variant="destructive" className="mt-4">
@@ -324,13 +388,10 @@ function LoginPage() {
                 <Label htmlFor="school-code">School code</Label>
                 <Input
                   id="school-code"
-                  ref={codeRef}
-                  defaultValue=""
-                  autoCapitalize="characters"
-                  autoCorrect="off"
-                  spellCheck={false}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="e.g. ABC123"
                   className="h-11"
-                  placeholder="Leave blank if you are super admin"
                   autoComplete="organization"
                   disabled={loading}
                 />
@@ -339,12 +400,10 @@ function LoginPage() {
                 <Label htmlFor="identifier">Email / matric / staff ID</Label>
                 <Input
                   id="identifier"
-                  ref={identifierRef}
-                  defaultValue=""
-                  autoCorrect="off"
-                  spellCheck={false}
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="you@email.com or matric number"
                   className="h-11"
-                  placeholder="Email or matric number"
                   autoComplete="username"
                   required
                   disabled={loading}
@@ -364,8 +423,8 @@ function LoginPage() {
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
-                    ref={passwordRef}
-                    defaultValue=""
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     className="h-11 pr-10"
                     autoComplete="current-password"
                     required
@@ -409,8 +468,8 @@ function LoginPage() {
 
             <p className="mt-6 text-center text-sm text-slate-500">
               New institution?{" "}
-              <Link to="/apply" className="font-semibold text-primary hover:underline">
-                Apply here
+              <Link to="/school-application" className="font-semibold text-primary hover:underline">
+                Apply for school
               </Link>
             </p>
           </div>

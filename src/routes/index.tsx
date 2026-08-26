@@ -32,18 +32,9 @@ export const Route = createFileRoute("/")({
     ],
   }),
   beforeLoad: async () => {
-    try {
-      const user = await Promise.race([
-        fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
-      ]);
-      if (user?.role && user.role in roleHome) {
-        throw redirect({ to: roleHome[user.role] as never });
-      }
-    } catch (e) {
-      if (e && typeof e === "object" && ("to" in e || (e as { isRedirect?: boolean }).isRedirect)) {
-        throw e;
-      }
+    const user = await fetchSessionUser();
+    if (user?.role) {
+      throw redirect({ to: roleHome[user.role] as never });
     }
   },
   component: HomePage,
@@ -87,157 +78,222 @@ const stats = [
 const plans = [
   {
     name: "Starter",
-    audience: "Technical schools & training centres",
+    audience: "Technical schools & academies",
     price: "₦45,000",
-    period: "per term",
+    period: "/term",
+    features: ["Up to 500 students", "Unlimited MCQ exams", "Basic integrity logs", "Email support"],
+    cta: "Get Started",
     highlight: false,
-    features: [
-      "Up to 500 active students",
-      "Unlimited objective examinations",
-      "Basic integrity monitoring",
-      "Result export (CSV/PDF)",
-      "Email support (48h)",
-    ],
   },
   {
     name: "Professional",
     audience: "Colleges & polytechnics",
     price: "₦120,000",
-    period: "per term",
-    highlight: true,
+    period: "/term",
     features: [
-      "Up to 5,000 active students",
-      "Essay + objective marking",
-      "Live proctoring dashboard",
-      "Custom branding",
+      "Up to 5,000 students",
+      "Question bank & marking center",
+      "Live monitoring",
+      "Officer approvals",
       "Priority support",
     ],
+    cta: "Choose Professional",
+    highlight: true,
   },
   {
     name: "Enterprise",
     audience: "Universities & multi-campus",
     price: "Custom",
-    period: "annual",
-    highlight: false,
+    period: "",
     features: [
       "Unlimited students",
+      "Multi-campus hierarchy",
+      "SSO & API access",
       "Dedicated success manager",
-      "SSO & advanced integrations",
-      "On-premise options",
-      "SLA & training",
+      "SLA & onboarding",
     ],
+    cta: "Contact Sales",
+    highlight: false,
   },
 ];
 
 function HomePage() {
   return (
     <PublicLayout>
-      <section className="relative overflow-hidden bg-gradient-to-b from-slate-50 to-white">
-        <div className="mx-auto grid max-w-[1180px] gap-10 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:items-center lg:py-24">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wider text-blue-600">Smart · Secure · Seamless</p>
-            <h1 className="mt-3 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl">
-              Examination management built for modern schools
+      <section className="relative min-h-[min(88vh,720px)] w-full overflow-hidden">
+        <img
+          src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1920&q=85"
+          alt="Students using laptops for online examination"
+          className="absolute inset-0 h-full w-full object-cover"
+          loading="eager"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#0b1b3a]/95 via-[#0b1b3a]/75 to-[#0b1b3a]/40" />
+        <div className="relative mx-auto flex min-h-[min(88vh,720px)] w-full max-w-[1180px] items-center px-4 py-16 sm:px-6">
+          <div className="max-w-2xl text-white">
+            <p className="mb-3 text-sm font-semibold uppercase tracking-wider text-blue-200">
+              Smart. Secure. Seamless.
+            </p>
+            <h1 className="text-3xl font-extrabold leading-tight sm:text-4xl lg:text-5xl">
+              Smart Examination Management for Every Institution
             </h1>
-            <p className="mt-4 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg">
-              Run secure computer-based tests, protect integrity, mark automatically and publish results — all in one platform.
+            <p className="mt-4 text-base leading-relaxed text-slate-200 sm:text-lg">
+              Conduct exams, manage students, create questions, automate marking and publish results
+              seamlessly — for universities, polytechnics, colleges and technical schools.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Button size="lg" className="rounded-full px-6 font-semibold" asChild>
+              <Button size="lg" className="rounded-full px-7 font-semibold" asChild>
                 <Link to="/school-application">
-                  Apply for your school <ArrowRight className="ml-2 h-4 w-4" />
+                  Get Started
+                  <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
-              <Button size="lg" variant="outline" className="rounded-full px-6 font-semibold" asChild>
-                <Link to="/login">Sign in</Link>
+              <Button
+                size="lg"
+                variant="outline"
+                className="rounded-full border-white/40 bg-white/10 px-7 font-semibold text-white hover:bg-white/20 hover:text-white"
+                asChild
+              >
+                <Link to="/pricing">View Pricing</Link>
               </Button>
             </div>
-            <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              {stats.map((s) => (
-                <div key={s.label} className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center shadow-sm">
-                  <p className="text-lg font-extrabold text-slate-900">{s.value}</p>
-                  <p className="text-[11px] font-medium text-slate-500">{s.label}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="relative hidden lg:block">
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                Live integrity monitoring
-              </div>
-              <p className="mt-2 text-sm text-slate-500">
-                Officers see candidate status, warnings and submission state in real time during examinations.
-              </p>
-              <div className="mt-6 space-y-3">
-                {["Fullscreen lock", "Face presence checks", "Tab-switch alerts", "Auto submit on time"].map((x) => (
-                  <div key={x} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                    <Check className="h-4 w-4 text-blue-600" />
-                    {x}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <ul className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-200">
+              {["No installation required", "Works on low bandwidth", "Institution-grade security"].map(
+                (i) => (
+                  <li key={i} className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-blue-300" />
+                    {i}
+                  </li>
+                ),
+              )}
+            </ul>
           </div>
         </div>
       </section>
 
-      <section className="border-t border-slate-100 bg-white py-16">
-        <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
-          <h2 className="text-center text-2xl font-extrabold text-slate-900 sm:text-3xl">Why schools choose D4EXAM</h2>
-          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {features.map((f) => (
-              <div key={f.title} className="rounded-2xl border border-slate-200 bg-slate-50/50 p-5">
-                <span className="grid h-11 w-11 place-items-center rounded-xl bg-blue-50 text-blue-600">
-                  <f.icon className="h-5 w-5" />
-                </span>
-                <h3 className="mt-4 text-base font-bold text-slate-900">{f.title}</h3>
-                <p className="mt-2 text-sm text-slate-600">{f.body}</p>
+      <section className="border-b border-slate-100 bg-slate-50/80">
+        <div className="mx-auto grid w-full max-w-[1180px] gap-4 px-4 py-12 sm:grid-cols-2 sm:px-6 lg:grid-cols-4">
+          {features.map((f) => (
+            <div key={f.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-primary">
+                <f.icon className="h-5 w-5" />
+              </span>
+              <h2 className="mt-4 text-base font-bold text-slate-900">{f.title}</h2>
+              <p className="mt-2 text-sm leading-relaxed text-slate-600">{f.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="border-b border-slate-100 bg-[#0b1b3a] text-white">
+        <div className="mx-auto grid w-full max-w-[1180px] grid-cols-2 gap-6 px-4 py-10 sm:px-6 lg:grid-cols-4">
+          {stats.map((s) => (
+            <div key={s.label} className="text-center">
+              <p className="text-3xl font-extrabold sm:text-4xl">{s.value}</p>
+              <p className="mt-1 text-sm text-slate-300">{s.label}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section id="pricing" className="border-b border-slate-100 bg-white">
+        <div className="mx-auto w-full max-w-[1180px] px-4 py-14 sm:px-6">
+          <div className="mx-auto max-w-2xl text-center">
+            <h2 className="text-2xl font-extrabold text-slate-900 sm:text-3xl">Pricing for every institution</h2>
+            <p className="mt-2 text-slate-600">
+              Transparent plans for technical schools, colleges, polytechnics and universities.
+            </p>
+          </div>
+          <div className="mt-10 grid gap-5 lg:grid-cols-3">
+            {plans.map((p) => (
+              <div
+                key={p.name}
+                className={`rounded-2xl border p-6 shadow-sm ${
+                  p.highlight
+                    ? "border-primary bg-blue-50/40 ring-2 ring-primary/20"
+                    : "border-slate-200 bg-white"
+                }`}
+              >
+                <p className="text-sm font-semibold text-primary">{p.audience}</p>
+                <h3 className="mt-1 text-xl font-extrabold text-slate-900">{p.name}</h3>
+                <p className="mt-3">
+                  <span className="text-3xl font-extrabold text-slate-900">{p.price}</span>
+                  <span className="text-sm text-slate-500">{p.period}</span>
+                </p>
+                <ul className="mt-5 space-y-2.5">
+                  {p.features.map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-sm text-slate-700">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  className="mt-6 w-full rounded-full font-semibold"
+                  variant={p.highlight ? "default" : "outline"}
+                  asChild
+                >
+                  <Link to={p.name === "Enterprise" ? "/support" : "/school-application"}>{p.cta}</Link>
+                </Button>
               </div>
             ))}
           </div>
+          <p className="mt-6 text-center text-sm text-slate-500">
+            Need a custom quote?{" "}
+            <Link to="/pricing" className="font-semibold text-primary hover:underline">
+              See full pricing details
+            </Link>
+          </p>
         </div>
       </section>
 
-      <section className="border-t border-slate-100 bg-slate-50 py-16">
-        <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
-          <h2 className="text-center text-2xl font-extrabold text-slate-900">How it works</h2>
-          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="border-b border-slate-100 bg-white">
+        <div className="mx-auto w-full max-w-[1180px] px-4 py-14 sm:px-6">
+          <h2 className="text-2xl font-extrabold text-slate-900 sm:text-3xl">How D4EXAM works</h2>
+          <ol className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {steps.map((s) => (
-              <div key={s.n} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-xs font-bold text-blue-600">{s.n}</p>
-                <h3 className="mt-2 text-base font-bold text-slate-900">{s.title}</h3>
-                <p className="mt-2 text-sm text-slate-600">{s.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="border-t border-slate-100 bg-white py-16">
-        <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
-          <h2 className="text-center text-2xl font-extrabold text-slate-900">Security that protects every script</h2>
-          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {security.map((s) => (
-              <div key={s.title} className="rounded-2xl border border-slate-200 p-5">
-                <s.icon className="h-6 w-6 text-blue-600" />
+              <li key={s.n} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <span className="text-sm font-extrabold text-primary">{s.n}</span>
                 <h3 className="mt-3 text-base font-bold text-slate-900">{s.title}</h3>
                 <p className="mt-2 text-sm text-slate-600">{s.body}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      <section className="border-b border-slate-100 bg-slate-50/80">
+        <div className="mx-auto grid w-full max-w-[1180px] gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[0.9fr_1.1fr]">
+          <div>
+            <h2 className="text-2xl font-extrabold text-slate-900 sm:text-3xl">
+              Examination integrity by design
+            </h2>
+            <p className="mt-3 text-slate-600">Every attempt is monitored, recorded and reviewable.</p>
+            <Button className="mt-6 rounded-full font-semibold" variant="outline" asChild>
+              <Link to="/features">Explore all features</Link>
+            </Button>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {security.map((s) => (
+              <div key={s.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <s.icon className="h-5 w-5 text-primary" />
+                <h3 className="mt-3 text-sm font-bold text-slate-900">{s.title}</h3>
+                <p className="mt-1.5 text-sm text-slate-600">{s.body}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="border-t border-slate-100 bg-slate-50 py-16">
-        <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
-          <h2 className="text-center text-2xl font-extrabold text-slate-900">Built for every role</h2>
-          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="border-b border-slate-100 bg-white">
+        <div className="mx-auto w-full max-w-[1180px] px-4 py-14 sm:px-6">
+          <h2 className="text-2xl font-extrabold text-slate-900 sm:text-3xl">One platform, every role</h2>
+          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {roles.map((r) => (
               <div key={r.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <r.icon className="h-6 w-6 text-blue-600" />
-                <h3 className="mt-3 text-base font-bold text-slate-900">{r.title}</h3>
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-primary">
+                  <r.icon className="h-5 w-5" />
+                </span>
+                <h3 className="mt-4 text-base font-bold text-slate-900">{r.title}</h3>
                 <p className="mt-2 text-sm text-slate-600">{r.body}</p>
               </div>
             ))}
@@ -245,52 +301,26 @@ function HomePage() {
         </div>
       </section>
 
-      <section className="border-t border-slate-100 bg-white py-16" id="pricing">
-        <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
-          <h2 className="text-center text-2xl font-extrabold text-slate-900">Simple pricing</h2>
-          <p className="mx-auto mt-2 max-w-lg text-center text-sm text-slate-600">
-            Choose a plan that matches your institution. Custom enterprise available.
-          </p>
-          <div className="mt-10 grid gap-5 lg:grid-cols-3">
-            {plans.map((p) => (
-              <div
-                key={p.name}
-                className={`rounded-2xl border p-6 shadow-sm ${
-                  p.highlight ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200"
-                }`}
-              >
-                <h3 className="text-lg font-extrabold text-slate-900">{p.name}</h3>
-                <p className="mt-1 text-xs font-medium text-slate-500">{p.audience}</p>
-                <p className="mt-4 text-3xl font-extrabold text-slate-900">
-                  {p.price}
-                  <span className="text-sm font-medium text-slate-500"> / {p.period}</span>
-                </p>
-                <ul className="mt-5 space-y-2">
-                  {p.features.map((f) => (
-                    <li key={f} className="flex gap-2 text-sm text-slate-700">
-                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-                <Button className="mt-6 w-full font-semibold" variant={p.highlight ? "default" : "outline"} asChild>
-                  <Link to="/school-application">Get started</Link>
-                </Button>
-              </div>
-            ))}
+      <section className="bg-white">
+        <div className="mx-auto w-full max-w-[1180px] px-4 py-14 sm:px-6">
+          <div className="flex flex-col items-start gap-6 rounded-2xl border border-blue-100 bg-blue-50/60 p-8 sm:p-10 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-2xl font-extrabold text-slate-900 sm:text-3xl">
+                Bring your examinations online — properly.
+              </h2>
+              <p className="mt-2 max-w-xl text-slate-600">
+                Apply as an institution today and get guided onboarding with the D4EXAM team.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-col gap-3 sm:flex-row">
+              <Button size="lg" className="rounded-full px-6 font-semibold" asChild>
+                <Link to="/school-application">Apply Now</Link>
+              </Button>
+              <Button size="lg" variant="outline" className="rounded-full px-6 font-semibold" asChild>
+                <Link to="/support">Contact Support</Link>
+              </Button>
+            </div>
           </div>
-        </div>
-      </section>
-
-      <section className="border-t border-slate-100 bg-[#0b1b3a] py-14 text-white">
-        <div className="mx-auto max-w-[1180px] px-4 text-center sm:px-6">
-          <h2 className="text-2xl font-extrabold">Ready to modernise your examinations?</h2>
-          <p className="mx-auto mt-2 max-w-lg text-sm text-slate-300">
-            Apply for your institution today. Setup support included for every plan.
-          </p>
-          <Button size="lg" className="mt-6 rounded-full bg-white px-8 font-semibold text-slate-900 hover:bg-slate-100" asChild>
-            <Link to="/school-application">Apply now</Link>
-          </Button>
         </div>
       </section>
     </PublicLayout>

@@ -1,9 +1,13 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
- * D4EXAM Capacitor — production Android loads the live Vercel web app as the shell.
- * This matches the previously working setup (stable UI, no blank blue SPA shell).
+ * D4EXAM Capacitor config
  *
+ * Live server.url is REQUIRED: TanStack Start is SSR. Loading only local assets
+ * causes a blank navy/blue screen after splash. The working product loads the
+ * production Vercel app inside the native shell (push, camera, status bar still work).
+ *
+ * When offline, errorPath shows the bundled offline page (not Chrome error).
  * StatusBar.overlaysWebView MUST be false so content is not clipped under the bar.
  */
 const config: CapacitorConfig = {
@@ -11,10 +15,9 @@ const config: CapacitorConfig = {
   appName: "D4EXAM",
   webDir: "dist",
   server: {
-    // Live production shell (same as before offline-local experiments)
     url: "https://d4exam-platform.vercel.app",
-    cleartext: false,
     androidScheme: "https",
+    errorPath: "offline.html",
     allowNavigation: [
       "d4exam-platform.vercel.app",
       "*.vercel.app",

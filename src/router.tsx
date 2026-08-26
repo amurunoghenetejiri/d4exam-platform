@@ -82,9 +82,8 @@ export const getRouter = () => {
     routeTree,
     context: { queryClient },
     scrollRestoration: true,
-    // Intent preload was saturating low-end Android WebViews (freeze + white screen).
-    defaultPreload: false,
-    defaultPreloadStaleTime: 0,
+    defaultPreloadStaleTime: 5 * 60_000,
+    defaultPreload: "intent",
     defaultPendingMs: 0,
     defaultPendingMinMs: 120,
     defaultPendingComponent: DefaultPending,

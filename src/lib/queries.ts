@@ -92,9 +92,9 @@ export function useUnreadNotificationCount(userId: string | null | undefined) {
   return useQuery({
     queryKey: ["count", "notifications", "unread", userId],
     enabled: Boolean(userId),
-    staleTime: 15_000,
+    staleTime: 3_000,
     refetchOnWindowFocus: true,
-    refetchInterval: isOnlineNow() ? 30_000 : false,
+    refetchInterval: isOnlineNow() ? 8_000 : false,
     networkMode: "offlineFirst",
     retry: 0,
     queryFn: async () => {
