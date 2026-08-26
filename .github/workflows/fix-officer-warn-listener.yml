@@ -1,0 +1,26 @@
+name: Fix officer warning reaches student in-exam
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/fix-officer-warn-listener.yml"
+      - "scripts/apply_officer_warn_listener.py"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -e
+          python3 scripts/apply_officer_warn_listener.py
+          grep -q exam-officer-warn src/components/cbt/CbtExamSession.impl.tsx
+          grep -q WARNING_SHOWN src/components/cbt/CbtExamSession.impl.tsx
+      - run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          git commit -m "fix(cbt): officer warning reaches student in-exam (banner + haptic)" || echo no-changes
+          git pull --rebase origin main || true
+          git push origin main
