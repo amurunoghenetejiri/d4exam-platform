@@ -1,0 +1,61 @@
+name: wire-cbt-screen-share
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/wire-cbt-screen-share.yml
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Insert screen share start in beginWithMedia
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          t = p.read_text()
+          if 'startScreenShareStream()' in t and 'skipScreenShare' in t and 'Screen sharing active' in t:
+              print('already wired')
+          else:
+              needle = '''      }\n      // Always immersive during active CBT: hide phone status + system chrome.\n      {\n        const ok = await requestExamFullscreen();'''
+              insert = '''      }\n      // Screen share when teacher enabled and device supports it\n      if (!_opts.skipScreenShare) {\n        try {\n          const share = await startScreenShareStream();\n          if (share.ok) {\n            stopScreenShareStream(screenStreamRef.current);\n            screenStreamRef.current = share.stream;\n            setScreenStream(share.stream);\n            onScreenShareEnded(share.stream, () => {\n              toast.error("Screen sharing stopped. Re-enable to continue the exam.");\n              setPaused(true);\n              setScreenStream(null);\n              screenStreamRef.current = null;\n            });\n            toast.success("Screen sharing active");\n          } else if (share.reason === "denied") {\n            toast.error(share.message || "Screen share is required. Allow sharing to continue.");\n            return;\n          } else if (share.reason !== "unsupported") {\n            toast.message(share.message || "Screen share unavailable on this device");\n          }\n        } catch (e) {\n          console.warn("[cbt] screen share", e);\n        }\n      }\n      // Always immersive during active CBT: hide phone status + system chrome.\n      {\n        const ok = await requestExamFullscreen();'''
+              if needle not in t:
+                  print('needle missing')
+                  raise SystemExit(1)
+              t = t.replace(needle, insert, 1)
+              # ensure state vars
+              if 'screenStreamRef' not in t:
+                  t = t.replace(
+                      'const [liveStream, setLiveStream]',
+                      'const [screenStream, setScreenStream] = useState<MediaStream | null>(null);\n  const screenStreamRef = useRef<MediaStream | null>(null);\n  const [liveStream, setLiveStream]',
+                      1,
+                  )
+              if 'useLiveScreenPublish({' not in t and 'useLiveCamPublish({' in t:
+                  idx = t.find('useLiveCamPublish({')
+                  end = t.find('  });', idx)
+                  t = t[:end+len('  });')] + '''\n\n  useLiveScreenPublish({\n    enabled: started && !done && !previewMode && !paused && Boolean(screenStream),\n    schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,\n    studentId: student?.studentId,\n    examId: id,\n    attemptId: liveAttemptId || attemptIdRef.current,\n    stream: screenStream,\n    getStream: () => screenStreamRef.current || screenStream,\n  });''' + t[end+len('  });'):]
+              p.write_text(t)
+              print('wired screen share')
+          # live-video publisher if missing
+          lv = Path('src/lib/live-video.ts')
+          lt = lv.read_text()
+          if 'startLiveScreenPublisher' not in lt:
+              lt = lt.rstrip() + '''\n\nexport const LIVE_SCREEN_EVENT = "screen-frame";\nexport const LIVE_SCREEN_FRAME_INTERVAL_MS = 900;\nexport type LiveScreenFramePayload = { attemptId: string; studentId: string; examId: string; frame: string; ts: number; screenActive?: boolean };\nexport function liveScreenChannelName(schoolId: string): string { return `live-screen:${schoolId}`; }\nexport type LiveScreenPublisher = { stop: () => void };\nexport function startLiveScreenPublisher(opts: { schoolId: string; attemptId: string; studentId: string; examId: string; getStream: () => MediaStream | null; intervalMs?: number; }): LiveScreenPublisher {\n  const intervalMs = opts.intervalMs ?? LIVE_SCREEN_FRAME_INTERVAL_MS;\n  let stopped = false; let channel: RealtimeChannel | null = null; let timer: ReturnType<typeof setInterval> | null = null; let publishing = false;\n  channel = supabase.channel(liveScreenChannelName(opts.schoolId), { config: { broadcast: { ack: false, self: false } } });\n  const sendFrame = async () => { if (stopped || publishing) return; const stream = opts.getStream(); if (!stream) return; publishing = true; try { const frame = await captureJpegFromStream(stream); if (stopped || !frame || !channel) return; void channel.send({ type: "broadcast", event: LIVE_SCREEN_EVENT, payload: { attemptId: opts.attemptId, studentId: opts.studentId, examId: opts.examId, frame, ts: Date.now(), screenActive: true } }); } catch (e) { console.warn("[live-screen]", e); } finally { publishing = false; } };\n  void channel.subscribe((status) => { if (status === "SUBSCRIBED" && !stopped) { void sendFrame(); timer = setInterval(() => void sendFrame(), intervalMs); } });\n  return { stop: () => { stopped = true; if (timer) clearInterval(timer); if (channel) { void supabase.removeChannel(channel); channel = null; } } };\n}\n'''
+              lv.write_text(lt)
+              print('live-video publisher added')
+          else:
+              print('live-video ok')
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/CbtExamSession.impl.tsx src/lib/live-video.ts
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "feat(cbt): start screen share + publish frames during exam"
+            git push
+          fi
