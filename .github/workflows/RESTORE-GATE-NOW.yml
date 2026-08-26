@@ -1,0 +1,30 @@
+name: RESTORE-GATE-NOW
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/RESTORE-GATE-NOW.yml
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 40
+      - name: Restore full ExamSecurityGate from known good commit
+        run: |
+          set -e
+          git show f32756a:src/components/cbt/ExamSecurityGate.tsx > src/components/cbt/ExamSecurityGate.tsx
+          wc -c src/components/cbt/ExamSecurityGate.tsx
+          grep -q 'export function ExamSecurityGate' src/components/cbt/ExamSecurityGate.tsx
+          test $(wc -c < src/components/cbt/ExamSecurityGate.tsx) -gt 10000
+      - name: Commit restore
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/ExamSecurityGate.tsx
+          git commit -m "fix(cbt): RESTORE full ExamSecurityGate component"
+          git push
