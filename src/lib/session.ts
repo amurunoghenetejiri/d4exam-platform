@@ -51,9 +51,70 @@ export interface SessionUser {
   identifierLabel: string;
 }
 
+const PENDING_ROLE_KEY = "d4_pending_role";
+const PENDING_ROLE_TS_KEY = "d4_pending_role_ts";
+
+/** Remember role for a few seconds so post-login navigation is not bounced by a slow session read. */
+export function seedPendingLoginRole(role: AppRole | string | null | undefined): void {
+  if (typeof window === "undefined" || !role) return;
+  try {
+    window.sessionStorage.setItem(PENDING_ROLE_KEY, String(role));
+    window.sessionStorage.setItem(PENDING_ROLE_TS_KEY, String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readPendingLoginRole(maxAgeMs = 45_000): AppRole | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const role = window.sessionStorage.getItem(PENDING_ROLE_KEY);
+    const ts = Number(window.sessionStorage.getItem(PENDING_ROLE_TS_KEY) || 0);
+    if (!role || !ts || Date.now() - ts > maxAgeMs) return null;
+    if (role in roleHome) return role as AppRole;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function clearPendingLoginRole(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(PENDING_ROLE_KEY);
+    window.sessionStorage.removeItem(PENDING_ROLE_TS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function fetchSessionUser(): Promise<SessionUser | null> {
-  const { data: userData } = await supabase.auth.getUser();
-  const user = userData.user;
+  // Prefer getSession (local) then getUser (network) so login handoff is reliable offline/slow.
+  let user: { id: string; email?: string | null } | null = null;
+  try {
+    const { data: sessData } = await supabase.auth.getSession();
+    if (sessData.session?.user) user = sessData.session.user;
+  } catch {
+    /* ignore */
+  }
+  if (!user) {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      user = userData.user;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!user) {
+    // One short retry — setSession can lag a tick on WebView / slow devices.
+    await new Promise((r) => setTimeout(r, 250));
+    try {
+      const { data: sessData } = await supabase.auth.getSession();
+      if (sessData.session?.user) user = sessData.session.user;
+    } catch {
+      /* ignore */
+    }
+  }
   if (!user) return null;
 
   const [profileByAuth, profileById, roleRes] = await Promise.all([
@@ -259,5 +320,6 @@ export function initials(name: string) {
 
 export async function signOut() {
   await supabase.auth.signOut();
+  clearPendingLoginRole();
   if (typeof window !== "undefined") window.location.href = "/login";
 }
