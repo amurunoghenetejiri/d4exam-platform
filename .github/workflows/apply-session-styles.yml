@@ -1,0 +1,32 @@
+name: Apply session styles CBT fixes
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/apply-session-styles.yml"
+      - "scripts/apply_sess_0.py"
+      - "scripts/apply_sess_1.py"
+      - "scripts/apply_sess_2.py"
+      - "scripts/apply_styles_p2.py"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 scripts/apply_sess_0.py
+          python3 scripts/apply_sess_1.py
+          python3 scripts/apply_sess_2.py
+          python3 scripts/apply_styles_p2.py
+          grep -q 'h-11 max-w' src/components/cbt/CbtExamSession.impl.tsx
+          grep -q '!paused' src/components/cbt/CbtExamSession.impl.tsx
+          grep -q 'finishingRef.current || done' src/components/cbt/CbtExamSession.impl.tsx
+      - run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/styles.css
+          git commit -m "fix(cbt): short header; stop security on submit; pause stops face; timer keeps ticking" || echo no-changes
+          git pull --rebase origin main || true
+          git push origin main
