@@ -1,24 +1,8 @@
-name: CBT integrity run
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - scripts/cbt_integrity_patch.py
-      - .github/workflows/cbt-integrity-run.yml
 jobs:
-  patch:
+  skipped:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Run patch
-        run: python3 scripts/cbt_integrity_patch.py
-      - name: Commit
-        run: |
-          git config user.name d4exam-bot
-          git config user.email bot@d4exam.app
-          git add -A
-          git commit -m "fix(cbt): face hysteresis, TAB VIOLATION, pause countdown, gate rules" || echo none
-          git pull --rebase origin main || true
-          git push
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."

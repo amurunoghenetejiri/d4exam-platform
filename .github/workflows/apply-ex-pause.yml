@@ -1,31 +1,8 @@
-name: Apply examinations clean pause UI
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/apply-ex-pause.yml"
 jobs:
-  apply:
+  skipped:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Write examinations + patch
-        run: |
-          set -e
-          python3 scripts/eq0.py
-          python3 scripts/eq1.py
-          python3 scripts/eq2.py
-          python3 scripts/eq3.py
-          python3 scripts/patch_push_bits.py
-          grep -n Minutes src/routes/teacher.examinations.tsx | head
-          ! grep -q "Exact time the student must wait" src/routes/teacher.examinations.tsx
-      - name: Commit
-        run: |
-          git config user.name "d4exam-bot"
-          git config user.email "bot@d4exam.local"
-          git add -A
-          git commit -m "fix: clean examinations pause min+sec; push heads-up" || echo no-changes
-          git pull --rebase origin main || true
-          git push origin main
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."

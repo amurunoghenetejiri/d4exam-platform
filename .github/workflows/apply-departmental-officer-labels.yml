@@ -1,9 +1,8 @@
-name: Apply departmental officer labels
+name: Disabled (legacy)
 on:
   workflow_dispatch:
 jobs:
-  apply:
+  skipped:
     runs-on: ubuntu-latest
     steps:
-      - name: No-op
-        run: echo "Labels already applied on main. Workflow disabled to avoid failed checks."
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."
