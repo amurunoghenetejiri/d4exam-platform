@@ -88,6 +88,28 @@ export function clearPendingLoginRole(): void {
   }
 }
 
+/**
+ * Wait until supabase.auth reports a session (local first).
+ * Call after setSession before navigating into a guarded route.
+ */
+export async function confirmSessionReady(maxAttempts = 8): Promise<boolean> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      if (sess.session?.access_token && sess.session.user?.id) return true;
+    } catch {
+      /* retry */
+    }
+    await new Promise((r) => setTimeout(r, 80 * (i + 1)));
+  }
+  try {
+    const { data } = await supabase.auth.getUser();
+    return Boolean(data.user?.id);
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchSessionUser(): Promise<SessionUser | null> {
   // Prefer getSession (local) then getUser (network) so login handoff is reliable offline/slow.
   let user: { id: string; email?: string | null } | null = null;
@@ -171,6 +193,12 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     }
   }
 
+  // Bridge right after login when role query lags one tick
+  if (roles.length === 0) {
+    const pending = readPendingLoginRole();
+    if (pending) roles = [pending];
+  }
+
   let schoolName: string | null = null;
   let schoolCode: string | null = null;
   let schoolLogoUrl: string | null = null;
@@ -248,6 +276,9 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
 
   let status = (profile?.status as string | undefined) ?? "pending";
   if (primaryRole === "super_admin" && (status === "pending" || status === "invited" || !profile)) {
+    status = "active";
+  }
+  if (primaryRole && (status === "pending" || status === "invited")) {
     status = "active";
   }
 
