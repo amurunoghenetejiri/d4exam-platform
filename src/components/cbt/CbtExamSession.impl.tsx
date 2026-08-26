@@ -21,6 +21,8 @@ import { saveCbtResult } from "@/lib/cbt-save-result";
 import { logSecurityEvent } from "@/lib/cbt-security";
 import { mapFaceSecurityEvent } from "@/lib/live-monitor";
 import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
+import { useLiveScreenPublish } from "@/lib/use-live-screen-publish";
+import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream } from "@/lib/screen-share";
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
 import { haptic } from "@/lib/haptic";
@@ -136,7 +138,9 @@ export function CbtExamPage() {
 
   const questionsQ = useQuery({
     queryKey: ["cbt-questions", id, examQ.data?.course_id, examQ.data?.school_id],
-    enabled: Boolean(examQ.data?.course_id),
+    enabled: Boolean(examQ.data?.id),
+    staleTime: 30_000,
+    retry: 1,
     queryFn: async () => {
       const exam = examQ.data!;
       return loadExamQuestionBank({
@@ -709,10 +713,17 @@ export function CbtExamPage() {
     void navigate({ to: "/student/results/$id", params: { id: targetId || id } });
   }
 
-  if (examQ.isLoading || questionsQ.isLoading) {
+  if (examQ.isLoading || (examQ.isFetching && !examQ.data)) {
     return (
       <div className="grid min-h-dvh place-items-center">
         <p className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading examination…</p>
+      </div>
+    );
+  }
+  if (questionsQ.isLoading && !questionsQ.data && !questionsQ.isError) {
+    return (
+      <div className="grid min-h-dvh place-items-center">
+        <p className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading questions…</p>
       </div>
     );
   }
