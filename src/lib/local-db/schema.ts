@@ -1,13 +1,12 @@
 /**
- * D4EXAM local SQLite schema (Step 2 foundation).
- * Server UUIDs are stored as TEXT and match Supabase ids where possible.
- * Never stores user secrets in clear form.
+ * D4EXAM local SQLite schema.
+ * Server UUIDs stored as TEXT. Never stores user secrets in clear form.
  */
 
 export const LOCAL_DB_NAME = "d4exam_local";
-export const LOCAL_DB_VERSION = 1;
+export const LOCAL_DB_VERSION = 2;
 
-/** Ordered DDL — safe to run with IF NOT EXISTS */
+/** Base DDL — IF NOT EXISTS safe */
 export const LOCAL_SCHEMA_SQL: string[] = [
   `CREATE TABLE IF NOT EXISTS local_meta (
     key TEXT PRIMARY KEY NOT NULL,
@@ -25,7 +24,6 @@ export const LOCAL_SCHEMA_SQL: string[] = [
     school_name TEXT,
     roles_json TEXT NOT NULL DEFAULT '[]',
     primary_role TEXT,
-    /* opaque session hints only — never password */
     access_token_expires_at TEXT,
     has_refresh_session INTEGER NOT NULL DEFAULT 0,
     last_validated_at TEXT,
@@ -68,7 +66,6 @@ export const LOCAL_SCHEMA_SQL: string[] = [
     scheduled_start TEXT,
     scheduled_end TEXT,
     duration_minutes INTEGER,
-    /* metadata only in Step 2 — no full question bank payload required yet */
     payload_json TEXT,
     updated_at TEXT,
     last_synced_at TEXT,
@@ -124,12 +121,15 @@ export const LOCAL_SCHEMA_SQL: string[] = [
     id TEXT PRIMARY KEY NOT NULL,
     school_id TEXT,
     title TEXT,
+    content_text TEXT,
+    content_url TEXT,
     payload_json TEXT,
     updated_at TEXT,
     last_synced_at TEXT,
     sync_status TEXT NOT NULL DEFAULT 'synced',
     deleted_at TEXT
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_local_materials_school ON local_materials(school_id)`,
 
   `CREATE TABLE IF NOT EXISTS local_exam_attempts (
     id TEXT PRIMARY KEY NOT NULL,
@@ -138,7 +138,6 @@ export const LOCAL_SCHEMA_SQL: string[] = [
     status TEXT,
     started_at TEXT,
     submitted_at TEXT,
-    /* answers_json reserved for future offline CBT — unused in Step 2 product paths */
     answers_json TEXT,
     payload_json TEXT,
     client_mutation_id TEXT,
@@ -187,6 +186,75 @@ export const LOCAL_SCHEMA_SQL: string[] = [
     available_at TEXT
   )`,
   `CREATE INDEX IF NOT EXISTS idx_local_outbox_status ON local_outbox(status, created_at)`,
+
+  `CREATE TABLE IF NOT EXISTS local_students (
+    id TEXT PRIMARY KEY NOT NULL,
+    profile_id TEXT,
+    school_id TEXT,
+    matric_number TEXT,
+    payload_json TEXT,
+    updated_at TEXT,
+    last_synced_at TEXT,
+    sync_status TEXT NOT NULL DEFAULT 'synced',
+    deleted_at TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_local_students_profile ON local_students(profile_id)`,
+
+  `CREATE TABLE IF NOT EXISTS local_subjects (
+    id TEXT PRIMARY KEY NOT NULL,
+    school_id TEXT,
+    code TEXT,
+    name TEXT,
+    payload_json TEXT,
+    updated_at TEXT,
+    last_synced_at TEXT,
+    sync_status TEXT NOT NULL DEFAULT 'synced',
+    deleted_at TEXT
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS local_app_settings (
+    key TEXT PRIMARY KEY NOT NULL,
+    value_json TEXT,
+    updated_at TEXT,
+    sync_status TEXT NOT NULL DEFAULT 'synced'
+  )`,
+];
+
+export const LOCAL_MIGRATIONS: { version: number; statements: string[] }[] = [
+  {
+    version: 2,
+    statements: [
+      `CREATE TABLE IF NOT EXISTS local_students (
+        id TEXT PRIMARY KEY NOT NULL,
+        profile_id TEXT,
+        school_id TEXT,
+        matric_number TEXT,
+        payload_json TEXT,
+        updated_at TEXT,
+        last_synced_at TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'synced',
+        deleted_at TEXT
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_local_students_profile ON local_students(profile_id)`,
+      `CREATE TABLE IF NOT EXISTS local_subjects (
+        id TEXT PRIMARY KEY NOT NULL,
+        school_id TEXT,
+        code TEXT,
+        name TEXT,
+        payload_json TEXT,
+        updated_at TEXT,
+        last_synced_at TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'synced',
+        deleted_at TEXT
+      )`,
+      `CREATE TABLE IF NOT EXISTS local_app_settings (
+        key TEXT PRIMARY KEY NOT NULL,
+        value_json TEXT,
+        updated_at TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'synced'
+      )`,
+    ],
+  },
 ];
 
 export type SyncStatus = "synced" | "pending" | "failed" | "conflict" | "deleted";
