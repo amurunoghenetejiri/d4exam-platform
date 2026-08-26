@@ -1,7 +1,8 @@
 /**
  * Camera/microphone for CBT proctoring.
- * Web: getUserMedia directly.
- * Android Capacitor: request OS runtime permissions first, then getUserMedia in WebView.
+ * Web: getUserMedia.
+ * Android Capacitor: request OS runtime permissions first (so Camera/Mic appear in App Settings),
+ * then getUserMedia in the WebView.
  */
 import { isNativeShell } from "@/native/platform";
 
@@ -15,6 +16,23 @@ export type PermissionResult = {
   deniedPermanently?: boolean;
   error?: string;
 };
+
+/** Open Android App Info → Permissions so the student can enable Camera / Microphone. */
+export async function openAppPermissionSettings(): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    if (isNativeShell()) {
+      const pkg = "com.d4exam.app";
+      const intent =
+        "intent://settings#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;" +
+        `data=package:${pkg};end`;
+      window.location.href = intent;
+      return;
+    }
+  } catch (e) {
+    console.warn("[D4EXAM] openAppPermissionSettings", e);
+  }
+}
 
 async function probeGetUserMedia(
   constraints: MediaStreamConstraints,
@@ -39,7 +57,7 @@ async function probeGetUserMedia(
         granted: false,
         deniedPermanently: true,
         error:
-          "Permission denied. Open Android Settings → Apps → D4EXAM → Permissions and enable Camera / Microphone.",
+          "Permission denied. Tap Open App Settings → Permissions → enable Camera and Microphone.",
       };
     }
     if (name === "NotFoundError" || name === "DevicesNotFoundError") {
@@ -49,35 +67,25 @@ async function probeGetUserMedia(
   }
 }
 
-/** Request native Android camera permission (shows system dialog). */
+/**
+ * Request native Android CAMERA permission (shows system dialog and lists Camera in App Settings).
+ * Then probe WebView getUserMedia so the in-app preview works.
+ */
 export async function ensureCameraPermission(): Promise<PermissionResult> {
   if (isNativeShell()) {
     try {
       const { Camera } = await import("@capacitor/camera");
       let status = await Camera.checkPermissions();
-      if (status.camera === "granted") {
-        return probeGetUserMedia({ video: true, audio: false });
+      if (status.camera !== "granted") {
+        status = await Camera.requestPermissions({ permissions: ["camera"] });
       }
-      if (status.camera === "denied") {
-        status = await Camera.requestPermissions({ permissions: ["camera"] });
-        if (status.camera !== "granted") {
-          return {
-            granted: false,
-            deniedPermanently: true,
-            error:
-              "Camera permission denied. Open Android Settings → Apps → D4EXAM → Permissions and enable Camera.",
-          };
-        }
-      } else {
-        status = await Camera.requestPermissions({ permissions: ["camera"] });
-        if (status.camera !== "granted") {
-          return {
-            granted: false,
-            deniedPermanently: status.camera === "denied",
-            error:
-              "Camera permission is required for examinations. Enable Camera in Android Settings → Apps → D4EXAM → Permissions.",
-          };
-        }
+      if (status.camera !== "granted") {
+        return {
+          granted: false,
+          deniedPermanently: status.camera === "denied",
+          error:
+            "Camera permission is required. Tap Open App Settings → enable Camera, then try again.",
+        };
       }
     } catch (e) {
       console.warn("[D4EXAM] Camera permission plugin error", e);
@@ -86,14 +94,13 @@ export async function ensureCameraPermission(): Promise<PermissionResult> {
   return probeGetUserMedia({ video: true, audio: false });
 }
 
-/** Request microphone via getUserMedia (WebView + browser). */
+/** Request microphone via getUserMedia (WebView shows system mic dialog on Android). */
 export async function ensureMicrophonePermission(): Promise<PermissionResult> {
   return probeGetUserMedia({ audio: true, video: false });
 }
 
 /**
- * Request camera + microphone together so the OS shows both permission dialogs
- * when the student enters the exam environment.
+ * Request camera + microphone together so OS dialogs appear when starting an exam.
  */
 export async function requestExamMediaPermissions(opts: {
   camera?: boolean;
@@ -164,7 +171,7 @@ export async function openCameraStream(
     const name = (e as DOMException)?.name || "";
     if (name === "NotAllowedError" || name === "PermissionDeniedError") {
       throw new Error(
-        "Camera permission is required for this examination. Enable Camera in Android Settings → Apps → D4EXAM.",
+        "Camera permission is required. Open App Settings → Permissions → enable Camera.",
       );
     }
     throw e instanceof Error ? e : new Error("Could not open camera");
