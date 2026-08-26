@@ -1,8 +1,5 @@
 /**
- * Prepare dist/ for Capacitor Android:
- * 1) Build client-only SPA (vite.capacitor.config.ts) — no SSR / no Vercel shell
- * 2) Write dist/index.html that mounts capacitor-app.js
- * 3) Copy public assets + offline.html
+ * Prepare dist/ for Capacitor Android SPA shell (no Vercel).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -18,7 +15,15 @@ const viteBin = path.join(root, "node_modules", "vite", "bin", "vite.js");
 const build = spawnSync(
   process.execPath,
   [viteBin, "build", "--config", "vite.capacitor.config.ts"],
-  { cwd: root, stdio: "inherit", env: { ...process.env, NODE_ENV: "production" } },
+  {
+    cwd: root,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      VITE_CONFIG_NATIVE_IGNORE_WARNING: "true",
+    },
+  },
 );
 if (build.status !== 0) {
   console.error("FATAL: Capacitor SPA build failed");
@@ -30,7 +35,7 @@ if (!fs.existsSync(path.join(distCap, "capacitor-app.js"))) {
   process.exit(1);
 }
 
-fs.mkdirSync(dist, { recursive: true });
+fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(path.join(dist, "assets"), { recursive: true });
 
 for (const name of fs.readdirSync(distCap)) {
@@ -59,7 +64,6 @@ const html = `<!DOCTYPE html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b1b3a" />
-    <meta name="color-scheme" content="light dark" />
     <title>D4EXAM</title>
     ${cssLink}
     <style>
@@ -67,9 +71,7 @@ const html = `<!DOCTYPE html>
       #root { min-height: 100dvh; }
       #d4-boot {
         position: fixed; inset: 0; z-index: 99999; display: grid; place-items: center;
-        background: #0b1b3a; color: #e2e8f0;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        text-align: center;
+        background: #0b1b3a; color: #e2e8f0; font-family: system-ui, sans-serif; text-align: center;
         padding: max(1rem, env(safe-area-inset-top)) 1.25rem max(1rem, env(safe-area-inset-bottom));
       }
       #d4-boot .mark {
@@ -84,12 +86,11 @@ const html = `<!DOCTYPE html>
       }
       @keyframes d4spin { to { transform: rotate(360deg); } }
       #d4-boot h1 { font-size: 1.15rem; margin: 0 0 0.4rem; font-weight: 700; }
-      #d4-boot p { margin: 0 auto; max-width: 18rem; font-size: 0.9rem; color: #94a3b8; line-height: 1.45; }
+      #d4-boot p { margin: 0 auto; max-width: 18rem; font-size: 0.9rem; color: #94a3b8; }
       #d4-boot button {
         margin-top: 1.1rem; border: 0; border-radius: 0.75rem;
         background: #2563eb; color: #fff; font-weight: 600;
-        padding: 0.7rem 1.25rem; font-size: 0.9rem; cursor: pointer;
-        display: none;
+        padding: 0.7rem 1.25rem; display: none;
       }
       #d4-boot.show-retry button { display: inline-block; }
     </style>
@@ -98,7 +99,7 @@ const html = `<!DOCTYPE html>
     <div id="d4-boot" role="status">
       <div>
         <div class="mark">D4</div>
-        <div class="spin" aria-hidden="true"></div>
+        <div class="spin"></div>
         <h1>Loading D4EXAM</h1>
         <p>Starting secure examination workspace…</p>
         <button type="button" id="d4-retry">Try again</button>
@@ -106,14 +107,11 @@ const html = `<!DOCTYPE html>
     </div>
     <div id="root"></div>
     <script>
-      (function () {
-        setTimeout(function () {
-          var boot = document.getElementById("d4-boot");
-          if (boot && boot.style.display !== "none") boot.classList.add("show-retry");
-        }, 15000);
-        var btn = document.getElementById("d4-retry");
-        if (btn) btn.onclick = function () { location.reload(); };
-      })();
+      setTimeout(function () {
+        var b = document.getElementById("d4-boot");
+        if (b && b.style.display !== "none") b.classList.add("show-retry");
+      }, 15000);
+      document.getElementById("d4-retry").onclick = function () { location.reload(); };
     </script>
     <script type="module" src="./assets/capacitor-app.js"></script>
   </body>
@@ -132,5 +130,4 @@ if (fs.existsSync(offlinePath)) {
 }
 
 console.log("[prepare-capacitor-dist] SPA shell ready (no Vercel).");
-console.log("  index.html + assets/capacitor-app.js");
 console.log("  assets:", fs.readdirSync(path.join(dist, "assets")).length, "files");
