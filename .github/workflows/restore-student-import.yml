@@ -1,0 +1,40 @@
+name: restore-student-import
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - scripts/si_b64_1.txt
+      - .github/workflows/restore-student-import.yml
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inline fix student-import import line
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/routes/admin.student-import.tsx")
+          t = p.read_text()
+          old = 'import { createSchoolUser, importStudents } from "@/lib/auth.school-admin.functions";'
+          new = 'import { createSchoolUser, importStudentsBulk as importStudents } from "@/lib/auth.school-admin.functions";'
+          if new in t:
+              print("already fixed")
+          elif old in t:
+              p.write_text(t.replace(old, new, 1))
+              print("fixed ok")
+          else:
+              raise SystemExit("import line not found")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/admin.student-import.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(build): import importStudentsBulk as importStudents"
+            git push
+          fi
