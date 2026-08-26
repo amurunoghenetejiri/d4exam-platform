@@ -1,8 +1,5 @@
-/**
- * Capacitor Android SPA build — client only, no Nitro SSR, no Vercel shell.
- * Stubs TanStack Start server entry points that normal Vite cannot resolve.
- */
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
@@ -10,64 +7,54 @@ import tailwindcss from "@tailwindcss/vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
+const stubDir = path.join(rootDir, "scripts", ".cap-stubs");
+const pathsFile = path.join(stubDir, "paths.json");
 
-/** Stub server-only / Node-only modules so the SPA can bundle. */
-function capacitorServerStubs(): Plugin {
-  const stub =
-    "export default {};\n" +
-    "export const createServerFn = () => {\n" +
-    "  const fn = async () => { throw new Error('This action requires an internet connection'); };\n" +
-    "  return Object.assign(fn, {\n" +
-    "    url: '',\n" +
-    "    method: () => fn,\n" +
-    "    handler: () => fn,\n" +
-    "    inputValidator: () => fn,\n" +
-    "    middleware: () => fn,\n" +
-    "  });\n" +
-    "};\n" +
-    "export const createMiddleware = () => ({ server: (h) => h });\n" +
-    "export const createStartHandler = () => () => {};\n" +
-    "export const getCookie = () => undefined;\n" +
-    "export const setCookie = () => {};\n" +
-    "export const getRequest = () => undefined;\n" +
-    "export const getWebRequest = () => undefined;\n" +
-    "export const getResponse = () => undefined;\n";
+function loadStubPaths() {
+  if (fs.existsSync(pathsFile)) {
+    return JSON.parse(fs.readFileSync(pathsFile, "utf8")) as {
+      stubFile: string;
+      nodeStub: string;
+    };
+  }
+  return {
+    stubFile: path.join(stubDir, "server-shim.js"),
+    nodeStub: path.join(stubDir, "node-shim.js"),
+  };
+}
 
-  const nodeStub =
-    "export default {};\n" +
-    "export const createHash = () => ({ update: () => ({ digest: () => '' }) });\n" +
-    "export const randomBytes = () => '';\n" +
-    "export const AsyncLocalStorage = class { run(_, f) { return f(); } getStore() { return undefined; } };\n" +
-    "export class Readable { static from() { return { pipe() {} }; } }\n" +
-    "export class Transform {}\n" +
-    "export class PassThrough {}\n";
+function capacitorAliases(): Plugin {
+  const { stubFile, nodeStub } = loadStubPaths();
 
-  function shouldStub(id: string): boolean {
-    if (!id) return false;
-    if (id === "#tanstack-start-entry" || id === "#tanstack-router-entry") return true;
-    if (id.startsWith("node:")) return true;
-    if (id.includes("@tanstack/start-server-core")) return true;
-    if (id.includes("@tanstack/start-storage-context")) return true;
-    if (id.includes("start-server-functions")) return true;
-    if (/\.server(\.[cm]?[jt]sx?)?$/.test(id)) return true;
-    if (id.includes("push-send.functions")) return true;
-    if (id.includes("@tanstack/react-start/server")) return true;
-    if (id.includes("react-start/server")) return true;
-    if (id.includes("tanstack-start-entry")) return true;
-    return false;
+  function shouldStub(id: string): string | null {
+    if (!id) return null;
+    if (id.startsWith("node:")) return nodeStub;
+    if (id === "#tanstack-start-entry" || id === "#tanstack-router-entry") return stubFile;
+    if (id.includes("tanstack-start-entry")) return stubFile;
+    if (id.includes("@tanstack/start-server-core")) return stubFile;
+    if (id.includes("@tanstack/start-storage-context")) return stubFile;
+    if (id.includes("@tanstack/react-start/server")) return stubFile;
+    if (id.includes("start-server-functions")) return stubFile;
+    const cleaned = id.split("?")[0];
+    if (/\.server(\.[cm]?[jt]sx?)?$/.test(cleaned)) return stubFile;
+    if (/\.functions(\.[cm]?[jt]sx?)?$/.test(cleaned)) return stubFile;
+    if (cleaned.endsWith("/server.ts") || cleaned.endsWith("/server.js")) return stubFile;
+    if (cleaned.includes("push-send.functions")) return stubFile;
+    if (cleaned.includes("student.server")) return stubFile;
+    if (cleaned.includes("auth.functions")) return stubFile;
+    return null;
   }
 
   return {
-    name: "capacitor-server-stubs",
+    name: "capacitor-alias-stubs",
     enforce: "pre",
     resolveId(id) {
-      if (shouldStub(id)) return "\0cap-stub:" + id;
+      const target = shouldStub(id);
+      if (target && fs.existsSync(target)) return target;
+      if (id.startsWith("@/") && (id.includes(".server") || id.includes(".functions"))) {
+        if (fs.existsSync(stubFile)) return stubFile;
+      }
       return null;
-    },
-    load(id) {
-      if (!id.startsWith("\0cap-stub:")) return null;
-      if (id.includes("node:")) return nodeStub;
-      return stub;
     },
   };
 }
@@ -75,7 +62,7 @@ function capacitorServerStubs(): Plugin {
 export default defineConfig({
   base: "./",
   root: rootDir,
-  plugins: [capacitorServerStubs(), react(), tailwindcss(), tsconfigPaths()],
+  plugins: [capacitorAliases(), react(), tailwindcss(), tsconfigPaths()],
   resolve: {
     alias: {
       "@": path.resolve(rootDir, "src"),

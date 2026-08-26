@@ -1,5 +1,8 @@
 /**
  * Prepare dist/ for Capacitor Android SPA shell (no Vercel).
+ * 1) Scan server modules and write a full stub map
+ * 2) Build client SPA with vite.capacitor.config.ts
+ * 3) Write dist/index.html
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -9,8 +12,144 @@ import { spawnSync } from "node:child_process";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
 const distCap = path.join(root, "dist-capacitor");
+const stubDir = path.join(root, "scripts", ".cap-stubs");
 
-console.log("[prepare-capacitor-dist] Building Capacitor SPA (client-only)…");
+function walk(dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const name of fs.readdirSync(dir)) {
+    const p = path.join(dir, name);
+    const st = fs.statSync(p);
+    if (st.isDirectory()) {
+      if (name === "node_modules" || name === "dist" || name === "android") continue;
+      walk(p, out);
+    } else if (/\.(ts|tsx|js|jsx)$/.test(name)) {
+      out.push(p);
+    }
+  }
+  return out;
+}
+
+function collectExportNames(filePath) {
+  const text = fs.readFileSync(filePath, "utf8");
+  const names = new Set();
+  const re =
+    /export\s+(?:async\s+)?function\s+([A-Za-z0-9_]+)|export\s+const\s+([A-Za-z0-9_]+)|export\s+{\s*([^}]+)\s*}/g;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m[1]) names.add(m[1]);
+    if (m[2]) names.add(m[2]);
+    if (m[3]) {
+      for (const part of m[3].split(",")) {
+        const bit = part.trim().split(/\s+as\s+/).pop().trim();
+        if (bit && /^[A-Za-z_][A-Za-z0-9_]*$/.test(bit)) names.add(bit);
+      }
+    }
+  }
+  return [...names];
+}
+
+function writeStubs() {
+  fs.rmSync(stubDir, { recursive: true, force: true });
+  fs.mkdirSync(stubDir, { recursive: true });
+
+  const srcFiles = walk(path.join(root, "src"));
+  const serverLike = srcFiles.filter(
+    (f) =>
+      /\.server\.[cm]?[jt]sx?$/.test(f) ||
+      /\.functions\.[cm]?[jt]sx?$/.test(f) ||
+      /server\.ts$/.test(f),
+  );
+
+  const allNames = new Set([
+    "getStartContext",
+    "getSchoolDashboardCounts",
+    "sendTestNotificationToSelf",
+    "getMyStudentContext",
+    "createServerFn",
+    "createMiddleware",
+    "getCookie",
+    "setCookie",
+    "getRequest",
+    "getWebRequest",
+    "getResponse",
+    "createStartHandler",
+  ]);
+
+  for (const f of serverLike) {
+    for (const n of collectExportNames(f)) allNames.add(n);
+  }
+
+  const uniqueLines = [
+    "/* auto-generated capacitor server stubs */",
+    "const _noop = async () => null;",
+    "export const createServerFn = () => {",
+    "  const f = async () => null;",
+    "  return Object.assign(f, { url: '', method() { return this; }, handler() { return this; }, inputValidator() { return this; }, middleware() { return this; } });",
+    "};",
+    "export const createMiddleware = () => ({ server: (h) => h });",
+    "export const createStartHandler = () => () => {};",
+    "export const getCookie = () => undefined;",
+    "export const setCookie = () => {};",
+    "export const getRequest = () => undefined;",
+    "export const getWebRequest = () => undefined;",
+    "export const getResponse = () => undefined;",
+    "export const getStartContext = () => ({});",
+    "export default {};",
+  ];
+  const reserved = new Set([
+    "createServerFn",
+    "createMiddleware",
+    "createStartHandler",
+    "getCookie",
+    "setCookie",
+    "getRequest",
+    "getWebRequest",
+    "getResponse",
+    "getStartContext",
+    "default",
+  ]);
+  for (const n of [...allNames].sort()) {
+    if (reserved.has(n)) continue;
+    uniqueLines.push(`export const ${n} = _noop;`);
+  }
+
+  const stubFile = path.join(stubDir, "server-shim.js");
+  fs.writeFileSync(stubFile, uniqueLines.join("\n") + "\n", "utf8");
+
+  const nodeStub = path.join(stubDir, "node-shim.js");
+  fs.writeFileSync(
+    nodeStub,
+    [
+      "export default {};",
+      "export const createHash = () => ({ update: () => ({ digest: () => '' }) });",
+      "export const randomBytes = () => '';",
+      "export const AsyncLocalStorage = class { run(_, f) { return f(); } getStore() { return undefined; } };",
+      "export class Readable { static from() { return { pipe() {} }; } }",
+      "export class Transform {}",
+      "export class PassThrough {}",
+    ].join("\n") + "\n",
+    "utf8",
+  );
+
+  console.log(
+    "[prepare-capacitor-dist] Generated stubs for",
+    allNames.size,
+    "exports from",
+    serverLike.length,
+    "server files",
+  );
+  return { stubFile, nodeStub };
+}
+
+const { stubFile, nodeStub } = writeStubs();
+
+fs.writeFileSync(
+  path.join(stubDir, "paths.json"),
+  JSON.stringify({ stubFile, nodeStub, root }),
+  "utf8",
+);
+
+console.log("[prepare-capacitor-dist] Building Capacitor SPA (client-only)\u2026");
 const viteBin = path.join(root, "node_modules", "vite", "bin", "vite.js");
 const build = spawnSync(
   process.execPath,
@@ -22,6 +161,8 @@ const build = spawnSync(
       ...process.env,
       NODE_ENV: "production",
       VITE_CONFIG_NATIVE_IGNORE_WARNING: "true",
+      D4_CAP_STUB: stubFile,
+      D4_CAP_NODE_STUB: nodeStub,
     },
   },
 );
@@ -101,7 +242,7 @@ const html = `<!DOCTYPE html>
         <div class="mark">D4</div>
         <div class="spin"></div>
         <h1>Loading D4EXAM</h1>
-        <p>Starting secure examination workspace…</p>
+        <p>Starting secure examination workspace\u2026</p>
         <button type="button" id="d4-retry">Try again</button>
       </div>
     </div>

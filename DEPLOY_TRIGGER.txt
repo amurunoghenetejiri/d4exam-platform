@@ -1,1 +1,1 @@
-spa-stub-fix-20260826c
+spa-full-stubs-20260826d
