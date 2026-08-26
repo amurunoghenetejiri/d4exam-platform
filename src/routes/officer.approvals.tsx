@@ -36,7 +36,8 @@ import {
   type ExamSettingsRow,
 } from "@/lib/exam-security";
 import { parseExamMeta } from "@/lib/exam-meta";
-import { notifyTeacherExamDecision, notifyStudentsExamApproved } from "@/lib/notify";
+import { notifyStudentsExamApproved } from "@/lib/notify";
+import { namedTeacherExamDecision as notifyTeacherExamDecision } from "@/lib/notify-named";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/officer/approvals")({

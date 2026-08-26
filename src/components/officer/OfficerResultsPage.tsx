@@ -8,12 +8,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { friendlyError } from "@/lib/friendly-error";
 import {
-  notifyStudentsResultsReleased,
+  
   notifyStudentsResultsHeld,
   notifyStudentsExamRescheduled,
   notifyStudentsRewriteAllowed,
   notifyStudentResultTerminated,
 } from "@/lib/notify";
+import { namedStudentsResultsReleased } from "@/lib/notify-named";
 import { cn } from "@/lib/utils";
 import { humanEventLabel, relativeTime } from "@/lib/live-monitor";
 
@@ -228,7 +229,7 @@ export function OfficerResultsPage() {
       const released = data ?? [];
       const studentIds = [...new Set(released.map((r) => r.student_id).filter(Boolean))] as string[];
       const examTitle = (examsQ.data ?? []).find((e) => e.id === examId)?.title ?? "your examination";
-      if (studentIds.length) void notifyStudentsResultsReleased({ schoolId, studentIds, examTitle });
+      if (studentIds.length) void namedStudentsResultsReleased({ schoolId, studentIds, examTitle });
       toast.success(`Released ${released.length} result(s)`);
       await qc.invalidateQueries({ queryKey: ["officer-results-exams"] });
       await qc.invalidateQueries({ queryKey: ["officer-results-counts"] });
@@ -311,7 +312,7 @@ export function OfficerResultsPage() {
       const { error } = await supabase.from("results").update({ status: "published", released_at: now, released_by: user.userId } as never).eq("id", result.id).eq("school_id", schoolId);
       if (error) throw error;
       const examTitle = (examsQ.data ?? []).find((e) => e.id === result.exam_id)?.title ?? "your examination";
-      void notifyStudentsResultsReleased({ schoolId, studentIds: [result.student_id], examTitle });
+      void namedStudentsResultsReleased({ schoolId, studentIds: [result.student_id], examTitle });
       toast.success("Result released — student notified");
       await qc.invalidateQueries({ queryKey: ["officer-exam-results"] });
       await qc.invalidateQueries({ queryKey: ["officer-results-counts"] });

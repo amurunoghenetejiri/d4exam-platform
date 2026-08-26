@@ -53,6 +53,7 @@ function actionLabelFor(n: Notif): string | null {
   const ty = (n.type || "").toLowerCase();
   const msg = (n.message || "").toLowerCase();
   if (ty.includes("result") || msg.includes("view your result") || msg.includes("result has been released")) return "VIEW RESULT";
+  if (title.includes("submitted for review") || msg.includes("for examination review") || msg.includes("open approvals")) return "OPEN APPROVALS";
   if (ty === "exam_available" || msg.includes("starts now") || msg.includes("tap below to start")) return "START EXAM";
   if (ty.includes("exam") && (msg.includes("approved") || msg.includes("scheduled"))) return "VIEW EXAM";
   if (ty.includes("reject") || ty.includes("revision")) return "REVIEW";

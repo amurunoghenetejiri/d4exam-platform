@@ -42,7 +42,7 @@ import {
   toExamSettingsRow,
 } from "@/lib/exam-security";
 import { embedExamMeta, parseExamMeta, assessmentKindLabel, type AssessmentKind } from "@/lib/exam-meta";
-import { notifyOfficersExamSubmitted } from "@/lib/notify";
+import { namedOfficersExamSubmitted as notifyOfficersExamSubmitted } from "@/lib/notify-named";
 import { ensureExamQuestionsLinked } from "@/lib/cbt-load-questions";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
