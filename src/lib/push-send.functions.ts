@@ -149,11 +149,7 @@ async function sendFcmV1(
             image: icon,
           },
         },
-        webpush: {
-          headers: { Urgency: "high", TTL: "86400" },
-          notification: { title: String(title), body: String(body), icon, badge: icon },
-          fcm_options: { link: absoluteLink },
-        },
+        // No webpush block when sending to native-prefer tokens — reduces Chrome delivery
       },
     }),
   });
@@ -205,6 +201,11 @@ async function sendFcmLegacy(
   return { ok: true as const };
 }
 
+function isNativeDeviceUa(ua: string | null | undefined): boolean {
+  if (!ua) return false;
+  return /native=1/i.test(ua) || /platform=android/i.test(ua);
+}
+
 export const dispatchPushToUser = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => {
     const raw =
@@ -229,19 +230,35 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
 
     const { data: devices } = await sb
       .from("push_devices")
-      .select("id, token")
+      .select("id, token, user_agent")
       .eq("user_id", data.recipientUserId)
       .eq("enabled", true)
-      .limit(25);
+      .limit(40);
 
-    const list = devices || [];
+    const list = (devices || []) as { id: string; token: string; user_agent?: string | null }[];
     if (!list.length) {
       return { sent: 0, failed: 0, skipped: true as const, reason: "no devices" };
     }
 
+    const nativeOnes = list.filter((d) => isNativeDeviceUa(d.user_agent));
+    // Prefer native APK tokens so we do not fire Chrome web-push tokens
+    const preferred = nativeOnes.length > 0 ? nativeOnes : list;
+
+    // Disable leftover web tokens when user has native devices (stops Chrome spam)
+    if (nativeOnes.length > 0) {
+      for (const d of list) {
+        if (!isNativeDeviceUa(d.user_agent)) {
+          void sb
+            .from("push_devices")
+            .update({ enabled: false, updated_at: new Date().toISOString() } as never)
+            .eq("id", d.id);
+        }
+      }
+    }
+
     const seen = new Set<string>();
-    const unique = list.filter((d) => {
-      const t = (d as { token: string }).token;
+    const unique = preferred.filter((d) => {
+      const t = d.token;
       if (!t || seen.has(t)) return false;
       seen.add(t);
       return true;
@@ -276,7 +293,7 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
     let sent = 0;
     let failed = 0;
     for (const d of unique) {
-      const token = (d as { token: string }).token;
+      const token = d.token;
       try {
         const result =
           sa && accessToken
@@ -380,7 +397,6 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
       push = { sent: 0, skipped: true, reason: (e as Error).message };
     }
 
-    // Still ok if in-app row was written (or client will write)
     return {
       ok: true as const,
       push,
