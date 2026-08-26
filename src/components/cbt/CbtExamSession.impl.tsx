@@ -215,6 +215,54 @@ export function CbtExamPage() {
     return () => window.clearInterval(t);
   }, [started, done]);
 
+  // Officer warnings from live monitor — top banner + haptic during the attempt
+  useEffect(() => {
+    if (!started || done || previewMode) return;
+    const studentId = student?.studentId;
+    if (!studentId || !id) return;
+    const channel = supabase
+      .channel(`exam-officer-warn-${id}-${studentId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "integrity_events",
+          filter: `student_id=eq.${studentId}`,
+        },
+        (payload) => {
+          try {
+            const row = payload.new as {
+              event_type?: string;
+              description?: string;
+              exam_id?: string | null;
+            };
+            const et = String(row.event_type || "").toUpperCase();
+            if (et !== "WARNING_SHOWN" && et !== "OFFICER_WARNING") return;
+            if (row.exam_id && String(row.exam_id) !== String(id)) return;
+            const msg =
+              String(row.description || "").trim() ||
+              "Officer warning: Follow exam rules. Further violations may void your result.";
+            setWarnBanner(msg);
+            try {
+              haptic("officer_warning");
+            } catch {
+              /* ignore */
+            }
+            window.setTimeout(() => setWarnBanner(null), 12_000);
+          } catch {
+            /* ignore */
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [started, done, previewMode, student?.studentId, id]);
+
+
+
   useEffect(() => () => {
     stopMediaStream(mediaStreamRef.current);
     mediaStreamRef.current = null;
