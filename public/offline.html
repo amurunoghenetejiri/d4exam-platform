@@ -25,25 +25,22 @@
         background: #2563eb; color: #fff; font-weight: 600;
         padding: 0.75rem 1.35rem; font-size: 0.9rem; cursor: pointer;
       }
-      .hint { margin-top: 1rem; font-size: 0.75rem; color: #64748b; max-width: 22rem; }
     </style>
   </head>
   <body>
     <div>
       <div class="mark">D4</div>
       <h1>You're offline</h1>
-      <p>Connect to the Internet and tap Retry to open D4EXAM. After you use the app online once, previously opened pages load from saved data when the connection drops.</p>
+      <p>D4EXAM is installed on this device. Tap Retry to reload the local app. Connect to the Internet to sync exams and results.</p>
       <button type="button" id="retry">Retry</button>
-      <p class="hint">Content not available offline yet will appear as a friendly message inside the app — not a browser error page.</p>
     </div>
     <script>
       (function () {
-        var LIVE = "https://d4exam-platform.vercel.app/";
         function go() {
           try {
-            window.location.replace(LIVE + "?offline_retry=" + Date.now());
+            window.location.reload();
           } catch (e) {
-            window.location.href = LIVE;
+            window.location.href = "./index.html";
           }
         }
         document.getElementById("retry").addEventListener("click", go);

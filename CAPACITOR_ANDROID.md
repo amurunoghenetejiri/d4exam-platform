@@ -6,43 +6,62 @@
 |--------|--------|
 | App name | D4EXAM |
 | App ID | `com.d4exam.app` |
-| Version | 1.2.0 (versionCode 3) |
 | Capacitor | 8.x |
-| Server URL | `https://d4exam-platform.vercel.app` |
+| Web assets | **Bundled** `dist/` (local) — does **not** load Vercel as the shell |
 
-## Native features
+## Architecture
 
-- **Launcher icon** — generated from `public/icon-512.png` / `public/logo.png` in CI
-- **Push** — `@capacitor/push-notifications` on Android; web FCM on browser/PWA
-- **Camera** — native permission via `@capacitor/camera`, then WebView `getUserMedia` for CBT
-- **Microphone** — `RECORD_AUDIO` + runtime `getUserMedia({ audio: true })`
-- **Files** — system file picker only (no broad storage permission)
+```
+ANDROID APK
+  → bundled HTML/JS/CSS (webDir: dist)
+  → local IndexedDB / SQLite offline cache
+  → Supabase (when online)
+```
 
-## Build APK (phone)
+**Not:** APK → Vercel website → Supabase
 
-1. https://github.com/amurunoghenetejiri/d4exam-platform/actions/workflows/build-android.yml
-2. **Run workflow** → `main`
-3. Download artifact **D4EXAM-Android-APK**
-4. Install `D4EXAM-debug.apk` (allow unknown sources)
+## Build APK (CI)
 
-## Required for full native FCM
+1. GitHub → Actions → **Build Android APK** → Run workflow
+2. Download artifact **D4EXAM-Android-APK**
+3. Install `D4EXAM-debug.apk`
 
-1. Firebase Console → Project **d4exam-6506a** → Add Android app `com.d4exam.app`
-2. Download `google-services.json`
-3. GitHub → Settings → Secrets → Actions → New secret:
-   - Name: `FIREBASE_GOOGLE_SERVICES_JSON`
-   - Value: full JSON file contents
-4. Re-run the Android workflow
+## Local build
 
-Without this secret the APK still builds; native push token registration may be limited until the secret is added.
+```bash
+npm install
+npm run build:cap    # vite build + prepare dist + generate index.html
+npx cap sync android
+npx cap open android
+# Android Studio → Run / Build APK
+```
+
+Or:
+
+```bash
+npm run cap:sync
+```
+
+## Offline startup
+
+With Wi‑Fi and mobile data **off**:
+
+1. App launches from **local** assets (no Vercel required)
+2. Login shell / last session UI can appear
+3. Previously synced data loads from local DB
+4. Online-only actions (start CBT, submit, approvals) wait until network returns
 
 ## Website vs APK
 
-| | Website / PWA | Android APK |
-|--|---------------|-------------|
-| UI | Unchanged | Same UI in WebView |
+| | Website / PWA (Vercel) | Android APK |
+|--|------------------------|-------------|
+| UI host | Vercel | **Bundled in APK** |
+| Data | Supabase | Local cache + Supabase when online |
 | Push | Browser FCM | Capacitor + FCM |
-| Camera | Browser permission | Native + WebView |
-| Icon | Favicon / PWA | D4EXAM logo mipmaps |
+| Camera | Browser | Native + WebView |
 
-Web changes must be deployed on Vercel for the APK WebView to pick them up (APK loads the live site).
+Deploying the website to Vercel does **not** change the APK UI until you rebuild the APK with `build:cap` / CI.
+
+## Firebase (optional)
+
+Secret `FIREBASE_GOOGLE_SERVICES_JSON` enables native FCM. Without it the APK still builds.
