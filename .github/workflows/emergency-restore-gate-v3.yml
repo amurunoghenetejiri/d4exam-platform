@@ -1,0 +1,33 @@
+name: emergency-restore-gate-v3
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/emergency-restore-gate-v3.yml
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 30
+      - name: Restore file
+        run: |
+          set -e
+          git show 2f73dfd572fec0d5d91fed9382d0827305b8566d:src/components/cbt/ExamSecurityGate.tsx > src/components/cbt/ExamSecurityGate.tsx
+          wc -c src/components/cbt/ExamSecurityGate.tsx
+          grep -q 'export function ExamSecurityGate' src/components/cbt/ExamSecurityGate.tsx
+          # Soft loading gates on CBT
+          sed -i 's/if (examQ.isLoading || (examQ.isFetching && !examQ.data)) {/if (examQ.isLoading \&\& !examQ.data) {/' src/components/cbt/CbtExamSession.impl.tsx || true
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/ExamSecurityGate.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): emergency restore ExamSecurityGate"
+            git push
+          fi
