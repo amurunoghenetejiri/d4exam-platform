@@ -24,6 +24,11 @@ import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
 import { haptic } from "@/lib/haptic";
+import {
+  notifyStudentExamSubmitted,
+  notifyStudentExamTerminated,
+  notifyStudentExamAutoSubmitted,
+} from "@/lib/notify";
 
 function isPreviewPath() {
   if (typeof window === "undefined") return false;
@@ -553,6 +558,45 @@ export function CbtExamPage() {
           }
           if (rid) { setResultId(rid); resultIdRef.current = rid; }
           toast.success(saved.published ? "Examination submitted — result is available now" : "Examination submitted successfully");
+          try {
+            const examTitle = String(examQ.data?.title || "your examination");
+            const schoolId = String(examQ.data?.school_id ?? student.schoolId ?? session?.schoolId ?? "") || null;
+            const authUid = session?.userId || "";
+            if (auto) {
+              const reason = (terminationReason || "").toLowerCase();
+              if (
+                reason.includes("auto") ||
+                reason.includes("automatically submitted") ||
+                reason.includes("tab violation")
+              ) {
+                void notifyStudentExamAutoSubmitted({
+                  studentUserId: authUid || undefined,
+                  studentId: student.studentId,
+                  schoolId,
+                  examId: id,
+                  examTitle,
+                });
+              } else {
+                void notifyStudentExamTerminated({
+                  studentUserId: authUid || undefined,
+                  studentId: student.studentId,
+                  schoolId,
+                  examId: id,
+                  examTitle,
+                  reason: terminationReason || null,
+                });
+              }
+            } else if (authUid) {
+              void notifyStudentExamSubmitted({
+                studentUserId: authUid,
+                schoolId,
+                examId: id,
+                examTitle,
+              });
+            }
+          } catch {
+            /* non-blocking */
+          }
         }
         await qc.invalidateQueries({ queryKey: ["student-exams"] });
       } else toast.success(auto ? "Examination closed" : "Examination submitted successfully");

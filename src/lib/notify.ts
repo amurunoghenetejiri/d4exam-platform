@@ -395,7 +395,7 @@ export async function notifyStudentsResultsReleased(opts: {
         recipientUserId: uid,
         schoolId: opts.schoolId,
         title: "🎉 Result Released",
-        message: `Results for “${opts.examTitle}” have been released.`,
+        message: `Your “${opts.examTitle}” result has been released. Tap to view your result.`,
         type: "result_published",
         link: "/student/results",
         entityType: "examination",
@@ -419,7 +419,7 @@ export async function notifyStudentExamSubmitted(opts: {
       recipientUserId: opts.studentUserId,
       schoolId: opts.schoolId,
       title: "🎓 Examination Submitted",
-      message: `Your submission for “${opts.examTitle}” was received.`,
+      message: `Your “${opts.examTitle}” examination has been submitted successfully.`,
       type: "exam_submitted",
       link: "/student/results",
       entityType: "examination",
@@ -604,8 +604,8 @@ export async function notifyOfficersExamSubmitted(opts: {
       recipients.map((uid) => ({
         recipientUserId: uid,
         schoolId: opts.schoolId,
-        title: "📝 Examination Submitted",
-        message: `“${opts.examTitle}”${course} was submitted${who} for approval.`,
+        title: "📝 Examination Submitted for Approval",
+        message: `${opts.teacherName ? opts.teacherName + " has submitted" : "A teacher submitted"} “${opts.examTitle}”${course} for approval.`,
         type: "exam_submitted",
         link: officers.includes(uid) ? "/officer/approvals" : "/admin/examinations",
         entityType: "examination",
@@ -689,17 +689,23 @@ export async function notifyStudentsExamApproved(opts: {
     let authIds = await resolveStudentAuthIds(opts);
     if (!authIds.length && opts.courseId) authIds = await courseStudentAuthIds(opts.courseId, opts.schoolId);
     if (!authIds.length) authIds = await courseStudentAuthIds(null, opts.schoolId);
-    const when = opts.scheduledStart
-      ? ` Scheduled to start ${new Date(opts.scheduledStart).toLocaleString()}.`
+    const startLabel = opts.scheduledStart
+      ? new Date(opts.scheduledStart).toLocaleString(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : "";
+    const when = startLabel
+      ? ` It is scheduled for ${startLabel}.`
       : "";
     await notifyMany(
       authIds.map((uid) => ({
         recipientUserId: uid,
         schoolId: opts.schoolId,
-        title: "📚 Examination Scheduled",
-        message: `“${opts.examTitle}” has been approved.${when}`,
+        title: "🎓 Examination Approved",
+        message: `Your “${opts.examTitle}” examination has been approved and is ready.${when} Open Examinations to prepare or start when it is time.`,
         type: "exam_scheduled",
-        link: "/student/examinations",
+        link: `/student/exam/${opts.examId}`,
         entityType: "examination",
         entityId: opts.examId,
         dedupeMinutes: 60,
@@ -884,5 +890,72 @@ export async function notifyStudentsNewMaterial(opts: {
     );
   } catch (e) {
     console.warn("[notify] notifyStudentsNewMaterial failed", e);
+  }
+}
+
+
+export async function notifyStudentExamTerminated(opts: {
+  studentUserId?: string | null;
+  studentId?: string | null;
+  schoolId?: string | null;
+  examId?: string | null;
+  examTitle?: string | null;
+  reason?: string | null;
+}): Promise<void> {
+  try {
+    let uid = (opts.studentUserId || "").trim();
+    if (!uid && opts.studentId) {
+      const ids = await studentIdsToAuthUserIds([opts.studentId]);
+      uid = ids[0] || "";
+    }
+    if (!uid) return;
+    const title = opts.examTitle?.trim() || "your examination";
+    const why = opts.reason?.trim()
+      ? ` ${opts.reason.trim()}`
+      : " because a configured examination security rule was triggered.";
+    await notifyUser({
+      recipientUserId: uid,
+      schoolId: opts.schoolId,
+      title: "🚫 Examination Terminated",
+      message: `Your “${title}” examination has been terminated${why}`,
+      type: "exam_terminated",
+      link: "/student/examinations",
+      entityType: "examination",
+      entityId: opts.examId ?? null,
+      dedupeMinutes: 30,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentExamTerminated failed", e);
+  }
+}
+
+export async function notifyStudentExamAutoSubmitted(opts: {
+  studentUserId?: string | null;
+  studentId?: string | null;
+  schoolId?: string | null;
+  examId?: string | null;
+  examTitle?: string | null;
+}): Promise<void> {
+  try {
+    let uid = (opts.studentUserId || "").trim();
+    if (!uid && opts.studentId) {
+      const ids = await studentIdsToAuthUserIds([opts.studentId]);
+      uid = ids[0] || "";
+    }
+    if (!uid) return;
+    const title = opts.examTitle?.trim() || "your examination";
+    await notifyUser({
+      recipientUserId: uid,
+      schoolId: opts.schoolId,
+      title: "⚠️ Examination Auto-Submitted",
+      message: `Your “${title}” examination was automatically submitted because the maximum allowed tab violations were reached.`,
+      type: "exam_submitted",
+      link: "/student/results",
+      entityType: "examination",
+      entityId: opts.examId ?? null,
+      dedupeMinutes: 30,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentExamAutoSubmitted failed", e);
   }
 }

@@ -73,6 +73,9 @@ function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
       exam_approved: "/student/examinations",
       result_published: "/student/results",
       result_pending_release: "/student/results",
+      exam_submitted: "/student/results",
+      exam_terminated: "/student/examinations",
+      exam_paused: "/student/examinations",
       officer_warning: "/student/examinations",
       announcement: "/student/notifications",
       system_alert: "/student",
@@ -220,6 +223,25 @@ export function NotificationsPage({ scope }: { scope: string }) {
       toast.success("All notifications marked as read");
     } catch (e) {
       toast.error((e as Error).message || "Could not update");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteAllNotifications() {
+    if (!user?.userId) return;
+    if (!window.confirm("Delete all notifications permanently? This cannot be undone.")) return;
+    setBusy(true);
+    try {
+      const { error: delErr } = await supabase
+        .from("notifications")
+        .delete()
+        .eq("recipient_user_id", user.userId);
+      if (delErr) throw delErr;
+      await invalidateAll();
+      toast.success("All notifications deleted");
+    } catch (e) {
+      toast.error((e as Error).message || "Could not delete");
     } finally {
       setBusy(false);
     }
