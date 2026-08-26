@@ -1,7 +1,9 @@
 /**
- * Offline student mode — local-first reads + network refresh.
- * Never throws when a cached value exists. Does not change UI.
+ * Offline-first reads + network refresh.
+ * LOCAL FIRST → display → if online refresh → update local → update UI.
+ * Never throws when a cached value exists. Soft empty when offline with no cache.
  */
+import { useQuery, type UseQueryOptions, type QueryKey } from "@tanstack/react-query";
 import { offlineGet, offlineSet } from "@/lib/offline-cache";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { mirrorByOfflineKey, readOfflineBlob } from "@/lib/local-db/mirror";
@@ -46,11 +48,21 @@ async function readAnyLocalCache<T>(userId: string | null | undefined, key: stri
   return null;
 }
 
+function isNetworkError(err: unknown): boolean {
+  const m = String((err as Error)?.message ?? err ?? "").toLowerCase();
+  return (
+    m.includes("failed to fetch") ||
+    m.includes("network") ||
+    m.includes("offline") ||
+    m.includes("timeout") ||
+    m.includes("abort") ||
+    m.includes("load failed") ||
+    m.includes("networkerror")
+  );
+}
+
 /**
- * LOCAL-FIRST:
- * 1. Serve local cache when available (online or offline).
- * 2. When online, refresh from network and update caches.
- * 3. When offline, never hammer the network; return cache or soft fallback.
+ * LOCAL-FIRST data access used by every offline-supported page.
  */
 export async function withOfflineCache<T>(
   userId: string | null | undefined,
@@ -73,7 +85,7 @@ export async function withOfflineCache<T>(
     if (opts && Object.prototype.hasOwnProperty.call(opts, "fallback")) {
       return opts.fallback as T;
     }
-    return (Array.isArray(opts?.fallback) ? opts!.fallback : (null as T)) as T;
+    return null as T;
   }
 
   if (localFirst && local !== null) {
@@ -82,35 +94,20 @@ export async function withOfflineCache<T>(
         const data = await fetcher();
         if (userId) {
           void offlineSet(userId, key, data, { schoolId: opts?.schoolId });
-          void mirrorByOfflineKey(userId, key, data, { schoolId: opts?.schoolId });
-          rememberLastUserId(userId);
+          void mirrorByOfflineKey(userId, key, data as never, opts?.schoolId);
         }
-      } catch {
-        /* keep local */
+      } catch (err) {
+        console.warn("[offline-query] background refresh failed", key, err);
       }
     })();
-    try {
-      const data = await Promise.race([
-        fetcher(),
-        new Promise<T>((_, rej) => setTimeout(() => rej(new Error("slow")), 2500)),
-      ]);
-      if (userId) {
-        void offlineSet(userId, key, data, { schoolId: opts?.schoolId });
-        void mirrorByOfflineKey(userId, key, data, { schoolId: opts?.schoolId });
-        rememberLastUserId(userId);
-      }
-      return data;
-    } catch {
-      return local;
-    }
+    return local;
   }
 
   try {
     const data = await fetcher();
     if (userId) {
       void offlineSet(userId, key, data, { schoolId: opts?.schoolId });
-      void mirrorByOfflineKey(userId, key, data, { schoolId: opts?.schoolId });
-      rememberLastUserId(userId);
+      void mirrorByOfflineKey(userId, key, data as never, opts?.schoolId);
     }
     return data;
   } catch (err) {
@@ -119,6 +116,65 @@ export async function withOfflineCache<T>(
     if (opts && Object.prototype.hasOwnProperty.call(opts, "fallback")) {
       return opts.fallback as T;
     }
-    return (Array.isArray(opts?.fallback) ? opts!.fallback : (null as T)) as T;
+    if (isNetworkError(err)) {
+      return null as T;
+    }
+    throw err;
   }
 }
+
+/**
+ * React Query helper: always local-first, never hard-fails offline.
+ */
+export function useOfflineQuery<T>(
+  opts: {
+    queryKey: QueryKey;
+    userId: string | null | undefined;
+    cacheKey: string;
+    schoolId?: string | null;
+    enabled?: boolean;
+    fallback?: T;
+    staleTime?: number;
+    fetcher: () => Promise<T>;
+  } & Partial<Pick<UseQueryOptions<T, Error>, "gcTime" | "refetchOnWindowFocus" | "refetchOnMount">>,
+) {
+  const {
+    queryKey,
+    userId,
+    cacheKey,
+    schoolId,
+    enabled = true,
+    fallback,
+    staleTime = 5 * 60_000,
+    fetcher,
+    gcTime,
+    refetchOnWindowFocus,
+    refetchOnMount,
+  } = opts;
+
+  return useQuery({
+    queryKey,
+    enabled,
+    staleTime,
+    gcTime: gcTime ?? 30 * 60_000,
+    refetchOnWindowFocus: refetchOnWindowFocus ?? false,
+    refetchOnMount: refetchOnMount ?? true,
+    networkMode: "offlineFirst",
+    retry: (count, err) => {
+      if (!isOnlineNow()) return false;
+      if (isNetworkError(err)) return count < 1;
+      return count < 1;
+    },
+    queryFn: async () =>
+      withOfflineCache(userId, cacheKey, fetcher, {
+        schoolId,
+        fallback: (fallback as T) ?? (null as T),
+      }),
+  });
+}
+
+/** User-facing copy when a page has never been synced. */
+export const OFFLINE_EMPTY_MESSAGE =
+  "Content not available offline yet. Connect to the Internet once to download this content.";
+
+export const OFFLINE_USING_SAVED = "You're offline — showing saved data.";
