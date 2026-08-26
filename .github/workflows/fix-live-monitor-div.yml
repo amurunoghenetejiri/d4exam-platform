@@ -1,67 +1,8 @@
-name: Fix live-monitor missing div
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/fix-live-monitor-div.yml"
 jobs:
-  fix:
+  skipped:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Insert missing closing div before selected panel end
-        run: |
-          set -e
-          python3 -c "
-          from pathlib import Path
-          p = Path('src/routes/officer.live-monitor.tsx')
-          lines = p.read_text().splitlines(keepends=True)
-          out = []
-          i = 0
-          fixed = False
-          while i < len(lines):
-              out.append(lines[i])
-              # After events section closes (p-3 sm:p-4 block), before panel close:
-              # look for the unique sequence near end of selected modal
-              if (not fixed and i + 4 < len(lines)
-                  and 'Events timeline' not in lines[i]
-                  and lines[i].rstrip() == '            </div>'
-                  and lines[i+1].rstrip() == '          </div>'
-                  and lines[i+2].rstrip() == '        </div>'
-                  and lines[i+3].rstrip() == '      )}'):
-                  # insert one more close for scroll container
-                  out.append('            </div>\n')
-                  fixed = True
-              i += 1
-          if not fixed:
-              # alternate: already has double close
-              text = ''.join(out)
-              if 'min-h-0 flex-1 overflow-y-auto' in text and text.count('            </div>\n            </div>\n          </div>\n        </div>\n      )}') >= 1:
-                  print('already balanced')
-              else:
-                  raise SystemExit('could not locate insertion point')
-          else:
-              p.write_text(''.join(out))
-              print('inserted missing </div>')
-          # verify div balance in page return
-          import re
-          t = p.read_text()
-          start = t.index('  return (\n    <div className=\"mx-auto')
-          end = t.index('\nfunction StatCard')
-          jsx = t[start:end]
-          o = len(re.findall(r'<div\\b', jsx))
-          c = len(re.findall(r'</div>', jsx))
-          print('page divs', o, c)
-          assert o == c, (o, c)
-          "
-      - name: Commit
-        run: |
-          git config user.name "d4exam-bot"
-          git config user.email "bot@d4exam.local"
-          git add src/routes/officer.live-monitor.tsx
-          git diff --cached --stat || true
-          git commit -m "fix: close missing div in officer live-monitor (Vercel build)" || echo no-changes
-          git pull --rebase origin main || true
-          git push origin main
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."

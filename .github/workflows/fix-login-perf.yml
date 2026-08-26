@@ -1,55 +1,8 @@
-name: Apply login perf fix
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/fix-login-perf.yml"
 jobs:
-  fix:
+  skipped:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Restore and patch login.tsx
-        run: |
-          set -euo pipefail
-          git show 92ca566844d03708b58b943c4bac0f685e0960d1:src/routes/login.tsx > src/routes/login.tsx
-          python3 << 'PY'
-          from pathlib import Path
-          t = Path("src/routes/login.tsx").read_text()
-          t = t.replace('const [code, setCode] = useState("");', 'const codeRef = useRef<HTMLInputElement>(null);')
-          t = t.replace('const [identifier, setIdentifier] = useState("");', 'const identifierRef = useRef<HTMLInputElement>(null);')
-          t = t.replace('const [password, setPassword] = useState("");', 'const passwordRef = useRef<HTMLInputElement>(null);')
-          if 'useRef' not in t.split('from "react"')[0]:
-              t = t.replace('import { useState } from "react";', 'import { useRef, useState } from "react";')
-          old = """    setError(\"\");\n    if (!identifier.trim() || !password.trim()) {\n"""
-          new = """    setError(\"\");\n    const code = (codeRef.current?.value ?? \"\").trim();\n    const identifier = (identifierRef.current?.value ?? \"\").trim();\n    const password = passwordRef.current?.value ?? \"\";\n    if (!identifier.trim() || !password.trim()) {\n"""
-          if old in t:
-              t = t.replace(old, new, 1)
-          t = t.replace("const schoolCode = code.trim().toUpperCase();", "const schoolCode = code.toUpperCase();")
-          t = t.replace("const ident = identifier.trim();", "const ident = identifier;")
-          t = t.replace(
-              "                  value={code}\n                  onChange={(e) => setCode(e.target.value)}\n",
-              "                  ref={codeRef}\n                  defaultValue=\"\"\n                  autoCapitalize=\"characters\"\n                  autoCorrect=\"off\"\n                  spellCheck={false}\n",
-          )
-          t = t.replace(
-              "                  value={identifier}\n                  onChange={(e) => setIdentifier(e.target.value)}\n",
-              "                  ref={identifierRef}\n                  defaultValue=\"\"\n                  autoCorrect=\"off\"\n                  spellCheck={false}\n",
-          )
-          t = t.replace(
-              "                    value={password}\n                    onChange={(e) => setPassword(e.target.value)}\n",
-              "                    ref={passwordRef}\n                    defaultValue=\"\"\n",
-          )
-          assert "setCode" not in t and "createFileRoute" in t
-          Path("src/routes/login.tsx").write_text(t)
-          print("patched", Path("src/routes/login.tsx").stat().st_size)
-          PY
-      - name: Commit if changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/routes/login.tsx
-          git diff --cached --quiet && echo "no change" && exit 0
-          git commit -m "perf: uncontrolled login inputs (fix typing freeze)"
-          git push
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."

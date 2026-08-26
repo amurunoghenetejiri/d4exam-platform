@@ -1,1 +1,8 @@
-PLACEHOLDER_WF
+name: Disabled (legacy)
+on:
+  workflow_dispatch:
+jobs:
+  skipped:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."
