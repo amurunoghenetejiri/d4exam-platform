@@ -1,0 +1,39 @@
+name: Step2 Local DB Foundation
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/run-local-db-step2.yml"
+      - "scripts/assemble_ldb.py"
+      - "scripts/apply_ldb_c.py"
+      - "scripts/ldb_manifest.json"
+      - "scripts/ldb_parts/**"
+      - "scripts/apply_ldb_p1.py"
+      - "scripts/apply_ldb_p2.py"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply local-db sources
+        run: |
+          if [ -f scripts/apply_ldb_p1.py ]; then python3 scripts/apply_ldb_p1.py; fi
+          if [ -f scripts/apply_ldb_p2.py ]; then python3 scripts/apply_ldb_p2.py; fi
+          if [ -f scripts/assemble_ldb.py ] && [ -f scripts/ldb_manifest.json ]; then
+            python3 scripts/assemble_ldb.py || true
+          fi
+          python3 scripts/apply_ldb_c.py
+      - name: Schema tests
+        run: |
+          if [ -f scripts/test-local-db.mjs ]; then node scripts/test-local-db.mjs; fi
+      - name: Commit
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add -A
+          git status
+          git commit -m "feat(offline): Step 2 local SQLite foundation (schema, repos, bootstrap)" || echo no-changes
+          git pull --rebase origin main || true
+          git push origin main
