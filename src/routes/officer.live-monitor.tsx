@@ -425,13 +425,26 @@ function Page() {
     const inProgress = attemptsQ.data ?? [];
     const recentDone = recentDoneQ.data ?? [];
     const merged = [...inProgress, ...recentDone];
-    const seen = new Set<string>();
-    return merged
-      .filter((a) => {
-        if (seen.has(a.id)) return false;
-        seen.add(a.id);
-        return true;
-      })
+    // One card per student: prefer in-progress + live frame + most recent activity
+    const byStudent = new Map<string, AttemptRow>();
+    const attemptRank = (a: AttemptRow) => {
+      const st = String(a.status || "").toLowerCase();
+      const isDone = ["submitted", "terminated", "flagged", "completed"].includes(st);
+      const frame = frames[a.id] || frames[`student:${a.student_id}`];
+      const frameTs = frame?.ts ?? 0;
+      const updated = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+      const started = a.started_at ? new Date(a.started_at).getTime() : 0;
+      const liveBoost = frame && isLiveCamFrameFresh(frame.ts, Date.now()) ? 1e15 : 0;
+      const progressBoost = isDone ? 0 : 1e14;
+      return progressBoost + liveBoost + Math.max(frameTs, updated, started);
+    };
+    for (const a of merged) {
+      const key = String(a.student_id || a.id);
+      const prev = byStudent.get(key);
+      if (!prev || attemptRank(a) >= attemptRank(prev)) byStudent.set(key, a);
+    }
+    const unique = Array.from(byStudent.values());
+    return unique
       .map((a) => {
         const basePresence = parsePresence(a.metadata);
         const frame = frames[a.id] || frames[`student:${a.student_id}`];
@@ -609,6 +622,25 @@ function Page() {
         examTitle: selected.title,
         message: "Warning: Follow exam rules. Further violations may void your result.",
       });
+      // Instant in-exam delivery via Realtime broadcast (no RLS dependency)
+      try {
+        const warnCh = supabase.channel(`student-exam-warn:${selected.a.student_id}`);
+        await warnCh.subscribe();
+        await warnCh.send({
+          type: "broadcast",
+          event: "officer_warning",
+          payload: {
+            studentId: selected.a.student_id,
+            examId: selected.a.exam_id,
+            attemptId: selected.a.id,
+            message: "Warning: Follow exam rules. Further violations may void your result.",
+            ts: Date.now(),
+          },
+        });
+        void supabase.removeChannel(warnCh);
+      } catch (be) {
+        console.warn("[live-monitor] warn broadcast", be);
+      }
       toast.success(`Warning sent to ${selected.name}`);
       void eventsQ.refetch();
     } catch (e) {

@@ -220,7 +220,41 @@ export function CbtExamPage() {
     if (!started || done || previewMode) return;
     const studentId = student?.studentId;
     if (!studentId || !id) return;
-    const channel = supabase
+
+    const showWarn = (raw?: string | null) => {
+      const msg =
+        String(raw || "").trim() ||
+        "Officer warning: Follow exam rules. Further violations may void your result.";
+      setWarnBanner(msg);
+      try {
+        haptic("officer_warning");
+      } catch {
+        /* ignore */
+      }
+      window.setTimeout(() => setWarnBanner(null), 12_000);
+    };
+
+    // 1) Broadcast channel — immediate, no RLS dependency
+    const broadcastCh = supabase
+      .channel(`student-exam-warn:${studentId}`)
+      .on("broadcast", { event: "officer_warning" }, ({ payload }) => {
+        try {
+          const p = (payload || {}) as {
+            examId?: string;
+            studentId?: string;
+            message?: string;
+          };
+          if (p.studentId && String(p.studentId) !== String(studentId)) return;
+          if (p.examId && String(p.examId) !== String(id)) return;
+          showWarn(p.message);
+        } catch {
+          /* ignore */
+        }
+      })
+      .subscribe();
+
+    // 2) postgres integrity_events (backup if RLS allows)
+    const pgCh = supabase
       .channel(`exam-officer-warn-${id}-${studentId}`)
       .on(
         "postgres_changes",
@@ -240,24 +274,17 @@ export function CbtExamPage() {
             const et = String(row.event_type || "").toUpperCase();
             if (et !== "WARNING_SHOWN" && et !== "OFFICER_WARNING") return;
             if (row.exam_id && String(row.exam_id) !== String(id)) return;
-            const msg =
-              String(row.description || "").trim() ||
-              "Officer warning: Follow exam rules. Further violations may void your result.";
-            setWarnBanner(msg);
-            try {
-              haptic("officer_warning");
-            } catch {
-              /* ignore */
-            }
-            window.setTimeout(() => setWarnBanner(null), 12_000);
+            showWarn(row.description);
           } catch {
             /* ignore */
           }
         },
       )
       .subscribe();
+
     return () => {
-      void supabase.removeChannel(channel);
+      void supabase.removeChannel(broadcastCh);
+      void supabase.removeChannel(pgCh);
     };
   }, [started, done, previewMode, student?.studentId, id]);
 
