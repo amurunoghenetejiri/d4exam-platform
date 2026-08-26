@@ -2,12 +2,10 @@
  * Local DB connection bootstrap.
  * - Native Android/iOS: @capacitor-community/sqlite
  * - Web / SSR: in-memory fallback so the website never breaks
- *
- * Does not change UI. Call initLocalDb() once at app bootstrap (native preferred).
  */
 
 import { Capacitor } from "@capacitor/core";
-import { LOCAL_DB_NAME, LOCAL_DB_VERSION, LOCAL_SCHEMA_SQL } from "./schema";
+import { LOCAL_DB_NAME, LOCAL_DB_VERSION, LOCAL_SCHEMA_SQL, LOCAL_MIGRATIONS } from "./schema";
 import type { LocalDbCapability } from "./types";
 
 export type SqlResult = {
@@ -83,28 +81,8 @@ function createMemoryExecutor(): LocalDbExecutor {
         return { rows: all };
       }
 
-      if (up.startsWith("UPDATE")) {
+      if (up.startsWith("UPDATE") || up.startsWith("DELETE")) {
         return { rows: [], changes: 0 };
-      }
-
-      if (up.startsWith("DELETE")) {
-        const m = s.match(/FROM\s+(\w+)/i);
-        if (!m) return { rows: [], changes: 0 };
-        const where = s.match(/WHERE\s+(\w+)\s*=\s*\?/i);
-        const store = ensure(m[1]);
-        if (!where) {
-          const n = store.size;
-          store.clear();
-          return { rows: [], changes: n };
-        }
-        let changes = 0;
-        for (const [k, row] of [...store.entries()]) {
-          if (String(row[where[1]]) === String(params[0])) {
-            store.delete(k);
-            changes += 1;
-          }
-        }
-        return { rows: [], changes };
       }
 
       return { rows: [] };
@@ -128,6 +106,13 @@ async function createNativeExecutor(): Promise<LocalDbExecutor | null> {
     await db.open();
     for (const stmt of LOCAL_SCHEMA_SQL) {
       await db.execute(stmt);
+    }
+    for (const mig of LOCAL_MIGRATIONS) {
+      if (mig.version <= LOCAL_DB_VERSION) {
+        for (const stmt of mig.statements) {
+          await db.execute(stmt);
+        }
+      }
     }
     await db.execute(
       `INSERT OR REPLACE INTO local_meta (key, value, updated_at) VALUES (?,?,datetime('now'))`,
@@ -171,6 +156,13 @@ export async function initLocalDb(opts?: { forceMemory?: boolean }): Promise<Loc
       for (const stmt of LOCAL_SCHEMA_SQL) {
         await executor.execute(stmt);
       }
+      for (const mig of LOCAL_MIGRATIONS) {
+        if (mig.version <= LOCAL_DB_VERSION) {
+          for (const stmt of mig.statements) {
+            await executor.execute(stmt);
+          }
+        }
+      }
       capability = {
         available: true,
         backend: "memory",
@@ -195,6 +187,13 @@ export async function initLocalDb(opts?: { forceMemory?: boolean }): Promise<Loc
     executor = createMemoryExecutor();
     for (const stmt of LOCAL_SCHEMA_SQL) {
       await executor.execute(stmt);
+    }
+    for (const mig of LOCAL_MIGRATIONS) {
+      if (mig.version <= LOCAL_DB_VERSION) {
+        for (const stmt of mig.statements) {
+          await executor.execute(stmt);
+        }
+      }
     }
     capability = {
       available: true,
