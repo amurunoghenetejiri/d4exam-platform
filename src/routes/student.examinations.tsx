@@ -11,6 +11,7 @@ import {
   formatExamWindow,
 } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
+import { processDueExamReminders } from "@/lib/notify";
 import { assertOnline } from "@/lib/require-online";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
@@ -134,6 +135,12 @@ function StartOrCountdownButton({
 function Page() {
   const { data: student, isLoading: sLoading } = useStudentContext();
   const schoolId = student?.schoolId ?? null;
+
+  useEffect(() => {
+    if (!schoolId) return;
+    const t = window.setTimeout(() => { void processDueExamReminders(schoolId); }, 2500);
+    return () => window.clearTimeout(t);
+  }, [schoolId]);
 
   useRealtimeInvalidate(
     `student-exams-sync-${student?.studentId ?? "x"}`,

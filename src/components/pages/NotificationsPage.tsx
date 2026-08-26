@@ -49,6 +49,17 @@ function normalizeNotifScope(scope: string): string {
   return "student";
 }
 
+function actionLabelFor(n: Notif): string | null {
+  const ty = (n.type || "").toLowerCase();
+  const msg = (n.message || "").toLowerCase();
+  if (ty.includes("result") || msg.includes("view your result") || msg.includes("result has been released")) return "VIEW RESULT";
+  if (ty === "exam_available" || msg.includes("starts now") || msg.includes("tap below to start")) return "START EXAM";
+  if (ty.includes("exam") && (msg.includes("approved") || msg.includes("scheduled"))) return "VIEW EXAM";
+  if (ty.includes("reject") || ty.includes("revision")) return "REVIEW";
+  if (n.link || n.action_url) return "VIEW DETAILS";
+  return null;
+}
+
 function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
   const direct = (n.link || n.action_url || "").trim();
   if (direct.startsWith("/")) return direct;
@@ -316,8 +327,21 @@ export function NotificationsPage({ scope }: { scope: string }) {
                 <p className="mt-0.5 text-sm text-slate-600">{n.message}</p>
                 <p className="mt-1 text-[11px] text-slate-400">
                   {new Date(n.created_at).toLocaleString()}
-                  {href && <span className="ml-2 text-sky-600">Open →</span>}
                 </p>
+                {href && actionLabelFor(n) && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-2 h-7 text-[11px] font-semibold"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (unreadItem) void markOne(n.id);
+                      try { void navigate({ to: href as never }); } catch { window.location.assign(href); }
+                    }}
+                  >
+                    {actionLabelFor(n)}
+                  </Button>
+                )}
               </div>
               <Button
                 type="button"
@@ -342,16 +366,16 @@ export function NotificationsPage({ scope }: { scope: string }) {
         title="Notifications"
         description={`Alerts and updates for your ${scope} account.`}
         actions={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={busy || unread === 0}
-            onClick={() => void markAllRead()}
-          >
-            {busy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCheck className="mr-1 h-4 w-4" />}
-            Mark all read
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={busy || unread === 0} onClick={() => void markAllRead()}>
+              {busy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCheck className="mr-1 h-4 w-4" />}
+              Mark all read
+            </Button>
+            <Button type="button" variant="outline" size="sm" disabled={busy || items.length === 0} onClick={() => void deleteAllNotifications()}>
+              {busy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1 h-4 w-4" />}
+              Delete all
+            </Button>
+          </div>
         }
       />
 

@@ -33,6 +33,7 @@ import { useRealtimeInvalidate } from "@/lib/realtime";
 import { withOfflineCache } from "@/lib/offline-query";
 import { OfflineKeys } from "@/lib/offline-cache";
 import { cn } from "@/lib/utils";
+import { processDueExamReminders } from "@/lib/notify";
 
 export const Route = createFileRoute("/student/")({
   head: () => ({ meta: [{ title: "Student Dashboard — D4EXAM" }] }),
@@ -70,6 +71,13 @@ const DONE_ATTEMPT = ["submitted", "terminated", "flagged"];
 function Page() {
   const { data: student, isLoading: sLoading } = useStudentContext();
   const { data: user } = useSessionUser();
+
+  useEffect(() => {
+    const sid = student?.schoolId ?? user?.schoolId ?? null;
+    if (!sid) return;
+    const t = window.setTimeout(() => { void processDueExamReminders(sid); }, 2000);
+    return () => window.clearTimeout(t);
+  }, [student?.schoolId, user?.schoolId]);
   const navigate = useNavigate();
 
   const [tick, setTick] = useState(0);

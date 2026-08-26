@@ -282,6 +282,31 @@ async function studentDisplayName(studentId: string | null | undefined): Promise
   }
 }
 
+async function authUserDisplayNames(authIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const uniq = [...new Set(authIds.filter(Boolean))];
+  if (!uniq.length) return map;
+  try {
+    const { data } = await supabase.from("profiles").select("auth_user_id, full_name").in("auth_user_id", uniq);
+    for (const row of data ?? []) {
+      const r = row as { auth_user_id?: string | null; full_name?: string | null };
+      if (r.auth_user_id) map.set(r.auth_user_id, (r.full_name || "").trim() || "Student");
+    }
+  } catch { /* ignore */ }
+  return map;
+}
+
+function formatExamWhen(iso: string | null | undefined): { date: string; time: string; full: string } {
+  if (!iso) return { date: "", time: "", full: "" };
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return { date: "", time: "", full: "" };
+    const date = d.toLocaleDateString(undefined, { dateStyle: "medium" });
+    const time = d.toLocaleTimeString(undefined, { timeStyle: "short" });
+    return { date, time, full: `${date} at ${time}` };
+  } catch { return { date: "", time: "", full: "" }; }
+}
+
 async function courseStudentAuthIds(courseId: string | null | undefined, schoolId: string): Promise<string[]> {
   if (!courseId) {
     try {
@@ -395,7 +420,7 @@ export async function notifyStudentsResultsReleased(opts: {
         recipientUserId: uid,
         schoolId: opts.schoolId,
         title: "🎉 Result Released",
-        message: `Your “${opts.examTitle}” result has been released. Tap to view your result.`,
+        message: `Student, your ${opts.examTitle} result has been released. Tap below to view your result.`,
         type: "result_published",
         link: "/student/results",
         entityType: "examination",
@@ -419,7 +444,7 @@ export async function notifyStudentExamSubmitted(opts: {
       recipientUserId: opts.studentUserId,
       schoolId: opts.schoolId,
       title: "🎓 Examination Submitted",
-      message: `Your “${opts.examTitle}” examination has been submitted successfully.`,
+      message: `Student, your ${opts.examTitle} examination has been submitted successfully.`,
       type: "exam_submitted",
       link: "/student/results",
       entityType: "examination",
@@ -957,5 +982,184 @@ export async function notifyStudentExamAutoSubmitted(opts: {
     });
   } catch (e) {
     console.warn("[notify] notifyStudentExamAutoSubmitted failed", e);
+  }
+}
+
+
+export async function notifyStudentExamReminder(opts: {
+  studentUserId: string;
+  schoolId?: string | null;
+  examId: string;
+  examTitle: string;
+  studentName?: string | null;
+  kind: "24h" | "30m" | "10m" | "start";
+}): Promise<void> {
+  try {
+    const names = await authUserDisplayNames([opts.studentUserId]);
+    const name = (opts.studentName || names.get(opts.studentUserId) || "Student").trim();
+    let title = "⏰ Examination Reminder";
+    let message = "";
+    let type: NotifyType = "exam_scheduled";
+    if (opts.kind === "24h") {
+      title = "📚 Examination Tomorrow";
+      message = `${name}, your ${opts.examTitle} examination is scheduled for tomorrow. Be prepared.`;
+    } else if (opts.kind === "30m") {
+      message = `${name}, your ${opts.examTitle} examination starts in 30 minutes. Be ready!`;
+    } else if (opts.kind === "10m") {
+      message = `${name}, your ${opts.examTitle} examination starts in 10 minutes. Get ready!`;
+    } else {
+      title = "🚀 Examination Starts Now";
+      message = `${name}, your ${opts.examTitle} examination starts now. Tap below to start.`;
+      type = "exam_available";
+    }
+    await notifyUser({
+      recipientUserId: opts.studentUserId,
+      schoolId: opts.schoolId,
+      title,
+      message,
+      type,
+      link: `/student/exam/${opts.examId}`,
+      entityType: `exam_reminder_${opts.kind}`,
+      entityId: opts.examId,
+      dedupeMinutes: opts.kind === "start" ? 45 : opts.kind === "10m" ? 20 : opts.kind === "30m" ? 40 : 12 * 60,
+    });
+  } catch (e) {
+    console.warn("[notify] notifyStudentExamReminder failed", e);
+  }
+}
+
+export async function notifyOfficersStudentViolation(opts: {
+  schoolId: string;
+  examId?: string | null;
+  examTitle?: string | null;
+  studentId?: string | null;
+  studentName?: string | null;
+  eventType: string;
+  description?: string | null;
+  severity?: string | null;
+}): Promise<void> {
+  try {
+    const sev = String(opts.severity || "medium").toLowerCase();
+    if (sev === "low") return;
+    const officers = await listOfficerUserIds(opts.schoolId);
+    if (!officers.length) return;
+    const who =
+      (opts.studentName || "").trim() ||
+      (opts.studentId ? await studentDisplayName(opts.studentId) : "A student");
+    const exam = (opts.examTitle || "an examination").trim();
+    const et = String(opts.eventType || "VIOLATION").replace(/_/g, " ");
+    const detail = (opts.description || "").trim();
+    await notifyMany(
+      officers.map((uid) => ({
+        recipientUserId: uid,
+        schoolId: opts.schoolId,
+        title: "⚠️ Examination Security Alert",
+        message: `${who} triggered ${et} during ${exam}.${detail ? ` ${detail}` : ""} Tap to open live monitoring.`,
+        type: "warning",
+        link: "/officer/live-monitor",
+        entityType: "integrity_event",
+        entityId: `${opts.examId || "x"}:${opts.studentId || "s"}:${opts.eventType}`,
+        dedupeMinutes: 3,
+      })),
+    );
+  } catch (e) {
+    console.warn("[notify] notifyOfficersStudentViolation failed", e);
+  }
+}
+
+export async function processDueExamReminders(schoolId?: string | null): Promise<{ sent: number }> {
+  let sent = 0;
+  try {
+    const now = Date.now();
+    let q = supabase
+      .from("examinations")
+      .select("id, title, school_id, scheduled_start, status, course_id")
+      .in("status", ["approved", "scheduled", "published", "ongoing"])
+      .not("scheduled_start", "is", null)
+      .limit(80);
+    if (schoolId) q = q.eq("school_id", schoolId);
+    const { data: exams, error } = await q;
+    if (error || !exams?.length) return { sent: 0 };
+    for (const raw of exams) {
+      const exam = raw as { id: string; title: string; school_id: string; scheduled_start: string; course_id?: string | null };
+      const startMs = new Date(exam.scheduled_start).getTime();
+      if (Number.isNaN(startMs)) continue;
+      const delta = startMs - now;
+      let kind: "24h" | "30m" | "10m" | "start" | null = null;
+      if (delta >= 23.5 * 3600_000 && delta <= 24.5 * 3600_000) kind = "24h";
+      else if (delta >= 26 * 60_000 && delta <= 34 * 60_000) kind = "30m";
+      else if (delta >= 7 * 60_000 && delta <= 13 * 60_000) kind = "10m";
+      else if (delta >= -2 * 60_000 && delta <= 2 * 60_000) kind = "start";
+      if (!kind) continue;
+      const authIds = await courseStudentAuthIds(exam.course_id ?? null, exam.school_id);
+      const names = await authUserDisplayNames(authIds);
+      for (const uid of authIds) {
+        await notifyStudentExamReminder({
+          studentUserId: uid,
+          schoolId: exam.school_id,
+          examId: exam.id,
+          examTitle: exam.title,
+          studentName: names.get(uid),
+          kind,
+        });
+        sent += 1;
+      }
+    }
+  } catch (e) {
+    console.warn("[notify] processDueExamReminders failed", e);
+  }
+  return { sent };
+}
+
+export async function processWeeklyAggregationSummaries(schoolId?: string | null): Promise<void> {
+  try {
+    const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+    const schoolsQ = schoolId
+      ? await supabase.from("schools").select("id, name").eq("id", schoolId)
+      : await supabase.from("schools").select("id, name").limit(40);
+    const schools = (schoolsQ.data ?? []) as { id: string; name: string }[];
+    for (const school of schools) {
+      const [{ count: studentCount }, { count: examCount }, { count: violationCount }] = await Promise.all([
+        supabase.from("students").select("id", { count: "exact", head: true }).eq("school_id", school.id).gte("created_at", since),
+        supabase.from("examinations").select("id", { count: "exact", head: true }).eq("school_id", school.id).gte("created_at", since),
+        supabase.from("integrity_events").select("id", { count: "exact", head: true }).eq("school_id", school.id).gte("created_at", since),
+      ]);
+      const admins = await listAdminUserIds(school.id);
+      const weekKey = new Date().toISOString().slice(0, 10);
+      const payloads: Parameters<typeof notifyMany>[0] = [];
+      if ((studentCount ?? 0) > 0) {
+        for (const uid of admins) {
+          payloads.push({
+            recipientUserId: uid, schoolId: school.id,
+            title: "👥 Weekly Enrollment Summary",
+            message: `${school.name}: ${studentCount} students were enrolled this week.`,
+            type: "info", link: "/admin/students", entityType: "weekly_enrollment", entityId: `${school.id}:${weekKey}`, dedupeMinutes: 6 * 24 * 60,
+          });
+        }
+      }
+      if ((examCount ?? 0) > 0) {
+        for (const uid of admins) {
+          payloads.push({
+            recipientUserId: uid, schoolId: school.id,
+            title: "📊 Weekly Examination Summary",
+            message: `${school.name}: ${examCount} examinations were created this week.`,
+            type: "info", link: "/admin/examinations", entityType: "weekly_exams", entityId: `${school.id}:${weekKey}`, dedupeMinutes: 6 * 24 * 60,
+          });
+        }
+      }
+      if ((violationCount ?? 0) > 0) {
+        for (const uid of admins) {
+          payloads.push({
+            recipientUserId: uid, schoolId: school.id,
+            title: "🛡️ Weekly Security Summary",
+            message: `${school.name}: ${violationCount} examination security violations were recorded this week.`,
+            type: "warning", link: "/admin", entityType: "weekly_security", entityId: `${school.id}:${weekKey}`, dedupeMinutes: 6 * 24 * 60,
+          });
+        }
+      }
+      if (payloads.length) await notifyMany(payloads);
+    }
+  } catch (e) {
+    console.warn("[notify] processWeeklyAggregationSummaries failed", e);
   }
 }

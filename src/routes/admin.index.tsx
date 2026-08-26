@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader, SectionCard, StatusBadge, EmptyState, NavCard } from "@/components/dashboard/kit";
@@ -6,6 +7,7 @@ import { GraduationCap, Users, BookOpen, FileText, Bell } from "lucide-react";
 import { useRows } from "@/lib/queries";
 import { useSessionUser } from "@/lib/session";
 import { getSchoolDashboardCounts } from "@/lib/student.server";
+import { processWeeklyAggregationSummaries, processDueExamReminders } from "@/lib/notify";
 
 export const Route = createFileRoute("/admin/")({
   head: () => ({
@@ -32,6 +34,15 @@ function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
   const enabled = Boolean(schoolId);
+
+  useEffect(() => {
+    if (!schoolId) return;
+    const t = window.setTimeout(() => {
+      void processDueExamReminders(schoolId);
+      void processWeeklyAggregationSummaries(schoolId);
+    }, 4000);
+    return () => window.clearTimeout(t);
+  }, [schoolId]);
 
   const countsQ = useQuery({
     queryKey: ["school-dashboard-counts", schoolId],

@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { notifyOfficersStudentViolation } from "@/lib/notify";
 
 export type SecurityEventType =
   | "TAB_SWITCH"
@@ -58,6 +59,17 @@ export async function logSecurityEvent(input: {
         ...(input.extra ?? {}),
       } as never,
     } as never);
+    const sev = String(input.severity ?? "low").toLowerCase();
+    if (sev === "medium" || sev === "high") {
+      void notifyOfficersStudentViolation({
+        schoolId: input.schoolId,
+        examId: input.examId,
+        studentId: input.studentId,
+        eventType: String(input.eventType),
+        description: input.description ?? null,
+        severity: sev,
+      });
+    }
   } catch (e) {
     console.warn("logSecurityEvent failed", e);
   }
