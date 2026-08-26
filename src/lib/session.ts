@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { offlineSet, OfflineKeys } from "@/lib/offline-cache";
 import { rememberLastUserId, readLastUserId, withOfflineCache } from "@/lib/offline-query";
+import { mirrorSessionUser } from "@/lib/local-db/mirror";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -230,6 +231,7 @@ export function useSessionUser() {
           if (u?.userId) {
             rememberLastUserId(u.userId);
             await offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
+            void mirrorSessionUser(u);
           }
           return u;
         },
