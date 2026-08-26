@@ -21,7 +21,6 @@ import { InstallAndPushPrompt } from "@/components/InstallAndPushPrompt";
 import { NetworkBanner } from "@/components/NetworkBanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,6 +33,7 @@ import { initials, signOut, useSessionUser, type AppRole } from "@/lib/session";
 import { useSchoolIdentity } from "@/lib/school-identity";
 import { useUnreadNotificationCount } from "@/lib/queries";
 import { useRealtimeInvalidate } from "@/lib/realtime";
+import { isNativeShell } from "@/native/platform";
 import type { RoleConfig } from "@/components/navigation/navConfig";
 
 export interface AppUser {
@@ -218,7 +218,7 @@ export function AppShell({
       ["student-dashboard-notifs"],
     ],
     Boolean(session?.userId),
-    400,
+    2500,
   );
 
   const unreadQ = useUnreadNotificationCount(session?.userId);
@@ -233,7 +233,9 @@ export function AppShell({
   return (
     <div className="relative min-h-dvh bg-slate-50">
       <NetworkBanner />
-      <Watermark opacity={0.08} size="xl" className="pointer-events-none lg:left-64" />
+      {!isNativeShell() ? (
+        <Watermark opacity={0.08} size="xl" className="pointer-events-none lg:left-64" />
+      ) : null}
 
       <aside className="fixed inset-y-0 left-0 z-40 hidden h-dvh max-h-dvh w-64 flex-col bg-[#0b1b3a] lg:flex">
         <div className="flex h-[4.5rem] shrink-0 items-center border-b border-white/10 px-4">
@@ -270,64 +272,71 @@ export function AppShell({
       >
         <div className="mx-auto grid h-12 max-w-[1400px] grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 px-2.5 sm:h-16 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-            <Sheet open={open} onOpenChange={setOpen}>
-              <SheetTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-9 w-9 shrink-0 lg:hidden"
-                  aria-label="Open menu"
-                >
-                  <Menu className="h-5 w-5" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent
-                side="left"
-                hideClose
-                className={cn(
-                  "flex flex-col gap-0 border-r-0 bg-[#0b1b3a] p-0 text-white",
-                  "!inset-y-0 !top-0 !bottom-0",
-                  "!h-[100dvh] !min-h-[100dvh] !max-h-[100dvh]",
-                  "w-[min(100vw-2rem,18rem)]",
-                )}
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0 lg:hidden"
+                aria-label="Open menu"
+                aria-expanded={open}
+                onClick={() => setOpen(true)}
               >
-                <SheetTitle className="sr-only">{config.label} navigation</SheetTitle>
-                <div className="flex min-h-16 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 sm:px-4 pt-[env(safe-area-inset-top,0px)]">
-                  <div className="min-w-0 flex-1">
-                    <PortalBrand
-                      isSchoolPortal={isSchoolPortal}
-                      logoUrl={logoUrl}
-                      schoolName={schoolName}
-                      homeTo={config.home}
-                    />
-                  </div>
+                <Menu className="h-5 w-5" />
+              </Button>
+              {open ? (
+                <div className="fixed inset-0 z-[60] lg:hidden" role="dialog" aria-modal="true">
                   <button
                     type="button"
-                    onClick={() => setOpen(false)}
+                    className="absolute inset-0 bg-black/45"
                     aria-label="Close menu"
-                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-white/90 transition-colors hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                    onClick={() => setOpen(false)}
+                  />
+                  <div
+                    className={cn(
+                      "absolute inset-y-0 left-0 flex w-[min(100vw-2.5rem,18rem)] flex-col",
+                      "bg-[#0b1b3a] text-white shadow-xl",
+                      "pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]",
+                    )}
                   >
-                    <X className="h-5 w-5" strokeWidth={2.25} />
-                  </button>
+                    <div className="flex min-h-14 shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3">
+                      <div className="min-w-0 flex-1">
+                        <PortalBrand
+                          isSchoolPortal={isSchoolPortal}
+                          logoUrl={logoUrl}
+                          schoolName={schoolName}
+                          homeTo={config.home}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setOpen(false)}
+                        aria-label="Close menu"
+                        className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-white/90 hover:bg-white/10"
+                      >
+                        <X className="h-5 w-5" strokeWidth={2.25} />
+                      </button>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3">
+                      <NavLinks config={config} onNavigate={() => setOpen(false)} />
+                    </div>
+                    <div className="shrink-0 border-t border-white/10 p-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpen(false);
+                          void signOut();
+                        }}
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-300 hover:bg-white/5 hover:text-white"
+                      >
+                        <LogOut className="h-4 w-4" aria-hidden />
+                        Logout
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                  <NavLinks config={config} onNavigate={() => setOpen(false)} />
-                </div>
-                <div className="mt-auto shrink-0 border-t border-white/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpen(false);
-                      void signOut();
-                    }}
-                    className="pressable flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-300 transition-colors hover:bg-white/5 hover:text-white active:scale-[0.98]"
-                  >
-                    <LogOut className="h-4 w-4" aria-hidden />
-                    Logout
-                  </button>
-                </div>
-              </SheetContent>
-            </Sheet>
+              ) : null}
+            </>
 
             <span className="hidden text-sm font-bold text-primary lg:inline">
               {config.label} Portal
@@ -361,7 +370,7 @@ export function AppShell({
             <div className="relative max-w-md">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
-                placeholder="Search…"
+                placeholder="Search\u2026"
                 className="h-10 rounded-xl border-slate-200 bg-slate-50 pl-9"
                 aria-label="Search"
               />
