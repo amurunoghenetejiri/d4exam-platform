@@ -51,6 +51,11 @@ const config: CapacitorConfig = {
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"],
     },
+    LocalNotifications: {
+      smallIcon: "ic_stat_d4exam",
+      iconColor: "#0b1b3a",
+      sound: "default",
+    },
   },
 };
 

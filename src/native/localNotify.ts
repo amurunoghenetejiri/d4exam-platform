@@ -53,6 +53,7 @@ export async function showD4ExamNativeNotification(
           channelId: "d4exam_default",
           smallIcon: "ic_stat_d4exam",
           largeIcon: "ic_launcher",
+          iconColor: "#0b1b3a",
           sound: "default",
         },
       ],
