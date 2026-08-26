@@ -224,6 +224,7 @@ export function CbtExamPage() {
     };
     const onFsChange = () => {
       if (!security.fullscreen) return;
+      if (finishingRef.current || done) return;
       if (document.fullscreenElement) { setFsGate(false); return; }
       fullscreenExitCountRef.current += 1;
       setFsGate(true);
@@ -404,6 +405,8 @@ export function CbtExamPage() {
     setFsGate(false);
     setPaused(false);
     setWarnBanner(null);
+    setDoneTerminated(auto);
+    setDone(true);
     void leaveExamFullscreen();
     if (previewMode) {
       toast.message("Preview ended — nothing was saved");
@@ -447,8 +450,6 @@ export function CbtExamPage() {
         await qc.invalidateQueries({ queryKey: ["student-exams"] });
       } else toast.success(auto ? "Examination closed" : "Examination submitted successfully");
     } catch (e) { toast.error(friendlyError(e, "Could not save result")); }
-    setDoneTerminated(auto);
-    setDone(true);
     shutdownMedia();
     finishingRef.current = false;
   }
@@ -639,9 +640,9 @@ export function CbtExamPage() {
         </div>
       )}
       <header className="d4-cbt-header relative z-40 shrink-0 border-b border-slate-200 bg-[#0b1b3a] text-white">
-        <div className="mx-auto flex h-14 max-w-[1200px] items-center justify-between gap-3 px-3 sm:h-16 sm:px-6">
+        <div className="mx-auto flex h-11 max-w-[1200px] items-center justify-between gap-2 px-2.5 sm:h-12 sm:px-4">
           <div className="flex min-w-0 items-center gap-3">
-            <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? student?.schoolName ?? session?.schoolName} size="md" className="bg-transparent" />
+            <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? student?.schoolName ?? session?.schoolName} size="sm" className="bg-transparent" />
             <p className="hidden truncate text-sm font-bold sm:block">{(exam as { courses?: { code?: string } }).courses?.code ?? "EXAM"} — {exam.title}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -714,9 +715,9 @@ export function CbtExamPage() {
         </section>
       </div>
       </div>
-      {started && !done && security.requireCamera && (
+      {started && !done && !paused && security.requireCamera && (
         <ExamCameraPip
-          enabled={started && !done}
+          enabled={started && !done && !paused}
           faceDetection={Boolean(security.faceDetection || security.requireCamera)}
           maxFaceWarnings={security.maxFaceWarnings ?? 3}
           stream={liveStream}

@@ -492,3 +492,8 @@ html.d4-exam-immersive [data-sonner-toaster] {
   transform: translateX(-50%) !important;
   z-index: 120 !important;
 }
+
+/* Hide residual system bar insets during locked CBT */
+html.d4-exam-immersive,
+html.d4-exam-immersive body { overflow: hidden !important; }
+html.d4-exam-immersive .d4-cbt-exam { height: 100dvh !important; max-height: 100dvh !important; padding-bottom: 0 !important; margin-bottom: 0 !important; }
