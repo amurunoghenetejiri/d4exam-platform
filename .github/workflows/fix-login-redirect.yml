@@ -1,0 +1,240 @@
+name: fix-login-redirect
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-login-redirect.yml
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch session.ts and login.tsx
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+
+          # session.ts
+          p = Path("src/lib/session.ts")
+          t = p.read_text()
+          if "seedPendingLoginRole" not in t:
+              old = '''export async function fetchSessionUser(): Promise<SessionUser | null> {
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (!user) return null;'''
+              new = '''const PENDING_ROLE_KEY = "d4_pending_role";
+const PENDING_ROLE_TS_KEY = "d4_pending_role_ts";
+
+/** Remember role for a few seconds so post-login navigation is not bounced by a slow session read. */
+export function seedPendingLoginRole(role: AppRole | string | null | undefined): void {
+  if (typeof window === "undefined" || !role) return;
+  try {
+    window.sessionStorage.setItem(PENDING_ROLE_KEY, String(role));
+    window.sessionStorage.setItem(PENDING_ROLE_TS_KEY, String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readPendingLoginRole(maxAgeMs = 45_000): AppRole | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const role = window.sessionStorage.getItem(PENDING_ROLE_KEY);
+    const ts = Number(window.sessionStorage.getItem(PENDING_ROLE_TS_KEY) || 0);
+    if (!role || !ts || Date.now() - ts > maxAgeMs) return null;
+    if (role in roleHome) return role as AppRole;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function clearPendingLoginRole(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(PENDING_ROLE_KEY);
+    window.sessionStorage.removeItem(PENDING_ROLE_TS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function fetchSessionUser(): Promise<SessionUser | null> {
+  let user: { id: string; email?: string | null } | null = null;
+  try {
+    const { data: sessData } = await supabase.auth.getSession();
+    if (sessData.session?.user) user = sessData.session.user;
+  } catch {
+    /* ignore */
+  }
+  if (!user) {
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      user = userData.user;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!user) {
+    await new Promise((r) => setTimeout(r, 250));
+    try {
+      const { data: sessData } = await supabase.auth.getSession();
+      if (sessData.session?.user) user = sessData.session.user;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!user) return null;'''
+              if old not in t:
+                  raise SystemExit("session fetch pattern missing")
+              t = t.replace(old, new, 1)
+              p.write_text(t)
+              print("session patched")
+          else:
+              print("session already")
+
+          # login.tsx
+          lp = Path("src/routes/login.tsx")
+          lt = lp.read_text()
+          if "confirmSessionReady" not in lt:
+              lt = lt.replace(
+                  'import { fetchSessionUser, roleHome, type AppRole } from "@/lib/session";',
+                  'import { fetchSessionUser, roleHome, seedPendingLoginRole, type AppRole } from "@/lib/session";',
+              )
+              old_go = '''/** Full page load so Capacitor WebView always applies the new session. */
+function goToRoleHome(role: string) {
+  const path = roleHome[role as AppRole];
+  if (!path) return false;
+  try {
+    window.location.replace(path);
+  } catch {
+    window.location.href = path;
+  }
+  return true;
+}'''
+              new_go = '''/** Full page load so Capacitor WebView always applies the new session. */
+function goToRoleHome(role: string) {
+  const path = roleHome[role as AppRole];
+  if (!path) return false;
+  seedPendingLoginRole(role);
+  try {
+    window.location.replace(path);
+  } catch {
+    window.location.href = path;
+  }
+  return true;
+}
+
+async function confirmSessionReady(maxWaitMs = 2_500): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.access_token && data.session.user?.id) return true;
+    } catch {
+      /* ignore */
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  try {
+    const { data } = await supabase.auth.getSession();
+    return Boolean(data.session?.access_token);
+  } catch {
+    return false;
+  }
+}'''
+              if old_go not in lt:
+                  raise SystemExit("goToRoleHome missing")
+              lt = lt.replace(old_go, new_go, 1)
+              old_set = '''          const { error: sessErr } = await supabase.auth.setSession({
+            access_token: result.session.access_token,
+            refresh_token: result.session.refresh_token,
+          });
+          if (!sessErr) {
+            if (result.role && result.role in roleHome) {
+              navigated = true;
+              goToRoleHome(String(result.role));
+              return;
+            }
+            if (await resolveRoleAndGoHome()) {
+              navigated = true;
+              return;
+            }
+          }'''
+              new_set = '''          const { error: sessErr } = await supabase.auth.setSession({
+            access_token: result.session.access_token,
+            refresh_token: result.session.refresh_token,
+          });
+          if (!sessErr) {
+            await confirmSessionReady();
+            if (result.role && result.role in roleHome) {
+              navigated = true;
+              seedPendingLoginRole(String(result.role));
+              goToRoleHome(String(result.role));
+              return;
+            }
+            if (await resolveRoleAndGoHome()) {
+              navigated = true;
+              return;
+            }
+          }'''
+              if old_set in lt:
+                  lt = lt.replace(old_set, new_set, 1)
+              lt = lt.replace(
+                  '''        if (!authErr && data.session) {
+          if (await resolveRoleAndGoHome()) {
+            navigated = true;
+            return;
+          }
+        }''',
+                  '''        if (!authErr && data.session) {
+          await confirmSessionReady();
+          if (await resolveRoleAndGoHome()) {
+            navigated = true;
+            return;
+          }
+        }''',
+              )
+              lt = lt.replace(
+                  '''            if (!againErr && again.session) {
+              if (await resolveRoleAndGoHome()) {
+                navigated = true;
+                return;
+              }
+              navigated = true;
+              goToRoleHome("school_admin");
+              return;
+            }''',
+                  '''            if (!againErr && again.session) {
+              await confirmSessionReady();
+              if (await resolveRoleAndGoHome()) {
+                navigated = true;
+                return;
+              }
+              navigated = true;
+              goToRoleHome("school_admin");
+              return;
+            }''',
+              )
+              lp.write_text(lt)
+              print("login patched")
+          else:
+              print("login already")
+
+          # ensure guard has pending role support
+          g = Path("src/lib/guard.ts").read_text()
+          print("guard has pending", "readPendingLoginRole" in g)
+          print("done")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/session.ts src/routes/login.tsx src/lib/guard.ts
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(auth): confirm session before redirect + pending role handoff"
+            git push
+          fi
