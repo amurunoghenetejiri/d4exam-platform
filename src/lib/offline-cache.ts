@@ -6,36 +6,39 @@
 
 const DB_NAME = "d4exam-offline-v1";
 const DB_VERSION = 1;
-const STORE = "kv";
+const STORE = "cache";
 
 export type OfflineEnvelope<T> = {
   data: T;
   userId: string;
-  schoolId?: string | null;
+  schoolId: string | null;
   lastSyncedAt: number;
-  source: "network" | "cache";
+  source: "network" | "local" | "sync";
 };
 
+function scopeKey(userId: string, key: string) {
+  return `${userId}::${key}`;
+}
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+
 function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === "undefined") {
-      reject(new Error("indexedDB unavailable"));
-      return;
-    }
+  if (typeof indexedDB === "undefined") {
+    return Promise.reject(new Error("IndexedDB unavailable"));
+  }
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onerror = () => reject(req.error ?? new Error("idb open failed"));
-    req.onsuccess = () => resolve(req.result);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE);
       }
     };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
   });
-}
-
-function scopeKey(userId: string, key: string): string {
-  return `${userId}::${key}`;
+  return dbPromise;
 }
 
 export async function offlineGet<T>(
@@ -48,10 +51,7 @@ export async function offlineGet<T>(
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly");
       const req = tx.objectStore(STORE).get(scopeKey(userId, key));
-      req.onsuccess = () => {
-        const v = req.result as OfflineEnvelope<T> | undefined;
-        resolve(v ?? null);
-      };
+      req.onsuccess = () => resolve((req.result as OfflineEnvelope<T>) ?? null);
       req.onerror = () => reject(req.error);
     });
   } catch {
@@ -142,6 +142,13 @@ export const OfflineKeys = {
   settings: "settings",
   courses: "courses",
   sessionUser: "session.user",
+  teacherContext: "teacher.context",
+  teacherWorkspace: "teacher.workspace",
+  officerDashboard: "officer.dashboard",
+  adminDashboard: "admin.dashboard",
+  unreadNotifications: "notifications.unread",
+  schoolIdentity: "school.identity",
+  rowsPrefix: "rows.",
 } as const;
 
 export function formatLastSynced(ts: number | null | undefined): string | null {
