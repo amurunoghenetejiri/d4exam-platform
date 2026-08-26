@@ -1,23 +1,32 @@
 /**
  * Online reconnection + background sync for offline-first reads.
+ * Step 4: delegates to sync engine (outbox push + scoped pull).
  * Does not mutate UI layout. Safe to call from root bootstrap.
- * No visible offline banners.
  */
 
 import { getNetworkStatus, subscribeNetworkStatus, probeConnectivity } from "@/native/networkService";
 import { offlineSet, OfflineKeys } from "@/lib/offline-cache";
+import { runSyncEngine, type SyncEngineCtx } from "@/lib/sync/engine";
+import { setConnectivityOnSnapshot } from "@/lib/sync/status";
+import { resolveConnectivity } from "@/lib/sync/connectivity";
 
 type SyncCtx = {
   userId: string;
   schoolId?: string | null;
   role?: string | null;
+  studentId?: string | null;
+  profileId?: string | null;
 };
 
 let lastSyncAt = 0;
 let syncing = false;
 const MIN_SYNC_GAP_MS = 8_000;
 
-export type OfflineSyncListener = (info: { online: boolean; syncing: boolean; lastSyncAt: number }) => void;
+export type OfflineSyncListener = (info: {
+  online: boolean;
+  syncing: boolean;
+  lastSyncAt: number;
+}) => void;
 const listeners = new Set<OfflineSyncListener>();
 
 export function subscribeOfflineSync(cb: OfflineSyncListener): () => void {
@@ -45,8 +54,9 @@ export async function runOfflineSync(opts?: {
   const now = Date.now();
   if (now - lastSyncAt < MIN_SYNC_GAP_MS) return false;
 
-  const online = await probeConnectivity();
-  if (!online) {
+  const conn = await resolveConnectivity();
+  setConnectivityOnSnapshot(conn.state, conn.internet);
+  if (!conn.internet) {
     emit();
     return false;
   }
@@ -54,20 +64,37 @@ export async function runOfflineSync(opts?: {
   syncing = true;
   emit();
   try {
-    const qc = opts?.queryClient;
-    if (qc) {
-      await Promise.race([
-        qc.invalidateQueries(),
-        new Promise((r) => setTimeout(r, 12_000)),
-      ]);
-    }
-    lastSyncAt = Date.now();
+    const engineCtx: SyncEngineCtx | null = opts?.ctx?.userId
+      ? {
+          userId: opts.ctx.userId,
+          schoolId: opts.ctx.schoolId,
+          role: opts.ctx.role,
+          studentId: opts.ctx.studentId,
+          profileId: opts.ctx.profileId,
+          queryClient: opts.queryClient,
+        }
+      : opts?.queryClient
+        ? { userId: "", queryClient: opts.queryClient }
+        : null;
+
+    const result = await runSyncEngine(engineCtx);
+
     if (opts?.ctx?.userId) {
-      await offlineSet(opts.ctx.userId, OfflineKeys.settings, {
-        lastBackgroundSyncAt: lastSyncAt,
-      }, { schoolId: opts.ctx.schoolId });
+      await offlineSet(
+        opts.ctx.userId,
+        OfflineKeys.settings,
+        {
+          lastBackgroundSyncAt: Date.now(),
+          lastSyncStatus: result.status,
+          lastSyncPushed: result.pushed,
+          lastSyncPulled: result.pulled,
+        },
+        { schoolId: opts.ctx.schoolId },
+      );
     }
-    return true;
+
+    lastSyncAt = Date.now();
+    return result.status === "SUCCESS" || result.status === "PARTIAL_SUCCESS";
   } catch {
     return false;
   } finally {
@@ -94,12 +121,20 @@ export function bootstrapOfflineSync(getCtx: () => {
     }
   });
 
+  const onVisible = () => {
+    if (document.visibilityState === "visible") {
+      void runOfflineSync(getCtx());
+    }
+  };
+  document.addEventListener("visibilitychange", onVisible);
+
   const t = window.setTimeout(() => {
     void runOfflineSync(getCtx());
-  }, 1500);
+  }, 1800);
 
   return () => {
     window.clearTimeout(t);
+    document.removeEventListener("visibilitychange", onVisible);
     unsubNet?.();
     unsubNet = null;
     bootstrapped = false;
@@ -114,3 +149,5 @@ export function requireOnlineMessage(): string {
 export function isOnlineNow(): boolean {
   return getNetworkStatus().connected;
 }
+
+export { probeConnectivity };
