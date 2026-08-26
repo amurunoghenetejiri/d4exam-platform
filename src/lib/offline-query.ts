@@ -4,6 +4,7 @@
  */
 import { offlineGet, offlineSet } from "@/lib/offline-cache";
 import { isOnlineNow } from "@/lib/offline-sync";
+import { mirrorByOfflineKey, readOfflineBlob } from "@/lib/local-db/mirror";
 
 const LAST_USER_KEY = "d4exam.lastUserId";
 
@@ -27,6 +28,7 @@ export function readLastUserId(): string | null {
 
 /**
  * Run fetcher when online; on failure or offline return IndexedDB cache.
+ * Step 3: also dual-writes into local SQLite/memory and reads it as fallback.
  * If no cache and fallback provided, return fallback (pages stay up).
  */
 export async function withOfflineCache<T>(
@@ -47,6 +49,8 @@ export async function withOfflineCache<T>(
       const data = await fetcher();
       if (userId) {
         void offlineSet(userId, key, data, { schoolId: opts?.schoolId });
+        // Step 3: dual-write into local SQLite/memory foundation
+        void mirrorByOfflineKey(userId, key, data, { schoolId: opts?.schoolId });
         rememberLastUserId(userId);
       }
       return data;
@@ -60,6 +64,11 @@ export async function withOfflineCache<T>(
     if (cached && cached.data !== undefined) {
       return cached.data;
     }
+    // Step 3: SQLite/memory blob fallback after IndexedDB miss
+    const localBlob = await readOfflineBlob<T>(userId, key);
+    if (localBlob !== null && localBlob !== undefined) {
+      return localBlob;
+    }
   }
 
   // Try last known user if caller had no userId yet (cold start offline)
@@ -68,6 +77,10 @@ export async function withOfflineCache<T>(
     const cached = await offlineGet<T>(last, key);
     if (cached && cached.data !== undefined) {
       return cached.data;
+    }
+    const localBlob = await readOfflineBlob<T>(last, key);
+    if (localBlob !== null && localBlob !== undefined) {
+      return localBlob;
     }
   }
 

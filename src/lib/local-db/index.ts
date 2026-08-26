@@ -1,5 +1,5 @@
 /**
- * D4EXAM local database foundation (Step 2).
+ * D4EXAM local database foundation (Step 2 + Step 3 mirror).
  *
  * UI → repositories → local SQLite (native) / memory (web)
  * Remote Supabase remains the source of truth (sync engine = later step).
@@ -29,3 +29,13 @@ export {
   setSyncCursor,
   getSyncCursor,
 } from "./repositories/outboxRepo";
+
+export {
+  mirrorOfflineBlob,
+  readOfflineBlob,
+  mirrorSessionUser,
+  mirrorExaminations,
+  mirrorNotifications,
+  mirrorResults,
+  mirrorByOfflineKey,
+} from "./mirror";
