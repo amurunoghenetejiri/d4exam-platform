@@ -1,0 +1,72 @@
+name: CBT session surgical patch
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/cbt-session-patch.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch session
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          # 1) onFsChange guard
+          a = "if (!security.fullscreen) return;\n      if (document.fullscreenElement)"
+          b = "if (!security.fullscreen) return;\n      if (finishingRef.current || done) return;\n      if (document.fullscreenElement)"
+          if "finishingRef.current || done" not in t:
+              if a not in t: raise SystemExit("fs guard target missing")
+              t = t.replace(a, b, 1)
+              print("fs guard")
+          # 2) early done on finish
+          m = "finishingRef.current = true;\n    shutdownMedia();\n    setFsGate(false);\n    setPaused(false);\n    setWarnBanner(null);\n    void leaveExamFullscreen();"
+          n = "finishingRef.current = true;\n    shutdownMedia();\n    setFsGate(false);\n    setPaused(false);\n    setWarnBanner(null);\n    setDoneTerminated(auto);\n    setDone(true);\n    void leaveExamFullscreen();"
+          if "setDone(true);\n    void leaveExamFullscreen" not in t:
+              if m not in t: raise SystemExit("finish marker missing")
+              t = t.replace(m, n, 1)
+              oe = "} catch (e) { toast.error(friendlyError(e, \"Could not save result\")); }\n    setDoneTerminated(auto);\n    setDone(true);\n    shutdownMedia();\n    finishingRef.current = false;"
+              ne = "} catch (e) { toast.error(friendlyError(e, \"Could not save result\")); }\n    shutdownMedia();\n    finishingRef.current = false;"
+              if oe in t: t = t.replace(oe, ne, 1)
+              print("early done")
+          # 3) pause stops face
+          op = "{started && !done && security.requireCamera && (\n        <ExamCameraPip\n          enabled={started && !done}"
+          np = "{started && !done && !paused && security.requireCamera && (\n        <ExamCameraPip\n          enabled={started && !done && !paused}"
+          if "enabled={started && !done && !paused}" not in t:
+              if op not in t: raise SystemExit("pip target missing")
+              t = t.replace(op, np, 1)
+              print("pip pause")
+          # 4) short header
+          oh = "flex h-14 max-w-[1200px] items-center justify-between gap-3 px-3 sm:h-16 sm:px-6"
+          nh = "flex h-11 max-w-[1200px] items-center justify-between gap-2 px-2.5 sm:h-12 sm:px-4"
+          if "h-11 max-w-[1200px]" not in t:
+              if oh not in t: raise SystemExit("header target missing")
+              t = t.replace(oh, nh, 1)
+              t = t.replace('size="md" className="bg-transparent"', 'size="sm" className="bg-transparent"', 1)
+              print("short header")
+          p.write_text(t)
+          assert "finishingRef.current || done" in t
+          assert "enabled={started && !done && !paused}" in t
+          assert "h-11 max-w-[1200px]" in t
+          print("ok", len(t))
+          # css
+          css = Path("src/styles.css")
+          ct = css.read_text()
+          if "Hide residual system bar insets during locked CBT" not in ct:
+              extra = "\n/* Hide residual system bar insets during locked CBT */\nhtml.d4-exam-immersive,\nhtml.d4-exam-immersive body { overflow: hidden !important; }\nhtml.d4-exam-immersive .d4-cbt-exam { height: 100dvh !important; max-height: 100dvh !important; padding-bottom: 0 !important; margin-bottom: 0 !important; }\n"
+              css.write_text(ct + extra)
+              print("css")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/styles.css
+          git commit -m "fix(cbt): short header; stop security on submit; pause stops face; timer keeps ticking" || echo no-changes
+          git pull --rebase origin main || true
+          git push origin main
