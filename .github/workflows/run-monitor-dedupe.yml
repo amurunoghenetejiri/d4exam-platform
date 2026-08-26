@@ -1,0 +1,25 @@
+name: Run monitor dedupe warn fix
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/run-monitor-dedupe.yml"
+      - "scripts/fix_monitor_dedupe_warn.py"
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python3 scripts/fix_monitor_dedupe_warn.py
+      - name: Commit
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/routes/officer.live-monitor.tsx src/components/cbt/CbtExamSession.impl.tsx
+          git diff --cached --stat || true
+          git commit -m "fix(monitor): one card per student; instant officer warning via broadcast" || echo no-changes
+          git pull --rebase origin main || true
+          git push origin main
