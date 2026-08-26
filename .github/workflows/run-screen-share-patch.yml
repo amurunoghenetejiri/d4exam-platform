@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
     paths:
-      - scripts/patch_screen_share.py
+      - scripts/_pss_p1.txt
+      - scripts/_pss_p2.txt
+      - scripts/assemble_patch_screen_share.sh
       - .github/workflows/run-screen-share-patch.yml
 jobs:
   patch:
@@ -13,13 +15,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Run patch script
-        run: python3 scripts/patch_screen_share.py
+      - name: Assemble and run patch
+        run: bash scripts/assemble_patch_screen_share.sh
       - name: Commit
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/lib/live-video.ts src/components/cbt/ExamSecurityGate.tsx src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
+          git add src/lib/live-video.ts src/components/cbt/ExamSecurityGate.tsx src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx scripts/patch_screen_share.py || true
           if git diff --cached --quiet; then echo No changes; else
             git commit -m "feat(screen-share): CBT share, pause on stop, officer face+screen view"
             git push
