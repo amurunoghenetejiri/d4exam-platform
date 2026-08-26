@@ -11,10 +11,13 @@ import {
   type PushPermissionState,
 } from "@/lib/push";
 import { sendTestNotificationToSelf } from "@/lib/push-send.functions";
+import { sendNotification } from "@/lib/notifications";
 import { isNativeShell } from "@/native/platform";
+import { useQueryClient } from "@tanstack/react-query";
 
 export function PushSettingsCard({ scope }: { scope?: string }) {
   const { data: session } = useSessionUser();
+  const queryClient = useQueryClient();
   const [pushBusy, setPushBusy] = useState(false);
   const [testBusy, setTestBusy] = useState(false);
   const [pushStatus, setPushStatus] = useState<PushPermissionState>(() => getPushPermissionState());
@@ -30,7 +33,7 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
       title="Push notifications"
       description={
         native
-          ? "Native Android alerts for exams, results and important updates"
+          ? "Alerts for exams, results and updates (in-app + system when configured)"
           : "Browser alerts for exams, results and important updates"
       }
     >
@@ -72,18 +75,70 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
             onClick={() => {
               if (!session?.userId) return;
               setTestBusy(true);
-              void sendTestNotificationToSelf({
-                data: { userId: session.userId, role: session.role || "" },
-              })
-                .then((r) => {
-                  if (r && (r as { ok?: boolean }).ok) {
-                    toast.success("Test notification sent. Check your bell and device.");
-                  } else {
-                    toast.error((r as { error?: string })?.error || "Test failed");
+              const role = session.role || "";
+              const link =
+                role === "super_admin"
+                  ? "/super-admin/notifications"
+                  : role === "school_admin"
+                    ? "/admin/notifications"
+                    : role === "examination_officer"
+                      ? "/officer/notifications"
+                      : role === "teacher"
+                        ? "/teacher/notifications"
+                        : role === "student"
+                          ? "/student/notifications"
+                          : "/";
+              const title = "D4EXAM Test Notification";
+              const message = "This is a test notification for your D4EXAM account.";
+
+              void (async () => {
+                try {
+                  // 1) Server path (admin insert + optional FCM)
+                  let serverOk = false;
+                  try {
+                    const r = await sendTestNotificationToSelf({
+                      data: { userId: session.userId, role },
+                    });
+                    if (r && (r as { ok?: boolean }).ok) {
+                      serverOk = true;
+                      const push = (r as { push?: { sent?: number; skipped?: boolean; reason?: string } })
+                        .push;
+                      if (push && push.skipped && push.reason) {
+                        console.info("[D4EXAM] push skipped:", push.reason);
+                      }
+                    }
+                  } catch (e) {
+                    console.warn("[D4EXAM] server test notify failed", e);
                   }
-                })
-                .catch((e) => toast.error((e as Error).message || "Test failed"))
-                .finally(() => setTestBusy(false));
+
+                  // 2) Always ensure an in-app row via client (works without service role)
+                  const client = await sendNotification({
+                    recipientUserId: session.userId,
+                    title,
+                    message,
+                    type: "system_alert",
+                    link,
+                  });
+
+                  // 3) Immediate visible feedback (works even without system tray FCM)
+                  toast.success(title, { description: message, duration: 6000 });
+
+                  void queryClient.invalidateQueries({ queryKey: ["count", "notifications"] });
+                  void queryClient.invalidateQueries({
+                    queryKey: ["count", "notifications", "unread", session.userId],
+                  });
+
+                  if (client.id || serverOk) {
+                    toast.message("Saved to Notifications — open the bell or Notifications page.");
+                  } else if (client.error) {
+                    toast.error(client.error);
+                  }
+                } catch (e) {
+                  toast.error((e as Error).message || "Test failed");
+                } finally {
+                  setTestBusy(false);
+                }
+              })();
             }}
           >
             {testBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -92,8 +147,8 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
         </div>
         <p className="text-xs text-slate-500">
           {native
-            ? "On Android, notifications appear in the system shade as D4EXAM (not Chrome). Test sends in-app + push to your account only."
-            : "Test sends an in-app notification and push to your account only. Open Notifications or the bell to confirm."}
+            ? "You will see an in-app toast and a row under Notifications. System tray push needs Firebase (google-services) configured on the APK."
+            : "Test creates an in-app notification and tries browser push when permission is granted."}
         </p>
       </div>
     </SectionCard>

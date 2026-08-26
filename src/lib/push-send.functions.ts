@@ -108,7 +108,6 @@ async function sendFcmV1(
   const projectId = sa.project_id || process.env["FIREBASE_PROJECT_ID"] || "d4exam-6506a";
   const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
   const origin = appOrigin();
-  // Transparent brand logo (same as navbar)
   const icon = `${origin}/logo.png`;
   const absoluteLink = link.startsWith("http")
     ? link
@@ -146,25 +145,14 @@ async function sendFcmV1(
             default_vibrate_timings: true,
             notification_priority: "PRIORITY_MAX",
             visibility: "PUBLIC",
-            // Capacitor push plugin default click action
             click_action: "FCM_PLUGIN_ACTIVITY",
             image: icon,
           },
         },
         webpush: {
-          headers: {
-            Urgency: "high",
-            TTL: "86400",
-          },
-          notification: {
-            title: String(title),
-            body: String(body),
-            icon,
-            badge: icon,
-          },
-          fcm_options: {
-            link: absoluteLink,
-          },
+          headers: { Urgency: "high", TTL: "86400" },
+          notification: { title: String(title), body: String(body), icon, badge: icon },
+          fcm_options: { link: absoluteLink },
         },
       },
     }),
@@ -193,12 +181,7 @@ async function sendFcmLegacy(
     },
     body: JSON.stringify({
       to: token,
-      notification: {
-        title,
-        body,
-        sound: "default",
-        icon,
-      },
+      notification: { title, body, sound: "default", icon },
       data: {
         title,
         body,
@@ -252,9 +235,10 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
       .limit(25);
 
     const list = devices || [];
-    if (!list.length) return { sent: 0, failed: 0, skipped: true as const, reason: "no devices" };
+    if (!list.length) {
+      return { sent: 0, failed: 0, skipped: true as const, reason: "no devices" };
+    }
 
-    // Deduplicate tokens so multi-role rows with same FCM token only get one push
     const seen = new Set<string>();
     const unique = list.filter((d) => {
       const t = (d as { token: string }).token;
@@ -329,7 +313,7 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
     return { sent, failed, skipped: false as const };
   });
 
-/** Test notification for the current user only (in-app + push). */
+/** Test notification for the current user only (in-app + optional push). */
 export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => {
     const raw =
@@ -358,12 +342,16 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
                 ? "/student/notifications"
                 : "/";
 
-    const welcomeTitle = "🔔 D4EXAM Test Notification";
+    const welcomeTitle = "D4EXAM Test Notification";
     const welcomeBody = "This is a test notification for your D4EXAM account.";
 
+    let inAppInserted = 0;
+    let inAppError: string | null = null;
     const sb = adminClient();
-    if (sb) {
-      await sb.from("notifications").insert({
+    if (!sb) {
+      inAppError = "Server missing SUPABASE_SERVICE_ROLE_KEY — client will insert instead";
+    } else {
+      const { error } = await sb.from("notifications").insert({
         recipient_user_id: data.userId,
         title: welcomeTitle,
         message: welcomeBody,
@@ -371,16 +359,36 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
         link,
         action_url: link,
       } as never);
+      if (error) {
+        inAppError = error.message;
+      } else {
+        inAppInserted = 1;
+      }
     }
 
-    const push = await dispatchPushToUser({
-      data: {
-        recipientUserId: data.userId,
-        title: welcomeTitle,
-        message: welcomeBody,
-        link,
-      },
-    });
+    let push: unknown = { sent: 0, skipped: true, reason: "not attempted" };
+    try {
+      push = await dispatchPushToUser({
+        data: {
+          recipientUserId: data.userId,
+          title: welcomeTitle,
+          message: welcomeBody,
+          link,
+        },
+      });
+    } catch (e) {
+      push = { sent: 0, skipped: true, reason: (e as Error).message };
+    }
 
-    return { ok: true as const, push, recipients: 1, inAppInserted: sb ? 1 : 0 };
+    // Still ok if in-app row was written (or client will write)
+    return {
+      ok: true as const,
+      push,
+      recipients: 1,
+      inAppInserted,
+      inAppError,
+      title: welcomeTitle,
+      message: welcomeBody,
+      link,
+    };
   });
