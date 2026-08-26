@@ -4,6 +4,8 @@
  * Do not scatter ad-hoc inserts — call these functions.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { isOnlineNow } from "@/lib/offline-sync";
+import { queueNotificationRead, queueNotificationReadAll } from "@/lib/sync/queue";
 import {
   notifyUser,
   notifyMany,
@@ -104,21 +106,53 @@ export async function notifyRoleInSchool(opts: {
 }
 
 export async function markAsRead(notificationId: string, userId: string): Promise<boolean> {
+  if (!isOnlineNow()) {
+    try {
+      await queueNotificationRead(notificationId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const { error } = await supabase
     .from("notifications")
     .update({ read_at: new Date().toISOString() } as never)
     .eq("id", notificationId)
     .eq("recipient_user_id", userId);
-  return !error;
+  if (error) {
+    try {
+      await queueNotificationRead(notificationId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 
 export async function markAllAsRead(userId: string): Promise<boolean> {
+  if (!isOnlineNow()) {
+    try {
+      await queueNotificationReadAll(userId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const { error } = await supabase
     .from("notifications")
     .update({ read_at: new Date().toISOString() } as never)
     .eq("recipient_user_id", userId)
     .is("read_at", null);
-  return !error;
+  if (error) {
+    try {
+      await queueNotificationReadAll(userId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 
 export async function getUnreadCount(userId: string): Promise<number> {
