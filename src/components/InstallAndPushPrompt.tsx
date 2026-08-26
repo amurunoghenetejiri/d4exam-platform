@@ -3,10 +3,11 @@ import { enablePushNotifications, getPushPermissionState } from "@/lib/push";
 import { useSessionUser } from "@/lib/session";
 import { isNativeShell } from "@/native/platform";
 
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
+type BeforeInstallPromptEvent = Event &
+  {
+    prompt: () => Promise<void>;
+    userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+  };
 
 function isStandaloneDisplay(): boolean {
   if (typeof window === "undefined") return true;
@@ -85,17 +86,61 @@ export function InstallAndPushPrompt() {
     if (!session?.userId) return;
     if (pushTried.current) return;
 
-    // Prompt immediately after login (any role) so D4EXAM can show heads-up
-    // push for in-app notifications. Safe on native: enablePushNotifications
-    // uses Capacitor PushNotifications only (no Firebase SW in the APK).
+    // Only request once per device until granted/denied. Never re-prompt on every login.
+    try {
+      const k = `d4_push_prompted:${session.userId}`;
+      if (localStorage.getItem(k) === "1") {
+        const st = getPushPermissionState();
+        if (st === "granted" || st === "denied") {
+          pushTried.current = true;
+          return;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     pushTried.current = true;
     const delay = isNativeShell() ? 800 : 1200;
     const t = window.setTimeout(() => {
+      const st0 = getPushPermissionState();
+      // Already decided — register silently without system dialog noise
+      if (st0 === "granted") {
+        void enablePushNotifications(session.userId, session.role, { requestPermission: false }).catch(
+          () => undefined,
+        );
+        try {
+          localStorage.setItem(`d4_push_prompted:${session.userId}`, "1");
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      if (st0 === "denied" || st0 === "unsupported") {
+        try {
+          localStorage.setItem(`d4_push_prompted:${session.userId}`, "1");
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       void enablePushNotifications(session.userId, session.role).then((r) => {
-        // Allow one retry if user dismissed the system dialog without choosing.
+        try {
+          localStorage.setItem(`d4_push_prompted:${session.userId}`, "1");
+        } catch {
+          /* ignore */
+        }
+        // Allow one retry only if still default (user dismissed without choosing)
         if (!r.ok) {
           const st = getPushPermissionState();
-          if (st === "default") pushTried.current = false;
+          if (st === "default") {
+            pushTried.current = false;
+            try {
+              localStorage.removeItem(`d4_push_prompted:${session.userId}`);
+            } catch {
+              /* ignore */
+            }
+          }
         }
       });
     }, delay);
