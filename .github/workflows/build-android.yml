@@ -74,13 +74,30 @@ jobs:
           test -f android/gradlew
           chmod +x android/gradlew
 
+      - name: Ensure Android permissions (camera, mic, notifications)
+        run: |
+          set -euo pipefail
+          MAN="android/app/src/main/AndroidManifest.xml"
+          test -f "$MAN"
+          if ! grep -q 'android.permission.CAMERA' "$MAN"; then
+            sed -i 's|android.permission.INTERNET" />|android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.CAMERA" />|' "$MAN" || true
+          fi
+          if ! grep -q 'RECORD_AUDIO' "$MAN"; then
+            sed -i 's|android.permission.CAMERA" />|android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />|' "$MAN" || true
+          fi
+          if ! grep -q 'POST_NOTIFICATIONS' "$MAN"; then
+            sed -i 's|android.permission.INTERNET" />|android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />|' "$MAN" || true
+          fi
+          echo "Manifest permissions:"
+          grep 'uses-permission' "$MAN" || true
+
       - name: Install ImageMagick for launcher icons
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq imagemagick
 
-      - name: Apply full transparent logo (no black box, fits container)
+      - name: Apply launcher + monochrome notification icons
         run: |
           set -euo pipefail
           LOGO="public/logo.png"
@@ -91,7 +108,7 @@ jobs:
           find "$RES" -type f \( -name 'ic_launcher.xml' -o -name 'ic_launcher_round.xml' -o -name 'ic_launcher_foreground.xml' -o -name 'ic_launcher_foreground.png' \) -delete || true
           rm -rf "$RES/mipmap-anydpi-v26" || true
 
-          # PNG-only: logo scaled to ~72% so full art fits launcher mask, transparent padding
+          # PNG-only launcher: logo scaled to ~72% so full art fits launcher mask
           make_icon() {
             local size="$1" dest="$2"
             local inner
@@ -112,17 +129,29 @@ jobs:
             make_icon "$px" "$RES/mipmap-$name/ic_launcher_round.png"
           done
 
-          # Notification small icons — transparent logo, padded
+          # Notification small icons — Android requires WHITE alpha silhouette (not full-color).
+          # Full-color launcher logos look tiny/faint in the status bar. Force RGB=white, keep alpha.
+          make_stat_icon() {
+            local size="$1" dest="$2"
+            local inner
+            # Fill ~90% of canvas so glyph is strong and comparable to WhatsApp/etc.
+            inner=$(awk "BEGIN {printf \"%d\", $size * 0.90}")
+            convert "$LOGO" -background none -gravity center -resize "${inner}x${inner}" \
+              -extent "${size}x${size}" \
+              -channel RGB -evaluate set 100% \
+              PNG32:"$dest"
+          }
           for dens in mdpi:24 hdpi:36 xhdpi:48 xxhdpi:72 xxxhdpi:96; do
             name="${dens%%:*}"
             px="${dens##*:}"
             mkdir -p "$RES/drawable-$name"
-            make_icon "$px" "$RES/drawable-$name/ic_stat_d4exam.png"
+            mkdir -p "$RES/drawable"
+            make_stat_icon "$px" "$RES/drawable-$name/ic_stat_d4exam.png"
           done
+          make_stat_icon 48 "$RES/drawable/ic_stat_d4exam.png"
 
-          # Manifest already uses @mipmap/ic_launcher — PNG only, no adaptive black layer
-          echo "Icons: transparent PNG only, logo ~72% (full art visible, no black box)"
-          find "$RES/mipmap-"* -name 'ic_launcher*' | sort
+          echo "Icons: launcher PNG + white monochrome ic_stat_d4exam"
+          find "$RES" -name 'ic_stat_d4exam.png' | sort
 
       - name: Optional google-services.json for FCM (native push)
         env:
