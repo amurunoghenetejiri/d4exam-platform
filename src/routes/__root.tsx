@@ -17,6 +17,7 @@ import { OfflineBootstrap } from "@/components/OfflineBootstrap";
 import { LocalDbBootstrap } from "@/components/LocalDbBootstrap";
 import { OfflineStatusPill } from "@/components/OfflineStatusPill";
 import { NotificationLiveListener } from "@/components/NotificationLiveListener";
+import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
 import { useSessionUser } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
@@ -213,6 +214,7 @@ function RootComponent() {
       <OfflineBootstrap />
       <OfflineStatusPill />
       <NotificationLiveListener />
+      <NotificationPermissionPrompt />
       <Outlet />
       <NativeBootstrap />
       <Toaster />
