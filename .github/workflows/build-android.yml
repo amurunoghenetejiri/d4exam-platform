@@ -11,6 +11,8 @@ on:
       - "public/**"
       - "src/lib/push.ts"
       - "src/native/**"
+      - "scripts/prepare-capacitor-dist.mjs"
+      - "scripts/generate-capacitor-index.mjs"
       - ".github/workflows/build-android.yml"
       - "DEPLOY_TRIGGER.txt"
 
@@ -43,19 +45,17 @@ jobs:
           set -euo pipefail
           npm run build
 
-      - name: Prepare Capacitor dist
+      - name: Prepare Capacitor dist (local shell — no Vercel)
         run: |
           set -euo pipefail
-          mkdir -p dist
-          if [ -d .output/public ]; then
-            cp -a .output/public/. dist/
+          node scripts/prepare-capacitor-dist.mjs
+          test -f dist/index.html
+          test -d dist/assets
+          if grep -R "d4exam-platform.vercel.app" dist/index.html dist/offline.html 2>/dev/null; then
+            echo "FATAL: Vercel URL leaked into bundled shell"
+            exit 1
           fi
-          cp -f public/offline.html dist/offline.html 2>/dev/null || true
-          cp -f public/firebase-messaging-sw.js dist/firebase-messaging-sw.js 2>/dev/null || true
-          if [ ! -f dist/index.html ]; then
-            printf '%s\n' '<!DOCTYPE html><html><head><meta charset="UTF-8"/><meta http-equiv="refresh" content="0;url=https://d4exam-platform.vercel.app/"/><title>D4EXAM</title></head><body style="background:#0b1b3a;color:#fff;display:grid;place-items:center;min-height:100vh;font-family:system-ui">Opening D4EXAM…</body></html>' > dist/index.html
-          fi
-          ls -la dist/offline.html dist/index.html 2>/dev/null || true
+          ls -la dist/index.html dist/offline.html dist/assets | head -30
 
       - name: Ensure complete Android platform
         run: |
@@ -65,7 +65,17 @@ jobs:
           test -f android/gradlew
           chmod +x android/gradlew
 
-      - name: Apply D4EXAM permissions version 2.5.0 branding
+      - name: Verify capacitor config has no Vercel shell URL
+        run: |
+          set -euo pipefail
+          CFG="capacitor.config.ts"
+          if grep -q 'server.url' "$CFG" && grep -q 'd4exam-platform.vercel.app' "$CFG"; then
+            echo "FATAL: server.url still points at Vercel — local shell required"
+            exit 1
+          fi
+          echo "OK: capacitor.config has no Vercel server.url"
+
+      - name: Apply D4EXAM permissions and branding
         run: |
           set -euo pipefail
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -74,62 +84,9 @@ jobs:
               sed -i "s|</manifest>|    <uses-permission android:name=\"$perm\" />\n</manifest>|" "$MANIFEST"
             fi
           done
-          mkdir -p android/app/src/main/res/values
-          rm -f android/app/src/main/res/values/ic_launcher_background.xml
-          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' \
-            '    <color name="colorPrimary">#0b1b3a</color>' \
-            '    <color name="colorPrimaryDark">#0b1b3a</color>' \
-            '    <color name="colorAccent">#3B82F6</color>' \
-            '    <color name="splash_background">#0b1b3a</color>' \
-            '    <color name="ic_launcher_background">#00000000</color>' \
-            '</resources>' > android/app/src/main/res/values/colors.xml
-          sed -i 's/<string name="app_name">.*<\/string>/<string name="app_name">D4EXAM<\/string>/' android/app/src/main/res/values/strings.xml || true
-          sed -i 's/versionCode [0-9]*/versionCode 25/' android/app/build.gradle || true
-          sed -i 's/versionName "[^"]*"/versionName "2.5.0"/' android/app/build.gradle || true
-
-      - name: Optional google-services.json from secret
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON }}
-        run: |
-          set -euo pipefail
-          if [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
-            printf '%s\n' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
-          fi
-
-      - name: Capacitor sync
-        run: npx cap sync android
-
-      - name: VERIFY live Vercel server.url
-        run: |
-          set -euo pipefail
-          CFG="android/app/src/main/assets/capacitor.config.json"
-          cat "$CFG"
-          grep -q 'd4exam-platform.vercel.app' "$CFG" || { echo "FATAL: server.url missing"; exit 1; }
-          test -f android/app/src/main/assets/public/offline.html
-          echo "OK live Vercel shell"
-
-      - name: Generate D4EXAM icons and splash
-        run: |
-          set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick fonts-dejavu-core
-          SRC=""
-          if [ -f public/logo.png ]; then SRC=public/logo.png
-          elif [ -f public/icon-512.png ]; then SRC=public/icon-512.png
-          else exit 0; fi
-          for density_size in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-            density=${density_size%%:*}; size=${density_size##*:}
-            dir="android/app/src/main/res/mipmap-${density}"; mkdir -p "$dir"
-            convert "$SRC" -resize "${size}x${size}" -background none -gravity center -extent "${size}x${size}" PNG32:"$dir/ic_launcher.png"
-            convert "$SRC" -resize "${size}x${size}" -background none -gravity center -extent "${size}x${size}" PNG32:"$dir/ic_launcher_round.png"
-            fsize=$((size * 2)); safe=$((fsize * 66 / 100))
-            convert "$SRC" -resize "${safe}x${safe}" -background none -gravity center -extent "${fsize}x${fsize}" PNG32:"$dir/ic_launcher_foreground.png"
-          done
-          mkdir -p android/app/src/main/res/drawable android/app/src/main/res/mipmap-anydpi-v26
-          convert -size 1080x1920 xc:"#0b1b3a" \( "$SRC" -resize 480x480 \) -gravity center -compose over -composite PNG32:android/app/src/main/res/drawable/d4_splash.png
-          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">' '    <background android:drawable="@color/ic_launcher_background"/>' '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>' '</adaptive-icon>' > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
-          cp android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
-          if [ -f android/app/src/main/res/values/styles.xml ]; then
-            sed -i 's|android:windowBackground">@[^<]*|android:windowBackground">@drawable/d4_splash|' android/app/src/main/res/values/styles.xml || true
+          if [ -f android/app/build.gradle ]; then
+            sed -i 's/versionCode .*/versionCode 10/' android/app/build.gradle || true
+            sed -i 's/versionName .*/versionName "3.0.0"/' android/app/build.gradle || true
           fi
 
       - name: Setup JDK 21
@@ -167,6 +124,7 @@ jobs:
 
       - name: Summary
         run: |
-          echo "### D4EXAM Android APK v2.5.0 — LIVE Vercel shell restored" >> "$GITHUB_STEP_SUMMARY"
-          echo "- server.url = https://d4exam-platform.vercel.app" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Fixes blank blue screen from local-only SPA" >> "$GITHUB_STEP_SUMMARY"
+          echo "### D4EXAM Android APK — local bundled shell" >> "$GITHUB_STEP_SUMMARY"
+          echo "- No server.url (does not load Vercel as app shell)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- webDir=dist with generated index.html + assets" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Supabase used online for auth/sync when network available" >> "$GITHUB_STEP_SUMMARY"
