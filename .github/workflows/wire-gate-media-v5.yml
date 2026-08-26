@@ -1,0 +1,58 @@
+name: wire-gate-media-v5
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/wire-gate-media-v5.yml
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wire media request into startPreview
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/components/cbt/ExamSecurityGate.tsx')
+          t = p.read_text()
+          if 'requestExamMediaPermissions' not in t:
+              t = t.replace(
+                  '  openCameraStream,\n} from "@/native/cameraService";',
+                  '  openCameraStream,\n  requestExamMediaPermissions,\n} from "@/native/cameraService";',
+              )
+          old = '''      const camOk = await ensureCameraPermission();
+      if (!camOk.granted) throw new Error(camOk.error || "Camera permission required");
+      // When exam requires microphone, request it together with camera so the OS shows both.
+      if (needMic) {
+        try {
+          await ensureMicrophonePermission();
+        } catch {
+          /* soft — exam start may still proceed without mic if policy allows */
+        }
+      }
+      const stream = await openCameraStream({'''
+          new = '''      const { camera: camOk, microphone: micOk } = await requestExamMediaPermissions({
+        camera: true,
+        microphone: Boolean(needMic),
+      });
+      if (!camOk.granted) throw new Error(camOk.error || "Camera permission required");
+      const stream = await openCameraStream({'''
+          if old in t:
+              t = t.replace(old, new)
+              print('startPreview wired')
+          else:
+              print('pattern missing or already wired')
+          p.write_text(t)
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/ExamSecurityGate.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): request camera+mic together when exam gate opens"
+            git push
+          fi
