@@ -1,0 +1,58 @@
+name: fix-cbt-screenstream-state
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-cbt-screenstream-state.yml
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add missing screenStream state and shutdown cleanup
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          t = p.read_text()
+          changed = False
+
+          if 'const [screenStream, setScreenStream]' not in t:
+              old = '  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);\n  const [fsGate, setFsGate] = useState(false);'
+              new = '''  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);\n  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);\n  const screenStreamRef = useRef<MediaStream | null>(null);\n  const [fsGate, setFsGate] = useState(false);'''
+              if old not in t:
+                  raise SystemExit('liveStream pattern missing')
+              t = t.replace(old, new, 1)
+              changed = True
+              print('added screenStream state')
+          else:
+              print('state already present')
+
+          old_sd = '''  const shutdownMedia = useCallback(() => {\n    stopMediaStream(mediaStreamRef.current);\n    mediaStreamRef.current = null;\n    setLiveStream(null);\n  }, []);'''
+          new_sd = '''  const shutdownMedia = useCallback(() => {\n    stopMediaStream(mediaStreamRef.current);\n    mediaStreamRef.current = null;\n    setLiveStream(null);\n    try {\n      stopScreenShareStream(screenStreamRef.current);\n    } catch {\n      /* ignore */\n    }\n    screenStreamRef.current = null;\n    setScreenStream(null);\n  }, []);'''
+          if 'stopScreenShareStream(screenStreamRef.current)' not in t.split('shutdownMedia')[1][:500] if 'shutdownMedia' in t else True:
+              if old_sd in t:
+                  t = t.replace(old_sd, new_sd, 1)
+                  changed = True
+                  print('shutdown patched')
+              else:
+                  print('shutdown pattern not found (may already be patched)')
+
+          if changed:
+              p.write_text(t)
+              print('wrote cbt file')
+          else:
+              print('no changes needed')
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): declare screenStream state (fixes exam page crash)"
+            git push
+          fi
