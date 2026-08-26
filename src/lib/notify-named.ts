@@ -114,10 +114,7 @@ export async function namedTeacherExamDecision(opts: {
     copy = Msg.teacherExamRejected({ teacherName, examTitle: opts.examTitle, note });
   } else if (d.includes("revision") || d.includes("change")) {
     type = "exam_revision_requested";
-    copy = {
-      title: `⚠️ ${teacherName}, CORRECTION REQUIRED`,
-      message: `Your ${opts.examTitle} requires correction.${note ? ` ${note}` : ""}`,
-    };
+    copy = Msg.teacherExamRevisionRequested({ teacherName, examTitle: opts.examTitle, note });
   } else if (opts.scheduleNote) {
     copy = { title: copy.title, message: `${copy.message}\n${opts.scheduleNote}` };
   }
@@ -147,4 +144,54 @@ export async function namedTeacherExamDecision(opts: {
       })),
     );
   }
+}
+
+export async function namedOfficersExamSubmitted(opts: {
+  schoolId: string;
+  examId: string;
+  examTitle: string;
+  teacherName?: string | null;
+  courseLabel?: string | null;
+}): Promise<void> {
+  const { listOfficerUserIds, listAdminUserIds } = await import("@/lib/notify");
+  const [officers, admins] = await Promise.all([
+    listOfficerUserIds(opts.schoolId),
+    listAdminUserIds(opts.schoolId),
+  ]);
+  const recipients = [...new Set([...officers, ...admins])];
+  let schoolName: string | null = null;
+  let schoolCode: string | null = null;
+  try {
+    const { data } = await supabase
+      .from("schools")
+      .select("name, school_code, code")
+      .eq("id", opts.schoolId)
+      .maybeSingle();
+    const row = data as { name?: string; school_code?: string; code?: string } | null;
+    schoolName = row?.name?.trim() || null;
+    schoolCode = (row?.school_code || row?.code || "").trim() || null;
+  } catch {
+    /* ignore */
+  }
+  const teacherName = (opts.teacherName || "A teacher").trim();
+  const copy = Msg.officerExamSubmittedForReview({
+    teacherName,
+    examTitle: opts.examTitle,
+    courseLabel: opts.courseLabel,
+    schoolName,
+    schoolCode,
+  });
+  await notifyMany(
+    recipients.map((uid) => ({
+      recipientUserId: uid,
+      schoolId: opts.schoolId,
+      title: copy.title,
+      message: copy.message,
+      type: "exam_submitted" as NotifyType,
+      link: officers.includes(uid) ? "/officer/approvals" : "/admin/examinations",
+      entityType: "examination",
+      entityId: opts.examId,
+      dedupeMinutes: 10,
+    })),
+  );
 }
