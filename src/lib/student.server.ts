@@ -4,20 +4,38 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { StudentContext, StudentCourse } from "@/lib/student";
 
 /**
- * Server-side student context: uses service role so RLS cannot hide the
- * student row or profile join. Also soft-links profile_id when missing.
+ * Server-side student context.
+ * Prefers service-role admin client; falls back to the authenticated user client
+ * so student dashboards still work when SUPABASE_SERVICE_ROLE_KEY is not set.
  */
 export const getMyStudentContext = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<StudentContext | null> => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const userId = context.userId as string;
 
-    const { data: profile } = await supabaseAdmin
+    type Db = typeof context.supabase;
+    let db: Db = context.supabase;
+    try {
+      const mod = await import("@/integrations/supabase/client.server");
+      if (mod.supabaseAdmin) db = mod.supabaseAdmin as unknown as Db;
+    } catch (e) {
+      console.warn("[student-context] admin client unavailable, using user client", e);
+    }
+
+    const { data: profileByAuth } = await db
       .from("profiles")
       .select("id, full_name, email, status, school_id")
       .eq("auth_user_id", userId)
       .maybeSingle();
+    let profile = profileByAuth;
+    if (!profile?.id) {
+      const { data: profileById } = await db
+        .from("profiles")
+        .select("id, full_name, email, status, school_id")
+        .eq("id", userId)
+        .maybeSingle();
+      profile = profileById;
+    }
 
     if (!profile?.id || !profile.school_id) return null;
 
@@ -29,7 +47,7 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
 
     let student: Record<string, unknown> | null = null;
 
-    const { data: byProfile } = await supabaseAdmin
+    const { data: byProfile } = await db
       .from("students")
       .select(studentSelect)
       .eq("profile_id", profileId)
@@ -41,7 +59,7 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
       const local = String(profile.email).split("@")[0] || "";
       const norm = local.replace(/[^a-z0-9]/gi, "").toLowerCase();
       if (norm.length >= 6) {
-        const { data: candidates } = await supabaseAdmin
+        const { data: candidates } = await db
           .from("students")
           .select(studentSelect)
           .eq("school_id", schoolId)
@@ -60,7 +78,7 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
     if (!student) return null;
 
     if (!student.profile_id) {
-      await supabaseAdmin
+      await db
         .from("students")
         .update({ profile_id: profileId } as never)
         .eq("id", student.id as string)
@@ -68,7 +86,7 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
       student.profile_id = profileId;
     }
 
-    const { data: sessions } = await supabaseAdmin
+    const { data: sessions } = await db
       .from("academic_sessions")
       .select("id, name, status")
       .eq("school_id", schoolId)
@@ -82,7 +100,7 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
     let semesterName: string | null = null;
     let semesterId: string | null = null;
     if (activeSession?.id) {
-      const { data: semesters } = await supabaseAdmin
+      const { data: semesters } = await db
         .from("semesters")
         .select("id, name, status")
         .eq("school_id", schoolId)
@@ -97,7 +115,7 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
       semesterId = (activeSem?.id as string | null) ?? null;
     }
 
-    const { data: links } = await supabaseAdmin
+    const { data: links } = await db
       .from("student_courses")
       .select("course_id, semester_id, courses(id, code, name)")
       .eq("student_id", student.id as string)
@@ -114,7 +132,7 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
     const departmentId = (student.department_id as string | null) ?? null;
     const levelId = (student.level_id as string | null) ?? null;
     if (departmentId) {
-      let oq = supabaseAdmin
+      let oq = db
         .from("course_offerings")
         .select("course_id, courses(id, code, name)")
         .eq("school_id", schoolId)
@@ -122,31 +140,18 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
       if (levelId) oq = oq.eq("level_id", levelId);
       const { data: offerings } = await oq;
       for (const row of offerings ?? []) {
-        const c = row.courses as { id: string; code: string; name: string } | null;
-        if (c?.id) byId.set(c.id, { id: c.id, code: c.code ?? "", name: c.name ?? "" });
-      }
-
-      let cq = supabaseAdmin
-        .from("courses")
-        .select("id, code, name")
-        .eq("school_id", schoolId)
-        .eq("department_id", departmentId)
-        .eq("status", "active");
-      if (levelId) cq = cq.or(`level_id.eq.${levelId},level_id.is.null`);
-      const { data: tagged } = await cq;
-      for (const c of tagged ?? []) {
-        if (c.id) byId.set(c.id, { id: c.id, code: c.code ?? "", name: c.name ?? "" });
+        const c = row.courses as { id: string; code: string; name: string } | null | undefined;
+        if (c?.id) byId.set(c.id, { id: c.id, code: c.code, name: c.name });
       }
     }
 
-    const courses = [...byId.values()].sort((a, b) => a.code.localeCompare(b.code));
-
+    const courses = Array.from(byId.values()).sort((a, b) => a.code.localeCompare(b.code));
     const departments = student.departments as { name: string } | null;
     const faculties = student.faculties as { name: string } | null;
     const levels = student.levels as { name: string } | null;
     const status = String((student.status as string | null) ?? "active");
 
-    const { data: school } = await supabaseAdmin
+    const { data: school } = await db
       .from("schools")
       .select("name")
       .eq("id", schoolId)
@@ -199,41 +204,19 @@ export const getSchoolDashboardCounts = createServerFn({ method: "POST" })
     const allowed =
       isSuper === true ||
       (profile?.school_id && String(profile.school_id) === schoolId);
-    if (!allowed) {
-      const { data: roles } = await supabaseAdmin
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", context.userId)
-        .eq("school_id", schoolId)
-        .limit(5);
-      if (!roles?.length) {
-        return { students: 0, teachers: 0, courses: 0, examinations: 0 };
-      }
-    }
+    if (!allowed) throw new Error("Forbidden");
 
-    const [students, teachers, courses, examinations] = await Promise.all([
-      supabaseAdmin
-        .from("students")
-        .select("*", { count: "exact", head: true })
-        .eq("school_id", schoolId),
-      supabaseAdmin
-        .from("teachers")
-        .select("*", { count: "exact", head: true })
-        .eq("school_id", schoolId),
-      supabaseAdmin
-        .from("courses")
-        .select("*", { count: "exact", head: true })
-        .eq("school_id", schoolId),
-      supabaseAdmin
-        .from("examinations")
-        .select("*", { count: "exact", head: true })
-        .eq("school_id", schoolId),
+    const [students, teachers, officers, courses] = await Promise.all([
+      supabaseAdmin.from("students").select("id", { count: "exact", head: true }).eq("school_id", schoolId),
+      supabaseAdmin.from("teachers").select("id", { count: "exact", head: true }).eq("school_id", schoolId),
+      supabaseAdmin.from("examination_officers").select("id", { count: "exact", head: true }).eq("school_id", schoolId),
+      supabaseAdmin.from("courses").select("id", { count: "exact", head: true }).eq("school_id", schoolId),
     ]);
 
     return {
       students: students.count ?? 0,
       teachers: teachers.count ?? 0,
+      officers: officers.count ?? 0,
       courses: courses.count ?? 0,
-      examinations: examinations.count ?? 0,
     };
   });
