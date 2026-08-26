@@ -1,9 +1,10 @@
 /**
  * Client-side push registration.
- * - Web/PWA: Firebase Cloud Messaging (browser) — may show as Chrome
- * - Android Capacitor: @capacitor/push-notifications ONLY (native D4EXAM channel)
+ * - Web/PWA: Firebase Cloud Messaging (may show as Chrome)
+ * - Android Capacitor: @capacitor/push-notifications ONLY (native D4EXAM tray)
  *
- * Native shell NEVER registers the Firebase messaging service worker.
+ * Crash-safe: never throw out of native register; never run web FCM inside APK.
+ * Multi-role: same FCM token can be linked to multiple user_ids (one row per user).
  */
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getMessaging, getToken, isSupported, onMessage, type Messaging } from "firebase/messaging";
@@ -18,6 +19,7 @@ let onMessageBound = false;
 let nativeListenersBound = false;
 let nativePermissionCache: PushPermissionState | null = null;
 let nativeRegisterInFlight = false;
+let lastNativeRegisterAt = 0;
 
 const NATIVE_PUSH_SKIP_KEY = "d4_native_push_skip_register";
 
@@ -125,6 +127,10 @@ export async function refreshNativePushPermissionState(): Promise<PushPermission
   }
 }
 
+/**
+ * Link this device token to the given user without stealing it from other users
+ * on the same phone (multi-role testing: student + teacher + officer, etc.).
+ */
 async function upsertPushDevice(
   userId: string,
   token: string,
@@ -137,28 +143,30 @@ async function upsertPushDevice(
       ? `${navigator.userAgent} | platform=${getRuntimePlatform()} | native=${isNativeShell() ? "1" : "0"}`
       : `platform=${getRuntimePlatform()}`;
 
+  const now = new Date().toISOString();
   const row = {
     user_id: userId,
     token,
     role: role || null,
     user_agent: ua.slice(0, 400),
     enabled: true,
-    last_seen_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    last_seen_at: now,
+    updated_at: now,
   };
 
   try {
+    // Prefer update of THIS user + token (multi-role safe)
     const upd = await supabase
       .from("push_devices")
       .update({
-        user_id: userId,
         role: role || null,
         user_agent: ua.slice(0, 400),
         enabled: true,
-        last_seen_at: row.last_seen_at,
-        updated_at: row.updated_at,
+        last_seen_at: now,
+        updated_at: now,
       } as never)
       .eq("token", token)
+      .eq("user_id", userId)
       .select("id");
 
     if (!upd.error && upd.data && (upd.data as { id: string }[]).length > 0) {
@@ -169,6 +177,7 @@ async function upsertPushDevice(
     if (!ins.error) return { ok: true };
 
     const msg = ins.error.message || "";
+    // Unique on token only (legacy schema): re-bind to current user
     if (/duplicate|unique|push_devices_token/i.test(msg)) {
       const again = await supabase
         .from("push_devices")
@@ -177,13 +186,16 @@ async function upsertPushDevice(
           role: role || null,
           user_agent: ua.slice(0, 400),
           enabled: true,
-          last_seen_at: row.last_seen_at,
-          updated_at: row.updated_at,
+          last_seen_at: now,
+          updated_at: now,
         } as never)
         .eq("token", token);
       if (!again.error) return { ok: true };
       return { ok: false, error: again.error.message };
     }
+
+    // Unique on (user_id, token) race → treat as ok
+    if (/duplicate|unique/i.test(msg)) return { ok: true };
 
     return { ok: false, error: msg };
   } catch (e) {
@@ -193,9 +205,9 @@ async function upsertPushDevice(
 
 function showLocalNotification(title: string, body: string, link?: string) {
   if (typeof window === "undefined" || !("Notification" in window)) return;
-  if (isNativeShell()) return; // never use browser Notification API inside the APK
+  if (isNativeShell()) return;
   if (Notification.permission !== "granted") return;
-  const icon = `${window.location.origin}/icon-192.png`;
+  const icon = `${window.location.origin}/logo.png`;
   try {
     const n = new Notification(title, {
       body,
@@ -243,12 +255,6 @@ async function bindNativePushListeners(userId: string, role?: string | null) {
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
 
-    try {
-      await PushNotifications.removeAllListeners();
-    } catch {
-      /* ignore */
-    }
-
     await PushNotifications.addListener("registration", (token) => {
       clearNativeRegisterSkip();
       if (token?.value) {
@@ -258,7 +264,7 @@ async function bindNativePushListeners(userId: string, role?: string | null) {
 
     await PushNotifications.addListener("registrationError", (err) => {
       console.warn("[D4EXAM] Push registration error", err);
-      markNativeRegisterUnsafe();
+      // Do not hard-skip forever — transient FCM errors are common
     });
 
     await PushNotifications.addListener("pushNotificationReceived", (notification) => {
@@ -294,19 +300,25 @@ async function safeNativeRegister(): Promise<{ ok: boolean; token?: string; erro
     return {
       ok: false,
       error:
-        "Push registration was disabled after a previous failure. Rebuild the APK with google-services.json, then clear app storage or tap Enable again.",
+        "Push registration was paused after repeated failures. Clear app storage or toggle notifications in Settings, then try Enable again.",
     };
   }
   if (nativeRegisterInFlight) {
     return { ok: false, error: "Registration already in progress" };
   }
+  // Throttle: avoid re-register storm that can crash WebView/FCM
+  const now = Date.now();
+  if (now - lastNativeRegisterAt < 8_000) {
+    return { ok: true };
+  }
+  lastNativeRegisterAt = now;
   nativeRegisterInFlight = true;
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
     await ensureAndroidChannel();
 
     const tokenPromise = new Promise<string | null>((resolve) => {
-      const timeout = setTimeout(() => resolve(null), 10_000);
+      const timeout = setTimeout(() => resolve(null), 12_000);
       void PushNotifications.addListener("registration", (t) => {
         clearTimeout(timeout);
         resolve(t?.value || null);
@@ -316,7 +328,6 @@ async function safeNativeRegister(): Promise<{ ok: boolean; token?: string; erro
       });
       void PushNotifications.addListener("registrationError", () => {
         clearTimeout(timeout);
-        markNativeRegisterUnsafe();
         resolve(null);
       }).catch(() => {
         clearTimeout(timeout);
@@ -324,15 +335,27 @@ async function safeNativeRegister(): Promise<{ ok: boolean; token?: string; erro
       });
     });
 
-    await PushNotifications.register();
+    try {
+      await PushNotifications.register();
+    } catch (regErr) {
+      console.warn("[D4EXAM] PushNotifications.register threw", regErr);
+      return {
+        ok: false,
+        error:
+          (regErr as Error).message ||
+          "Native push register failed (is google-services.json in the APK?)",
+      };
+    }
+
     const token = await tokenPromise;
     if (token) {
       clearNativeRegisterSkip();
       return { ok: true, token };
     }
+    // No token yet — not a hard crash; listeners may deliver later
     return { ok: true };
   } catch (e) {
-    markNativeRegisterUnsafe();
+    console.warn("[D4EXAM] safeNativeRegister failed", e);
     return { ok: false, error: (e as Error).message || "Native push registration failed" };
   } finally {
     nativeRegisterInFlight = false;
@@ -342,14 +365,23 @@ async function safeNativeRegister(): Promise<{ ok: boolean; token?: string; erro
 async function enableNativePushNotifications(
   userId: string,
   role?: string | null,
+  opts?: { requestPermission?: boolean },
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
   try {
     await disableWebPushInNativeShell();
     const { PushNotifications } = await import("@capacitor/push-notifications");
 
     let permStatus = await PushNotifications.checkPermissions();
-    if (permStatus.receive !== "granted") {
-      permStatus = await PushNotifications.requestPermissions();
+    if (permStatus.receive !== "granted" && opts?.requestPermission !== false) {
+      try {
+        permStatus = await PushNotifications.requestPermissions();
+      } catch (permErr) {
+        console.warn("[D4EXAM] requestPermissions failed", permErr);
+        return {
+          ok: false,
+          error: "Could not request notification permission",
+        };
+      }
     }
 
     const state: PushPermissionState =
@@ -372,15 +404,20 @@ async function enableNativePushNotifications(
 
     await bindNativePushListeners(userId, role);
     clearNativeRegisterSkip();
+
+    // Defer register slightly so permission dialog + activity resume settle (avoids crash loops)
+    await new Promise((r) => setTimeout(r, 350));
+
     const reg = await safeNativeRegister();
     if (reg.token) {
       const saved = await upsertPushDevice(userId, reg.token, role);
       if (!saved.ok) return { ok: false, error: saved.error };
       return { ok: true, token: reg.token };
     }
+    // Permission granted even if token delayed — app must stay up
     return { ok: true, error: reg.error };
   } catch (e) {
-    markNativeRegisterUnsafe();
+    console.warn("[D4EXAM] enableNativePushNotifications failed", e);
     return { ok: false, error: (e as Error).message || "Native push registration failed" };
   }
 }
@@ -390,7 +427,7 @@ async function enableWebPushNotifications(
   role?: string | null,
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
   if (isNativeShell()) {
-    return enableNativePushNotifications(userId, role);
+    return enableNativePushNotifications(userId, role, { requestPermission: true });
   }
   if (typeof window === "undefined" || !("Notification" in window)) {
     return { ok: false, error: "Notifications are not supported in this browser" };
@@ -448,7 +485,7 @@ export async function enablePushNotifications(
   if (!userId) return { ok: false, error: "Sign in required" };
   if (isNativeShell()) {
     await disableWebPushInNativeShell();
-    return enableNativePushNotifications(userId, role);
+    return enableNativePushNotifications(userId, role, { requestPermission: true });
   }
   return enableWebPushNotifications(userId, role);
 }
@@ -475,7 +512,11 @@ export async function refreshPushLastSeen(userId: string): Promise<void> {
   }
 }
 
-/** Called from root NativeBootstrap on session - native only, never web FCM. */
+/**
+ * Called on session in native shell.
+ * IMPORTANT: only re-registers if permission is ALREADY granted.
+ * Never auto-prompts on cold start (that was causing crash loops).
+ */
 export async function initNativePushIfNeeded(
   userId?: string | null,
   role?: string | null,
@@ -483,11 +524,13 @@ export async function initNativePushIfNeeded(
   if (!isNativeShell()) return;
   try {
     await disableWebPushInNativeShell();
-    const state = await refreshNativePushPermissionState();
     if (!userId) return;
-    if (state === "granted" || state === "default") {
-      void enableNativePushNotifications(userId, role);
+    const state = await refreshNativePushPermissionState();
+    if (state === "granted") {
+      // Silent re-bind + register — no permission dialog
+      void enableNativePushNotifications(userId, role, { requestPermission: false });
     }
+    // state === default → wait for user to tap Enable in settings (avoids crash on prompt)
   } catch {
     /* never crash startup */
   }

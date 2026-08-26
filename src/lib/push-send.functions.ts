@@ -108,13 +108,12 @@ async function sendFcmV1(
   const projectId = sa.project_id || process.env["FIREBASE_PROJECT_ID"] || "d4exam-6506a";
   const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
   const origin = appOrigin();
-  const icon = `${origin}/icon-192.png`;
+  // Transparent brand logo (same as navbar)
+  const icon = `${origin}/logo.png`;
   const absoluteLink = link.startsWith("http")
     ? link
     : `${origin}${link.startsWith("/") ? link : `/${link}`}`;
 
-  // notification + android = system tray on native Android
-  // data + webpush = browser / PWA
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -127,6 +126,7 @@ async function sendFcmV1(
         notification: {
           title: String(title),
           body: String(body),
+          image: icon,
         },
         data: {
           title: String(title),
@@ -146,7 +146,9 @@ async function sendFcmV1(
             default_vibrate_timings: true,
             notification_priority: "PRIORITY_MAX",
             visibility: "PUBLIC",
+            // Capacitor push plugin default click action
             click_action: "FCM_PLUGIN_ACTIVITY",
+            image: icon,
           },
         },
         webpush: {
@@ -182,7 +184,7 @@ async function sendFcmLegacy(
   serverKey: string,
 ) {
   const origin = appOrigin();
-  const icon = `${origin}/icon-192.png`;
+  const icon = `${origin}/logo.png`;
   const res = await fetch("https://fcm.googleapis.com/fcm/send", {
     method: "POST",
     headers: {
@@ -195,6 +197,7 @@ async function sendFcmLegacy(
         title,
         body,
         sound: "default",
+        icon,
       },
       data: {
         title,
@@ -251,6 +254,15 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
     const list = devices || [];
     if (!list.length) return { sent: 0, failed: 0, skipped: true as const, reason: "no devices" };
 
+    // Deduplicate tokens so multi-role rows with same FCM token only get one push
+    const seen = new Set<string>();
+    const unique = list.filter((d) => {
+      const t = (d as { token: string }).token;
+      if (!t || seen.has(t)) return false;
+      seen.add(t);
+      return true;
+    });
+
     const sa = parseServiceAccount();
     const legacyKey = process.env["FCM_SERVER_KEY"] || process.env["FIREBASE_SERVER_KEY"] || "";
 
@@ -279,7 +291,7 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
 
     let sent = 0;
     let failed = 0;
-    for (const d of list) {
+    for (const d of unique) {
       const token = (d as { token: string }).token;
       try {
         const result =
@@ -346,7 +358,7 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
                 ? "/student/notifications"
                 : "/";
 
-    const welcomeTitle = "\ud83d\udd14 D4EXAM Test Notification";
+    const welcomeTitle = "🔔 D4EXAM Test Notification";
     const welcomeBody = "This is a test notification for your D4EXAM account.";
 
     const sb = adminClient();
