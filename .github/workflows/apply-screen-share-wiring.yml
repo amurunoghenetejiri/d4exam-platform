@@ -1,0 +1,406 @@
+name: apply-screen-share-wiring
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-screen-share-wiring.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch live-video, session, monitor, gate
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          lv = Path("src/lib/live-video.ts")
+          t = lv.read_text()
+          if "LIVE_SCREEN_EVENT" not in t:
+              t = t.replace(
+                  'export const LIVE_CAM_EVENT = "frame";',
+                  'export const LIVE_CAM_EVENT = "frame";\nexport const LIVE_SCREEN_EVENT = "screen_frame";',
+              )
+              t = t.replace(
+                  "export function liveCamChannelName(schoolId: string): string {\n  return `live-cam:${schoolId}`;\n}",
+                  "export function liveCamChannelName(schoolId: string): string {\n  return `live-cam:${schoolId}`;\n}\n\nexport function liveScreenChannelName(schoolId: string): string {\n  return `live-screen:${schoolId}`;\n}",
+              )
+              t = t.rstrip() + """
+
+export type LiveScreenFramePayload = {
+  attemptId: string;
+  studentId: string;
+  examId: string;
+  frame: string;
+  ts: number;
+  screenActive?: boolean;
+};
+
+export type LiveScreenPublisher = { stop: () => void };
+
+export function startLiveScreenPublisher(opts: {
+  schoolId: string;
+  attemptId: string;
+  studentId: string;
+  examId: string;
+  getStream: () => MediaStream | null;
+  intervalMs?: number;
+}): LiveScreenPublisher {
+  const intervalMs = opts.intervalMs ?? 900;
+  let stopped = false;
+  let channel: RealtimeChannel | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let publishing = false;
+  channel = supabase.channel(liveScreenChannelName(opts.schoolId), {
+    config: { broadcast: { ack: false, self: false } },
+  });
+  const sendFrame = async () => {
+    if (stopped || publishing) return;
+    const stream = opts.getStream();
+    if (!stream) return;
+    publishing = true;
+    try {
+      const frame = await captureJpegFromStream(stream, { maxWidth: 480, quality: 0.45 });
+      if (stopped || !frame || !channel) return;
+      void channel.send({
+        type: "broadcast",
+        event: LIVE_SCREEN_EVENT,
+        payload: {
+          attemptId: opts.attemptId,
+          studentId: opts.studentId,
+          examId: opts.examId,
+          frame,
+          ts: Date.now(),
+          screenActive: true,
+        },
+      });
+    } catch (e) {
+      console.warn("[live-screen] publish failed", e);
+    } finally {
+      publishing = false;
+    }
+  };
+  void channel.subscribe((status) => {
+    if (status === "SUBSCRIBED" && !stopped) {
+      void sendFrame();
+      timer = setInterval(() => void sendFrame(), intervalMs);
+    }
+  });
+  return {
+    stop: () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+      if (channel) {
+        try { void supabase.removeChannel(channel); } catch { /* ignore */ }
+        channel = null;
+      }
+    },
+  };
+}
+
+export type LiveScreenSubscriber = { stop: () => void };
+
+export function startLiveScreenSubscriber(opts: {
+  schoolId: string;
+  onFrame: (payload: LiveScreenFramePayload) => void;
+}): LiveScreenSubscriber {
+  const channel = supabase.channel(liveScreenChannelName(opts.schoolId), {
+    config: { broadcast: { self: false } },
+  });
+  channel.on("broadcast", { event: LIVE_SCREEN_EVENT }, ({ payload }) => {
+    const p = payload as LiveScreenFramePayload;
+    if (p?.frame && p?.studentId) opts.onFrame(p);
+  });
+  void channel.subscribe();
+  return {
+    stop: () => {
+      try { void supabase.removeChannel(channel); } catch { /* ignore */ }
+    },
+  };
+}
+"""
+              lv.write_text(t)
+              print("live-video patched")
+          else:
+              print("live-video already")
+
+          gate = Path("src/components/cbt/ExamSecurityGate.tsx")
+          g = gate.read_text()
+          g2 = g.replace(
+              'const hardBlock = shareMode === "required" && !screenSupported;',
+              'const hardBlock = false; // required only when device supports screen share',
+          )
+          if g2 != g:
+              gate.write_text(g2)
+              print("gate patched")
+          else:
+              print("gate skip")
+
+          sess = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          s = sess.read_text()
+          if "useLiveScreenPublish" not in s:
+              s = s.replace(
+                  'import { useLiveCamPublish } from "@/lib/use-live-cam-publish";',
+                  'import { useLiveCamPublish } from "@/lib/use-live-cam-publish";\nimport { useLiveScreenPublish } from "@/lib/use-live-screen-publish";\nimport {\n  startScreenShareStream,\n  stopScreenShareStream,\n  onScreenShareEnded,\n  isScreenShareSupported,\n} from "@/lib/screen-share";\nimport { resolveScreenShareMode } from "@/lib/exam-security";',
+              )
+          if "screenStreamRef" not in s:
+              s = s.replace(
+                  "  const mediaStreamRef = useRef<MediaStream | null>(null);",
+                  "  const mediaStreamRef = useRef<MediaStream | null>(null);\n  const screenStreamRef = useRef<MediaStream | null>(null);\n  const screenEndedUnsubRef = useRef<null | (() => void)>(null);\n  const [liveScreenStream, setLiveScreenStream] = useState<MediaStream | null>(null);",
+              )
+          if "stopScreenShareStream(screenStreamRef" not in s:
+              s = s.replace(
+                  """  const shutdownMedia = useCallback(() => {
+    stopMediaStream(mediaStreamRef.current);
+    mediaStreamRef.current = null;
+    setLiveStream(null);
+  }, []);""",
+                  """  const shutdownMedia = useCallback(() => {
+    stopMediaStream(mediaStreamRef.current);
+    mediaStreamRef.current = null;
+    setLiveStream(null);
+    try { screenEndedUnsubRef.current?.(); } catch { /* ignore */ }
+    screenEndedUnsubRef.current = null;
+    stopScreenShareStream(screenStreamRef.current);
+    screenStreamRef.current = null;
+    setLiveScreenStream(null);
+  }, []);""",
+              )
+          if "useLiveScreenPublish({" not in s:
+              idx = s.find("useLiveCamPublish({")
+              if idx >= 0:
+                  depth = 0
+                  i = idx
+                  end = None
+                  while i < len(s):
+                      if s[i] == "(": depth += 1
+                      elif s[i] == ")":
+                          depth -= 1
+                          if depth == 0:
+                              end = i + 1
+                              if end < len(s) and s[end] == ";": end += 1
+                              break
+                      i += 1
+                  if end:
+                      insert = """
+
+  useLiveScreenPublish({
+    enabled: started && !done && !previewMode && !paused && Boolean(liveScreenStream || screenStreamRef.current),
+    schoolId: examQ.data?.school_id || session?.schoolId || student?.schoolId,
+    studentId: student?.studentId,
+    examId: id,
+    attemptId: liveAttemptId || attemptIdRef.current,
+    stream: liveScreenStream,
+    getStream: () => screenStreamRef.current || liveScreenStream,
+  });"""
+                      s = s[:end] + insert + s[end:]
+          if "SCREEN_SHARE_STARTED" not in s:
+              needle = "      // Always immersive during active CBT"
+              block = '''      // Screen share — required when teacher enabled AND device supports it
+      {
+        const shareMode = resolveScreenShareMode(security);
+        const supported = isScreenShareSupported() || Boolean(_opts.caps?.screenShare);
+        const mustShare = shareMode === "required" && supported && !_opts.skipScreenShare;
+        const wantShare = (shareMode === "required" || shareMode === "optional") && supported && !_opts.skipScreenShare;
+        if (wantShare) {
+          const result = await startScreenShareStream();
+          if (result.ok) {
+            try { screenEndedUnsubRef.current?.(); } catch { /* ignore */ }
+            stopScreenShareStream(screenStreamRef.current);
+            screenStreamRef.current = result.stream;
+            setLiveScreenStream(result.stream);
+            screenEndedUnsubRef.current = onScreenShareEnded(result.stream, () => {
+              setPauseReason("Screen sharing was stopped. Re-enable screen share to continue the examination.");
+              setPaused(true);
+              try {
+                const schoolId = examQ.data?.school_id || student?.schoolId || session?.schoolId;
+                if (student?.studentId && schoolId) {
+                  void logSecurityEvent({
+                    schoolId, examId: id, studentId: student.studentId,
+                    attemptId: attemptIdRef.current,
+                    eventType: "SCREEN_SHARE_STOPPED", severity: "high",
+                    description: "Student stopped screen sharing during the examination.",
+                  });
+                }
+              } catch { /* ignore */ }
+              toast.error("Screen sharing stopped — exam paused");
+            });
+            toast.success("Screen sharing active");
+            try {
+              const schoolId = examQ.data?.school_id || student?.schoolId || session?.schoolId;
+              if (student?.studentId && schoolId) {
+                void logSecurityEvent({
+                  schoolId, examId: id, studentId: student.studentId,
+                  attemptId: attemptIdRef.current,
+                  eventType: "SCREEN_SHARE_STARTED", severity: "low",
+                  description: "Screen sharing started for examination monitoring.",
+                });
+              }
+            } catch { /* ignore */ }
+          } else if (mustShare) {
+            toast.error(result.message || "Screen sharing is required to start this examination.");
+            return;
+          } else if (shareMode === "required" && !supported) {
+            toast.message("Screen share not available on this device — continuing without it.");
+          }
+        }
+      }
+
+      // Always immersive during active CBT'''
+              if needle in s:
+                  s = s.replace(needle, block, 1)
+          if "Re-enable screen share" not in s:
+              old_btn = '<PauseContinueButton examId={id} onContinue={() => { setPaused(false); setPauseReason(""); void restoreFullscreenFromUser(); }} />'
+              new_btn = '''{String(pauseReason || "").toLowerCase().includes("screen share") ? (
+              <Button
+                className="mt-5 w-full font-semibold"
+                onClick={async () => {
+                  const result = await startScreenShareStream();
+                  if (!result.ok) {
+                    toast.error(result.message || "Enable screen share to continue");
+                    return;
+                  }
+                  try { screenEndedUnsubRef.current?.(); } catch { /* ignore */ }
+                  stopScreenShareStream(screenStreamRef.current);
+                  screenStreamRef.current = result.stream;
+                  setLiveScreenStream(result.stream);
+                  screenEndedUnsubRef.current = onScreenShareEnded(result.stream, () => {
+                    setPauseReason("Screen sharing was stopped. Re-enable screen share to continue the examination.");
+                    setPaused(true);
+                    toast.error("Screen sharing stopped — exam paused");
+                  });
+                  setPaused(false);
+                  setPauseReason("");
+                  void restoreFullscreenFromUser();
+                  toast.success("Screen sharing restored");
+                }}
+              >
+                Re-enable screen share & continue
+              </Button>
+            ) : (
+              <PauseContinueButton examId={id} onContinue={() => { setPaused(false); setPauseReason(""); void restoreFullscreenFromUser(); }} />
+            )}'''
+              if old_btn in s:
+                  s = s.replace(old_btn, new_btn, 1)
+          if "screenActive:" not in s:
+              s = s.replace(
+                  "cameraActive: Boolean(mediaStreamRef.current || liveStream),",
+                  "cameraActive: Boolean(mediaStreamRef.current || liveStream),\n        screenActive: Boolean(screenStreamRef.current || liveScreenStream),",
+                  1,
+              )
+          sess.write_text(s)
+          print("session brace", s.count("{") - s.count("}"))
+          print("session SCREEN", "SCREEN_SHARE_STARTED" in s)
+
+          mon = Path("src/routes/officer.live-monitor.tsx")
+          m = mon.read_text()
+          if "startLiveScreenSubscriber" not in m:
+              m = m.replace(
+                  """import {
+  isLiveCamFrameFresh,
+  startLiveCamSubscriber,
+  LIVE_CAM_STALE_MS,
+  type LiveCamFramePayload,
+} from "@/lib/live-video";""",
+                  """import {
+  isLiveCamFrameFresh,
+  startLiveCamSubscriber,
+  startLiveScreenSubscriber,
+  LIVE_CAM_STALE_MS,
+  type LiveCamFramePayload,
+  type LiveScreenFramePayload,
+} from "@/lib/live-video";""",
+              )
+          if "screenFrames" not in m:
+              m = m.replace(
+                  "  const [frames, setFrames] = useState<Record<string, FrameEntry>>({});",
+                  "  const [frames, setFrames] = useState<Record<string, FrameEntry>>({});\n  const [screenFrames, setScreenFrames] = useState<Record<string, { src: string; ts: number }>>({});",
+              )
+          if "startLiveScreenSubscriber({" not in m:
+              m = m.replace(
+                  """    return () => sub.stop();
+  }, [schoolId]);
+
+  useRealtimeInvalidate(""",
+                  """    return () => sub.stop();
+  }, [schoolId]);
+
+  useEffect(() => {
+    if (!schoolId) return;
+    const sub = startLiveScreenSubscriber({
+      schoolId,
+      onFrame: (p: LiveScreenFramePayload) => {
+        const attemptId = p.attemptId;
+        if (!attemptId || !p.frame) return;
+        const entry = { src: p.frame, ts: p.ts || Date.now() };
+        const sid = String(p.studentId || "");
+        setScreenFrames((prev) => {
+          const next = { ...prev, [attemptId]: entry };
+          if (sid) next[`student:${sid}`] = entry;
+          return next;
+        });
+      },
+    });
+    return () => sub.stop();
+  }, [schoolId]);
+
+  useRealtimeInvalidate(""",
+                  1,
+              )
+          if 'font-bold text-white">SCREEN<' not in m:
+              start = m.find("relative w-full shrink-0 bg-slate-900 aspect-[4/3]")
+              if start > 0:
+                  start = m.rfind("<div", 0, start)
+                  end_marker = '            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">'
+                  end = m.find(end_marker, start)
+                  if end > start:
+                      new_block = '''            <div className="grid w-full shrink-0 grid-cols-1 gap-2 bg-slate-100 p-2 sm:grid-cols-2">
+              <div className="relative aspect-[4/3] max-h-[min(360px,42dvh)] overflow-hidden rounded-lg bg-slate-900">
+                <div className="absolute left-2 top-2 z-10 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold text-white">FACE</div>
+                {selected.videoStatus === "live" && selected.frame?.src ? (
+                  <img src={selected.frame.src} alt={`${selected.name} face`} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center text-white">
+                    {selected.isDone ? <CheckCircle2 className="h-10 w-10 text-emerald-400/80" /> : selected.presence.cameraActive ? <UserRound className="h-10 w-10 opacity-40" /> : <CameraOff className="h-10 w-10 opacity-40" />}
+                    <p className="text-xs font-semibold">{selected.isDone ? doneStatusLabel(selected.a.status) : faceLabel(selected.presence)}</p>
+                  </div>
+                )}
+              </div>
+              <div className="relative aspect-[4/3] max-h-[min(360px,42dvh)] overflow-hidden rounded-lg bg-slate-900">
+                <div className="absolute left-2 top-2 z-10 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold text-white">SCREEN</div>
+                {(() => {
+                  const screenFr = screenFrames[selected.a.id] || screenFrames[`student:${selected.a.student_id}`];
+                  const screenFresh = Boolean(screenFr && Date.now() - screenFr.ts < 15000);
+                  if (screenFresh && screenFr?.src) {
+                    return <img src={screenFr.src} alt={`${selected.name} screen`} className="h-full w-full object-contain bg-black" />;
+                  }
+                  return (
+                    <div className="flex h-full flex-col items-center justify-center gap-2 px-3 text-center text-white">
+                      <LayoutGrid className="h-10 w-10 opacity-40" />
+                      <p className="text-xs font-semibold">{selected.isDone ? "Exam finished" : "Screen not sharing"}</p>
+                      <p className="text-[10px] text-white/70">{selected.isDone ? "No live screen" : "Appears when the student shares screen on the Android app."}</p>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+'''
+                      m = m[:start] + new_block + m[end:]
+                      print("dual view inserted")
+          mon.write_text(m)
+          print("monitor brace", m.count("{") - m.count("}"))
+          print("done")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "feat(screen-share): CBT screen share, pause on stop, officer dual view"
+            git push
+          fi
