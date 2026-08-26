@@ -1,0 +1,27 @@
+name: Step5 Offline Layer
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/run-step5-offline.yml"
+      - "scripts/apply_s5*.py"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply Step 5 assets
+        run: |
+          for f in scripts/apply_s5a.py scripts/apply_s5b.py scripts/apply_s5_gate.py; do
+            if [ -f "$f" ]; then python3 "$f"; fi
+          done
+      - name: Commit
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add -A
+          git commit -m "feat(offline): Step 5 schema v2, root pill, exam online gate" || echo no-changes
+          git pull --rebase origin main || true
+          git push origin main
