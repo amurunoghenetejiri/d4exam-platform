@@ -1,29 +1,27 @@
-name: Restore main to c93a499 (Vercel shell)
+name: Restore app to c93a499 (Vercel shell)
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: write
-  workflows: write
-  actions: write
 
 concurrency:
-  group: restore-main-hard
+  group: restore-app-c93a499
   cancel-in-progress: false
 
 jobs:
   restore:
-    name: Hard-reset main to c93a499
+    name: Restore source tree from c93a499
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout full history
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Reset main to c93a499 and force-push
+      - name: Overlay c93a499 tree (except .github/workflows)
         run: |
           set -euo pipefail
           TARGET=c93a499237cfc86533209caa6d318f86e95f3299
@@ -31,12 +29,35 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git fetch origin "$TARGET"
-          git checkout main
-          git reset --hard "$TARGET"
 
-          grep -q 'd4exam-platform.vercel.app' capacitor.config.ts
-          echo "OK: capacitor.config has Vercel server.url"
+          # Snapshot current workflows so we do not rewrite workflow files (GITHUB_TOKEN restriction)
+          rm -rf /tmp/keep-workflows
+          mkdir -p /tmp/keep-workflows
+          if [ -d .github/workflows ]; then
+            cp -a .github/workflows/. /tmp/keep-workflows/
+          fi
+
+          # Make working tree match TARGET exactly
+          git checkout "$TARGET" -- .
+
+          # Restore workflows from current main tip (avoid workflows permission error)
+          mkdir -p .github/workflows
+          rm -rf .github/workflows/*
+          cp -a /tmp/keep-workflows/. .github/workflows/ || true
+
+          # Verify Vercel shell config from TARGET
+          grep -q 'url: "https://d4exam-platform.vercel.app"' capacitor.config.ts \
+            || grep -q "url: 'https://d4exam-platform.vercel.app'" capacitor.config.ts \
+            || grep -q 'd4exam-platform.vercel.app' capacitor.config.ts
+          echo "OK: Capacitor uses Vercel live server"
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Already matches target tree (plus workflows)"
+            exit 0
+          fi
+
+          git commit -m "restore: exact app state from c93a499 (Vercel live shell + original UI/UX)"
+          git push origin HEAD:main
+          echo "Pushed restore commit. App source matches c93a499."
           git log -1 --oneline
-
-          git push --force origin main
-          echo "main is now exactly at $TARGET"
