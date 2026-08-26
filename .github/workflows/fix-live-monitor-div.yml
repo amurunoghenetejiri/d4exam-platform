@@ -1,0 +1,76 @@
+name: Fix live-monitor missing div
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/fix-live-monitor-div.yml"
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add missing closing div
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/routes/officer.live-monitor.tsx")
+          t = p.read_text()
+          needle = """              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard("""
+          fixed = """              )}
+            </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard("""
+          if "min-h-0 flex-1 overflow-y-auto" not in t:
+              raise SystemExit("unexpected file: missing scroll container")
+          if fixed in t:
+              print("already fixed")
+          elif needle in t:
+              p.write_text(t.replace(needle, fixed, 1))
+              print("fixed missing </div>")
+          else:
+              import re
+              start = t.index("{selected && (")
+              end = t.index("function StatCard")
+              block = t[start:end]
+              o = len(re.findall(r"<div\\b", block))
+              c = len(re.findall(r"</div>", block))
+              print("opens", o, "closes", c)
+              raise SystemExit("pattern not found")
+          t = p.read_text()
+          start = t.index("  return (\n    <div className=\"mx-auto")
+          end = t.index("\nfunction StatCard")
+          jsx = t[start:end]
+          o = len(__import__("re").findall(r"<div\\b", jsx))
+          c = len(__import__("re").findall(r"</div>", jsx))
+          print("page divs", o, c)
+          if o != c:
+              raise SystemExit(f"still unbalanced {o} vs {c}")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/routes/officer.live-monitor.tsx
+          git diff --cached --stat
+          git commit -m "fix: close missing div in officer live-monitor (Vercel build)" || echo no-changes
+          git pull --rebase origin main || true
+          git push origin main
