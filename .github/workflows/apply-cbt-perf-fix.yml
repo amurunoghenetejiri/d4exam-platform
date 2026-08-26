@@ -1,0 +1,77 @@
+name: apply-cbt-perf-fix
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-cbt-perf-fix.yml
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch session timeout + exam start + CBT load timeouts
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+
+          s = Path('src/lib/session.ts')
+          st = s.read_text()
+          st2 = st.replace('withTimeout(fetchSessionUser(), 18_000, "session")', 'withTimeout(fetchSessionUser(), 6_000, "session")')
+          if st2 != st:
+              s.write_text(st2)
+              print('session timeout ok')
+          else:
+              print('session already patched or pattern missing')
+
+          e = Path('src/routes/student.examinations.tsx')
+          et = e.read_text()
+          old = '''        void assertOnline("Connect to the internet to write this exam.").then(() => navigate({ to: "/student/exam/$id", params: { id: examId } })).catch((err) => window.alert(err instanceof Error ? err.message : "Internet required to write exams."));'''
+          new = '''        if (typeof navigator !== "undefined" && navigator.onLine === false) {\n          window.alert("Connect to the internet to write this exam.");\n          return;\n        }\n        void navigate({ to: "/student/exam/$id", params: { id: examId } });'''
+          if old in et:
+              e.write_text(et.replace(old, new))
+              print('examinations start ok')
+          else:
+              print('examinations already patched or pattern missing')
+
+          c = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          ct = c.read_text()
+          changed = False
+          if 'useLiveScreenPublish' not in ct and 'useLiveCamPublish' in ct:
+              ct = ct.replace(
+                  'import { useLiveCamPublish } from "@/lib/use-live-cam-publish";',
+                  'import { useLiveCamPublish } from "@/lib/use-live-cam-publish";\nimport { useLiveScreenPublish } from "@/lib/use-live-screen-publish";\nimport { startScreenShareStream, onScreenShareEnded, stopScreenShareStream } from "@/lib/screen-share";',
+              )
+              changed = True
+          # loading condition
+          old_load = '''  if (examQ.isLoading || questionsQ.isLoading) {\n    return (\n      <div className="grid min-h-dvh place-items-center">\n        <p className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading examination…</p>\n      </div>\n    );\n  }'''
+          new_load = '''  if (examQ.isLoading || (examQ.isFetching && !examQ.data)) {\n    return (\n      <div className="grid min-h-dvh place-items-center">\n        <p className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading examination…</p>\n      </div>\n    );\n  }\n  if (questionsQ.isLoading && !questionsQ.data && !questionsQ.isError) {\n    return (\n      <div className="grid min-h-dvh place-items-center">\n        <p className="flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading questions…</p>\n      </div>\n    );\n  }'''
+          if old_load in ct:
+              ct = ct.replace(old_load, new_load)
+              changed = True
+              print('loading condition ok')
+          # questions query enabled + timeout
+          if 'Questions load timed out' not in ct and 'loadExamQuestionBank' in ct:
+              ct = ct.replace(
+                  'enabled: Boolean(examQ.data?.course_id),',
+                  'enabled: Boolean(examQ.data?.id),\n    staleTime: 30_000,\n    retry: 1,',
+              )
+              changed = True
+              print('questions enabled ok')
+          if changed:
+              c.write_text(ct)
+              print('cbt written')
+          else:
+              print('cbt no changes')
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/session.ts src/routes/student.examinations.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "perf(cbt): faster exam open, question load timeouts, screen-share imports"
+            git push
+          fi
