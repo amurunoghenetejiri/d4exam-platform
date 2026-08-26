@@ -3,6 +3,8 @@
  * No hardcoded product assumptions beyond feature API presence.
  */
 
+import { isScreenShareSupported } from "@/lib/screen-share";
+
 export type DeviceType = "desktop" | "tablet" | "mobile" | "unknown";
 
 export type BrowserName =
@@ -81,17 +83,11 @@ export function detectDeviceCapabilities(): DeviceCapabilities {
 
   const microphone = camera;
 
-  // Native FaceDetector OR MediaPipe WASM fallback (used in CBT).
-  // Mobile Chrome often lacks FaceDetector but MediaPipe works with camera.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nativeFace = typeof (window as any).FaceDetector === "function";
   const faceDetection = nativeFace || camera;
 
-  const screenShare =
-    mediaDevices &&
-    secureContext &&
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    typeof (navigator.mediaDevices as any).getDisplayMedia === "function";
+  const screenShare = isScreenShareSupported();
 
   return {
     deviceType: detectDeviceType(ua),
