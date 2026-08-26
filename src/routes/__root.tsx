@@ -16,6 +16,7 @@ import { ThemeColorSync } from "@/components/ThemeColorSync";
 import { OfflineBootstrap } from "@/components/OfflineBootstrap";
 import { LocalDbBootstrap } from "@/components/LocalDbBootstrap";
 import { OfflineStatusPill } from "@/components/OfflineStatusPill";
+import { NotificationLiveListener } from "@/components/NotificationLiveListener";
 import { useSessionUser } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
@@ -211,6 +212,7 @@ function RootComponent() {
       <LocalDbBootstrap />
       <OfflineBootstrap />
       <OfflineStatusPill />
+      <NotificationLiveListener />
       <Outlet />
       <NativeBootstrap />
       <Toaster />
