@@ -13,6 +13,7 @@ import {
 import { sendTestNotificationToSelf } from "@/lib/push-send.functions";
 import { sendNotification } from "@/lib/notifications";
 import { isNativeShell } from "@/native/platform";
+import { showD4ExamNativeNotification } from "@/native/localNotify";
 import { useQueryClient } from "@tanstack/react-query";
 
 export function PushSettingsCard({ scope }: { scope?: string }) {
@@ -33,7 +34,7 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
       title="Push notifications"
       description={
         native
-          ? "Alerts for exams, results and updates (in-app + system when configured)"
+          ? "Alerts show as D4EXAM on this device (not Chrome)"
           : "Browser alerts for exams, results and important updates"
       }
     >
@@ -93,26 +94,15 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
 
               void (async () => {
                 try {
-                  // 1) Server path (admin insert + optional FCM)
-                  let serverOk = false;
                   try {
-                    const r = await sendTestNotificationToSelf({
+                    await sendTestNotificationToSelf({
                       data: { userId: session.userId, role },
                     });
-                    if (r && (r as { ok?: boolean }).ok) {
-                      serverOk = true;
-                      const push = (r as { push?: { sent?: number; skipped?: boolean; reason?: string } })
-                        .push;
-                      if (push && push.skipped && push.reason) {
-                        console.info("[D4EXAM] push skipped:", push.reason);
-                      }
-                    }
-                  } catch (e) {
-                    console.warn("[D4EXAM] server test notify failed", e);
+                  } catch {
+                    /* ignore server errors */
                   }
 
-                  // 2) Always ensure an in-app row via client (works without service role)
-                  const client = await sendNotification({
+                  await sendNotification({
                     recipientUserId: session.userId,
                     title,
                     message,
@@ -120,19 +110,17 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
                     link,
                   });
 
-                  // 3) Immediate visible feedback (works even without system tray FCM)
                   toast.success(title, { description: message, duration: 6000 });
+
+                  // Native tray as D4EXAM (never browser Notification / Chrome)
+                  if (native) {
+                    await showD4ExamNativeNotification(title, message, link);
+                  }
 
                   void queryClient.invalidateQueries({ queryKey: ["count", "notifications"] });
                   void queryClient.invalidateQueries({
                     queryKey: ["count", "notifications", "unread", session.userId],
                   });
-
-                  if (client.id || serverOk) {
-                    toast.message("Saved to Notifications — open the bell or Notifications page.");
-                  } else if (client.error) {
-                    toast.error(client.error);
-                  }
                 } catch (e) {
                   toast.error((e as Error).message || "Test failed");
                 } finally {
@@ -147,8 +135,8 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
         </div>
         <p className="text-xs text-slate-500">
           {native
-            ? "You will see an in-app toast and a row under Notifications. System tray push needs Firebase (google-services) configured on the APK."
-            : "Test creates an in-app notification and tries browser push when permission is granted."}
+            ? "On the Android app, alerts use the D4EXAM icon — not Chrome. Install the latest APK if local notifications are missing."
+            : "In a browser, system alerts may appear under Chrome; use the Android app for native D4EXAM alerts."}
         </p>
       </div>
     </SectionCard>

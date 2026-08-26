@@ -1,13 +1,12 @@
 /**
  * Client-side push registration.
  *
- * Android Capacitor (CRITICAL):
- * PushNotifications.register() starts Firebase Messaging. Without
- * google-services.json in the APK, the native process is KILLED — not a JS
- * exception. We therefore NEVER call register() until FCM is confirmed present.
+ * Native Android APK:
+ * - NEVER use web FCM / service worker / browser Notification (those show as Chrome)
+ * - Use Capacitor permission + D4EXAM Local Notifications for system tray
+ * - Do not call PushNotifications.register() without google-services (process crash)
  *
- * Allow notifications only: requestPermissions + notification channel + listeners.
- * In-app notifications (Supabase) still work. System FCM needs google-services.
+ * Web/PWA: Firebase web push (may show as Chrome — expected in browser only)
  */
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getMessaging, getToken, isSupported, onMessage, type Messaging } from "firebase/messaging";
@@ -15,6 +14,7 @@ import { FIREBASE_WEB_CONFIG, FIREBASE_VAPID_KEY } from "@/lib/firebase-config";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { isNativeShell, getRuntimePlatform } from "@/native/platform";
+import { showD4ExamNativeNotification } from "@/native/localNotify";
 
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
@@ -22,12 +22,9 @@ let onMessageBound = false;
 let nativeListenersBound = false;
 let nativePermissionCache: PushPermissionState | null = null;
 
-/**
- * Set true ONLY after google-services.json is in the APK and FCM is verified.
- * Default false = app never crashes on Allow / reopen.
- */
 const ENABLE_NATIVE_FCM_REGISTER = false;
 
+/** Kill every web push path inside the APK so Chrome never owns notifications. */
 async function disableWebPushInNativeShell(): Promise<void> {
   if (typeof window === "undefined" || !isNativeShell()) return;
   try {
@@ -48,11 +45,37 @@ async function disableWebPushInNativeShell(): Promise<void> {
         const keys = await caches.keys();
         await Promise.all(
           keys
-            .filter((k) => /firebase|messaging|fcm|workbox/i.test(k))
+            .filter((k) => /firebase|messaging|fcm|workbox|d4exam/i.test(k))
             .map((k) => caches.delete(k)),
         );
       } catch {
         /* ignore */
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Turn off old web/Chrome FCM device rows so server stops sending Chrome pushes. */
+async function disableWebPushDevicesForUser(userId: string): Promise<void> {
+  if (!userId) return;
+  try {
+    // Disable any token not clearly marked as native Capacitor
+    const { data } = await supabase
+      .from("push_devices")
+      .select("id, user_agent, token")
+      .eq("user_id", userId)
+      .eq("enabled", true);
+    const rows = (data || []) as { id: string; user_agent?: string | null }[];
+    for (const row of rows) {
+      const ua = row.user_agent || "";
+      const isNative = /native=1/i.test(ua) || /platform=android/i.test(ua);
+      if (!isNative) {
+        await supabase
+          .from("push_devices")
+          .update({ enabled: false, updated_at: new Date().toISOString() } as never)
+          .eq("id", row.id);
       }
     }
   } catch {
@@ -102,8 +125,18 @@ export async function refreshNativePushPermissionState(): Promise<PushPermission
     nativePermissionCache = state;
     return state;
   } catch {
-    nativePermissionCache = "default";
-    return "default";
+    // Fall back to local-notifications permission
+    try {
+      const { LocalNotifications } = await import("@capacitor/local-notifications");
+      const s = await LocalNotifications.checkPermissions();
+      const state: PushPermissionState =
+        s.display === "granted" ? "granted" : s.display === "denied" ? "denied" : "default";
+      nativePermissionCache = state;
+      return state;
+    } catch {
+      nativePermissionCache = "default";
+      return "default";
+    }
   }
 }
 
@@ -113,6 +146,8 @@ async function upsertPushDevice(
   role?: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!userId || !token) return { ok: false, error: "Missing user or token" };
+  // Never store web tokens from the APK shell
+  if (isNativeShell() && !token) return { ok: false, error: "No token" };
 
   const ua =
     typeof navigator !== "undefined"
@@ -177,6 +212,7 @@ async function upsertPushDevice(
 
 function showLocalNotification(title: string, body: string, link?: string) {
   if (typeof window === "undefined" || !("Notification" in window)) return;
+  // Never use browser Notification API inside APK (shows as Chrome)
   if (isNativeShell()) return;
   if (Notification.permission !== "granted") return;
   const icon = `${window.location.origin}/logo.png`;
@@ -218,7 +254,7 @@ async function ensureAndroidChannel(): Promise<void> {
       lights: true,
     });
   } catch {
-    /* ignore — channel is optional */
+    /* ignore */
   }
 }
 
@@ -242,6 +278,7 @@ async function bindNativePushListeners(userId: string, role?: string | null) {
         const title = notification.title || "D4EXAM";
         const body = notification.body || "";
         toast.info(title, { description: body });
+        void showD4ExamNativeNotification(title, body);
       } catch {
         /* ignore */
       }
@@ -265,10 +302,6 @@ async function bindNativePushListeners(userId: string, role?: string | null) {
   }
 }
 
-/**
- * Intentionally does NOT call PushNotifications.register() by default.
- * That native call crashes the APK when Firebase is not configured.
- */
 async function enableNativePushNotifications(
   userId: string,
   role?: string | null,
@@ -276,58 +309,64 @@ async function enableNativePushNotifications(
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
   try {
     await disableWebPushInNativeShell();
-    const { PushNotifications } = await import("@capacitor/push-notifications");
+    await disableWebPushDevicesForUser(userId);
 
-    let permStatus = await PushNotifications.checkPermissions();
-    if (permStatus.receive !== "granted" && opts?.requestPermission !== false) {
-      try {
+    // Prefer Local Notifications permission (shows as D4EXAM app, not Chrome)
+    try {
+      const { LocalNotifications } = await import("@capacitor/local-notifications");
+      let lp = await LocalNotifications.checkPermissions();
+      if (lp.display !== "granted" && opts?.requestPermission !== false) {
+        lp = await LocalNotifications.requestPermissions();
+      }
+      if (lp.display === "granted") {
+        nativePermissionCache = "granted";
+        await showD4ExamNativeNotification(
+          "D4EXAM notifications enabled",
+          "You will receive alerts as D4EXAM, not Chrome.",
+        );
+      }
+    } catch {
+      /* plugin may be missing until next APK */
+    }
+
+    try {
+      const { PushNotifications } = await import("@capacitor/push-notifications");
+      let permStatus = await PushNotifications.checkPermissions();
+      if (permStatus.receive !== "granted" && opts?.requestPermission !== false) {
         permStatus = await PushNotifications.requestPermissions();
-      } catch (permErr) {
-        console.warn("[D4EXAM] requestPermissions failed", permErr);
-        return { ok: false, error: "Could not request notification permission" };
       }
-    }
+      const state: PushPermissionState =
+        permStatus.receive === "granted"
+          ? "granted"
+          : permStatus.receive === "denied"
+            ? "denied"
+            : "default";
+      if (state === "granted") nativePermissionCache = "granted";
 
-    const state: PushPermissionState =
-      permStatus.receive === "granted"
-        ? "granted"
-        : permStatus.receive === "denied"
-          ? "denied"
-          : "default";
-    nativePermissionCache = state;
-
-    if (permStatus.receive !== "granted") {
-      return {
-        ok: false,
-        error:
-          permStatus.receive === "denied"
-            ? "Permission denied. Enable notifications in Android Settings → Apps → D4EXAM."
-            : "Permission not granted",
-      };
-    }
-
-    // Safe only — never register FCM here
-    try {
-      await ensureAndroidChannel();
-    } catch {
-      /* ignore */
-    }
-    try {
-      await bindNativePushListeners(userId, role);
+      if (permStatus.receive === "granted") {
+        try {
+          await ensureAndroidChannel();
+          await bindNativePushListeners(userId, role);
+        } catch {
+          /* ignore */
+        }
+        if (ENABLE_NATIVE_FCM_REGISTER) {
+          try {
+            await PushNotifications.register();
+          } catch (e) {
+            console.warn("[D4EXAM] FCM register skipped", e);
+          }
+        }
+      }
     } catch {
       /* ignore */
     }
 
-    // Optional FCM (disabled until google-services.json is in the APK)
-    if (ENABLE_NATIVE_FCM_REGISTER) {
-      try {
-        await PushNotifications.register();
-      } catch (e) {
-        console.warn("[D4EXAM] FCM register skipped/failed", e);
-      }
-    }
-
-    return { ok: true };
+    if (nativePermissionCache === "granted") return { ok: true };
+    return {
+      ok: false,
+      error: "Permission not granted. Enable notifications in Android Settings → Apps → D4EXAM.",
+    };
   } catch (e) {
     console.warn("[D4EXAM] enableNativePushNotifications failed", e);
     return { ok: false, error: (e as Error).message || "Native push setup failed" };
@@ -424,10 +463,6 @@ export async function refreshPushLastSeen(userId: string): Promise<void> {
   }
 }
 
-/**
- * Native session bootstrap — permission check + channel only.
- * Never calls PushNotifications.register() (that was the crash).
- */
 export async function initNativePushIfNeeded(
   userId?: string | null,
   role?: string | null,
@@ -435,6 +470,7 @@ export async function initNativePushIfNeeded(
   if (!isNativeShell()) return;
   try {
     await disableWebPushInNativeShell();
+    if (userId) await disableWebPushDevicesForUser(userId);
     if (!userId) return;
     const state = await refreshNativePushPermissionState();
     if (state === "granted") {
@@ -444,9 +480,10 @@ export async function initNativePushIfNeeded(
       } catch {
         /* ignore */
       }
-      // Do NOT call register() — crashes without google-services.json
     }
   } catch {
     /* never crash startup */
   }
 }
+
+export { showD4ExamNativeNotification };
