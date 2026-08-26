@@ -22,7 +22,11 @@ import { resolveScreenShareMode } from "@/lib/exam-security";
 import type { ExamSecuritySettings } from "@/types";
 import { cn } from "@/lib/utils";
 import { primeHaptics } from "@/lib/haptic";
-import { ensureCameraPermission } from "@/native/cameraService";
+import {
+  ensureCameraPermission,
+  ensureMicrophonePermission,
+  openCameraStream,
+} from "@/native/cameraService";
 
 type Props = {
   examTitle: string;
@@ -107,9 +111,17 @@ export function ExamSecurityGate({
     try {
       const camOk = await ensureCameraPermission();
       if (!camOk.granted) throw new Error(camOk.error || "Camera permission required");
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: false,
+      // When exam requires microphone, request it together with camera so the OS shows both.
+      if (needMic) {
+        try {
+          await ensureMicrophonePermission();
+        } catch {
+          /* soft — exam start may still proceed without mic if policy allows */
+        }
+      }
+      const stream = await openCameraStream({
+        facingMode: "user",
+        audio: Boolean(needMic),
       });
       previewStreamRef.current = stream;
       if (videoRef.current) {
@@ -120,7 +132,9 @@ export function ExamSecurityGate({
     } catch {
       setPreviewState("error");
       setPreviewError(
-        "Camera unavailable. Allow camera access for D4EXAM (Android Settings → Apps → D4EXAM → Permissions), close other apps using the camera, then try again.",
+        needMic
+          ? "Camera/microphone unavailable. Allow Camera and Microphone for D4EXAM (Android Settings → Apps → D4EXAM → Permissions), then try again."
+          : "Camera unavailable. Allow camera access for D4EXAM (Android Settings → Apps → D4EXAM → Permissions), close other apps using the camera, then try again.",
       );
     }
   };
