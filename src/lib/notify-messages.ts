@@ -1,5 +1,6 @@
 /**
  * Professional notification copy for D4EXAM (in-app + push).
+ * Exact templates: emoji titles, personal names, school ID, review CTAs.
  */
 
 export function fmtDate(iso?: string | null): string {
@@ -39,6 +40,7 @@ export function studentExamApproved(opts: {
   if (date) message += `\n\n📅 Date: ${date}`;
   if (startT) message += `\n⏰ Starts: ${startT}`;
   if (endT) message += `\n⏱ Ends: ${endT}`;
+  message += `\n\nTap below to open Examinations.`;
   return { title: `🎓 ${name}, YOUR EXAM IS APPROVED`, message };
 }
 
@@ -49,7 +51,7 @@ export function studentExamAvailable(opts: {
   const name = (opts.studentName || "Student").trim();
   return {
     title: `🚀 ${name}, EXAM AVAILABLE`,
-    message: `Your ${opts.examTitle} examination is now available.`,
+    message: `Your ${opts.examTitle} examination is now available.\n\nTap below to start.`,
   };
 }
 
@@ -61,15 +63,27 @@ export function studentExamReminder(opts: {
   const name = (opts.studentName || "Student").trim();
   const exam = opts.examTitle;
   if (opts.kind === "24h") {
-    return { title: `📚 ${name}, EXAM TOMORROW`, message: `Your ${exam} examination is scheduled for tomorrow. Be prepared.` };
+    return {
+      title: `📚 ${name}, EXAM TOMORROW`,
+      message: `Your ${exam} examination is scheduled for tomorrow. Be prepared.`,
+    };
   }
   if (opts.kind === "30m") {
-    return { title: `⏰ ${name}, EXAM IN 30 MINUTES`, message: `Your ${exam} examination starts in 30 minutes. Be ready!` };
+    return {
+      title: `⏰ ${name}, EXAM IN 30 MINUTES`,
+      message: `Your ${exam} examination starts in 30 minutes. Be ready!`,
+    };
   }
   if (opts.kind === "10m") {
-    return { title: `⏰ ${name}, EXAM IN 10 MINUTES`, message: `Your ${exam} examination starts in 10 minutes. Get ready!` };
+    return {
+      title: `⏰ ${name}, EXAM IN 10 MINUTES`,
+      message: `Your ${exam} examination starts in 10 minutes. Get ready!`,
+    };
   }
-  return { title: `🚀 ${name}, EXAM STARTS NOW`, message: `Your ${exam} examination is now available.` };
+  return {
+    title: `🚀 ${name}, EXAM STARTS NOW`,
+    message: `Your ${exam} examination starts now.\n\nTap below to start.`,
+  };
 }
 
 export function studentResultReady(opts: {
@@ -78,8 +92,13 @@ export function studentResultReady(opts: {
   officerName?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const by = opts.officerName?.trim() ? ` has been released by ${opts.officerName.trim()}.` : " has been released.";
-  return { title: `🎉 ${name}, RESULT READY`, message: `Your result for ${opts.examTitle}${by}` };
+  const by = opts.officerName?.trim()
+    ? ` has been released by ${opts.officerName.trim()}.`
+    : " has been released.";
+  return {
+    title: `🎉 ${name}, RESULT READY`,
+    message: `Your result for ${opts.examTitle}${by}\n\nTap below to view your result.`,
+  };
 }
 
 export function studentAutoSubmitted(opts: {
@@ -89,7 +108,18 @@ export function studentAutoSubmitted(opts: {
   const name = (opts.studentName || "Student").trim();
   return {
     title: `📤 ${name}, EXAM AUTO-SUBMITTED`,
-    message: `Your ${opts.examTitle} examination was automatically submitted.`,
+    message: `Your ${opts.examTitle} examination was automatically submitted.\n\nTap below to view status.`,
+  };
+}
+
+export function studentExamSubmitted(opts: {
+  studentName: string;
+  examTitle: string;
+}): { title: string; message: string } {
+  const name = (opts.studentName || "Student").trim();
+  return {
+    title: `🎓 ${name}, EXAM SUBMITTED`,
+    message: `Your ${opts.examTitle} examination has been submitted successfully.\n\nTap below to view status.`,
   };
 }
 
@@ -99,8 +129,8 @@ export function teacherExamApproved(opts: {
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
   return {
-    title: `✅ ${name}, EXAM APPROVED`,
-    message: `Your examination “${opts.examTitle}” was approved.`,
+    title: `✅ ${name}, EXAMINATION APPROVED`,
+    message: `Officer approved your ${opts.examTitle} examination.\n\nTap below to open Examinations.`,
   };
 }
 
@@ -110,10 +140,54 @@ export function teacherExamRejected(opts: {
   note?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const note = opts.note?.trim() ? `\n\nReason:\n${opts.note.trim()}` : "";
+  const note = opts.note?.trim() ? `\n\nMessage:\n${opts.note.trim()}` : "";
   return {
-    title: `❌ ${name}, EXAM NOT APPROVED`,
-    message: `Your examination “${opts.examTitle}” was not approved.${note}`,
+    title: `❌ ${name}, EXAMINATION REJECTED`,
+    message: `Officer rejected your ${opts.examTitle} examination.${note}\n\nTap below to review.`,
+  };
+}
+
+export function teacherExamRevisionRequested(opts: {
+  teacherName: string;
+  examTitle: string;
+  note?: string | null;
+}): { title: string; message: string } {
+  const name = (opts.teacherName || "Teacher").trim();
+  const note = opts.note?.trim() ? `\n\nMessage:\n${opts.note.trim()}` : "";
+  return {
+    title: `📝 ${name}, REVISION REQUESTED`,
+    message: `Officer requested changes to your ${opts.examTitle} examination.${note}\n\nTap below to edit.`,
+  };
+}
+
+export function officerExamSubmittedForReview(opts: {
+  teacherName: string;
+  examTitle: string;
+  courseLabel?: string | null;
+  schoolName?: string | null;
+  schoolCode?: string | null;
+}): { title: string; message: string } {
+  const teacher = (opts.teacherName || "A teacher").trim();
+  const course = (opts.courseLabel || "").trim();
+  const exam = course ? `${course} — ${opts.examTitle}` : opts.examTitle;
+  const schoolBits: string[] = [];
+  if (opts.schoolName?.trim()) schoolBits.push(opts.schoolName.trim());
+  if (opts.schoolCode?.trim()) schoolBits.push(`School ID: ${opts.schoolCode.trim()}`);
+  const schoolLine = schoolBits.length ? `\n\n${schoolBits.join(" · ")}` : "";
+  return {
+    title: "🔔 Exam Submitted for Review",
+    message: `${teacher} submitted ${exam} for examination review.${schoolLine}\n\nTap below to open Approvals.`,
+  };
+}
+
+export function officerResultAwaitingReview(opts: {
+  studentName: string;
+  examTitle: string;
+}): { title: string; message: string } {
+  const name = (opts.studentName || "A student").trim();
+  return {
+    title: "📊 Result Awaiting Review",
+    message: `${name} submitted ${opts.examTitle}. Review and release when ready.\n\nTap below to open Results.`,
   };
 }
 
@@ -124,7 +198,7 @@ export function newSchoolApplication(opts: {
   const who = opts.applicantName?.trim() ? ` by ${opts.applicantName.trim()}` : "";
   return {
     title: "🏫 New School Application",
-    message: `A new school application has been submitted for ${opts.schoolName}${who}. Please review the application.`,
+    message: `A new school application has been submitted for ${opts.schoolName}${who}.\n\nTap below to review and approve.`,
   };
 }
 
@@ -140,45 +214,11 @@ export function schoolApplicationApproved(opts: {
   schoolId: string;
   loginHint?: string | null;
 }): { title: string; message: string } {
-  const login = opts.loginHint?.trim() || "Sign in at /login with your School ID and email.";
+  const login = opts.loginHint?.trim() || "Sign in at /login with your School ID and password.";
   return {
-    title: "🎉 School Application Approved!",
-    message: `Congratulations! Your school application has been approved.\n\nSchool: ${opts.schoolName}\nSchool ID: ${opts.schoolId}\n\n${login}`,
+    title: "✅ School Application Approved",
+    message: `Your school application for ${opts.schoolName} has been approved.\n\nSchool ID: ${opts.schoolId}\n\n${login}`,
   };
-}
-
-export function weeklySchoolReport(opts: {
-  schoolName: string;
-  students?: number;
-  teachers?: number;
-  examsCreated?: number;
-  examsApproved?: number;
-  resultsReleased?: number;
-}): { title: string; message: string } {
-  const lines: string[] = [`${opts.schoolName} this week:`];
-  if (opts.students) lines.push(`• ${opts.students} students enrolled`);
-  if (opts.teachers) lines.push(`• ${opts.teachers} teachers added`);
-  if (opts.examsCreated) lines.push(`• ${opts.examsCreated} examinations created`);
-  if (opts.examsApproved) lines.push(`• ${opts.examsApproved} examinations approved`);
-  if (opts.resultsReleased) lines.push(`• ${opts.resultsReleased} results released`);
-  return { title: "📊 WEEKLY SCHOOL REPORT", message: lines.join("\n") };
-}
-
-export function examSecuritySummary(opts: {
-  examTitle: string;
-  warnings?: number;
-  limitReached?: number;
-  paused?: number;
-  autoSubmitted?: number;
-  terminated?: number;
-}): { title: string; message: string } {
-  const lines: string[] = [`During ${opts.examTitle}:`];
-  if (opts.warnings) lines.push(`• ${opts.warnings} students triggered warnings`);
-  if (opts.limitReached) lines.push(`• ${opts.limitReached} students reached the violation limit`);
-  if (opts.paused) lines.push(`• ${opts.paused} exams were paused`);
-  if (opts.autoSubmitted) lines.push(`• ${opts.autoSubmitted} exams were auto-submitted`);
-  if (opts.terminated) lines.push(`• ${opts.terminated} exams were terminated`);
-  return { title: "⚠️ EXAM SECURITY ALERT", message: lines.join("\n") };
 }
 
 export function schoolApplicationRejected(opts: {
@@ -201,4 +241,36 @@ export function schoolApplicationNeedsChanges(opts: {
     title: "⚠️ Action Required",
     message: `Your school application for ${opts.schoolName} requires some changes before it can be approved.\n\n${reason}`,
   };
+}
+
+export function weeklySchoolReport(opts: {
+  schoolName: string;
+  students?: number;
+  teachers?: number;
+  exams?: number;
+  resultsReleased?: number;
+}): { title: string; message: string } {
+  const lines: string[] = [`Weekly summary for ${opts.schoolName}:`];
+  if (opts.students) lines.push(`• ${opts.students} students added`);
+  if (opts.teachers) lines.push(`• ${opts.teachers} teachers added`);
+  if (opts.exams) lines.push(`• ${opts.exams} examinations created`);
+  if (opts.resultsReleased) lines.push(`• ${opts.resultsReleased} results released`);
+  return { title: "📊 WEEKLY SCHOOL REPORT", message: lines.join("\n") };
+}
+
+export function examSecuritySummary(opts: {
+  examTitle: string;
+  warnings?: number;
+  limitReached?: number;
+  paused?: number;
+  autoSubmitted?: number;
+  terminated?: number;
+}): { title: string; message: string } {
+  const lines: string[] = [`During ${opts.examTitle}:`];
+  if (opts.warnings) lines.push(`• ${opts.warnings} students triggered warnings`);
+  if (opts.limitReached) lines.push(`• ${opts.limitReached} students reached the violation limit`);
+  if (opts.paused) lines.push(`• ${opts.paused} exams were paused`);
+  if (opts.autoSubmitted) lines.push(`• ${opts.autoSubmitted} exams were auto-submitted`);
+  if (opts.terminated) lines.push(`• ${opts.terminated} exams were terminated`);
+  return { title: "⚠️ EXAM SECURITY ALERT", message: lines.join("\n") };
 }
