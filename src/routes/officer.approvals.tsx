@@ -376,7 +376,7 @@ function Page() {
 
       if (action === "approve" && schoolId) {
         try {
-          void notifyStudentsExamApproved({
+          await notifyStudentsExamApproved({
             schoolId,
             examId: selected.id,
             examTitle: selected.title,

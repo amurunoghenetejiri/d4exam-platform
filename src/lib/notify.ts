@@ -39,19 +39,30 @@ export type NotifyPayload = {
   dedupeMinutes?: number;
 };
 
-function firePush(recipientUserId: string, title: string, message: string, link: string | null) {
-  void import("@/lib/push-send.functions")
-    .then((m) =>
-      m.dispatchPushToUser({
-        data: {
-          recipientUserId,
-          title,
-          message,
-          link: link || "/",
-        },
-      }),
-    )
-    .catch(() => undefined);
+async function firePush(
+  recipientUserId: string,
+  title: string,
+  message: string,
+  link: string | null,
+): Promise<void> {
+  if (!recipientUserId) return;
+  try {
+    const m = await import("@/lib/push-send.functions");
+    const result = await m.dispatchPushToUser({
+      data: {
+        recipientUserId,
+        title,
+        message,
+        link: link || "/",
+      },
+    });
+    const r = result as { sent?: number; skipped?: boolean; reason?: string };
+    if (r?.skipped || (r?.sent ?? 0) === 0) {
+      console.warn("[notify] push not delivered", recipientUserId, r?.reason || r);
+    }
+  } catch (e) {
+    console.warn("[notify] firePush failed", e);
+  }
 }
 
 export async function resolveAuthUserIds(
@@ -82,22 +93,20 @@ export async function resolveAuthUserIds(
 export async function studentIdsToAuthUserIds(studentIds: string[]): Promise<string[]> {
   if (!studentIds.length) return [];
   try {
-    const { data: students } = await supabase
+    const { data: students, error } = await supabase
       .from("students")
-      .select("id, profile_id, auth_user_id")
+      .select("id, profile_id, profiles(auth_user_id)")
       .in("id", studentIds);
-    const direct = (students ?? [])
-      .map((s) => (s as { auth_user_id?: string | null }).auth_user_id)
-      .filter(Boolean) as string[];
-    if (direct.length) return [...new Set(direct)];
-    const profileIds = [...new Set((students ?? []).map((s) => s.profile_id).filter(Boolean))] as string[];
-    if (!profileIds.length) return resolveAuthUserIds(studentIds);
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, auth_user_id")
-      .in("id", profileIds);
-    const fromProfiles = [...new Set((profiles ?? []).map((p) => (p as { auth_user_id?: string | null }).auth_user_id).filter(Boolean) as string[])];
-    if (fromProfiles.length) return fromProfiles;
+    if (!error && students?.length) {
+      const auth = [
+        ...new Set(
+          (students as { profiles?: { auth_user_id?: string | null } | null }[])
+            .map((s) => s.profiles?.auth_user_id)
+            .filter((x): x is string => Boolean(x)),
+        ),
+      ];
+      if (auth.length) return auth;
+    }
     return resolveAuthUserIds(studentIds);
   } catch {
     return resolveAuthUserIds(studentIds);
@@ -148,7 +157,7 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
     } as never);
 
     if (!rpcErr && rpcId) {
-      firePush(p.recipientUserId, p.title, p.message, p.link ?? null);
+      await firePush(p.recipientUserId, p.title, p.message, p.link ?? null);
       return String(rpcId);
     }
 
@@ -171,7 +180,7 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
       console.warn("[notify] insert failed", error.message);
       return null;
     }
-    if (data?.id) firePush(p.recipientUserId, p.title, p.message, p.link ?? null);
+    if (data?.id) await firePush(p.recipientUserId, p.title, p.message, p.link ?? null);
     return (data?.id as string) ?? null;
   } catch (e) {
     console.warn("[notify] error:", e);
@@ -308,28 +317,54 @@ function formatExamWhen(iso: string | null | undefined): { date: string; time: s
 }
 
 async function courseStudentAuthIds(courseId: string | null | undefined, schoolId: string): Promise<string[]> {
-  if (!courseId) {
-    try {
-      const { data: roles } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("school_id", schoolId)
-        .eq("role", "student")
-        .limit(2000);
-      return [...new Set((roles ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
-    } catch {
-      return [];
-    }
-  }
   try {
-    const { data: enroll } = await supabase
-      .from("course_enrollments")
-      .select("student_id")
-      .eq("course_id", courseId)
-      .limit(2000);
-    const sids = [...new Set((enroll ?? []).map((r) => (r as { student_id: string }).student_id))];
-    return studentIdsToAuthUserIds(sids);
-  } catch {
+    if (courseId) {
+      const sids: string[] = [];
+      const { data: sc } = await supabase
+        .from("student_courses")
+        .select("student_id")
+        .eq("course_id", courseId)
+        .eq("school_id", schoolId)
+        .limit(3000);
+      for (const r of sc ?? []) {
+        const id = (r as { student_id?: string }).student_id;
+        if (id) sids.push(id);
+      }
+      if (!sids.length) {
+        const { data: enroll } = await supabase
+          .from("course_enrollments")
+          .select("student_id")
+          .eq("course_id", courseId)
+          .limit(3000);
+        for (const r of enroll ?? []) {
+          const id = (r as { student_id?: string }).student_id;
+          if (id) sids.push(id);
+        }
+      }
+      if (sids.length) return studentIdsToAuthUserIds([...new Set(sids)]);
+    }
+    const { data: roles } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("school_id", schoolId)
+      .eq("role", "student")
+      .limit(3000);
+    const fromRoles = [...new Set((roles ?? []).map((r) => (r as { user_id: string }).user_id).filter(Boolean))];
+    if (fromRoles.length) return fromRoles;
+    const { data: students } = await supabase
+      .from("students")
+      .select("id, profiles(auth_user_id)")
+      .eq("school_id", schoolId)
+      .limit(3000);
+    const auth: string[] = [];
+    for (const s of students ?? []) {
+      const aid = (s as { profiles?: { auth_user_id?: string | null } | null }).profiles?.auth_user_id;
+      if (aid) auth.push(aid);
+    }
+    if (auth.length) return [...new Set(auth)];
+    return studentIdsToAuthUserIds((students ?? []).map((s) => (s as { id: string }).id).filter(Boolean));
+  } catch (e) {
+    console.warn("[notify] courseStudentAuthIds failed", e);
     return [];
   }
 }
