@@ -56,8 +56,10 @@ export function useStudentContext() {
     queryKey: ["student-context", session?.profileId, session?.schoolId, session?.userId],
     enabled: Boolean(
       session?.userId &&
-        session?.schoolId &&
-        (session.role === "student" || (session.roles && session.roles.includes("student"))),
+        (session.role === "student" ||
+          (session.roles && session.roles.includes("student")) ||
+          // Role may lag one tick after login — still try when school is known
+          session?.schoolId),
     ),
     staleTime: 5 * 60_000,
     queryFn: async (): Promise<StudentContext | null> => {
@@ -66,8 +68,80 @@ export function useStudentContext() {
         uid,
         OfflineKeys.studentContext,
         async () => {
-          const { getMyStudentContext } = await import("@/lib/student.server");
-          return getMyStudentContext();
+          try {
+            const { getMyStudentContext } = await import("@/lib/student.server");
+            const ctx = await getMyStudentContext();
+            if (ctx) return ctx;
+          } catch (e) {
+            console.warn("[student-context] server fn failed", e);
+          }
+          // Client-side fallback using the browser Supabase session
+          try {
+            const { supabase } = await import("@/integrations/supabase/client");
+            if (!uid) return null;
+            let profileQ = await supabase
+              .from("profiles")
+              .select("id, full_name, email, status, school_id")
+              .eq("auth_user_id", uid)
+              .maybeSingle();
+            let profile = profileQ.data;
+            if (!profile?.id) {
+              profileQ = await supabase
+                .from("profiles")
+                .select("id, full_name, email, status, school_id")
+                .eq("id", uid)
+                .maybeSingle();
+              profile = profileQ.data;
+            }
+            if (!profile?.id || !profile.school_id) return null;
+            const schoolId = profile.school_id as string;
+            const { data: student } = await supabase
+              .from("students")
+              .select(
+                "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, status, departments(name), faculties(name), levels(name)",
+              )
+              .eq("profile_id", profile.id)
+              .eq("school_id", schoolId)
+              .maybeSingle();
+            if (!student) return null;
+            const { data: school } = await supabase
+              .from("schools")
+              .select("name")
+              .eq("id", schoolId)
+              .maybeSingle();
+            const departments = student.departments as { name: string } | null;
+            const faculties = student.faculties as { name: string } | null;
+            const levels = student.levels as { name: string } | null;
+            const status = String(student.status ?? "active");
+            return {
+              studentId: student.id as string,
+              matric:
+                (student.matric_number as string | null) ??
+                (student.student_id as string | null) ??
+                null,
+              schoolId,
+              profileId: (student.profile_id as string | null) ?? profile.id,
+              fullName: (profile.full_name || "").trim() || String(student.matric_number || ""),
+              email: profile.email || "",
+              schoolName: (school?.name as string | null) ?? null,
+              departmentId: (student.department_id as string | null) ?? null,
+              levelId: (student.level_id as string | null) ?? null,
+              facultyId: (student.faculty_id as string | null) ?? null,
+              departmentName: departments?.name ?? null,
+              facultyName: faculties?.name ?? null,
+              levelName: levels?.name ?? null,
+              status,
+              isActive: status.toLowerCase() === "active",
+              sessionName: null,
+              semesterName: null,
+              semesterId: null,
+              courses: [],
+              courseIds: [],
+            };
+          } catch (e) {
+            console.warn("[student-context] client fallback failed", e);
+            return null;
+          }
         },
         { schoolId: session?.schoolId, fallback: null },
       );
