@@ -1,23 +1,8 @@
-name: Fix exam-approval push
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/run-push-approve-fix.yml"
-      - "scripts/apply_push_approve_fix.py"
 jobs:
-  fix:
+  skipped:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - run: python3 scripts/apply_push_approve_fix.py
-      - name: Commit
-        run: |
-          git config user.name "d4exam-bot"
-          git config user.email "bot@d4exam.local"
-          git add src/lib/notify.ts src/routes/officer.approvals.tsx
-          git commit -m "fix(notify): student_courses recipients + await FCM push on exam approve" || echo no-changes
-          git pull --rebase origin main || true
-          git push origin main
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."

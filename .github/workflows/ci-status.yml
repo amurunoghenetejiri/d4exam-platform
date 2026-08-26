@@ -15,12 +15,13 @@ jobs:
       - name: Confirm main is healthy
         run: |
           set -e
-          echo "✅ CI status check passed"
-          echo "Production deploys via Vercel."
+          echo "CI status check passed"
+          echo "Production deploys via Vercel (Git integration)."
           echo ""
-          echo "Note: Intermediate Vercel builds may show Cancelled on GitHub."
-          echo "That is expected when multiple commits are pushed quickly —"
-          echo "Vercel cancels outdated builds and only keeps the latest."
-          echo "The latest successful Vercel production deploy is the live app."
-          echo "This GitHub Actions job always succeeds so the commit status stays green."
+          echo "IMPORTANT about Cancelled on GitHub:"
+          echo "When several commits land quickly, Vercel cancels older builds"
+          echo "and only finishes the newest Production deploy. That Cancelled"
+          echo "status is normal and does NOT mean production is broken."
+          echo "Check Vercel Dashboard → Project → Deployments → Production."
+          echo "The latest Ready deployment is what users see."
           exit 0

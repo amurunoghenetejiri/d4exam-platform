@@ -1,25 +1,8 @@
-name: Apply complete notification system
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/run-notif-everything.yml"
-      - "scripts/apply_notif_everything.py"
 jobs:
-  fix:
+  skipped:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Apply
-        run: python3 scripts/apply_notif_everything.py
-      - name: Commit
-        run: |
-          git config user.name "d4exam-bot"
-          git config user.email "bot@d4exam.local"
-          git add -A
-          git diff --cached --stat || true
-          git commit -m "feat(notify): reminders, weekly summaries, officer violation push, delete-all, exact messages, CTAs" || echo no-changes
-          git pull --rebase origin main || true
-          git push origin main
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."

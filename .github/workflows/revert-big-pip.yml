@@ -1,60 +1,8 @@
-name: Revert to big PiP working state
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/revert-big-pip.yml'
 jobs:
-  revert:
+  skipped:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Restore pre-experiment files + big camera PiP
-        run: |
-          set -euo pipefail
-          BASE=5f114287220800db187d368de651a0d0006a0f5a
-          for f in \
-            src/styles.css \
-            src/components/layout/AppShell.tsx \
-            src/components/cbt/CbtExamSession.impl.tsx \
-            src/components/cbt/ExamCameraPip.tsx \
-            src/native/statusBar.ts \
-            capacitor.config.ts \
-            src/components/NetworkBanner.tsx
-          do
-            git show "$BASE:$f" > "$f"
-            echo "restored $f"
-          done
-          # Big PiP (original large size before 72px shrink)
-          python3 << 'PY'
-          from pathlib import Path
-          p = Path('src/components/cbt/ExamCameraPip.tsx')
-          t = p.read_text()
-          t = t.replace(
-            '"fixed z-[80] w-[72px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[88px]"',
-            '"fixed z-[80] w-[132px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[150px]"',
-          )
-          t = t.replace(
-            '"fixed z-[80] w-[min(30vw,7.25rem)] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[7.5rem]"',
-            '"fixed z-[80] w-[132px] overflow-hidden rounded-xl border border-white/20 bg-slate-950 shadow-xl sm:w-[150px]"',
-          )
-          p.write_text(t)
-          assert 'w-[132px]' in t
-          assert 'createFaceEngine' in t
-          print('PiP big 132/150 OK, face engine present')
-          PY
-          rm -f .github/workflows/restore-cbt-layout.yml
-          grep -q 'd4exam-platform.vercel.app' capacitor.config.ts
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No changes"
-          else
-            git commit -m "revert: restore working app + big camera PiP (132/150) — undo broken mobile experiments, keep notifications"
-            git push origin HEAD:main
-          fi
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."

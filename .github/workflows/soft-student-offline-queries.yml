@@ -1,43 +1,8 @@
-name: Soft student offline queries
+name: Disabled (legacy)
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/soft-student-offline-queries.yml"
-permissions:
-  contents: write
 jobs:
-  apply:
+  skipped:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Soften student query throws
-        run: |
-          set -e
-          # Never crash student list pages when offline / API fails
-          for f in src/routes/student.index.tsx src/routes/student.examinations.tsx src/routes/student.results.tsx src/routes/student.history.tsx src/routes/student.courses.tsx; do
-            if [ -f "$f" ]; then
-              sed -i 's/if (error) throw error;/if (error) { console.warn("[offline]", error); return []; }/g' "$f" || true
-              echo "patched $f"
-            fi
-          done
-          # Exam start requires network
-          python3 -c "
-          from pathlib import Path
-          p = Path('src/routes/student.examinations.tsx')
-          t = p.read_text()
-          if 'assertOnline' not in t:
-              t = t.replace('import { supabase } from \"@/integrations/supabase/client\";', 'import { supabase } from \"@/integrations/supabase/client\";\nimport { assertOnline } from \"@/lib/require-online\";')
-              t = t.replace('void navigate({ to: \"/student/exam/$id\", params: { id: examId } });', 'void assertOnline(\"Connect to the internet to write this exam.\").then(() => navigate({ to: \"/student/exam/$id\", params: { id: examId } })).catch((e) => window.alert(e instanceof Error ? e.message : \"Internet required\"));')
-              p.write_text(t)
-              print('exam gate')
-          else:
-              print('exam gate skip')
-          "
-          git config user.name fix-bot
-          git config user.email bot@d4exam.local
-          git add -A
-          git commit -m "feat(offline): soft-fail student queries; exam start requires internet" || echo no
-          git push
+      - run: echo "Legacy one-shot workflow — disabled. Production deploys via Vercel."
