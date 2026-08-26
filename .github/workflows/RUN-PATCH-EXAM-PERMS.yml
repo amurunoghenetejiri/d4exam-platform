@@ -14,7 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run patch script
-        run: python3 scripts/patch_exam_permissions.py
+        run: |
+          set -e
+          ls -la scripts/patch_exam_permissions.py
+          python3 scripts/patch_exam_permissions.py
+          grep -n "Allow camera, mic" src/components/cbt/ExamSecurityGate.tsx | head
       - name: Commit
         run: |
           git config user.name github-actions[bot]
