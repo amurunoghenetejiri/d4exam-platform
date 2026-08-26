@@ -88,6 +88,12 @@ jobs:
           if ! grep -q 'POST_NOTIFICATIONS' "$MAN"; then
             sed -i 's|android.permission.INTERNET" />|android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />|' "$MAN" || true
           fi
+          if ! grep -q 'FOREGROUND_SERVICE_MEDIA_PROJECTION' "$MAN"; then
+            sed -i 's|android.permission.RECORD_AUDIO" />|android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />|' "$MAN" || true
+          fi
+          if ! grep -q 'android.hardware.camera' "$MAN"; then
+            sed -i 's|</manifest>|    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <uses-feature android:name="android.hardware.camera.front" android:required="false" />\n</manifest>|' "$MAN" || true
+          fi
           echo "Manifest permissions:"
           grep 'uses-permission' "$MAN" || true
 
@@ -104,11 +110,9 @@ jobs:
           test -f "$LOGO"
           RES="android/app/src/main/res"
 
-          # Remove ALL adaptive / xml launchers (transparent adaptive → black on many OEMs)
           find "$RES" -type f \( -name 'ic_launcher.xml' -o -name 'ic_launcher_round.xml' -o -name 'ic_launcher_foreground.xml' -o -name 'ic_launcher_foreground.png' \) -delete || true
           rm -rf "$RES/mipmap-anydpi-v26" || true
 
-          # PNG-only launcher: logo scaled to ~72% so full art fits launcher mask
           make_icon() {
             local size="$1" dest="$2"
             local inner
@@ -129,12 +133,9 @@ jobs:
             make_icon "$px" "$RES/mipmap-$name/ic_launcher_round.png"
           done
 
-          # Notification small icons — Android requires WHITE alpha silhouette (not full-color).
-          # Full-color launcher logos look tiny/faint in the status bar. Force RGB=white, keep alpha.
           make_stat_icon() {
             local size="$1" dest="$2"
             local inner
-            # Fill ~90% of canvas so glyph is strong and comparable to WhatsApp/etc.
             inner=$(awk "BEGIN {printf \"%d\", $size * 0.90}")
             convert "$LOGO" -background none -gravity center -resize "${inner}x${inner}" \
               -extent "${size}x${size}" \
@@ -159,8 +160,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
-            printf '%s\n' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
-            echo "Wrote android/app/google-services.json from secret"
+            printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "Wrote google-services.json from secret"
           elif [ -f android/app/google-services.json ]; then
             echo "Using committed google-services.json"
           else
@@ -182,16 +183,28 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Do NOT install emulator — unused for assembleDebug and often fails (ZipFile errors).
+          packages: |
+            platform-tools
+            platforms;android-34
+            build-tools;34.0.0
+            cmdline-tools;latest
 
       - name: Accept Android licenses
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" || true
 
       - name: Capacitor sync Android
         run: |
           set -euo pipefail
           npx cap sync android
+          MAN="android/app/src/main/AndroidManifest.xml"
+          grep -q 'android.permission.CAMERA' "$MAN"
+          grep -q 'android.permission.RECORD_AUDIO' "$MAN"
+          echo "OK: CAMERA and RECORD_AUDIO present in AndroidManifest"
 
       - name: Build debug APK
         run: |
