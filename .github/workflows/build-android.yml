@@ -10,6 +10,7 @@ on:
       - "package.json"
       - "public/**"
       - "src/lib/push.ts"
+      - "src/lib/push-send.functions.ts"
       - "src/native/**"
       - "scripts/prepare-capacitor-dist.mjs"
       - "scripts/generate-capacitor-index.mjs"
@@ -48,7 +49,6 @@ jobs:
       - name: Prepare Capacitor dist (fallback assets; shell is Vercel URL)
         run: |
           set -euo pipefail
-          # Keep dist populated for Capacitor webDir even though server.url points at Vercel
           if [ -f scripts/prepare-capacitor-dist.mjs ]; then
             node scripts/prepare-capacitor-dist.mjs || true
           fi
@@ -63,6 +63,8 @@ jobs:
           if [ ! -f dist/index.html ]; then
             printf '%s\n' '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>D4EXAM</title></head><body><p>Loading…</p></body></html>' > dist/index.html
           fi
+          # Ensure logo is in dist for offline fallback
+          if [ -f public/logo.png ]; then cp -f public/logo.png dist/logo.png; fi
           echo "dist ready (runtime shell = https://d4exam-platform.vercel.app)"
           ls -la dist/index.html || true
 
@@ -73,6 +75,81 @@ jobs:
           npx cap add android
           test -f android/gradlew
           chmod +x android/gradlew
+
+      - name: Install ImageMagick for launcher icons
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq imagemagick
+
+      - name: Apply transparent D4EXAM logo as launcher + notification icon
+        run: |
+          set -euo pipefail
+          LOGO="public/logo.png"
+          test -f "$LOGO"
+          RES="android/app/src/main/res"
+
+          # Transparent adaptive background (no colored box behind logo)
+          mkdir -p "$RES/values"
+          cat > "$RES/values/ic_launcher_background.xml" <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_launcher_background">#00000000</color>
+          </resources>
+          EOF
+
+          # Generate density PNGs (transparent) — full-bleed logo, bold/clear
+          make_icon() {
+            local size="$1" dest="$2"
+            convert "$LOGO" -background none -gravity center -resize "${size}x${size}" \
+              -extent "${size}x${size}" PNG32:"$dest"
+          }
+
+          for dens in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            name="${dens%%:*}"
+            px="${dens##*:}"
+            mkdir -p "$RES/mipmap-$name"
+            make_icon "$px" "$RES/mipmap-$name/ic_launcher.png"
+            make_icon "$px" "$RES/mipmap-$name/ic_launcher_round.png"
+            make_icon "$px" "$RES/mipmap-$name/ic_launcher_foreground.png"
+          done
+
+          # Adaptive XML pointing at transparent FG + transparent BG color
+          for dens in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p "$RES/mipmap-$dens"
+            cat > "$RES/mipmap-$dens/ic_launcher.xml" <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_launcher_background"/>
+              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+          </adaptive-icon>
+          EOF
+            cp "$RES/mipmap-$dens/ic_launcher.xml" "$RES/mipmap-$dens/ic_launcher_round.xml"
+          done
+
+          # Notification small icon (white silhouette works best; use logo scaled)
+          for dens in mdpi:24 hdpi:36 xhdpi:48 xxhdpi:72 xxxhdpi:96; do
+            name="${dens%%:*}"
+            px="${dens##*:}"
+            mkdir -p "$RES/drawable-$name"
+            make_icon "$px" "$RES/drawable-$name/ic_stat_d4exam.png"
+          done
+
+          echo "Launcher icons generated from public/logo.png (transparent)"
+
+      - name: Optional google-services.json for FCM (native push)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
+            printf '%s\n' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+            echo "Wrote android/app/google-services.json from secret"
+          elif [ -f android/app/google-services.json ]; then
+            echo "Using committed google-services.json"
+          else
+            echo "WARNING: No google-services.json — native FCM may not register until secret is set"
+          fi
 
       - name: Verify capacitor uses Vercel shell URL
         run: |
