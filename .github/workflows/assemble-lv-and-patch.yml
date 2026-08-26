@@ -1,0 +1,12 @@
+name: assemble-lv-and-patch
+on:
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Note
+        run: echo "Trigger full patch via run-screen-share-patch when script parts are present"
