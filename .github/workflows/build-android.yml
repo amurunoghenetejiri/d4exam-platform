@@ -65,7 +65,6 @@ jobs:
           fi
           if [ -f public/logo.png ]; then cp -f public/logo.png dist/logo.png; fi
           echo "dist ready (runtime shell = https://d4exam-platform.vercel.app)"
-          ls -la dist/index.html || true
 
       - name: Ensure complete Android platform
         run: |
@@ -81,65 +80,39 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq imagemagick
 
-      - name: Apply transparent D4EXAM logo as launcher + notification icon
+      - name: Apply full transparent logo (no black box, fits container)
         run: |
           set -euo pipefail
           LOGO="public/logo.png"
           test -f "$LOGO"
           RES="android/app/src/main/res"
 
-          # Remove any default Capacitor adaptive XML that would clash with PNGs
-          find "$RES" -type f \( -name 'ic_launcher.xml' -o -name 'ic_launcher_round.xml' -o -name 'ic_launcher_foreground.xml' \) -delete || true
+          # Remove ALL adaptive / xml launchers (transparent adaptive → black on many OEMs)
+          find "$RES" -type f \( -name 'ic_launcher.xml' -o -name 'ic_launcher_round.xml' -o -name 'ic_launcher_foreground.xml' -o -name 'ic_launcher_foreground.png' \) -delete || true
           rm -rf "$RES/mipmap-anydpi-v26" || true
 
-          # Transparent background color resource (no solid box)
-          mkdir -p "$RES/values"
-          cat > "$RES/values/ic_launcher_background.xml" <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="ic_launcher_background">#00000000</color>
-          </resources>
-          EOF
-
+          # PNG-only: logo scaled to ~72% so full art fits launcher mask, transparent padding
           make_icon() {
             local size="$1" dest="$2"
-            convert "$LOGO" -background none -gravity center -resize "${size}x${size}" \
+            local inner
+            inner=$(awk "BEGIN {printf \"%d\", $size * 0.72}")
+            convert "$LOGO" -background none -gravity center -resize "${inner}x${inner}" \
               -extent "${size}x${size}" PNG32:"$dest"
           }
 
-          # PNG-only launchers (no XML in same density folder = no Duplicate resources)
           for dens in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
             name="${dens%%:*}"
             px="${dens##*:}"
             mkdir -p "$RES/mipmap-$name"
-            # Wipe old defaults first
             rm -f "$RES/mipmap-$name/ic_launcher.png" \
                   "$RES/mipmap-$name/ic_launcher_round.png" \
-                  "$RES/mipmap-$name/ic_launcher_foreground.png" \
                   "$RES/mipmap-$name/ic_launcher.xml" \
                   "$RES/mipmap-$name/ic_launcher_round.xml" || true
             make_icon "$px" "$RES/mipmap-$name/ic_launcher.png"
             make_icon "$px" "$RES/mipmap-$name/ic_launcher_round.png"
           done
 
-          # Adaptive icons only under anydpi-v26 (references density foreground PNGs)
-          mkdir -p "$RES/mipmap-anydpi-v26"
-          for dens in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
-            name="${dens%%:*}"
-            px="${dens##*:}"
-            mkdir -p "$RES/mipmap-$name"
-            make_icon "$px" "$RES/mipmap-$name/ic_launcher_foreground.png"
-          done
-          cat > "$RES/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background"/>
-              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-          </adaptive-icon>
-          EOF
-          cp "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
-
-          # Notification status icons (transparent logo)
+          # Notification small icons — transparent logo, padded
           for dens in mdpi:24 hdpi:36 xhdpi:48 xxhdpi:72 xxxhdpi:96; do
             name="${dens%%:*}"
             px="${dens##*:}"
@@ -147,8 +120,9 @@ jobs:
             make_icon "$px" "$RES/drawable-$name/ic_stat_d4exam.png"
           done
 
-          echo "Launcher icons OK (PNG density + adaptive anydpi-v26, no duplicates)"
-          find "$RES" -name 'ic_launcher*' | sort
+          # Manifest already uses @mipmap/ic_launcher — PNG only, no adaptive black layer
+          echo "Icons: transparent PNG only, logo ~72% (full art visible, no black box)"
+          find "$RES/mipmap-"* -name 'ic_launcher*' | sort
 
       - name: Optional google-services.json for FCM (native push)
         env:
@@ -161,7 +135,7 @@ jobs:
           elif [ -f android/app/google-services.json ]; then
             echo "Using committed google-services.json"
           else
-            echo "WARNING: No google-services.json — native FCM may not register until secret is set"
+            echo "WARNING: No google-services.json — Allow will not crash; FCM token may not register until secret is set"
           fi
 
       - name: Verify capacitor uses Vercel shell URL
