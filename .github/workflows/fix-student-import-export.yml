@@ -12,12 +12,26 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Fix importStudents import
+      - name: Fix importStudents import with Python
         run: |
-          set -euo pipefail
-          FILE=src/routes/admin.student-import.tsx
-          sed -i 's/import { createSchoolUser, importStudents } from "@\/lib\/auth.school-admin.functions";/import { createSchoolUser, importStudentsBulk as importStudents } from "@\/lib\/auth.school-admin.functions";/' "$FILE"
-          grep -n "importStudentsBulk as importStudents\|importStudents" "$FILE" | head -5
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/routes/admin.student-import.tsx")
+          t = p.read_text()
+          old = 'import { createSchoolUser, importStudents } from "@/lib/auth.school-admin.functions";'
+          new = 'import { createSchoolUser, importStudentsBulk as importStudents } from "@/lib/auth.school-admin.functions";'
+          if old not in t and new in t:
+              print("already fixed")
+          elif old in t:
+              p.write_text(t.replace(old, new, 1))
+              print("fixed")
+          else:
+              print("pattern not found")
+              for i, ln in enumerate(t.splitlines()[:15], 1):
+                  if "auth.school-admin" in ln:
+                      print(i, repr(ln))
+              raise SystemExit(1)
+          PY
       - name: Commit
         run: |
           git config user.name github-actions[bot]
