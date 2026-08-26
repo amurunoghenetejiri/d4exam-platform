@@ -95,6 +95,9 @@ export function CbtExamPage() {
   const orderedIdsRef = useRef<string[] | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const faceStatusRef = useRef<string>("starting");
+  const answeredCountRef = useRef(0);
+  const totalQuestionsRef = useRef(0);
+  const timeRemainingRef = useRef<number | null>(null);
   const [liveAttemptId, setLiveAttemptId] = useState<string | null>(null);
   const finishingRef = useRef(false);
   const startedRef = useRef(false);
@@ -150,7 +153,33 @@ export function CbtExamPage() {
     stream: liveStream,
     getStream: () => mediaStreamRef.current || liveStream,
     getFaceStatus: () => faceStatusRef.current,
+    getAnsweredCount: () => answeredCountRef.current,
+    getTotalQuestions: () => totalQuestionsRef.current,
+    getTimeRemainingSec: () => timeRemainingRef.current,
   });
+
+  useEffect(() => {
+    if (!started || done || previewMode) return;
+    const tick = () => {
+      const aid = attemptIdRef.current;
+      if (!aid) return;
+      const meta = {
+        lastSeenAt: new Date().toISOString(),
+        cameraActive: Boolean(mediaStreamRef.current || liveStream),
+        faceStatus: faceStatusRef.current || "ok",
+        answeredCount: answeredCountRef.current,
+        totalQuestions: totalQuestionsRef.current,
+        timeRemainingSec: timeRemainingRef.current,
+        fullscreen: typeof document !== "undefined" ? Boolean(document.fullscreenElement) : false,
+        studentName: session?.fullName || student?.fullName || undefined,
+      };
+      void supabase.from("exam_attempts").update({ metadata: meta, updated_at: new Date().toISOString() } as never).eq("id", aid);
+    };
+    tick();
+    const t = window.setInterval(tick, 8000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done, previewMode, liveStream, session?.fullName, student?.fullName]);
 
   const shutdownMedia = useCallback(() => {
     stopMediaStream(mediaStreamRef.current);
@@ -357,6 +386,9 @@ export function CbtExamPage() {
   const TOTAL = questions.length;
   const q = questions[index];
   const answeredCount = Object.keys(answers).length;
+  answeredCountRef.current = answeredCount;
+  totalQuestionsRef.current = questions.length;
+  timeRemainingRef.current = seconds;
 
   const faceWarnCountRef = useRef(0);
   const onFaceSecurityEvent = useCallback((ev: FaceSecurityEvent) => {

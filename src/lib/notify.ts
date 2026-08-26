@@ -431,14 +431,25 @@ export async function notifyStudentExamSubmitted(opts: {
 }
 
 export async function notifyStudentOfficerWarning(opts: {
-  studentUserId: string;
+  studentUserId?: string | null;
+  studentId?: string | null;
   schoolId?: string | null;
   examId?: string | null;
+  examTitle?: string | null;
   message?: string | null;
 }): Promise<void> {
   try {
+    let uid = (opts.studentUserId || "").trim();
+    if (!uid && opts.studentId) {
+      const ids = await studentIdsToAuthUserIds([opts.studentId]);
+      uid = ids[0] || "";
+    }
+    if (!uid) {
+      console.warn("[notify] notifyStudentOfficerWarning: no auth user", opts.studentId);
+      return;
+    }
     await notifyUser({
-      recipientUserId: opts.studentUserId,
+      recipientUserId: uid,
       schoolId: opts.schoolId,
       title: "⚠️ Officer Warning",
       message: opts.message?.trim() || "An examination officer sent you a warning during your exam. Stay focused.",

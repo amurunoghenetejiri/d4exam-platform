@@ -17,12 +17,15 @@ export type LiveCamFramePayload = {
   ts: number;
   faceStatus?: string;
   cameraActive?: boolean;
+  answeredCount?: number;
+  totalQuestions?: number;
+  timeRemainingSec?: number | null;
 };
 
 export const LIVE_CAM_EVENT = "frame";
 /** ~1.5 fps — clearer tiles without flooding Realtime */
 export const LIVE_CAM_FRAME_INTERVAL_MS = 650;
-export const LIVE_CAM_STALE_MS = 5_000;
+export const LIVE_CAM_STALE_MS = 12_000;
 
 export function liveCamChannelName(schoolId: string): string {
   return `live-cam:${schoolId}`;
@@ -150,7 +153,7 @@ export function startLiveCamPublisher(opts: {
   studentId: string;
   examId: string;
   getStream: () => MediaStream | null;
-  getFaceMeta?: () => { faceStatus?: string; cameraActive?: boolean };
+  getFaceMeta?: () => { faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null };
   intervalMs?: number;
 }): LiveCamPublisher {
   const intervalMs = opts.intervalMs ?? LIVE_CAM_FRAME_INTERVAL_MS;
@@ -186,6 +189,9 @@ export function startLiveCamPublisher(opts: {
         ts: Date.now(),
         faceStatus: meta.faceStatus,
         cameraActive: meta.cameraActive !== false,
+        answeredCount: typeof meta.answeredCount === "number" ? meta.answeredCount : undefined,
+        totalQuestions: typeof meta.totalQuestions === "number" ? meta.totalQuestions : undefined,
+        timeRemainingSec: typeof meta.timeRemainingSec === "number" ? meta.timeRemainingSec : null,
       };
       void channel.send({
         type: "broadcast",

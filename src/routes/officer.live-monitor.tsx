@@ -84,7 +84,7 @@ type IntegrityEvent = {
 };
 
 type FilterKey = "all" | "normal" | "warning" | "violation" | "offline";
-type FrameEntry = { src: string; ts: number };
+type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null };
 
 function isFaceOrCameraLogOnly(eventType: string): boolean {
   const t = String(eventType || "").toUpperCase();
@@ -216,7 +216,7 @@ function Page() {
         if (!attemptId || !p.frame) return;
         setFrames((prev) => ({
           ...prev,
-          [attemptId]: { src: p.frame, ts: p.ts || Date.now() },
+          [attemptId]: { src: p.frame, ts: p.ts || Date.now(), faceStatus: p.faceStatus, cameraActive: p.cameraActive !== false, answeredCount: p.answeredCount, totalQuestions: p.totalQuestions, timeRemainingSec: p.timeRemainingSec },
         }));
       },
     });
@@ -413,21 +413,38 @@ function Page() {
         return true;
       })
       .map((a) => {
-        const presence = parsePresence(a.metadata);
+        const basePresence = parsePresence(a.metadata);
+        const frame = frames[a.id];
         const st = String(a.status || "").toLowerCase();
         const isDone = ["submitted", "terminated", "flagged", "completed"].includes(st);
+        const hasLiveVideo = !isDone && Boolean(frame && isLiveCamFrameFresh(frame.ts, now));
+        // Prefer live Realtime frame for online/camera/face so officers never see Offline while video is live
+        const presence = { ...basePresence };
+        if (hasLiveVideo && frame) {
+          presence.lastSeenAt = new Date(frame.ts).toISOString();
+          presence.cameraActive = frame.cameraActive !== false;
+          if (frame.faceStatus) {
+            const fs = String(frame.faceStatus).toLowerCase();
+            if (fs === "ok" || fs === "none" || fs === "multi" || fs === "unclear" || fs === "unavailable") {
+              presence.faceStatus = fs as typeof presence.faceStatus;
+            }
+          }
+          if (typeof frame.answeredCount === "number") presence.answeredCount = frame.answeredCount;
+          if (typeof frame.totalQuestions === "number") presence.totalQuestions = frame.totalQuestions;
+          if (typeof frame.timeRemainingSec === "number") presence.timeRemainingSec = frame.timeRemainingSec;
+        } else if (frame?.ts && !presence.lastSeenAt) {
+          presence.lastSeenAt = new Date(frame.ts).toISOString();
+        }
         const sev: MonitorSeverity = isDone ? "completed" : severityFromPresence(a.status, presence, now);
         const name = studentDisplayName(a);
-        const matric = a.students?.matric_number || a.students?.student_id || "—";
+        const matric = String(a.students?.matric_number || a.students?.student_id || "—").trim() || "—";
         const _c = a.examinations?.courses as unknown;
         const course = Array.isArray(_c)
           ? ((_c[0] as { code?: string } | undefined)?.code || "—")
           : ((_c as { code?: string } | null | undefined)?.code || "—");
         const title = a.examinations?.title || "Exam";
-        const frame = frames[a.id];
-        const hasLiveVideo = !isDone && Boolean(frame && isLiveCamFrameFresh(frame.ts, now));
         const bars = isDone ? 0 : signalBars(frame?.ts, presence.lastSeenAt, now);
-        const activity = lastActivityMs(presence.lastSeenAt, a);
+        const activity = lastActivityMs(presence.lastSeenAt, a) ?? (frame?.ts ?? null);
         let videoStatus: "live" | "reconnecting" | "offline" | "done" = "offline";
         if (isDone) videoStatus = "done";
         else if (hasLiveVideo) videoStatus = "live";
@@ -783,7 +800,7 @@ function Page() {
       {selected && (
         <div className="fixed inset-0 z-[70] flex justify-end bg-black/40" onClick={() => setSelectedId(null)}>
           <div
-            className="flex h-full w-full max-w-md flex-col overflow-y-auto bg-white shadow-2xl sm:max-w-lg"
+            className="flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl sm:max-w-lg"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-4 sm:py-3">
@@ -808,7 +825,7 @@ function Page() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white shadow-sm"><div className="relative w-full bg-slate-900" style={{ height: "min(420px, 70vw)" }}>
+            <div className="relative w-full shrink-0 bg-slate-900 aspect-[4/3] max-h-[min(420px,50dvh)]">
               {selected.videoStatus === "live" && selected.frame?.src ? (
                 <>
                   <img
@@ -863,7 +880,8 @@ function Page() {
                   </div>
                 </>
               )}
-            </div></div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <div className="grid grid-cols-2 gap-2 border-b border-slate-100 p-3 text-sm sm:p-4">
               <Info label="Course" value={selected.course} />
               <Info label="Exam" value={selected.title} />
@@ -880,7 +898,7 @@ function Page() {
                     : "—"
                 }
               />
-              <Info label="Connection" value={isOnline(selected.presence.lastSeenAt) ? "Online" : "Offline"} />
+              <Info label="Connection" value={selected.hasLiveVideo || isOnline(selected.presence.lastSeenAt) ? "Online" : "Offline"} />
               <Info label="Camera" value={selected.presence.cameraActive ? "Active" : "Off"} />
               <Info label="Face" value={selected.isDone ? "—" : faceLabel(selected.presence)} />
               <Info label="Tab switches" value={String(selected.a.tab_switch_count ?? 0)} />
@@ -1094,7 +1112,10 @@ function StudentCard({
       <div className="p-1.5 sm:p-2">
         <p className="truncate text-[11px] font-bold leading-tight text-slate-900 sm:text-xs sm:text-sm">{name}</p>
         <p className="truncate text-[9px] leading-tight text-slate-500 sm:text-[10px]">
-          {matric} · {course}
+          {matric}
+        </p>
+        <p className="truncate text-[9px] leading-tight text-slate-400 sm:text-[10px]">
+          {course}
         </p>
       </div>
     </button>

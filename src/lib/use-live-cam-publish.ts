@@ -14,6 +14,9 @@ export function useLiveCamPublish(opts: {
   stream: MediaStream | null;
   getStream?: () => MediaStream | null;
   getFaceStatus?: () => string;
+  getAnsweredCount?: () => number;
+  getTotalQuestions?: () => number;
+  getTimeRemainingSec?: () => number | null;
 }) {
   const pubRef = useRef<LiveCamPublisher | null>(null);
 
@@ -49,6 +52,9 @@ export function useLiveCamPublish(opts: {
       getFaceMeta: () => ({
         faceStatus: opts.getFaceStatus?.() || "ok",
         cameraActive: true,
+        answeredCount: opts.getAnsweredCount?.(),
+        totalQuestions: opts.getTotalQuestions?.(),
+        timeRemainingSec: opts.getTimeRemainingSec?.() ?? null,
       }),
       intervalMs: 700,
     });
