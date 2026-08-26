@@ -91,6 +91,8 @@ export function CbtExamPage() {
   const [mediaBusy, setMediaBusy] = useState(false);
   const [resultId, setResultId] = useState<string | null>(null);
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
   const [fsGate, setFsGate] = useState(false);
   const [paused, setPaused] = useState(false);
   const [pauseReason, setPauseReason] = useState<string>("");
@@ -204,6 +206,13 @@ export function CbtExamPage() {
     stopMediaStream(mediaStreamRef.current);
     mediaStreamRef.current = null;
     setLiveStream(null);
+    try {
+      stopScreenShareStream(screenStreamRef.current);
+    } catch {
+      /* ignore */
+    }
+    screenStreamRef.current = null;
+    setScreenStream(null);
   }, []);
 
   useEffect(() => {
