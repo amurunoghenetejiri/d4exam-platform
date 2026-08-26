@@ -27,6 +27,7 @@ import {
   ensureMicrophonePermission,
   openCameraStream,
   requestExamMediaPermissions,
+  openAppPermissionSettings,
 } from "@/native/cameraService";
 import { canAttemptScreenShare, startScreenShareStream, stopScreenShareStream } from "@/lib/screen-share";
 
