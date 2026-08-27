@@ -24,6 +24,12 @@
 
         </activity>
 
+        <!-- Required for MediaProjection screen share during CBT (Android 10+) -->
+        <service
+            android:name=".ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
