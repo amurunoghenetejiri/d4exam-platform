@@ -1,0 +1,30 @@
+name: APPLY-MONITOR-FEED
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/APPLY-MONITOR-FEED.yml
+      - scripts/patch_monitor_names_feed.py
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch monitor names + feed mode
+        run: |
+          set -euo pipefail
+          python3 scripts/patch_monitor_names_feed.py
+          grep -q 'studentDisplayName' src/routes/officer.live-monitor.tsx
+          grep -q 'startLiveScreenSubscriber' src/routes/officer.live-monitor.tsx
+      - name: Commit sources only
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/officer.live-monitor.tsx src/components/officer/OfficerResultsPage.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(monitor): student full name + matric, Camera/Screen/Both feed"
+            git push
+          fi
