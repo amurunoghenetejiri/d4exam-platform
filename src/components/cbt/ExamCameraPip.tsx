@@ -353,35 +353,84 @@ export function ExamCameraPip({
       else if (next === "unavailable") fireAlert("unclear", faceCount);
     };
 
+    let nullStreak = 0;
+    const startedAt = Date.now();
+
+    const waitVideoReady = async (maxMs = 2500) => {
+      const t0 = Date.now();
+      while (!cancelled && Date.now() - t0 < maxMs) {
+        const v = videoRef.current;
+        if (v && v.readyState >= 2 && v.videoWidth >= 16) {
+          try {
+            if (v.paused) await v.play();
+          } catch {
+            /* ignore */
+          }
+          return true;
+        }
+        await new Promise((r) => window.setTimeout(r, 80));
+      }
+      return Boolean(videoRef.current && videoRef.current.readyState >= 2);
+    };
+
     const tick = async () => {
       if (cancelled || !videoRef.current || !faceEngineRef.current) return;
       try {
-        const n = await faceEngineRef.current.count(videoRef.current);
-        if (cancelled) return;
-        if (n == null) {
-          applyState("unclear", null);
-        } else if (n <= 0) {
-          applyState("none", 0);
-        } else if (n > 1) {
-          applyState("multi", n);
+        const v = videoRef.current;
+        if (v.readyState < 2 || v.videoWidth < 16) {
+          if (Date.now() - startedAt > 1200) {
+            nullStreak += 1;
+            if (nullStreak >= 8) applyState("none", 0);
+          }
         } else {
-          applyState("ok", 1);
+          const n = await faceEngineRef.current.count(v);
+          if (cancelled) return;
+          if (n == null) {
+            nullStreak += 1;
+            if (Date.now() - startedAt > 1500 && nullStreak >= 5) {
+              applyState("none", 0);
+            } else if (nullStreak >= 12) {
+              applyState("unclear", null);
+            }
+          } else {
+            nullStreak = 0;
+            if (n <= 0) applyState("none", 0);
+            else if (n > 1) applyState("multi", n);
+            else applyState("ok", 1);
+          }
         }
       } catch {
-        if (!cancelled) applyState("unclear", null);
+        if (!cancelled) {
+          nullStreak += 1;
+          if (nullStreak >= 10) applyState("unclear", null);
+        }
       }
-      if (!cancelled) timer = window.setTimeout(() => void tick(), 200);
+      if (!cancelled) timer = window.setTimeout(() => void tick(), 250);
     };
 
     void (async () => {
       try {
-        const engine = await createFaceEngine();
+        await waitVideoReady(2500);
+        if (cancelled) return;
+        let engine: FaceEngine | null = null;
+        for (let i = 0; i < 3 && !cancelled; i++) {
+          engine = await createFaceEngine();
+          if (engine) break;
+          await new Promise((r) => window.setTimeout(r, 500 * (i + 1)));
+        }
         if (cancelled) {
           engine?.close();
           return;
         }
         if (!engine) {
-          setFaceStatus("unclear");
+          // Engine failed — do not stay stuck forever on "Detecting face"
+          setFaceStatus("unavailable");
+          lastStateRef.current = "unavailable";
+          onSecRef.current?.({
+            kind: "camera_blocked",
+            faceCount: null,
+            at: new Date().toISOString(),
+          });
           return;
         }
         faceEngineRef.current = engine;
@@ -445,11 +494,11 @@ export function ExamCameraPip({
       : camConn === "unavailable"
         ? "Camera not available"
         : faceStatus === "multi"
-          ? "Multiple faces detected"
+          ? "Multiple Faces Detected"
           : faceStatus === "none"
-            ? "No face detected"
+            ? "No Face Detected"
             : faceStatus === "ok"
-              ? "1 face monitoring"
+              ? "1 Face Monitoring"
               : faceStatus === "unavailable"
                 ? camConn === "active"
                   ? "Face check off"

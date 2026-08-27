@@ -104,6 +104,7 @@ export function CbtExamPage() {
   const orderedIdsRef = useRef<string[] | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const faceStatusRef = useRef<string>("starting");
+  const lastLoggedFaceRef = useRef<string>("");
   const answeredCountRef = useRef(0);
   const totalQuestionsRef = useRef(0);
   const timeRemainingRef = useRef<number | null>(null);
@@ -503,6 +504,10 @@ export function CbtExamPage() {
     if (!schoolId || !studentId || !id) return;
     const isViolation = ev.kind === "none" || ev.kind === "multi" || ev.kind === "camera_blocked";
     if (isViolation) faceWarnCountRef.current += 1;
+    // Event-based logging only — do not spam identical states every frame
+    const logKey = `${mapped.eventType}:${ev.faceCount ?? ""}`;
+    if (lastLoggedFaceRef.current === logKey) return;
+    lastLoggedFaceRef.current = logKey;
     void logSecurityEvent({
       schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
       eventType: mapped.eventType, severity: mapped.severity, description: mapped.description,

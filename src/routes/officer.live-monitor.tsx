@@ -625,7 +625,18 @@ function Page() {
       // Instant in-exam delivery via Realtime broadcast (no RLS dependency)
       try {
         const warnCh = supabase.channel(`student-exam-warn:${selected.a.student_id}`);
-        await warnCh.subscribe();
+        await new Promise<void>((resolve, reject) => {
+          const t = window.setTimeout(() => resolve(), 2500);
+          warnCh.subscribe((status) => {
+            if (status === "SUBSCRIBED") {
+              window.clearTimeout(t);
+              resolve();
+            } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+              window.clearTimeout(t);
+              reject(new Error(String(status)));
+            }
+          });
+        });
         await warnCh.send({
           type: "broadcast",
           event: "officer_warning",
@@ -637,7 +648,7 @@ function Page() {
             ts: Date.now(),
           },
         });
-        void supabase.removeChannel(warnCh);
+        window.setTimeout(() => { void supabase.removeChannel(warnCh); }, 1500);
       } catch (be) {
         console.warn("[live-monitor] warn broadcast", be);
       }
