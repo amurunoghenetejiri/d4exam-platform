@@ -1,12 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useRows } from "@/lib/queries";
-import { reviewSchoolApplication } from "@/lib/auth.school-admin.functions";
+import {
+  listSchoolApplications,
+  reviewSchoolApplication,
+} from "@/lib/auth.school-admin.functions";
 import { toast } from "sonner";
 import { ArrowLeft, Building2, Copy, Loader2, MapPin, Phone, Mail, User } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -107,17 +109,22 @@ function locationLine(app: AppRow): string {
 
 function Page() {
   const review = useServerFn(reviewSchoolApplication);
+  const listApps = useServerFn(listSchoolApplications);
   const qc = useQueryClient();
-  const { data, isLoading, refetch } = useRows<AppRow>({
-    table: "school_applications",
-    // Do not select non-existent "notes" column — notes live in documents JSON
-    select:
-      "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes, documents",
-    order: { column: "created_at", ascending: false },
-    limit: 100,
+
+  // Service-role list — client RLS often hides school_applications from the browser client
+  const { data, isLoading, refetch, error: listError } = useQuery({
+    queryKey: ["super-admin", "school_applications"],
+    queryFn: async () => {
+      const rows = await listApps();
+      return (rows ?? []) as AppRow[];
+    },
+    staleTime: 5_000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 15_000,
   });
 
-  // Live updates: when a school submits, superadmin sees it immediately
+  // Live updates: new submits / status changes refresh the list immediately
   useEffect(() => {
     const channel = supabase
       .channel("super-admin-school-applications")
@@ -125,7 +132,7 @@ function Page() {
         "postgres_changes",
         { event: "*", schema: "public", table: "school_applications" },
         () => {
-          void qc.invalidateQueries({ queryKey: ["rows", "school_applications"] });
+          void qc.invalidateQueries({ queryKey: ["super-admin", "school_applications"] });
           void refetch();
         },
       )
@@ -206,7 +213,7 @@ function Page() {
         toast.success("Application marked under review.");
       }
 
-      await qc.invalidateQueries({ queryKey: ["rows", "school_applications"] });
+      await qc.invalidateQueries({ queryKey: ["super-admin", "school_applications"] });
       await refetch();
     } catch (e) {
       toast.error((e as Error).message || "Could not update application");
@@ -311,9 +318,7 @@ function Page() {
                 <dd className="text-slate-800">
                   <span className="inline-flex items-center gap-1">
                     <Phone className="h-3.5 w-3.5 text-slate-400" />
-                    {selected.official_phone || "—"}
-                  </span>
-                </dd>
+                    {selected.official_phone || "—"}</dd>
               </div>
             </dl>
           </SectionCard>
@@ -499,6 +504,11 @@ function Page() {
       <div className="mt-4 sm:mt-6">
         {isLoading ? (
           <p className="text-sm text-slate-500">Loading applications…</p>
+        ) : listError ? (
+          <EmptyState
+            title="Could not load applications"
+            description={(listError as Error).message || "Check that you are signed in as super admin."}
+          />
         ) : apps.length === 0 ? (
           <EmptyState
             title="No applications"
