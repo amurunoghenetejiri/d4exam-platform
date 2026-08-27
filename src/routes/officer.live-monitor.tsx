@@ -917,7 +917,7 @@ function Page() {
       {selected && (
         <div className="fixed inset-0 z-[70] flex justify-end bg-black/40" onClick={() => setSelectedId(null)}>
           <div
-            className="flex h-full w-full max-w-md flex-col overflow-hidden bg-white shadow-2xl sm:max-w-lg"
+            className="flex h-full w-full max-w-3xl flex-col overflow-hidden bg-white shadow-2xl sm:max-w-4xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-4 sm:py-3">
@@ -942,87 +942,99 @@ function Page() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="relative w-full shrink-0 bg-slate-900 aspect-[4/3] max-h-[min(420px,50dvh)]">
-              {selected.videoStatus === "live" && selected.frame?.src ? (
-                <>
-                  <img
-                    src={selected.frame.src}
-                    alt={`${selected.name} live camera`}
-                    className="h-full w-full object-cover"
-                  />
-                  <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" /> LIVE
-                  </div>
-                  <div className="absolute right-2 top-2 flex items-center gap-1.5 rounded-full bg-black/55 px-2 py-1">
-                    {selected.bars >= 2 ? (
-                      <Wifi className="h-3 w-3 text-emerald-300" />
-                    ) : (
-                      <WifiOff className="h-3 w-3 text-red-300" />
+            {/* Feed mode + dual pane */}
+            <div className="shrink-0 border-b border-slate-100 px-3 py-2 sm:px-4">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Feed</span>
+                {([
+                  ["camera", "Camera"],
+                  ["screen", "Screen"],
+                  ["both", "Both"],
+                ] as const).map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setFeedMode(k)}
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-[10px] font-bold transition",
+                      feedMode === k ? "bg-primary text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
                     )}
-                    <SignalBars bars={selected.bars} />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-slate-700 px-2 py-0.5 text-[10px] font-bold text-white">
-                    {selected.videoStatus === "done"
-                      ? doneStatusLabel(selected.a.status).toUpperCase()
-                      : selected.videoStatus === "reconnecting"
-                        ? "RECONNECTING"
-                        : selected.videoStatus === "live"
-                          ? "LIVE"
-                          : "OFFLINE"}
-                  </div>
-                  <div className="absolute right-2 top-2 flex items-center gap-1.5 rounded-full bg-black/55 px-2 py-1">
-                    <SignalBars bars={selected.bars} />
-                  </div>
-                  <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-white">
-                    {selected.isDone ? (
-                      <CheckCircle2 className="h-12 w-12 text-emerald-400/80" />
-                    ) : selected.presence.cameraActive ? (
-                      <UserRound className="h-12 w-12 opacity-40" />
-                    ) : (
-                      <CameraOff className="h-12 w-12 opacity-40" />
-                    )}
-                    <p className="text-sm font-semibold">
-                      {selected.isDone ? doneStatusLabel(selected.a.status) : faceLabel(selected.presence)}
-                    </p>
-                    <p className="text-[11px] text-white/70">
-                      {selected.isDone
-                        ? "This student finished. Card leaves after 10 minutes."
-                        : selected.presence.cameraActive
-                          ? "Live frames appear when the student camera is streaming. Nothing is recorded."
-                          : "Student camera is off or unavailable. Offline cards leave after 3 minutes."}
-                    </p>
-                  </div>
-                </>
-              )}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <span className="ml-auto truncate text-[10px] font-semibold text-slate-500">
+                  {selected.course} · {selected.title}
+                </span>
+              </div>
             </div>
             {(() => {
-              const sf = selected
-                ? screenFrames[selected.a.id] || screenFrames[`student:${selected.a.student_id}`]
-                : null;
-              const live = sf && isLiveScreenFrameFresh(sf.ts);
-              if (!selected || selected.isDone) return null;
+              const camSrc = selected.frame?.src;
+              const camLive = selected.videoStatus === "live" && Boolean(camSrc);
+              const sf = screenFrames[selected.a.id] || screenFrames[`student:${selected.a.student_id}`];
+              const scrLive = Boolean(sf && isLiveScreenFrameFresh(sf.ts));
+              const showCam = feedMode === "camera" || feedMode === "both";
+              const showScr = feedMode === "screen" || feedMode === "both";
+              const dual = showCam && showScr;
               return (
-                <div className="border-b border-slate-100 px-3 py-2 sm:px-4">
-                  <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
-                    Shared screen {live ? "· Live" : ""}
-                  </p>
-                  <div className="relative aspect-video overflow-hidden rounded-lg border border-slate-200 bg-slate-900">
-                    {live && sf ? (
-                      <img src={sf.src} alt="Student screen" className="h-full w-full object-contain" />
-                    ) : (
-                      <div className="flex h-full flex-col items-center justify-center gap-1 px-3 text-center text-white/70">
-                        <p className="text-xs font-semibold">Screen not shared yet</p>
-                        <p className="text-[10px]">When the student shares their screen, it appears here.</p>
+                <div
+                  className={cn(
+                    "shrink-0 gap-1.5 bg-slate-100 p-1.5 sm:gap-2 sm:p-2",
+                    dual ? "grid grid-cols-1 sm:grid-cols-2" : "grid grid-cols-1",
+                  )}
+                >
+                  {showCam && (
+                    <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10">
+                      {camLive && camSrc ? (
+                        <img src={camSrc} alt={`${selected.name} camera`} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full flex-col items-center justify-center gap-1.5 px-3 text-center text-white/70">
+                          {selected.isDone ? (
+                            <CheckCircle2 className="h-10 w-10 text-emerald-400/80" />
+                          ) : (
+                            <CameraOff className="h-10 w-10 opacity-40" />
+                          )}
+                          <p className="text-xs font-semibold text-white/90">
+                            {selected.isDone ? doneStatusLabel(selected.a.status) : "Camera offline"}
+                          </p>
+                        </div>
+                      )}
+                      <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
+                        <span className={cn("h-1.5 w-1.5 rounded-full", camLive ? "animate-pulse bg-red-500" : "bg-slate-400")} />
+                        Camera
                       </div>
-                    )}
-                  </div>
+                      {camLive && (
+                        <div className="absolute right-2 top-2 rounded-full bg-black/55 px-2 py-1 backdrop-blur-sm">
+                          <SignalBars bars={selected.bars} />
+                        </div>
+                      )}
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-6">
+                        <p className="truncate text-xs font-extrabold text-white">{selected.name}</p>
+                        <p className="truncate text-[10px] text-white/80">{selected.matric}</p>
+                      </div>
+                    </div>
+                  )}
+                  {showScr && (
+                    <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10">
+                      {scrLive && sf ? (
+                        <img src={sf.src} alt={`${selected.name} screen`} className="h-full w-full object-contain bg-black" />
+                      ) : (
+                        <div className="flex h-full flex-col items-center justify-center gap-1.5 px-4 text-center text-white/60">
+                          <Monitor className="h-10 w-10 opacity-30" />
+                          <p className="text-xs font-semibold text-white/80">Screen not shared</p>
+                          <p className="text-[10px] text-white/50">Appears when the student shares their screen</p>
+                        </div>
+                      )}
+                      <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
+                        <span className={cn("h-1.5 w-1.5 rounded-full", scrLive ? "animate-pulse bg-emerald-400" : "bg-slate-400")} />
+                        Screen {scrLive ? "· Live" : ""}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+<div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <div className="grid grid-cols-2 gap-2 border-b border-slate-100 p-3 text-sm sm:p-4">
               <Info label="Course" value={selected.course} />
               <Info label="Exam" value={selected.title} />
@@ -1250,51 +1262,22 @@ function StudentCard({
             <SignalBars bars={bars} />
           </div>
         )}
-        <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between gap-0.5 sm:bottom-1.5 sm:left-1.5 sm:right-1.5 sm:gap-1">
-          <FaceChip presence={presence} sev={sev} isDone={isDone} statusLabel={statusLabel} />
-          {!isDone && (
-            <span className="shrink-0 rounded bg-black/50 px-1 py-0.5 font-mono text-[9px] font-semibold text-white sm:px-1.5 sm:text-[10px]">
-              {formatDuration(presence.timeRemainingSec)}
-            </span>
-          )}
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-1.5 pb-1.5 pt-8 sm:px-2 sm:pb-2">
+          <div className="mb-1 flex items-center justify-between gap-0.5">
+            <FaceChip presence={presence} sev={sev} isDone={isDone} statusLabel={statusLabel} />
+            {!isDone && (
+              <span className="shrink-0 rounded bg-black/50 px-1 py-0.5 font-mono text-[9px] font-semibold text-white sm:px-1.5 sm:text-[10px]">
+                {formatDuration(presence.timeRemainingSec)}
+              </span>
+            )}
+          </div>
+          <p className="truncate text-[11px] font-extrabold leading-tight text-white drop-shadow sm:text-xs">{name}</p>
+          <p className="truncate text-[9px] font-medium leading-tight text-white/85 sm:text-[10px]">{matric}</p>
+          <p className="truncate text-[9px] leading-tight text-white/65 sm:text-[10px]">{course}</p>
         </div>
       </div>
-      <div className="p-1.5 sm:p-2">
-        <p className="truncate text-[11px] font-bold leading-tight text-slate-900 sm:text-xs sm:text-sm">{name}</p>
-        <p className="truncate text-[9px] leading-tight text-slate-500 sm:text-[10px]">
-          {matric}
-        </p>
-        <p className="truncate text-[9px] leading-tight text-slate-400 sm:text-[10px]">
-          {course}
-        </p>
-      </div>
-    </button>
-  );
-}
+      <div className="hidden" aria-hidden />
 
-function AlertsPanel({
-  alerts,
-  readIds,
-  studentNameById,
-  onOpen,
-  onMarkAll,
-}: {
-  alerts: IntegrityEvent[];
-  readIds: Set<string>;
-  studentNameById: Map<string, { name: string; matric: string }>;
-  onOpen: (studentId: string | null) => void;
-  onMarkAll: () => void;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
-      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-        <h3 className="text-sm font-extrabold text-slate-900">
-          Alerts <span className="text-slate-400">({alerts.length})</span>
-        </h3>
-        <button type="button" onClick={onMarkAll} className="text-[11px] font-semibold text-primary hover:underline">
-          Mark all read
-        </button>
-      </div>
       <ul className="max-h-[22rem] divide-y divide-slate-50 overflow-y-auto sm:max-h-[28rem]">
         {alerts.length === 0 ? (
           <li className="p-4 text-center text-xs text-slate-500">No recent alerts</li>
