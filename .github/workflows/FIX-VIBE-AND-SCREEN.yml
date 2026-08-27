@@ -1,0 +1,47 @@
+name: FIX-VIBE-AND-SCREEN
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-VIBE-AND-SCREEN.yml
+      - patches/vibe_ss_*.b64
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply vibration + screen monitor fixes
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          import base64, json, pathlib
+          parts = sorted(pathlib.Path("patches").glob("vibe_ss_*.b64"))
+          assert parts, "missing patches"
+          b64 = "".join(p.read_text().strip() for p in parts)
+          blob = json.loads(base64.b64decode(b64).decode())
+          for path, content_b64 in blob.items():
+              p = pathlib.Path(path)
+              p.parent.mkdir(parents=True, exist_ok=True)
+              data = base64.b64decode(content_b64)
+              assert b"PLACEHOLDER" not in data, path
+              p.write_bytes(data)
+              print("wrote", path, len(data))
+          assert "vibrate" in pathlib.Path("src/lib/haptic.ts").read_text()
+          assert "refreshNativeScreenShareState" in pathlib.Path("src/lib/screen-share.ts").read_text()
+          assert "VibrationEffect" in pathlib.Path("android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java").read_text()
+          print("ALL_OK")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java \
+            android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java \
+            src/lib/haptic.ts src/lib/screen-share.ts src/lib/use-live-screen-publish.ts \
+            src/components/cbt/ExamCameraPip.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): native vibration + reliable screen monitor frames to officer"
+            git push
+          fi
