@@ -112,7 +112,6 @@ function Page() {
   const listApps = useServerFn(listSchoolApplications);
   const qc = useQueryClient();
 
-  // Service-role list — client RLS often hides school_applications from the browser client
   const { data, isLoading, refetch, error: listError } = useQuery({
     queryKey: ["super-admin", "school_applications"],
     queryFn: async () => {
@@ -124,7 +123,6 @@ function Page() {
     refetchInterval: 15_000,
   });
 
-  // Live updates: new submits / status changes refresh the list immediately
   useEffect(() => {
     const channel = supabase
       .channel("super-admin-school-applications")
@@ -255,13 +253,7 @@ function Page() {
         />
 
         <div className="mb-4">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="font-semibold"
-            onClick={() => setSelectedId(null)}
-          >
+          <Button type="button" variant="outline" size="sm" className="font-semibold" onClick={() => setSelectedId(null)}>
             <ArrowLeft className="mr-1.5 h-3.5 w-3.5" /> Back to applications
           </Button>
         </div>
@@ -318,7 +310,9 @@ function Page() {
                 <dd className="text-slate-800">
                   <span className="inline-flex items-center gap-1">
                     <Phone className="h-3.5 w-3.5 text-slate-400" />
-                    {selected.official_phone || "—"}</dd>
+                    {selected.official_phone || "—"}
+                  </span>
+                </dd>
               </div>
             </dl>
           </SectionCard>
@@ -422,43 +416,21 @@ function Page() {
                   className="border-slate-200"
                 />
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    className="font-semibold"
-                    disabled={busyId === selected.id}
-                    onClick={() => void decide(selected.id, "approved")}
-                  >
+                  <Button size="sm" className="font-semibold" disabled={busyId === selected.id} onClick={() => void decide(selected.id, "approved")}>
                     {busyId === selected.id && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
                     Approve
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busyId === selected.id}
-                    onClick={() => void decide(selected.id, "under_review")}
-                  >
+                  <Button size="sm" variant="outline" disabled={busyId === selected.id} onClick={() => void decide(selected.id, "under_review")}>
                     Under review
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busyId === selected.id}
-                    onClick={() => void decide(selected.id, "more_information_required")}
-                  >
+                  <Button size="sm" variant="outline" disabled={busyId === selected.id} onClick={() => void decide(selected.id, "more_information_required")}>
                     Need more info
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    disabled={busyId === selected.id}
-                    onClick={() => void decide(selected.id, "rejected")}
-                  >
+                  <Button size="sm" variant="destructive" disabled={busyId === selected.id} onClick={() => void decide(selected.id, "rejected")}>
                     Reject
                   </Button>
                 </div>
-                {isPending ? (
-                  <p className="text-xs text-slate-500">Status: pending until you approve or reject.</p>
-                ) : null}
+                {isPending ? <p className="text-xs text-slate-500">Status: pending until you approve or reject.</p> : null}
               </div>
             </SectionCard>
           )}
