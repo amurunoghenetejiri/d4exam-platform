@@ -1,0 +1,139 @@
+name: FIX-INTEGRITY-PATCH2
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-INTEGRITY-PATCH2.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch PIP retry, officer, session
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          pip = Path("src/components/cbt/ExamCameraPip.tsx")
+          pt = pip.read_text()
+          old = '''        if (!engine) {
+          // Engine failed — do not stay stuck forever on "Detecting face"
+          setFaceStatus("unavailable");
+          lastStateRef.current = "unavailable";
+          onSecRef.current?.({
+            kind: "camera_blocked",
+            faceCount: null,
+            at: new Date().toISOString(),
+          });
+          return;
+        }'''
+          new = '''        if (!engine) {
+          // Transient load failure (CDN/WebView) — keep retrying so PIP does not stay on "Face check off"
+          setFaceStatus("unclear");
+          lastStateRef.current = "unclear";
+          if (!cancelled) {
+            timer = window.setTimeout(() => {
+              if (cancelled) return;
+              void (async () => {
+                for (let i = 0; i < 3 && !cancelled; i++) {
+                  const e2 = await createFaceEngine();
+                  if (e2) {
+                    faceEngineRef.current = e2;
+                    void tick();
+                    return;
+                  }
+                  await new Promise((r) => window.setTimeout(r, 800 * (i + 1)));
+                }
+                if (!cancelled) {
+                  setFaceStatus("unavailable");
+                  lastStateRef.current = "unavailable";
+                  timer = window.setTimeout(() => {
+                    if (!cancelled) void createFaceEngine().then((e3) => {
+                      if (e3 && !cancelled) {
+                        faceEngineRef.current = e3;
+                        setFaceStatus("unclear");
+                        void tick();
+                      }
+                    });
+                  }, 12_000);
+                }
+              })();
+            }, 2500);
+          }
+          return;
+        }'''
+          if old in pt:
+              pt = pt.replace(old, new)
+              print("ExamCameraPip retry patched")
+          elif "keep retrying so PIP" in pt:
+              print("ExamCameraPip already patched")
+          else:
+              raise SystemExit("ExamCameraPip block not found")
+          pip.write_text(pt)
+
+          op = Path("src/routes/officer.live-monitor.tsx")
+          ot = op.read_text()
+          old_o = '''          if (frame.faceStatus) {
+            const fs = String(frame.faceStatus).toLowerCase();
+            if (fs === "ok" || fs === "none" || fs === "multi" || fs === "unclear" || fs === "unavailable") {
+              presence.faceStatus = fs as typeof presence.faceStatus;
+            }
+          } else if (!presence.faceStatus || presence.faceStatus === "unknown" || presence.faceStatus === "unavailable") {
+            presence.faceStatus = "ok";
+          }'''
+          new_o = '''          if (frame.faceStatus) {
+            const fs = String(frame.faceStatus).toLowerCase();
+            if (fs === "ok" || fs === "none" || fs === "multi" || fs === "unclear" || fs === "unavailable") {
+              presence.faceStatus = fs as typeof presence.faceStatus;
+            } else if (fs === "camera_blocked" || fs === "starting") {
+              presence.faceStatus = fs === "camera_blocked" ? "unavailable" : "unknown";
+            }
+          }
+          // Do not force "ok" when faceStatus is missing — keep metadata / prior frame value'''
+          if old_o in ot:
+              ot = ot.replace(old_o, new_o)
+              print("officer force-ok fixed")
+          elif "Do not force" in ot:
+              print("officer already fixed")
+          else:
+              raise SystemExit("officer block not found")
+          op.write_text(ot)
+
+          cs = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          ct = cs.read_text()
+          ct = ct.replace(
+              'const faceStatusRef = useRef<string>("starting");',
+              'const faceStatusRef = useRef<string>("unclear");',
+          )
+          old_m = '''    faceStatusRef.current = ev.kind === "ok" ? "ok" : ev.kind === "multi" ? "multi" : ev.kind === "none" ? "none" : String(ev.kind);'''
+          new_m = '''    faceStatusRef.current =
+      ev.kind === "ok"
+        ? "ok"
+        : ev.kind === "multi"
+          ? "multi"
+          : ev.kind === "none"
+            ? "none"
+            : ev.kind === "unclear"
+              ? "unclear"
+              : ev.kind === "camera_blocked"
+                ? "unavailable"
+                : String(ev.kind);'''
+          if old_m in ct:
+              ct = ct.replace(old_m, new_m)
+              print("session face map fixed")
+          else:
+              print("session map skip/already")
+          cs.write_text(ct)
+          print("ALL DONE")
+          PY
+      - name: Commit & push
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/ExamCameraPip.tsx src/routes/officer.live-monitor.tsx src/components/cbt/CbtExamSession.impl.tsx
+          git status
+          git commit -m "fix(cbt): face engine retry, officer live face status, publish none/multi" || echo "no changes"
+          git push origin HEAD:main
