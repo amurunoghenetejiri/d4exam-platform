@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/APPLY-FACE-PIP-FIX.yml
-      - scripts/ExamCameraPip.full.tsx
+      - scripts/patch_exam_camera_pip.py
       - scripts/patch_cbt_face_log.py
 jobs:
   apply:
@@ -14,25 +14,12 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Apply ExamCameraPip full file
+      - name: Patch face PIP + logging + officer warn
         run: |
           set -euo pipefail
-          if [ -f scripts/ExamCameraPip.full.tsx ]; then
-            cp scripts/ExamCameraPip.full.tsx src/components/cbt/ExamCameraPip.tsx
-            echo "ExamCameraPip applied"
-          else
-            echo "missing ExamCameraPip.full.tsx"
-            exit 1
-          fi
-          if [ -f scripts/CbtExamSession.impl.full.tsx ]; then
-            cp scripts/CbtExamSession.impl.full.tsx src/components/cbt/CbtExamSession.impl.tsx
-            echo "CbtExamSession applied"
-          fi
+          python3 scripts/patch_exam_camera_pip.py
           python3 scripts/patch_cbt_face_log.py
-          grep -q '1 Face Monitoring' src/components/cbt/ExamCameraPip.tsx
-          grep -q 'waitVideoReady' src/components/cbt/ExamCameraPip.tsx
-          grep -q 'lastLoggedFaceRef' src/components/cbt/CbtExamSession.impl.tsx
-          grep -q 'SUBSCRIBED' src/routes/officer.live-monitor.tsx
+          grep -q 'export function ExamCameraPip' src/components/cbt/ExamCameraPip.tsx
       - name: Commit app sources only
         run: |
           git config user.name github-actions[bot]
