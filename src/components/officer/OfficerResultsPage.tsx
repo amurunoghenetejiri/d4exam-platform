@@ -136,7 +136,7 @@ export function OfficerResultsPage() {
       const selects = [
         `id, exam_id, student_id, attempt_id, total_score, max_score, percentage, grade, pass_fail,
            correct_count, wrong_count, unanswered_count, status, security_review_status, released_at, created_at,
-           students(matric_number, student_id, profiles(full_name))`,
+           students(full_name, matric_number, student_id, profiles(full_name))`,
         `id, exam_id, student_id, attempt_id, total_score, max_score, percentage, grade, pass_fail,
            correct_count, wrong_count, unanswered_count, status, security_review_status, released_at, created_at,
            students(matric_number, student_id)`,
@@ -506,7 +506,9 @@ export function OfficerResultsPage() {
           ) : (
             <ul className="divide-y divide-slate-50">
               {examResults.map((r) => {
-                const nm = r.students?.profiles?.full_name || r.students?.matric_number || "Student";
+                const nm = (r.students as { full_name?: string | null } | null)?.full_name
+                  || r.students?.profiles?.full_name
+                  || "Student";
                 const mat = r.students?.matric_number || r.students?.student_id || "—";
                 const h = isHeld(r.status, r.released_at);
                 const term = String(r.status || "").toLowerCase() === "terminated";
