@@ -1,0 +1,117 @@
+name: APPLY-GATE-HOLD
+on:
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch gate + session + live-video
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+
+          # ExamSecurityGate: import holdExamScreenShare + call on grant
+          g = Path("src/components/cbt/ExamSecurityGate.tsx")
+          t = g.read_text()
+          t2 = t.replace(
+              'import { canAttemptScreenShare, startScreenShareStream } from "@/lib/screen-share";',
+              'import {\n  canAttemptScreenShare,\n  holdExamScreenShare,\n  startScreenShareStream,\n} from "@/lib/screen-share";',
+          )
+          t2 = t2.replace(
+              '''          if (share.ok) {
+            // Keep MediaProjection active for exam reuse
+            setScreenGranted(true);
+          }''',
+              '''          if (share.ok) {
+            // Hold MediaProjection so it survives Start Exam / route transition
+            holdExamScreenShare(true);
+            setScreenGranted(true);
+          }''',
+          )
+          if t2 != t:
+              g.write_text(t2)
+              print("patched ExamSecurityGate")
+          else:
+              print("gate already patched or pattern miss")
+
+          # CbtExamSession: publish enabled includes screenStreamRef
+          s = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          st = s.read_text()
+          old = """  useLiveScreenPublish({
+    enabled: started && !done && !previewMode && (Boolean(screenStream) || isNativeScreenShareActive()),
+    schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,
+    studentId: student?.studentId,
+    examId: id,
+    attemptId: liveAttemptId || attemptIdRef.current,
+    stream: screenStream,
+    getStream: () => screenStreamRef.current || screenStream || getActiveScreenStream(),
+  });"""
+          new = """  useLiveScreenPublish({
+    enabled:
+      started &&
+      !done &&
+      !previewMode &&
+      (Boolean(screenStream) || isNativeScreenShareActive() || Boolean(screenStreamRef.current)),
+    schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,
+    studentId: student?.studentId,
+    examId: id,
+    attemptId: liveAttemptId || attemptIdRef.current,
+    stream: screenStream,
+    getStream: () => screenStreamRef.current || screenStream || getActiveScreenStream(),
+  });"""
+          if old in st:
+              s.write_text(st.replace(old, new, 1))
+              print("patched CbtExamSession")
+          elif "Boolean(screenStreamRef.current)" in st:
+              print("session already patched")
+          else:
+              print("session pattern miss")
+
+          # live-video: safer native frame path
+          lv = Path("src/lib/live-video.ts")
+          lt = lv.read_text()
+          old_lv = '''      let frame = getLatestNativeScreenJpeg();
+      if (!frame) {
+        const stream = opts.getStream();
+        if (stream) {
+          frame = await captureJpegFromStream(stream, {
+            maxWidth: 720,
+            quality: 0.55,
+            mirror: false,
+          });
+        }
+      }
+      if (stopped || !frame || !channel) return;'''
+          new_lv = '''      let frame = getLatestNativeScreenJpeg();
+      if (!frame) {
+        const stream = opts.getStream();
+        if (stream && stream.getVideoTracks().some((t) => t.readyState === "live")) {
+          frame = await captureJpegFromStream(stream, {
+            maxWidth: 720,
+            quality: 0.55,
+            mirror: false,
+          });
+        }
+      }
+      if (stopped || !channel) return;
+      if (!frame) {
+        // No frame this tick — native capture may still be warming up
+        return;
+      }'''
+          if old_lv in lt:
+              lv.write_text(lt.replace(old_lv, new_lv, 1))
+              print("patched live-video")
+          else:
+              print("live-video already patched or pattern miss")
+          PY
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet && echo "no changes" && exit 0
+          git commit -m "fix(screen): hold on gate grant + publish enabled + live-video frame path"
+          git push
