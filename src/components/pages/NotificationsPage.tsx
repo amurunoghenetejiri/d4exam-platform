@@ -50,15 +50,29 @@ function normalizeNotifScope(scope: string): string {
 }
 
 function actionLabelFor(n: Notif): string | null {
-  const ty = (n.type || "").toLowerCase();
-  const msg = (n.message || "").toLowerCase();
-  if (ty.includes("result") || msg.includes("view your result") || msg.includes("result has been released")) return "VIEW RESULT";
-  if (title.includes("submitted for review") || msg.includes("for examination review") || msg.includes("open approvals")) return "OPEN APPROVALS";
-  if (ty === "exam_available" || msg.includes("starts now") || msg.includes("tap below to start")) return "START EXAM";
-  if (ty.includes("exam") && (msg.includes("approved") || msg.includes("scheduled"))) return "VIEW EXAM";
-  if (ty.includes("reject") || ty.includes("revision")) return "REVIEW";
-  if (n.link || n.action_url) return "VIEW DETAILS";
-  return null;
+  try {
+    const ty = (n.type || "").toLowerCase();
+    const msg = (n.message || "").toLowerCase();
+    const title = (n.title || "").toLowerCase();
+    if (ty.includes("result") || msg.includes("view your result") || msg.includes("result has been released"))
+      return "VIEW RESULT";
+    if (
+      title.includes("submitted for review") ||
+      msg.includes("for examination review") ||
+      msg.includes("open approvals")
+    )
+      return "OPEN APPROVALS";
+    if (ty === "exam_available" || msg.includes("starts now") || msg.includes("tap below to start"))
+      return "START EXAM";
+    if (ty.includes("exam") && (msg.includes("approved") || msg.includes("scheduled"))) return "VIEW EXAM";
+    if (ty.includes("school") || title.includes("school application") || title.includes("application approved"))
+      return "VIEW DETAILS";
+    if (ty.includes("reject") || ty.includes("revision")) return "REVIEW";
+    if (n.link || n.action_url) return "VIEW DETAILS";
+    return null;
+  } catch {
+    return n.link || n.action_url ? "VIEW DETAILS" : null;
+  }
 }
 
 function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
@@ -118,12 +132,20 @@ function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
       result_published: "/admin/results",
       announcement: "/admin/notifications",
       system_alert: "/admin",
+      school_approved: "/admin",
+      school_suspended: "/admin",
+      school_revoked: "/admin",
     },
     "super-admin": {
       system_alert: "/super-admin/applications",
       announcement: "/super-admin/applications",
       warning: "/super-admin/applications",
       info: "/super-admin/applications",
+      school_application: "/super-admin/applications",
+      school_approved: "/super-admin/schools",
+      school_rejected: "/super-admin/applications",
+      school_suspended: "/super-admin/schools",
+      school_revoked: "/super-admin/schools",
     },
   };
 
@@ -132,17 +154,22 @@ function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
 }
 
 async function fetchOwnNotifications(userId: string): Promise<Notif[]> {
-  // Prefer full shape; fall back if a column is missing on older DBs
-  const full =
-    "id, title, message, type, created_at, read_at, link, action_url";
+  const full = "id, title, message, type, created_at, read_at, link, action_url";
   const minimal = "id, title, message, type, created_at, read_at";
 
-  let { data, error } = await supabase
-    .from("notifications")
-    .select(full)
-    .eq("recipient_user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(150);
+  let data: unknown[] | null = null;
+  let error: { message: string } | null = null;
+
+  {
+    const res = await supabase
+      .from("notifications")
+      .select(full)
+      .eq("recipient_user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(150);
+    data = res.data as unknown[] | null;
+    error = res.error;
+  }
 
   if (error) {
     const retry = await supabase
@@ -151,8 +178,18 @@ async function fetchOwnNotifications(userId: string): Promise<Notif[]> {
       .eq("recipient_user_id", userId)
       .order("created_at", { ascending: false })
       .limit(150);
-    if (retry.error) throw new Error(retry.error.message);
-    data = retry.data;
+    if (retry.error) {
+      const legacy = await supabase
+        .from("notifications")
+        .select(minimal)
+        .eq("user_id" as never, userId)
+        .order("created_at", { ascending: false })
+        .limit(150);
+      if (legacy.error) throw new Error(retry.error.message || legacy.error.message);
+      data = legacy.data as unknown[] | null;
+    } else {
+      data = retry.data as unknown[] | null;
+    }
   }
 
   return (data ?? []).map((row) => {
@@ -292,6 +329,7 @@ export function NotificationsPage({ scope }: { scope: string }) {
         {list.map((n) => {
           const href = resolveNotifHref(n, scope);
           const unreadItem = !n.read_at;
+          const actionLabel = actionLabelFor(n);
           return (
             <li
               key={n.id}
@@ -325,11 +363,11 @@ export function NotificationsPage({ scope }: { scope: string }) {
                     {(n.type || "info").replace(/_/g, " ")}
                   </Badge>
                 </div>
-                <p className="mt-0.5 text-sm text-slate-600">{n.message}</p>
+                <p className="mt-0.5 whitespace-pre-wrap text-sm text-slate-600">{n.message}</p>
                 <p className="mt-1 text-[11px] text-slate-400">
                   {new Date(n.created_at).toLocaleString()}
                 </p>
-                {href && actionLabelFor(n) && (
+                {href && actionLabel && (
                   <Button
                     type="button"
                     size="sm"
@@ -337,10 +375,14 @@ export function NotificationsPage({ scope }: { scope: string }) {
                     onClick={(e) => {
                       e.stopPropagation();
                       if (unreadItem) void markOne(n.id);
-                      try { void navigate({ to: href as never }); } catch { window.location.assign(href); }
+                      try {
+                        void navigate({ to: href as never });
+                      } catch {
+                        window.location.assign(href);
+                      }
                     }}
                   >
-                    {actionLabelFor(n)}
+                    {actionLabel}
                   </Button>
                 )}
               </div>

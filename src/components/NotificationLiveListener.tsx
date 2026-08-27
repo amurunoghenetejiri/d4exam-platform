@@ -52,6 +52,10 @@ export function NotificationLiveListener() {
             void queryClient.invalidateQueries({
               queryKey: ["count", "notifications", "unread", userId],
             });
+            void queryClient.invalidateQueries({
+              queryKey: ["own-notifications", userId],
+            });
+            void queryClient.invalidateQueries({ queryKey: ["rows", "notifications"] });
           } catch {
             /* ignore */
           }
