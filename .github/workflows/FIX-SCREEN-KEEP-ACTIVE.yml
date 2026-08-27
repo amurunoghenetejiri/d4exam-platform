@@ -1,0 +1,32 @@
+name: FIX-SCREEN-KEEP-ACTIVE
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/FIX-SCREEN-KEEP-ACTIVE.yml
+      - patches/ksa_*.b64
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply keep-active screen share fix
+        run: |
+          set -euo pipefail
+          cat patches/ksa_*.b64 | tr -d '\n' | base64 -d > scripts/keep_screen_active.py
+          if grep -q PLACEHOLDER src/lib/screen-share.ts 2>/dev/null; then
+            git show 7c15b3336d24ea723e3da5fffc442966791547bc:src/lib/screen-share.ts > src/lib/screen-share.ts || true
+          fi
+          python3 scripts/keep_screen_active.py
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/screen-share.ts src/lib/use-live-screen-publish.ts src/lib/live-video.ts src/components/cbt/ExamSecurityGate.tsx src/components/cbt/CbtExamSession.impl.tsx scripts/keep_screen_active.py || true
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(screen): keep MediaProjection active after grant, reuse in exam, publish native frames"
+            git push
+          fi
