@@ -1,0 +1,26 @@
+name: FIX-SCREEN-SHARE-E2E
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/FIX-SCREEN-SHARE-E2E.yml
+      - scripts/fix_screen_share_e2e.py
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply E2E screen share fix
+        run: python3 scripts/fix_screen_share_e2e.py
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/screen-share.ts src/lib/use-live-screen-publish.ts src/lib/live-video.ts src/components/cbt/ExamSecurityGate.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(screen): keep share active, reuse stream, publish native frames to officer"
+            git push
+          fi
