@@ -1,0 +1,32 @@
+name: APPLY-SCREEN-SHARE-FIX
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/APPLY-SCREEN-SHARE-FIX.yml
+      - scripts/patch_screen_share_officer.py
+      - src/lib/live-video.ts
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch officer + CBT for screen frames
+        run: |
+          set -euo pipefail
+          python3 scripts/patch_screen_share_officer.py
+          grep -q 'startLiveScreenSubscriber' src/lib/live-video.ts
+          grep -q 'startLiveScreenSubscriber' src/routes/officer.live-monitor.tsx
+          grep -q 'screenFrames' src/routes/officer.live-monitor.tsx
+      - name: Commit app sources only
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/officer.live-monitor.tsx src/components/cbt/CbtExamSession.impl.tsx src/lib/live-video.ts
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(screen): officer receives live student screen frames"
+            git push
+          fi

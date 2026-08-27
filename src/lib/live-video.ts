@@ -1,35 +1,9 @@
 /**
- * Near-live exam camera streaming for officers.
- * Uses low-rate JPEG frames over Supabase Realtime Broadcast (no TURN server required).
- * Streaming stops when the student exam ends or the camera is closed.
- *
- * Performance: reuses one hidden <video> + canvas so frames do not lag/skip as badly.
+ * Live camera + screen JPEG frame publish/subscribe over Supabase Realtime broadcast.
+ * Camera frames are mirrored (selfie); screen frames are not.
  */
-
-import { supabase } from "@/integrations/supabase/client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-
-export type LiveCamFramePayload = {
-  attemptId: string;
-  studentId: string;
-  examId: string;
-  frame: string;
-  ts: number;
-  faceStatus?: string;
-  cameraActive?: boolean;
-  answeredCount?: number;
-  totalQuestions?: number;
-  timeRemainingSec?: number | null;
-};
-
-export const LIVE_CAM_EVENT = "frame";
-/** ~1.5 fps — clearer tiles without flooding Realtime */
-export const LIVE_CAM_FRAME_INTERVAL_MS = 650;
-export const LIVE_CAM_STALE_MS = 12_000;
-
-export function liveCamChannelName(schoolId: string): string {
-  return `live-cam:${schoolId}`;
-}
+import { supabase } from "@/integrations/supabase/client";
 
 let sharedVideo: HTMLVideoElement | null = null;
 let sharedCanvas: HTMLCanvasElement | null = null;
@@ -41,39 +15,27 @@ function getSharedVideo(): HTMLVideoElement | null {
     sharedVideo.muted = true;
     sharedVideo.playsInline = true;
     sharedVideo.setAttribute("playsinline", "true");
-    sharedVideo.style.position = "fixed";
-    sharedVideo.style.left = "-9999px";
-    sharedVideo.style.width = "1px";
-    sharedVideo.style.height = "1px";
-    sharedVideo.style.opacity = "0";
-    sharedVideo.style.pointerEvents = "none";
-    try {
-      document.body.appendChild(sharedVideo);
-    } catch {
-      /* SSR / no body */
-    }
+    sharedVideo.setAttribute("webkit-playsinline", "true");
   }
   return sharedVideo;
 }
 
 function getSharedCanvas(): HTMLCanvasElement | null {
   if (typeof document === "undefined") return null;
-  if (!sharedCanvas) {
-    sharedCanvas = document.createElement("canvas");
-  }
+  if (!sharedCanvas) sharedCanvas = document.createElement("canvas");
   return sharedCanvas;
 }
 
 export async function captureJpegFromStream(
   stream: MediaStream,
-  opts?: { maxWidth?: number; quality?: number },
+  opts?: { maxWidth?: number; quality?: number; mirror?: boolean },
 ): Promise<string | null> {
-  if (typeof document === "undefined") return null;
   const tracks = stream.getVideoTracks();
   if (!tracks.some((t) => t.readyState === "live" && t.enabled !== false)) return null;
 
   const maxWidth = opts?.maxWidth ?? 360;
   const quality = opts?.quality ?? 0.52;
+  const mirror = opts?.mirror !== false; // default true for selfie cam; false for screen
 
   const video = getSharedVideo();
   const canvas = getSharedCanvas();
@@ -98,7 +60,6 @@ export async function captureJpegFromStream(
     });
   }
 
-  // Stale/frozen track: currentTime not advancing — rebind and try again
   const t0 = video.currentTime;
   await new Promise((r) => window.setTimeout(r, 40));
   if (video.readyState >= 2 && video.currentTime === t0 && !video.paused) {
@@ -126,8 +87,10 @@ export async function captureJpegFromStream(
   if (!ctx) return null;
 
   ctx.save();
-  ctx.translate(w, 0);
-  ctx.scale(-1, 1);
+  if (mirror) {
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+  }
   try {
     ctx.drawImage(video, 0, 0, w, h);
   } catch {
@@ -143,9 +106,28 @@ export async function captureJpegFromStream(
   }
 }
 
-export type LiveCamPublisher = {
-  stop: () => void;
+export type LiveCamPublisher = { stop: () => void };
+
+export const LIVE_CAM_EVENT = "cam-frame";
+export const LIVE_CAM_FRAME_INTERVAL_MS = 900;
+export const LIVE_CAM_STALE_MS = 8_000;
+
+export type LiveCamFramePayload = {
+  attemptId: string;
+  studentId: string;
+  examId: string;
+  frame: string;
+  ts: number;
+  faceStatus?: string;
+  cameraActive?: boolean;
+  answeredCount?: number;
+  totalQuestions?: number;
+  timeRemainingSec?: number | null;
 };
+
+export function liveCamChannelName(schoolId: string): string {
+  return `live-cam:${schoolId}`;
+}
 
 export function startLiveCamPublisher(opts: {
   schoolId: string;
@@ -153,18 +135,22 @@ export function startLiveCamPublisher(opts: {
   studentId: string;
   examId: string;
   getStream: () => MediaStream | null;
-  getFaceMeta?: () => { faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null };
   intervalMs?: number;
+  getFaceMeta?: () => {
+    faceStatus?: string;
+    cameraActive?: boolean;
+    answeredCount?: number;
+    totalQuestions?: number;
+    timeRemainingSec?: number | null;
+  };
 }): LiveCamPublisher {
   const intervalMs = opts.intervalMs ?? LIVE_CAM_FRAME_INTERVAL_MS;
   let stopped = false;
   let channel: RealtimeChannel | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let publishing = false;
-  let consecutiveFails = 0;
 
-  const channelName = liveCamChannelName(opts.schoolId);
-  channel = supabase.channel(channelName, {
+  channel = supabase.channel(liveCamChannelName(opts.schoolId), {
     config: { broadcast: { ack: false, self: false } },
   });
 
@@ -174,33 +160,27 @@ export function startLiveCamPublisher(opts: {
     if (!stream) return;
     publishing = true;
     try {
-      const frame = await captureJpegFromStream(stream);
-      if (stopped || !frame || !channel) {
-        consecutiveFails += 1;
-        return;
-      }
-      consecutiveFails = 0;
-      const meta = opts.getFaceMeta?.() ?? {};
-      const payload: LiveCamFramePayload = {
-        attemptId: opts.attemptId,
-        studentId: opts.studentId,
-        examId: opts.examId,
-        frame,
-        ts: Date.now(),
-        faceStatus: meta.faceStatus,
-        cameraActive: meta.cameraActive !== false,
-        answeredCount: typeof meta.answeredCount === "number" ? meta.answeredCount : undefined,
-        totalQuestions: typeof meta.totalQuestions === "number" ? meta.totalQuestions : undefined,
-        timeRemainingSec: typeof meta.timeRemainingSec === "number" ? meta.timeRemainingSec : null,
-      };
+      const frame = await captureJpegFromStream(stream, { maxWidth: 360, quality: 0.52, mirror: true });
+      if (stopped || !frame || !channel) return;
+      const meta = opts.getFaceMeta?.() || {};
       void channel.send({
         type: "broadcast",
         event: LIVE_CAM_EVENT,
-        payload,
+        payload: {
+          attemptId: opts.attemptId,
+          studentId: opts.studentId,
+          examId: opts.examId,
+          frame,
+          ts: Date.now(),
+          faceStatus: meta.faceStatus,
+          cameraActive: meta.cameraActive,
+          answeredCount: meta.answeredCount,
+          totalQuestions: meta.totalQuestions,
+          timeRemainingSec: meta.timeRemainingSec,
+        },
       });
     } catch (e) {
-      consecutiveFails += 1;
-      if (consecutiveFails <= 2) console.warn("[live-cam] publish failed", e);
+      console.warn("[live-cam]", e);
     } finally {
       publishing = false;
     }
@@ -216,47 +196,25 @@ export function startLiveCamPublisher(opts: {
   return {
     stop: () => {
       stopped = true;
-      if (timer) {
-        clearInterval(timer);
-        timer = null;
-      }
+      if (timer) clearInterval(timer);
       if (channel) {
         void supabase.removeChannel(channel);
         channel = null;
-      }
-      if (sharedVideo && sharedVideo.srcObject) {
-        try {
-          sharedVideo.srcObject = null;
-        } catch {
-          /* ignore */
-        }
       }
     },
   };
 }
 
-export type LiveCamSubscriber = {
-  stop: () => void;
-};
+export type LiveCamSubscriber = { stop: () => void };
 
-/** Accepts either ({ schoolId, onFrame }) or (schoolId, onFrame) for call-site compatibility. */
-export function startLiveCamSubscriber(
-  optsOrSchoolId:
-    | { schoolId: string; onFrame: (payload: LiveCamFramePayload) => void }
-    | string,
-  onFrameMaybe?: (payload: LiveCamFramePayload) => void,
-): LiveCamSubscriber {
-  const opts =
-    typeof optsOrSchoolId === "string"
-      ? { schoolId: optsOrSchoolId, onFrame: onFrameMaybe! }
-      : optsOrSchoolId;
-
-  const channelName = liveCamChannelName(opts.schoolId);
-  const channel = supabase.channel(channelName, {
-    config: { broadcast: { self: false } },
+export function startLiveCamSubscriber(opts: {
+  schoolId: string;
+  onFrame: (p: LiveCamFramePayload) => void;
+}): LiveCamSubscriber {
+  const lastTsByAttempt = new Map<string, number>();
+  const channel = supabase.channel(liveCamChannelName(opts.schoolId), {
+    config: { broadcast: { ack: false, self: false } },
   });
-
-  let lastTsByAttempt = new Map<string, number>();
 
   channel.on("broadcast", { event: LIVE_CAM_EVENT }, ({ payload }) => {
     const raw = payload as LiveCamFramePayload & { attempt_id?: string };
@@ -286,15 +244,132 @@ export function isLiveCamFrameFresh(ts: number | null | undefined, now = Date.no
 }
 
 export const LIVE_SCREEN_EVENT = "screen-frame";
-export const LIVE_SCREEN_FRAME_INTERVAL_MS = 900;
-export type LiveScreenFramePayload = { attemptId: string; studentId: string; examId: string; frame: string; ts: number; screenActive?: boolean };
-export function liveScreenChannelName(schoolId: string): string { return `live-screen:${schoolId}`; }
+export const LIVE_SCREEN_FRAME_INTERVAL_MS = 700;
+export type LiveScreenFramePayload = {
+  attemptId: string;
+  studentId: string;
+  examId: string;
+  frame: string;
+  ts: number;
+  screenActive?: boolean;
+};
+export function liveScreenChannelName(schoolId: string): string {
+  return `live-screen:${schoolId}`;
+}
 export type LiveScreenPublisher = { stop: () => void };
-export function startLiveScreenPublisher(opts: { schoolId: string; attemptId: string; studentId: string; examId: string; getStream: () => MediaStream | null; intervalMs?: number; }): LiveScreenPublisher {
+
+export function startLiveScreenPublisher(opts: {
+  schoolId: string;
+  attemptId: string;
+  studentId: string;
+  examId: string;
+  getStream: () => MediaStream | null;
+  intervalMs?: number;
+}): LiveScreenPublisher {
   const intervalMs = opts.intervalMs ?? LIVE_SCREEN_FRAME_INTERVAL_MS;
-  let stopped = false; let channel: RealtimeChannel | null = null; let timer: ReturnType<typeof setInterval> | null = null; let publishing = false;
-  channel = supabase.channel(liveScreenChannelName(opts.schoolId), { config: { broadcast: { ack: false, self: false } } });
-  const sendFrame = async () => { if (stopped || publishing) return; const stream = opts.getStream(); if (!stream) return; publishing = true; try { const frame = await captureJpegFromStream(stream); if (stopped || !frame || !channel) return; void channel.send({ type: "broadcast", event: LIVE_SCREEN_EVENT, payload: { attemptId: opts.attemptId, studentId: opts.studentId, examId: opts.examId, frame, ts: Date.now(), screenActive: true } }); } catch (e) { console.warn("[live-screen]", e); } finally { publishing = false; } };
-  void channel.subscribe((status) => { if (status === "SUBSCRIBED" && !stopped) { void sendFrame(); timer = setInterval(() => void sendFrame(), intervalMs); } });
-  return { stop: () => { stopped = true; if (timer) clearInterval(timer); if (channel) { void supabase.removeChannel(channel); channel = null; } } };
+  let stopped = false;
+  let channel: RealtimeChannel | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let publishing = false;
+
+  channel = supabase.channel(liveScreenChannelName(opts.schoolId), {
+    config: { broadcast: { ack: false, self: false } },
+  });
+
+  const sendFrame = async () => {
+    if (stopped || publishing) return;
+    const stream = opts.getStream();
+    if (!stream) return;
+    publishing = true;
+    try {
+      const frame = await captureJpegFromStream(stream, {
+        maxWidth: 720,
+        quality: 0.55,
+        mirror: false,
+      });
+      if (stopped || !frame || !channel) return;
+      void channel.send({
+        type: "broadcast",
+        event: LIVE_SCREEN_EVENT,
+        payload: {
+          attemptId: opts.attemptId,
+          studentId: opts.studentId,
+          examId: opts.examId,
+          frame,
+          ts: Date.now(),
+          screenActive: true,
+        },
+      });
+    } catch (e) {
+      console.warn("[live-screen]", e);
+    } finally {
+      publishing = false;
+    }
+  };
+
+  void channel.subscribe((status) => {
+    if (status === "SUBSCRIBED" && !stopped) {
+      void sendFrame();
+      timer = setInterval(() => void sendFrame(), intervalMs);
+    }
+  });
+
+  return {
+    stop: () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+      if (channel) {
+        void supabase.removeChannel(channel);
+        channel = null;
+      }
+    },
+  };
+}
+
+export const LIVE_SCREEN_STALE_MS = 8_000;
+
+export function isLiveScreenFrameFresh(ts: number | null | undefined, now = Date.now()): boolean {
+  if (ts == null) return false;
+  return now - ts <= LIVE_SCREEN_STALE_MS;
+}
+
+export type LiveScreenSubscriber = { stop: () => void };
+
+/** Officer side: receive student screen JPEG frames over Realtime broadcast. */
+export function startLiveScreenSubscriber(opts: {
+  schoolId: string;
+  onFrame: (p: LiveScreenFramePayload) => void;
+}): LiveScreenSubscriber {
+  const lastTsByAttempt = new Map<string, number>();
+  const channel = supabase.channel(liveScreenChannelName(opts.schoolId), {
+    config: { broadcast: { ack: false, self: false } },
+  });
+
+  channel.on("broadcast", { event: LIVE_SCREEN_EVENT }, ({ payload }) => {
+    const raw = payload as LiveScreenFramePayload & { attempt_id?: string; student_id?: string };
+    if (!raw?.frame) return;
+    const attemptId = raw.attemptId || raw.attempt_id || "";
+    if (!attemptId) return;
+    const p: LiveScreenFramePayload = {
+      attemptId,
+      studentId: raw.studentId || raw.student_id || "",
+      examId: raw.examId || "",
+      frame: raw.frame,
+      ts: raw.ts || Date.now(),
+      screenActive: raw.screenActive !== false,
+    };
+    const prev = lastTsByAttempt.get(attemptId) ?? 0;
+    if (p.ts && p.ts < prev - 500) return;
+    if (p.ts) lastTsByAttempt.set(attemptId, p.ts);
+    opts.onFrame(p);
+  });
+
+  void channel.subscribe();
+
+  return {
+    stop: () => {
+      lastTsByAttempt.clear();
+      void supabase.removeChannel(channel);
+    },
+  };
 }
