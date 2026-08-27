@@ -44,7 +44,7 @@ export function useLiveScreenPublish(opts: {
       studentId,
       examId,
       getStream: () => opts.getStream?.() || opts.stream,
-      intervalMs: 900,
+      intervalMs: 700,
     });
 
     return () => {
