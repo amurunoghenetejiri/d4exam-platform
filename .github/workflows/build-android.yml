@@ -119,13 +119,12 @@ jobs:
           echo "Manifest permissions:"
           grep 'uses-permission' "$MAN" || true
 
-      - name: Install ImageMagick for launcher icons
+      - name: Install Pillow for launcher + notification icons
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq imagemagick
+          python3 -m pip install --quiet pillow
 
-      - name: Apply launcher + monochrome notification icons
+      - name: Apply launcher + bold monochrome notification icons
         run: |
           set -euo pipefail
           LOGO="public/logo.png"
@@ -135,46 +134,61 @@ jobs:
           find "$RES" -type f \( -name 'ic_launcher.xml' -o -name 'ic_launcher_round.xml' -o -name 'ic_launcher_foreground.xml' -o -name 'ic_launcher_foreground.png' \) -delete || true
           rm -rf "$RES/mipmap-anydpi-v26" || true
 
-          make_icon() {
-            local size="$1" dest="$2"
-            local inner
-            inner=$(awk "BEGIN {printf \"%d\", $size * 0.72}")
-            convert "$LOGO" -background none -gravity center -resize "${inner}x${inner}" \
-              -extent "${size}x${size}" PNG32:"$dest"
-          }
+          # Generate bold launcher + white status-bar icons from public/logo.png.
+          # Status bar icons MUST be white-on-transparent silhouettes; coloured
+          # launcher icons render as a tiny unreadable blob in the notification shade.
+          python3 << 'PY'
+          from pathlib import Path
+          from PIL import Image, ImageFilter
 
-          for dens in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
-            name="${dens%%:*}"
-            px="${dens##*:}"
-            mkdir -p "$RES/mipmap-$name"
-            rm -f "$RES/mipmap-$name/ic_launcher.png" \
-                  "$RES/mipmap-$name/ic_launcher_round.png" \
-                  "$RES/mipmap-$name/ic_launcher.xml" \
-                  "$RES/mipmap-$name/ic_launcher_round.xml" || true
-            make_icon "$px" "$RES/mipmap-$name/ic_launcher.png"
-            make_icon "$px" "$RES/mipmap-$name/ic_launcher_round.png"
-          done
+          logo = Image.open("public/logo.png").convert("RGBA")
+          res = Path("android/app/src/main/res")
 
-          make_stat_icon() {
-            local size="$1" dest="$2"
-            local inner
-            inner=$(awk "BEGIN {printf \"%d\", $size * 0.90}")
-            convert "$LOGO" -background none -gravity center -resize "${inner}x${inner}" \
-              -extent "${size}x${size}" \
-              -channel RGB -evaluate set 100% \
-              PNG32:"$dest"
-          }
-          for dens in mdpi:24 hdpi:36 xhdpi:48 xxhdpi:72 xxxhdpi:96; do
-            name="${dens%%:*}"
-            px="${dens##*:}"
-            mkdir -p "$RES/drawable-$name"
-            mkdir -p "$RES/drawable"
-            make_stat_icon "$px" "$RES/drawable-$name/ic_stat_d4exam.png"
-          done
-          make_stat_icon 48 "$RES/drawable/ic_stat_d4exam.png"
+          def make_launcher(size: int, dest: Path) -> None:
+              """Full-colour app icon — fill ~90% so the whole logo is bold and clear."""
+              inner = max(1, int(size * 0.90))
+              scaled = logo.copy()
+              scaled.thumbnail((inner, inner), Image.Resampling.LANCZOS)
+              canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+              ox = (size - scaled.width) // 2
+              oy = (size - scaled.height) // 2
+              canvas.paste(scaled, (ox, oy), scaled)
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              canvas.save(dest, format="PNG")
 
-          echo "Icons: launcher PNG + white monochrome ic_stat_d4exam"
-          find "$RES" -name 'ic_stat_d4exam.png' | sort
+          def make_stat(size: int, dest: Path) -> None:
+              """Pure white silhouette for status bar / notification smallIcon."""
+              inner = max(1, int(size * 0.95))
+              scaled = logo.copy()
+              scaled.thumbnail((inner, inner), Image.Resampling.LANCZOS)
+              alpha = scaled.split()[3]
+              # Hard threshold → solid shape (no soft grey edges)
+              alpha = alpha.point(lambda p: 255 if p > 40 else 0)
+              # Thicken so the mark reads bold at 24dp (like Phoenix / other apps)
+              for _ in range(2):
+                  alpha = alpha.filter(ImageFilter.MaxFilter(3))
+              white = Image.new("RGBA", scaled.size, (255, 255, 255, 0))
+              white.putalpha(alpha)
+              canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+              ox = (size - white.width) // 2
+              oy = (size - white.height) // 2
+              canvas.paste(white, (ox, oy), white)
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              canvas.save(dest, format="PNG")
+
+          for name, px in [("mdpi", 48), ("hdpi", 72), ("xhdpi", 96), ("xxhdpi", 144), ("xxxhdpi", 192)]:
+              d = res / f"mipmap-{name}"
+              make_launcher(px, d / "ic_launcher.png")
+              make_launcher(px, d / "ic_launcher_round.png")
+
+          for name, px in [("mdpi", 24), ("hdpi", 36), ("xhdpi", 48), ("xxhdpi", 72), ("xxxhdpi", 96)]:
+              make_stat(px, res / f"drawable-{name}" / "ic_stat_d4exam.png")
+          make_stat(48, res / "drawable" / "ic_stat_d4exam.png")
+          print("Icons generated: large launcher + bold white ic_stat_d4exam")
+          PY
+
+          echo "Generated icons:"
+          find "$RES" -name 'ic_stat_d4exam.png' -o -name 'ic_launcher.png' | sort
 
       - name: Optional google-services.json for FCM (native push)
         env:
