@@ -22,7 +22,8 @@ import { logSecurityEvent } from "@/lib/cbt-security";
 import { mapFaceSecurityEvent } from "@/lib/live-monitor";
 import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
 import { useLiveScreenPublish } from "@/lib/use-live-screen-publish";
-import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, isNativeScreenShareActive, getActiveScreenStream } from "@/lib/screen-share";
+import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, isNativeScreenShareActive, getActiveScreenStream, refreshNativeScreenShareState, holdExamScreenShare } from "@/lib/screen-share";
+// holdExamScreenShare patched below
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
 import { haptic } from "@/lib/haptic";
@@ -171,7 +172,7 @@ export function CbtExamPage() {
   });
 
   useLiveScreenPublish({
-    enabled: started && !done && !previewMode && !paused && (Boolean(screenStream) || isNativeScreenShareActive()),
+    enabled: started && !done && !previewMode && (Boolean(screenStream) || isNativeScreenShareActive()),
     schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,
     studentId: student?.studentId,
     examId: id,
@@ -179,6 +180,30 @@ export function CbtExamPage() {
     stream: screenStream,
     getStream: () => screenStreamRef.current || screenStream || getActiveScreenStream(),
   });
+
+  // Keep MediaProjection virtual display alive during exam
+  useEffect(() => {
+    if (!started || done || previewMode) return;
+    holdExamScreenShare(true);
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const on = await refreshNativeScreenShareState();
+        if (cancelled) return;
+        if (on) {
+          const s = getActiveScreenStream();
+          if (s) {
+            screenStreamRef.current = s;
+            setScreenStream((prev) => prev || s);
+          }
+        }
+      } catch { /* ignore */ }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 4000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [started, done, previewMode]);
+
 
   useEffect(() => {
     if (!started || done || previewMode) return;
@@ -209,6 +234,7 @@ export function CbtExamPage() {
     mediaStreamRef.current = null;
     setLiveStream(null);
     try {
+      holdExamScreenShare(false);
       stopScreenShareStream(screenStreamRef.current);
     } catch {
       /* ignore */
@@ -666,34 +692,37 @@ export function CbtExamPage() {
           return;
         }
       }
-      // Screen share when teacher enabled and device supports it
+      // Screen share: REUSE native MediaProjection from gate — never re-prompt / never stop
       if (!_opts.skipScreenShare) {
         try {
-          const existing = screenStreamRef.current || getActiveScreenStream();
-          const share = (isNativeScreenShareActive() && existing) ? { ok: true as const, stream: existing } : await startScreenShareStream();
-          if (share.ok) {
-            screenStreamRef.current = share.stream;
-            setScreenStream(share.stream);
-            onScreenShareEnded(share.stream, () => {
-              toast.error("Screen sharing stopped. Re-enable to continue the exam.");
-              setPaused(true);
-              setScreenStream(null);
-              screenStreamRef.current = null;
-              try {
-                const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
-                if (schoolId && student?.studentId && id && !doneRef.current) {
-                  void logSecurityEvent({
-                    schoolId,
-                    examId: id,
-                    attemptId: attemptIdRef.current,
-                    studentId: student.studentId,
-                    eventType: "SCREEN_SHARE_STOPPED",
-                    severity: "high",
-                    description: "Screen sharing stopped",
-                    extra: { source: "track_ended" },
-                  });
-                }
-              } catch { /* ignore */ }
+          holdExamScreenShare(true);
+          let shareOk = false;
+          const already = isNativeScreenShareActive() || (await refreshNativeScreenShareState());
+          if (already) {
+            const s = getActiveScreenStream() || screenStreamRef.current || new MediaStream();
+            screenStreamRef.current = s;
+            setScreenStream(s);
+            shareOk = true;
+            console.info("[cbt] SCREEN_SHARE_CONNECTED reused from gate");
+          } else {
+            const share = await startScreenShareStream();
+            if (share.ok) {
+              screenStreamRef.current = share.stream;
+              setScreenStream(share.stream);
+              shareOk = true;
+              console.info("[cbt] SCREEN_SHARE_CONNECTED started in beginWithMedia");
+            } else if (share.reason === "denied") {
+              holdExamScreenShare(false);
+              toast.error(share.message || "Screen share is required. Allow sharing to continue.");
+              return;
+            } else if (share.reason !== "unsupported") {
+              toast.message(share.message || "Screen share unavailable on this device");
+            }
+          }
+          if (shareOk) {
+            onScreenShareEnded(screenStreamRef.current || new MediaStream(), () => {
+              console.warn("[cbt] SCREEN_SHARE_DISCONNECTED during exam");
+              toast.error("Screen sharing was interrupted. Reconnect if prompted.");
             });
             toast.success("Screen sharing active");
             try {
@@ -711,16 +740,12 @@ export function CbtExamPage() {
                 });
               }
             } catch { /* ignore */ }
-          } else if (share.reason === "denied") {
-            toast.error(share.message || "Screen share is required. Allow sharing to continue.");
-            return;
-          } else if (share.reason !== "unsupported") {
-            toast.message(share.message || "Screen share unavailable on this device");
           }
         } catch (e) {
           console.warn("[cbt] screen share", e);
         }
       }
+
       // Always immersive during active CBT: hide phone status + system chrome.
       {
         const ok = await requestExamFullscreen();
