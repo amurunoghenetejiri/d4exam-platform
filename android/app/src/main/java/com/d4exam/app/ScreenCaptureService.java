@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -17,6 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Must reach startForeground BEFORE getMediaProjection is called.
  */
 public class ScreenCaptureService extends Service {
+  private static final String TAG = "D4ScreenCaptureSvc";
   private static final String CHANNEL_ID = "d4exam_screen_share";
   private static final int NOTIF_ID = 4402;
 
@@ -32,6 +34,10 @@ public class ScreenCaptureService extends Service {
   @Override
   public void onCreate() {
     super.onCreate();
+    promoteToForeground();
+  }
+
+  private void promoteToForeground() {
     createChannel();
     Notification notification =
         new NotificationCompat.Builder(this, CHANNEL_ID)
@@ -41,14 +47,17 @@ public class ScreenCaptureService extends Service {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setSilent(true)
             .build();
     try {
       if (Build.VERSION.SDK_INT >= 29) {
-        startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+        startForeground(
+            NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
       } else {
         startForeground(NOTIF_ID, notification);
       }
     } catch (Exception e) {
+      Log.w(TAG, "startForeground typed failed, fallback", e);
       try {
         startForeground(NOTIF_ID, notification);
       } catch (Exception ignored) {
@@ -59,14 +68,17 @@ public class ScreenCaptureService extends Service {
       READY_LATCH.countDown();
     } catch (Exception ignored) {
     }
+    Log.i(TAG, "FOREGROUND_READY");
   }
 
   private void createChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       NotificationChannel channel =
-          new NotificationChannel(CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_LOW);
+          new NotificationChannel(
+              CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_LOW);
       channel.setDescription("Shown while screen share is active during an examination");
       channel.setShowBadge(false);
+      channel.setSound(null, null);
       NotificationManager nm = getSystemService(NotificationManager.class);
       if (nm != null) nm.createNotificationChannel(channel);
     }
@@ -75,7 +87,7 @@ public class ScreenCaptureService extends Service {
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
     if (!FOREGROUND_READY.get()) {
-      onCreate();
+      promoteToForeground();
     }
     return START_STICKY;
   }
@@ -88,6 +100,7 @@ public class ScreenCaptureService extends Service {
   @Override
   public void onDestroy() {
     FOREGROUND_READY.set(false);
+    Log.i(TAG, "onDestroy");
     super.onDestroy();
   }
 }
