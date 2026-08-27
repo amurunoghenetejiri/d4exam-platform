@@ -19,38 +19,56 @@ import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.WindowManager;
+import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import androidx.activity.result.ActivityResult;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Native screen capture for D4EXAM exam monitoring (MediaProjection).
- * Lifecycle survives exam start / route changes / immersive mode.
- * stop() only on explicit exam end.
+ *
+ * Critical design:
+ * - Capture state is STATIC so it survives Capacitor plugin / WebView recreation
+ *   when the student moves from the security gate into the live CBT session.
+ * - stop() is ignored while keepAlive is true (exam hold).
+ * - handleOnDestroy does NOT tear down projection while keepAlive is true.
+ * - Frames are emitted as JPEG base64 via the "frame" listener.
  */
 @CapacitorPlugin(name = "D4ScreenShare")
 public class ScreenSharePlugin extends Plugin {
   private static final String TAG = "D4ScreenShare";
 
+  // --- Static capture state (survives plugin instance recreation) ---
+  private static volatile MediaProjection sMediaProjection = null;
+  private static volatile VirtualDisplay sVirtualDisplay = null;
+  private static volatile ImageReader sImageReader = null;
+  private static volatile HandlerThread sHandlerThread = null;
+  private static volatile Handler sHandler = null;
+  private static final AtomicBoolean sCapturing = new AtomicBoolean(false);
+  private static final AtomicBoolean sKeepAlive = new AtomicBoolean(false);
+  private static volatile int sScreenWidth = 720;
+  private static volatile int sScreenHeight = 1280;
+  private static volatile int sScreenDensity = 320;
+  private static volatile long sLastEmitMs = 0;
+  private static final long MIN_FRAME_INTERVAL_MS = 500;
+  /** Weak ref to the live plugin instance for notifyListeners. */
+  private static volatile ScreenSharePlugin sLivePlugin = null;
+
   private MediaProjectionManager projectionManager;
-  private MediaProjection mediaProjection;
-  private VirtualDisplay virtualDisplay;
-  private ImageReader imageReader;
-  private HandlerThread handlerThread;
-  private Handler handler;
-  private volatile boolean capturing = false;
-  private int screenWidth = 720;
-  private int screenHeight = 1280;
-  private int screenDensity = 320;
-  private long lastEmitMs = 0;
-  private static final long MIN_FRAME_INTERVAL_MS = 550;
+
+  @Override
+  public void load() {
+    super.load();
+    sLivePlugin = this;
+    Log.i(TAG, "plugin load capturing=" + sCapturing.get() + " keepAlive=" + sKeepAlive.get());
+  }
 
   @PluginMethod
   public void isAvailable(PluginCall call) {
@@ -61,13 +79,26 @@ public class ScreenSharePlugin extends Plugin {
   }
 
   @PluginMethod
+  public void setKeepAlive(PluginCall call) {
+    boolean hold = Boolean.TRUE.equals(call.getBoolean("hold", false));
+    sKeepAlive.set(hold);
+    Log.i(TAG, "setKeepAlive=" + hold);
+    JSObject ret = new JSObject();
+    ret.put("keepAlive", hold);
+    ret.put("active", isReallyActive());
+    call.resolve(ret);
+  }
+
+  @PluginMethod
   public void start(PluginCall call) {
+    sLivePlugin = this;
     Activity activity = getActivity();
     if (activity == null) {
       call.reject("Activity not available");
       return;
     }
-    if (capturing && mediaProjection != null && virtualDisplay != null) {
+
+    if (isReallyActive()) {
       Log.i(TAG, "start: already capturing — reuse");
       JSObject ret = new JSObject();
       ret.put("active", true);
@@ -75,19 +106,20 @@ public class ScreenSharePlugin extends Plugin {
       call.resolve(ret);
       return;
     }
-    if (mediaProjection != null && !capturing) {
+
+    if (sMediaProjection != null && !sCapturing.get()) {
       Log.i(TAG, "start: projection alive, rebuilding virtual display");
       try {
         ensureMetrics(activity);
         startCaptureInternal();
         JSObject ret = new JSObject();
-        ret.put("active", capturing);
+        ret.put("active", sCapturing.get());
         ret.put("rebuilt", true);
         call.resolve(ret);
         return;
       } catch (Exception e) {
         Log.e(TAG, "rebuild failed", e);
-        releaseProjectionOnly();
+        releaseDisplayOnly();
       }
     }
 
@@ -109,6 +141,7 @@ public class ScreenSharePlugin extends Plugin {
 
   @ActivityCallback
   private void onScreenPermission(PluginCall call, ActivityResult result) {
+    sLivePlugin = this;
     if (call == null) return;
     if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
       Log.w(TAG, "permission denied");
@@ -123,36 +156,50 @@ public class ScreenSharePlugin extends Plugin {
       } else {
         getContext().startService(svc);
       }
-      boolean ready = ScreenCaptureService.READY_LATCH.await(3, TimeUnit.SECONDS);
+      boolean ready = false;
+      try {
+        ready = ScreenCaptureService.READY_LATCH.await(4, TimeUnit.SECONDS);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+      }
       if (!ready || !ScreenCaptureService.FOREGROUND_READY.get()) {
         Log.w(TAG, "FGS not ready in time — proceeding anyway");
       }
 
-      mediaProjection = projectionManager.getMediaProjection(result.getResultCode(), result.getData());
-      if (mediaProjection == null) {
+      if (projectionManager == null) {
+        projectionManager =
+            (MediaProjectionManager)
+                getActivity().getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+      }
+      MediaProjection mp =
+          projectionManager.getMediaProjection(result.getResultCode(), result.getData());
+      if (mp == null) {
         call.reject("Could not create MediaProjection");
         return;
       }
+      sMediaProjection = mp;
 
-      mediaProjection.registerCallback(
+      mp.registerCallback(
           new MediaProjection.Callback() {
             @Override
             public void onStop() {
               Log.w(TAG, "MediaProjection.onStop — system stopped projection");
-              capturing = false;
+              sCapturing.set(false);
               releaseDisplayOnly();
-              mediaProjection = null;
+              sMediaProjection = null;
+              sKeepAlive.set(false);
               notifyStopped();
             }
           },
           new Handler(Looper.getMainLooper()));
 
       startCaptureInternal();
-      if (!capturing) {
+      if (!sCapturing.get()) {
         call.reject("Failed to start screen capture pipeline");
         return;
       }
-      Log.i(TAG, "SCREEN_CAPTURE_STARTED " + screenWidth + "x" + screenHeight);
+      sKeepAlive.set(true);
+      Log.i(TAG, "SCREEN_CAPTURE_STARTED " + sScreenWidth + "x" + sScreenHeight);
       JSObject ret = new JSObject();
       ret.put("active", true);
       call.resolve(ret);
@@ -164,6 +211,14 @@ public class ScreenSharePlugin extends Plugin {
 
   @PluginMethod
   public void stop(PluginCall call) {
+    if (sKeepAlive.get()) {
+      Log.w(TAG, "stop ignored — keepAlive active");
+      JSObject ret = new JSObject();
+      ret.put("active", isReallyActive());
+      ret.put("ignored", true);
+      call.resolve(ret);
+      return;
+    }
     Log.i(TAG, "stop: explicit stop requested");
     stopCaptureInternal(true);
     JSObject ret = new JSObject();
@@ -174,26 +229,35 @@ public class ScreenSharePlugin extends Plugin {
   @PluginMethod
   public void isActive(PluginCall call) {
     JSObject ret = new JSObject();
-    boolean active = capturing && mediaProjection != null && virtualDisplay != null;
+    boolean active = isReallyActive();
     ret.put("active", active);
-    ret.put("capturing", capturing);
-    ret.put("hasProjection", mediaProjection != null);
+    ret.put("capturing", sCapturing.get());
+    ret.put("hasProjection", sMediaProjection != null);
+    ret.put("keepAlive", sKeepAlive.get());
     call.resolve(ret);
   }
 
   @PluginMethod
   public void ensureRunning(PluginCall call) {
+    sLivePlugin = this;
     try {
-      if (capturing && mediaProjection != null && virtualDisplay != null) {
+      if (isReallyActive()) {
         JSObject ret = new JSObject();
         ret.put("active", true);
         call.resolve(ret);
         return;
       }
-      if (mediaProjection != null) {
+      if (sMediaProjection != null) {
+        Activity activity = getActivity();
+        if (activity != null) {
+          try {
+            ensureMetrics(activity);
+          } catch (Exception ignored) {
+          }
+        }
         startCaptureInternal();
         JSObject ret = new JSObject();
-        ret.put("active", capturing);
+        ret.put("active", sCapturing.get());
         call.resolve(ret);
         return;
       }
@@ -208,33 +272,39 @@ public class ScreenSharePlugin extends Plugin {
     }
   }
 
+  private static boolean isReallyActive() {
+    return sCapturing.get() && sMediaProjection != null && sVirtualDisplay != null;
+  }
+
   private void ensureMetrics(Activity activity) {
     WindowManager wm = (WindowManager) activity.getSystemService(Context.WINDOW_SERVICE);
     if (wm != null) {
       DisplayMetrics metrics = new DisplayMetrics();
       wm.getDefaultDisplay().getRealMetrics(metrics);
-      screenWidth = Math.min(metrics.widthPixels, 720);
-      screenHeight = Math.max(1, (int) ((float) metrics.heightPixels / metrics.widthPixels * screenWidth));
-      screenDensity = metrics.densityDpi;
+      sScreenWidth = Math.min(metrics.widthPixels, 720);
+      sScreenHeight =
+          Math.max(1, (int) ((float) metrics.heightPixels / metrics.widthPixels * sScreenWidth));
+      sScreenDensity = metrics.densityDpi;
     }
   }
 
   private void startCaptureInternal() {
     releaseDisplayOnly();
-    if (mediaProjection == null) {
-      capturing = false;
+    if (sMediaProjection == null) {
+      sCapturing.set(false);
       return;
     }
-    handlerThread = new HandlerThread("D4ScreenShare");
-    handlerThread.start();
-    handler = new Handler(handlerThread.getLooper());
+    sHandlerThread = new HandlerThread("D4ScreenShare");
+    sHandlerThread.start();
+    sHandler = new Handler(sHandlerThread.getLooper());
 
-    imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2);
-    imageReader.setOnImageAvailableListener(
+    sImageReader =
+        ImageReader.newInstance(sScreenWidth, sScreenHeight, PixelFormat.RGBA_8888, 2);
+    sImageReader.setOnImageAvailableListener(
         reader -> {
-          if (!capturing) return;
+          if (!sCapturing.get()) return;
           long now = System.currentTimeMillis();
-          if (now - lastEmitMs < MIN_FRAME_INTERVAL_MS) {
+          if (now - sLastEmitMs < MIN_FRAME_INTERVAL_MS) {
             Image skip = null;
             try {
               skip = reader.acquireLatestImage();
@@ -248,52 +318,55 @@ public class ScreenSharePlugin extends Plugin {
           try {
             image = reader.acquireLatestImage();
             if (image == null) return;
-            lastEmitMs = now;
+            sLastEmitMs = now;
             String jpegB64 = imageToJpegBase64(image);
             if (jpegB64 != null) {
               JSObject data = new JSObject();
               data.put("jpeg", jpegB64);
-              data.put("width", screenWidth);
-              data.put("height", screenHeight);
+              data.put("width", sScreenWidth);
+              data.put("height", sScreenHeight);
               data.put("ts", now);
-              notifyListeners("frame", data);
+              ScreenSharePlugin plugin = sLivePlugin;
+              if (plugin != null) {
+                plugin.notifyListeners("frame", data);
+              }
             }
           } catch (Exception ignored) {
           } finally {
             if (image != null) image.close();
           }
         },
-        handler);
+        sHandler);
 
-    virtualDisplay =
-        mediaProjection.createVirtualDisplay(
+    sVirtualDisplay =
+        sMediaProjection.createVirtualDisplay(
             "D4EXAM-Screen",
-            screenWidth,
-            screenHeight,
-            screenDensity,
+            sScreenWidth,
+            sScreenHeight,
+            sScreenDensity,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader.getSurface(),
+            sImageReader.getSurface(),
             null,
-            handler);
-    capturing = virtualDisplay != null;
-    Log.i(TAG, "startCaptureInternal capturing=" + capturing);
+            sHandler);
+    sCapturing.set(sVirtualDisplay != null);
+    Log.i(TAG, "startCaptureInternal capturing=" + sCapturing.get());
   }
 
-  private String imageToJpegBase64(Image image) {
+  private static String imageToJpegBase64(Image image) {
     try {
       Image.Plane[] planes = image.getPlanes();
       ByteBuffer buffer = planes[0].getBuffer();
       int pixelStride = planes[0].getPixelStride();
       int rowStride = planes[0].getRowStride();
-      int rowPadding = rowStride - pixelStride * screenWidth;
+      int rowPadding = rowStride - pixelStride * sScreenWidth;
       Bitmap bitmap =
           Bitmap.createBitmap(
-              screenWidth + rowPadding / pixelStride, screenHeight, Bitmap.Config.ARGB_8888);
+              sScreenWidth + rowPadding / pixelStride, sScreenHeight, Bitmap.Config.ARGB_8888);
       bitmap.copyPixelsFromBuffer(buffer);
-      Bitmap cropped = Bitmap.createBitmap(bitmap, 0, 0, screenWidth, screenHeight);
+      Bitmap cropped = Bitmap.createBitmap(bitmap, 0, 0, sScreenWidth, sScreenHeight);
       if (cropped != bitmap) bitmap.recycle();
       ByteArrayOutputStream baos = new ByteArrayOutputStream();
-      cropped.compress(Bitmap.CompressFormat.JPEG, 52, baos);
+      cropped.compress(Bitmap.CompressFormat.JPEG, 55, baos);
       cropped.recycle();
       return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
     } catch (Exception e) {
@@ -301,27 +374,27 @@ public class ScreenSharePlugin extends Plugin {
     }
   }
 
-  private void releaseDisplayOnly() {
-    capturing = false;
+  private static void releaseDisplayOnly() {
+    sCapturing.set(false);
     try {
-      if (virtualDisplay != null) {
-        virtualDisplay.release();
-        virtualDisplay = null;
+      if (sVirtualDisplay != null) {
+        sVirtualDisplay.release();
+        sVirtualDisplay = null;
       }
     } catch (Exception ignored) {
     }
     try {
-      if (imageReader != null) {
-        imageReader.close();
-        imageReader = null;
+      if (sImageReader != null) {
+        sImageReader.close();
+        sImageReader = null;
       }
     } catch (Exception ignored) {
     }
     try {
-      if (handlerThread != null) {
-        handlerThread.quitSafely();
-        handlerThread = null;
-        handler = null;
+      if (sHandlerThread != null) {
+        sHandlerThread.quitSafely();
+        sHandlerThread = null;
+        sHandler = null;
       }
     } catch (Exception ignored) {
     }
@@ -330,9 +403,9 @@ public class ScreenSharePlugin extends Plugin {
   private void releaseProjectionOnly() {
     releaseDisplayOnly();
     try {
-      if (mediaProjection != null) {
-        mediaProjection.stop();
-        mediaProjection = null;
+      if (sMediaProjection != null) {
+        sMediaProjection.stop();
+        sMediaProjection = null;
       }
     } catch (Exception ignored) {
     }
@@ -340,6 +413,7 @@ public class ScreenSharePlugin extends Plugin {
 
   private void stopCaptureInternal(boolean stopService) {
     Log.i(TAG, "stopCaptureInternal stopService=" + stopService);
+    sKeepAlive.set(false);
     releaseProjectionOnly();
     if (stopService) {
       try {
@@ -353,13 +427,23 @@ public class ScreenSharePlugin extends Plugin {
   private void notifyStopped() {
     JSObject data = new JSObject();
     data.put("active", false);
-    notifyListeners("stopped", data);
+    ScreenSharePlugin plugin = sLivePlugin;
+    if (plugin != null) {
+      plugin.notifyListeners("stopped", data);
+    }
   }
 
   @Override
   protected void handleOnDestroy() {
-    Log.i(TAG, "handleOnDestroy");
+    if (sKeepAlive.get()) {
+      Log.i(TAG, "handleOnDestroy — keepAlive, leaving projection running");
+      sLivePlugin = null;
+      super.handleOnDestroy();
+      return;
+    }
+    Log.i(TAG, "handleOnDestroy — stopping capture");
     stopCaptureInternal(true);
+    sLivePlugin = null;
     super.handleOnDestroy();
   }
 }
