@@ -1,0 +1,179 @@
+name: FIX-INTEGRITY-CORE
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-INTEGRITY-CORE.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - name: Apply face + officer + session + thresholds patches
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import subprocess
+
+          fd = Path("src/lib/face-detector.ts")
+          t = fd.read_text()
+          if t.strip() == "PLACEHOLDER_FACE" or "createFaceEngine" not in t:
+              restored = False
+              for rev in ["HEAD~5", "HEAD~10", "91959bee98eb4b2c00c984a47b6cd1cf7faed565", "9483189"]:
+                  try:
+                      data = subprocess.check_output(["git", "show", f"{rev}:src/lib/face-detector.ts"], text=True, stderr=subprocess.DEVNULL)
+                      if "createFaceEngine" in data and "PLACEHOLDER" not in data:
+                          fd.write_text(data)
+                          t = data
+                          print("restored face-detector from", rev)
+                          restored = True
+                          break
+                  except Exception as e:
+                      print("skip", rev, e)
+              if not restored:
+                  raise SystemExit("could not restore face-detector")
+          t = t.replace("const STRONG_SCORE = 0.48;", "const STRONG_SCORE = 0.42;")
+          t = t.replace("const WEAK_SCORE = 0.32;", "const WEAK_SCORE = 0.28;")
+          t = t.replace("const MEDIAPIPE_LOAD_TIMEOUT_MS = 18_000;", "const MEDIAPIPE_LOAD_TIMEOUT_MS = 22_000;")
+          fd.write_text(t)
+          print("face-detector ok")
+
+          pip = Path("src/components/cbt/ExamCameraPip.tsx")
+          pt = pip.read_text()
+          old = '''        if (!engine) {
+          // Engine failed — do not stay stuck forever on "Detecting face"
+          setFaceStatus("unavailable");
+          lastStateRef.current = "unavailable";
+          onSecRef.current?.({
+            kind: "camera_blocked",
+            faceCount: null,
+            at: new Date().toISOString(),
+          });
+          return;
+        }'''
+          new = '''        if (!engine) {
+          // Transient load failure (CDN/WebView) — keep retrying so PIP does not stay on "Face check off"
+          setFaceStatus("unclear");
+          lastStateRef.current = "unclear";
+          if (!cancelled) {
+            timer = window.setTimeout(() => {
+              if (cancelled) return;
+              void (async () => {
+                for (let i = 0; i < 3 && !cancelled; i++) {
+                  const e2 = await createFaceEngine();
+                  if (e2) {
+                    faceEngineRef.current = e2;
+                    void tick();
+                    return;
+                  }
+                  await new Promise((r) => window.setTimeout(r, 800 * (i + 1)));
+                }
+                if (!cancelled) {
+                  setFaceStatus("unavailable");
+                  lastStateRef.current = "unavailable";
+                  timer = window.setTimeout(() => {
+                    if (!cancelled) void createFaceEngine().then((e3) => {
+                      if (e3 && !cancelled) {
+                        faceEngineRef.current = e3;
+                        setFaceStatus("unclear");
+                        void tick();
+                      }
+                    });
+                  }, 12_000);
+                }
+              })();
+            }, 2500);
+          }
+          return;
+        }'''
+          if old in pt:
+              pt = pt.replace(old, new)
+              print("ExamCameraPip retry patched")
+          elif "keep retrying so PIP" in pt:
+              print("ExamCameraPip already patched")
+          else:
+              print("WARN ExamCameraPip block not found")
+          pip.write_text(pt)
+
+          op = Path("src/routes/officer.live-monitor.tsx")
+          ot = op.read_text()
+          old_o = '''          if (frame.faceStatus) {
+            const fs = String(frame.faceStatus).toLowerCase();
+            if (fs === "ok" || fs === "none" || fs === "multi" || fs === "unclear" || fs === "unavailable") {
+              presence.faceStatus = fs as typeof presence.faceStatus;
+            }
+          } else if (!presence.faceStatus || presence.faceStatus === "unknown" || presence.faceStatus === "unavailable") {
+            presence.faceStatus = "ok";
+          }'''
+          new_o = '''          if (frame.faceStatus) {
+            const fs = String(frame.faceStatus).toLowerCase();
+            if (fs === "ok" || fs === "none" || fs === "multi" || fs === "unclear" || fs === "unavailable") {
+              presence.faceStatus = fs as typeof presence.faceStatus;
+            } else if (fs === "camera_blocked" || fs === "starting") {
+              presence.faceStatus = fs === "camera_blocked" ? "unavailable" : "unknown";
+            }
+          }
+          // Do not force "ok" when faceStatus is missing — keep metadata / prior frame value'''
+          if old_o in ot:
+              ot = ot.replace(old_o, new_o)
+              print("officer force-ok fixed")
+          elif "Do not force" in ot:
+              print("officer already fixed")
+          else:
+              print("WARN officer block not found")
+          op.write_text(ot)
+
+          cs = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          ct = cs.read_text()
+          ct = ct.replace(
+              'const faceStatusRef = useRef<string>("starting");',
+              'const faceStatusRef = useRef<string>("unclear");',
+          )
+          old_m = '''    faceStatusRef.current = ev.kind === "ok" ? "ok" : ev.kind === "multi" ? "multi" : ev.kind === "none" ? "none" : String(ev.kind);'''
+          new_m = '''    faceStatusRef.current =
+      ev.kind === "ok"
+        ? "ok"
+        : ev.kind === "multi"
+          ? "multi"
+          : ev.kind === "none"
+            ? "none"
+            : ev.kind === "unclear"
+              ? "unclear"
+              : ev.kind === "camera_blocked"
+                ? "unavailable"
+                : String(ev.kind);'''
+          if old_m in ct:
+              ct = ct.replace(old_m, new_m)
+              print("session face map fixed")
+          elif "camera_blocked" in ct and "faceStatusRef.current" in ct:
+              print("session already mapped")
+          else:
+              print("WARN session map not found")
+          cs.write_text(ct)
+
+          man = Path("android/app/src/main/AndroidManifest.xml")
+          mt = man.read_text()
+          if "android.permission.VIBRATE" not in mt:
+              mt = mt.replace(
+                  '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+                  '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />',
+              )
+              man.write_text(mt)
+              print("VIBRATE added")
+          else:
+              print("VIBRATE present")
+          print("ALL DONE")
+          PY
+      - name: Commit & push
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git status
+          git commit -m "fix(cbt): face retry, officer face status, vibration, publish real faceStatus" || echo "no changes"
+          git push origin HEAD:main
