@@ -214,7 +214,14 @@ async function startWebScreenShare(): Promise<ScreenShareStartResult> {
 
 export async function startScreenShareStream(): Promise<ScreenShareStartResult> {
   if (isNativeAndroid()) {
-    return startNativeScreenShare();
+    const native = await startNativeScreenShare();
+    if (native.ok) return native;
+    // Plugin missing / WebView limitation — try browser getDisplayMedia if present
+    if (native.reason !== "denied" && hasGetDisplayMedia()) {
+      const web = await startWebScreenShare();
+      if (web.ok) return web;
+    }
+    return native;
   }
   return startWebScreenShare();
 }
