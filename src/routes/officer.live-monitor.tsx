@@ -1318,8 +1318,33 @@ function StudentCard({
           <p className="truncate text-[9px] leading-tight text-white/65 sm:text-[10px]">{course}</p>
         </div>
       </div>
-      <div className="hidden" aria-hidden />
+    </button>
+  );
+}
 
+function AlertsPanel({
+  alerts,
+  readIds,
+  studentNameById,
+  onOpen,
+  onMarkAll,
+}: {
+  alerts: IntegrityEvent[];
+  readIds: Set<string>;
+  studentNameById: Map<string, { name: string; matric: string }>;
+  onOpen: (studentId: string | null) => void;
+  onMarkAll: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm sm:rounded-2xl">
+      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+        <h3 className="text-sm font-extrabold text-slate-900">
+          Alerts <span className="text-slate-400">({alerts.length})</span>
+        </h3>
+        <button type="button" onClick={onMarkAll} className="text-[11px] font-semibold text-primary hover:underline">
+          Mark all read
+        </button>
+      </div>
       <ul className="max-h-[22rem] divide-y divide-slate-50 overflow-y-auto sm:max-h-[28rem]">
         {alerts.length === 0 ? (
           <li className="p-4 text-center text-xs text-slate-500">No recent alerts</li>
