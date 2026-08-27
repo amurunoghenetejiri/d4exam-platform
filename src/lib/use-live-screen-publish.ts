@@ -3,6 +3,7 @@
  */
 import { useEffect, useRef } from "react";
 import { startLiveScreenPublisher, type LiveScreenPublisher } from "@/lib/live-video";
+import { isNativeScreenShareActive } from "@/lib/screen-share";
 
 export function useLiveScreenPublish(opts: {
   enabled: boolean;
@@ -20,7 +21,7 @@ export function useLiveScreenPublish(opts: {
     const studentId = String(opts.studentId || "");
     const examId = String(opts.examId || "");
     const attemptId = String(opts.attemptId || "");
-    const hasStream = Boolean(opts.stream || opts.getStream?.());
+    const hasStream = Boolean(opts.stream || opts.getStream?.() || isNativeScreenShareActive());
 
     if (!opts.enabled || !schoolId || !studentId || !examId || !attemptId || !hasStream) {
       try {
