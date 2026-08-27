@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - "android/**"
+      - "native-android/**"
+      - "src/lib/screen-share.ts"
       - "capacitor.config.ts"
       - "package.json"
       - "public/**"
@@ -73,6 +75,26 @@ jobs:
           npx cap add android
           test -f android/gradlew
           chmod +x android/gradlew
+
+      - name: Overlay native screen-share + immersive plugins
+        run: |
+          set -euo pipefail
+          if [ -d native-android ]; then
+            cp -a native-android/. android/
+            echo "Native overlay applied:"
+            find android/app/src/main/java -type f | sort
+          else
+            echo "WARNING: native-android overlay missing"
+            exit 1
+          fi
+          MAN="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q 'ScreenCaptureService' "$MAN"; then
+            sed -i 's|</application>|        <service android:name=".ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />\n    </application>|' "$MAN"
+            echo "ScreenCaptureService added to manifest"
+          fi
+          test -f android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
+          test -f android/app/src/main/java/com/d4exam/app/MainActivity.java
+          grep -q 'ScreenSharePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
 
       - name: Ensure Android permissions (camera, mic, notifications)
         run: |
@@ -184,8 +206,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # Single-line space-separated packages (multi-line was treated as ONE invalid package name).
-          # Do not install emulator — not needed for assembleDebug.
           packages: platform-tools platforms;android-34 build-tools;34.0.0
 
       - name: Accept Android licenses
@@ -201,7 +221,8 @@ jobs:
           MAN="android/app/src/main/AndroidManifest.xml"
           grep -q 'android.permission.CAMERA' "$MAN"
           grep -q 'android.permission.RECORD_AUDIO' "$MAN"
-          echo "OK: CAMERA and RECORD_AUDIO present in AndroidManifest"
+          grep -q 'ScreenSharePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
+          echo "OK: CAMERA, RECORD_AUDIO, and ScreenSharePlugin present"
 
       - name: Build debug APK
         run: |
