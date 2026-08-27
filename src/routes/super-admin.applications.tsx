@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,6 +10,7 @@ import { reviewSchoolApplication } from "@/lib/auth.school-admin.functions";
 import { toast } from "sonner";
 import { ArrowLeft, Building2, Copy, Loader2, MapPin, Phone, Mail, User } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/super-admin/applications")({
   head: () => ({
@@ -31,12 +32,11 @@ type AppRow = {
   applicant_name: string;
   applicant_email: string;
   applicant_phone: string | null;
-  notes: string | null;
   tracking_code: string | null;
   status: string;
   created_at: string;
   review_notes: string | null;
-  documents?: { logo_url?: string | null } | null;
+  documents?: { logo_url?: string | null; logo_name?: string | null; notes?: string | null } | null;
 };
 
 type Creds = {
@@ -87,6 +87,13 @@ function SchoolLogo({
   );
 }
 
+function notesFromApp(app: AppRow): string | null {
+  const docs = app.documents;
+  if (!docs || typeof docs !== "object") return null;
+  const n = (docs as { notes?: string | null }).notes;
+  return typeof n === "string" && n.trim() ? n.trim() : null;
+}
+
 function logoFromApp(app: AppRow): string | null {
   const docs = app.documents;
   if (!docs || typeof docs !== "object") return null;
@@ -103,11 +110,30 @@ function Page() {
   const qc = useQueryClient();
   const { data, isLoading, refetch } = useRows<AppRow>({
     table: "school_applications",
+    // Do not select non-existent "notes" column — notes live in documents JSON
     select:
-      "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, notes, tracking_code, status, created_at, review_notes, documents",
+      "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes, documents",
     order: { column: "created_at", ascending: false },
     limit: 100,
   });
+
+  // Live updates: when a school submits, superadmin sees it immediately
+  useEffect(() => {
+    const channel = supabase
+      .channel("super-admin-school-applications")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "school_applications" },
+        () => {
+          void qc.invalidateQueries({ queryKey: ["rows", "school_applications"] });
+          void refetch();
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [qc, refetch]);
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -321,10 +347,10 @@ function Page() {
           </SectionCard>
         </div>
 
-        {selected.notes ? (
+        {notesFromApp(selected) ? (
           <div className="mt-4">
             <SectionCard title="Applicant notes">
-              <p className="whitespace-pre-wrap text-sm text-slate-700">{selected.notes}</p>
+              <p className="whitespace-pre-wrap text-sm text-slate-700">{notesFromApp(selected)}</p>
             </SectionCard>
           </div>
         ) : null}
