@@ -1,13 +1,1 @@
-package com.d4exam.app;
-
-import android.os.Bundle;
-import com.getcapacitor.BridgeActivity;
-
-public class MainActivity extends BridgeActivity {
-  @Override
-  public void onCreate(Bundle savedInstanceState) {
-    registerPlugin(ExamImmersivePlugin.class);
-    registerPlugin(ScreenSharePlugin.class);
-    super.onCreate(savedInstanceState);
-  }
-}
+PLACEHOLDER_MAIN
