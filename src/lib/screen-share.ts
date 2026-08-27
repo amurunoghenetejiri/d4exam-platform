@@ -28,6 +28,7 @@ let nativeStoppedUnsub: { remove: () => void } | null = null;
 let nativeCanvas: HTMLCanvasElement | null = null;
 let nativeStream: MediaStream | null = null;
 let nativeActive = false;
+let latestNativeScreenJpeg: string | null = null;
 
 export function isNativeAndroid(): boolean {
   try {
@@ -107,9 +108,12 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
         /* ignore */
       }
     }
+    latestNativeScreenJpeg = null;
     nativeFrameUnsub = await D4ScreenShare.addListener("frame", (data) => {
-      if (!nativeCanvas || !data?.jpeg) return;
+      if (!data?.jpeg) return;
       try {
+        latestNativeScreenJpeg = `data:image/jpeg;base64,${data.jpeg}`;
+        if (!nativeCanvas) return;
         const img = new Image();
         img.onload = () => {
           try {
@@ -124,7 +128,7 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
             /* ignore */
           }
         };
-        img.src = `data:image/jpeg;base64,${data.jpeg}`;
+        img.src = latestNativeScreenJpeg;
       } catch {
         /* ignore */
       }
@@ -132,6 +136,7 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
 
     nativeStoppedUnsub = await D4ScreenShare.addListener("stopped", () => {
       nativeActive = false;
+      latestNativeScreenJpeg = null;
     });
 
     if (!nativeStream) {
@@ -215,73 +220,79 @@ export async function startScreenShareStream(): Promise<ScreenShareStartResult> 
 export function stopScreenShareStream(stream: MediaStream | null | undefined): void {
   if (isNativeAndroid() && nativeActive) {
     nativeActive = false;
+    latestNativeScreenJpeg = null;
     try {
       void D4ScreenShare.stop();
     } catch {
       /* ignore */
     }
+  }
+  if (nativeFrameUnsub) {
     try {
-      nativeFrameUnsub?.remove();
+      nativeFrameUnsub.remove();
     } catch {
       /* ignore */
     }
     nativeFrameUnsub = null;
+  }
+  if (nativeStoppedUnsub) {
     try {
-      nativeStoppedUnsub?.remove();
+      nativeStoppedUnsub.remove();
     } catch {
       /* ignore */
     }
     nativeStoppedUnsub = null;
-    nativeCanvas = null;
   }
-  const s = stream || nativeStream;
+  if (stream) {
+    try {
+      stream.getTracks().forEach((t) => t.stop());
+    } catch {
+      /* ignore */
+    }
+  }
+  if (nativeStream && nativeStream !== stream) {
+    try {
+      nativeStream.getTracks().forEach((t) => t.stop());
+    } catch {
+      /* ignore */
+    }
+  }
   nativeStream = null;
-  if (!s) return;
-  try {
-    s.getTracks().forEach((t) => {
-      try {
-        t.stop();
-      } catch {
-        /* ignore */
-      }
-    });
-  } catch {
-    /* ignore */
-  }
+  nativeCanvas = null;
 }
 
-/** Fires once when the user stops sharing (system UI or track end). */
-export function onScreenShareEnded(stream: MediaStream, cb: () => void): () => void {
+export function onScreenShareEnded(stream: MediaStream, onEnded: () => void): () => void {
+  const track = stream.getVideoTracks()[0];
+  if (!track) return () => {};
+  const handler = () => {
+    try {
+      onEnded();
+    } catch {
+      /* ignore */
+    }
+  };
+  track.addEventListener("ended", handler);
+  let nativeStopHandler: (() => void) | null = null;
   if (isNativeAndroid()) {
-    let removed = false;
-    const unsubPromise = D4ScreenShare.addListener("stopped", () => {
-      if (!removed) cb();
+    nativeStopHandler = () => handler();
+    void D4ScreenShare.addListener("stopped", nativeStopHandler).then((h) => {
+      nativeStoppedUnsub = h;
     });
-    return () => {
-      removed = true;
-      void unsubPromise.then((u) => u.remove()).catch(() => undefined);
-    };
-  }
-  const tracks = stream.getVideoTracks();
-  const handlers: Array<{ track: MediaStreamTrack; fn: () => void }> = [];
-  for (const track of tracks) {
-    const fn = () => cb();
-    track.addEventListener("ended", fn);
-    handlers.push({ track, fn });
   }
   return () => {
-    for (const { track, fn } of handlers) {
-      try {
-        track.removeEventListener("ended", fn);
-      } catch {
-        /* ignore */
-      }
+    try {
+      track.removeEventListener("ended", handler);
+    } catch {
+      /* ignore */
     }
   };
 }
 
-export function screenShareActive(stream: MediaStream | null | undefined): boolean {
-  if (isNativeAndroid() && nativeActive) return true;
-  if (!stream) return false;
-  return stream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled !== false);
+/** Latest JPEG data-URL from native MediaProjection (Android APK). */
+export function getLatestNativeScreenJpeg(): string | null {
+  return latestNativeScreenJpeg;
+}
+
+export function clearNativeScreenJpeg(): void {
+  latestNativeScreenJpeg = null;
 }
