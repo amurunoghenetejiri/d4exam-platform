@@ -188,6 +188,7 @@ export function CbtExamPage() {
       const meta = {
         lastSeenAt: new Date().toISOString(),
         cameraActive: Boolean(mediaStreamRef.current || liveStream),
+        screenActive: Boolean(screenStreamRef.current || screenStream),
         faceStatus: faceStatusRef.current || "ok",
         answeredCount: answeredCountRef.current,
         totalQuestions: totalQuestionsRef.current,
@@ -678,8 +679,38 @@ export function CbtExamPage() {
               setPaused(true);
               setScreenStream(null);
               screenStreamRef.current = null;
+              try {
+                const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
+                if (schoolId && student?.studentId && id && !doneRef.current) {
+                  void logSecurityEvent({
+                    schoolId,
+                    examId: id,
+                    attemptId: attemptIdRef.current,
+                    studentId: student.studentId,
+                    eventType: "SCREEN_SHARE_STOPPED",
+                    severity: "high",
+                    description: "Screen sharing stopped",
+                    extra: { source: "track_ended" },
+                  });
+                }
+              } catch { /* ignore */ }
             });
             toast.success("Screen sharing active");
+            try {
+              const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
+              if (schoolId && student?.studentId && id) {
+                void logSecurityEvent({
+                  schoolId,
+                  examId: id,
+                  attemptId: attemptIdRef.current,
+                  studentId: student.studentId,
+                  eventType: "SCREEN_SHARE_STARTED",
+                  severity: "low",
+                  description: "Screen sharing started",
+                  extra: { source: "cbt_start" },
+                });
+              }
+            } catch { /* ignore */ }
           } else if (share.reason === "denied") {
             toast.error(share.message || "Screen share is required. Allow sharing to continue.");
             return;

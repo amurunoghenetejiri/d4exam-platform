@@ -45,6 +45,9 @@ import {
   startLiveCamSubscriber,
   LIVE_CAM_STALE_MS,
   type LiveCamFramePayload,
+  startLiveScreenSubscriber,
+  isLiveScreenFrameFresh,
+  type LiveScreenFramePayload,
 } from "@/lib/live-video";
 
 export const Route = createFileRoute("/officer/live-monitor")({
@@ -206,6 +209,7 @@ function Page() {
   const [readAlertIds, setReadAlertIds] = useState<Set<string>>(new Set());
   const [showAlertsMobile, setShowAlertsMobile] = useState(false);
   const [frames, setFrames] = useState<Record<string, FrameEntry>>({});
+  const [screenFrames, setScreenFrames] = useState<Record<string, { src: string; ts: number }>>({});
   const [warningBusy, setWarningBusy] = useState(false);
   const [, setTick] = useState(0);
   const seenAlertIdsRef = useRef<Set<string>>(new Set());
@@ -952,6 +956,30 @@ function Page() {
                 </>
               )}
             </div>
+            {(() => {
+              const sf = selected
+                ? screenFrames[selected.a.id] || screenFrames[`student:${selected.a.student_id}`]
+                : null;
+              const live = sf && isLiveScreenFrameFresh(sf.ts);
+              if (!selected || selected.isDone) return null;
+              return (
+                <div className="border-b border-slate-100 px-3 py-2 sm:px-4">
+                  <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                    Shared screen {live ? "· Live" : ""}
+                  </p>
+                  <div className="relative aspect-video overflow-hidden rounded-lg border border-slate-200 bg-slate-900">
+                    {live && sf ? (
+                      <img src={sf.src} alt="Student screen" className="h-full w-full object-contain" />
+                    ) : (
+                      <div className="flex h-full flex-col items-center justify-center gap-1 px-3 text-center text-white/70">
+                        <p className="text-xs font-semibold">Screen not shared yet</p>
+                        <p className="text-[10px]">When the student shares their screen, it appears here.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <div className="grid grid-cols-2 gap-2 border-b border-slate-100 p-3 text-sm sm:p-4">
               <Info label="Course" value={selected.course} />
@@ -972,6 +1000,14 @@ function Page() {
               <Info label="Connection" value={selected.hasLiveVideo || isOnline(selected.presence.lastSeenAt) ? "Online" : "Offline"} />
               <Info label="Camera" value={selected.presence.cameraActive ? "Active" : "Off"} />
               <Info label="Face" value={selected.isDone ? "—" : faceLabel(selected.presence)} />
+              <Info
+                label="Screen"
+                value={(() => {
+                  const sf = screenFrames[selected.a.id] || screenFrames[`student:${selected.a.student_id}`];
+                  if (sf && isLiveScreenFrameFresh(sf.ts)) return "Sharing live";
+                  return "Not sharing";
+                })()}
+              />
               <Info label="Tab switches" value={String(selected.a.tab_switch_count ?? 0)} />
             </div>
             {!selected.isDone && (
