@@ -1,10 +1,13 @@
 /**
- * CBT exam vibration (motor only — no sound).
- * Hierarchy (weakest → strongest):
+ * CBT exam vibration (motor only - no sound).
+ * Hierarchy (weakest -> strongest):
  *   start  <  unclear/none (amber)  <  multi  <  officer_warning
  *
- * Only these events may vibrate. Never vibrate on taps/swipes.
+ * Android APK: uses native ExamImmersive.vibrate (WebView navigator.vibrate is unreliable).
+ * Web: navigator.vibrate fallback.
  */
+
+import { Capacitor, registerPlugin } from "@capacitor/core";
 
 export type HapticKind =
   | "start"
@@ -18,22 +21,40 @@ export type HapticKind =
   | "strong";
 
 const PATTERNS: Record<HapticKind, number[]> = {
-  // Weakest — Start Exam only
-  start: [140, 60, 160],
-  // Amber: face not seen / unclear — stronger than start
-  none: [180, 50, 220, 50, 260, 55, 280],
-  unclear: [180, 50, 220, 50, 260, 55, 280],
-  light: [100, 50, 120],
-  // Multiple faces — longer/harder than unclear
-  multi: [200, 40, 240, 40, 280, 45, 320, 45, 360, 50, 400],
-  strong: [200, 40, 240, 40, 280, 45, 320, 45, 360, 50, 400],
-  camera_blocked: [160, 50, 200, 50, 240],
-  tab_switch: [90, 50, 120],
-  // Officer warning — strongest / longest
+  start: [0, 140, 60, 160],
+  none: [0, 180, 50, 220, 50, 260, 55, 280],
+  unclear: [0, 180, 50, 220, 50, 260, 55, 280],
+  light: [0, 100, 50, 120],
+  multi: [0, 200, 40, 240, 40, 280, 45, 320, 45, 360, 50, 400],
+  strong: [0, 200, 40, 240, 40, 280, 45, 320, 45, 360, 50, 400],
+  camera_blocked: [0, 160, 50, 200, 50, 240],
+  tab_switch: [0, 90, 50, 120],
   officer_warning: [
-    250, 35, 300, 35, 350, 40, 400, 40, 450, 45, 500, 45, 550, 50, 600, 50, 650,
+    0, 250, 35, 300, 35, 350, 40, 400, 40, 450, 45, 500, 45, 550, 50, 600, 50, 650,
   ],
 };
+
+type ExamImmersivePlugin = {
+  vibrate(opts: { pattern?: number[]; ms?: number }): Promise<{ ok?: boolean }>;
+  enter(): Promise<void>;
+  exit(): Promise<void>;
+};
+
+let _immersive: ExamImmersivePlugin | null = null;
+function ExamImmersive(): ExamImmersivePlugin {
+  if (!_immersive) {
+    _immersive = registerPlugin<ExamImmersivePlugin>("ExamImmersive");
+  }
+  return _immersive;
+}
+
+function isNativeAndroid(): boolean {
+  try {
+    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+  } catch {
+    return false;
+  }
+}
 
 let primed = false;
 let timers: number[] = [];
@@ -44,18 +65,10 @@ let lastAt = 0;
 export function canVibrate(): boolean {
   try {
     if (typeof window === "undefined") return false;
+    if (isNativeAndroid()) return true;
     const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
-    const win = window as Window & { navigator?: Navigator; vibrate?: (p: number | number[]) => boolean };
-    if (typeof nav?.vibrate === "function" || typeof win?.vibrate === "function") return true;
-    // Capacitor Android WebView often exposes vibrate only after a user gesture;
-    // still treat as available so integrity alerts attempt vibration.
-    try {
-      const Cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-      if (Cap?.isNativePlatform?.()) return true;
-    } catch {
-      /* ignore */
-    }
-    return false;
+    const win = window as Window & { vibrate?: (p: number | number[]) => boolean };
+    return typeof nav?.vibrate === "function" || typeof win?.vibrate === "function";
   } catch {
     return false;
   }
@@ -72,8 +85,22 @@ function clearTimers() {
   timers = [];
 }
 
+/** Prefer native Android Vibrator; fall back to navigator.vibrate. */
 function vibrateRaw(arg: number | number[]): boolean {
   try {
+    const pattern = Array.isArray(arg) ? arg : [arg];
+    const normalized =
+      pattern.length && pattern[0] === 0 ? pattern : [0, ...pattern];
+
+    if (isNativeAndroid()) {
+      try {
+        void ExamImmersive().vibrate({ pattern: normalized });
+        return true;
+      } catch {
+        /* fall through */
+      }
+    }
+
     const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
     const win = window as Window & { vibrate?: (p: number | number[]) => boolean };
     const fn =
@@ -81,23 +108,10 @@ function vibrateRaw(arg: number | number[]): boolean {
       (typeof win?.vibrate === "function" ? win.vibrate.bind(win) : null);
     if (fn) {
       try {
-        return Boolean(fn(arg));
+        return Boolean(fn(normalized.length === 2 && normalized[0] === 0 ? normalized[1] : normalized));
       } catch {
-        /* fall through */
+        /* ignore */
       }
-    }
-    // Native shell fallback: short pattern via Android WebView chrome if exposed
-    try {
-      const Cap = (window as unknown as {
-        Capacitor?: { Plugins?: { Haptics?: { impact?: (o: { style: string }) => Promise<void> } } };
-      }).Capacitor;
-      const impact = Cap?.Plugins?.Haptics?.impact;
-      if (typeof impact === "function") {
-        void impact({ style: "HEAVY" });
-        return true;
-      }
-    } catch {
-      /* ignore */
     }
     return false;
   } catch {
@@ -109,7 +123,7 @@ function pulseTrain(ons: number[], gap = 50) {
   let delay = 0;
   for (const pulse of ons) {
     const id = window.setTimeout(() => {
-      vibrateRaw(pulse);
+      vibrateRaw([0, pulse]);
     }, delay);
     timers.push(id);
     delay += pulse + gap;
@@ -118,7 +132,8 @@ function pulseTrain(ons: number[], gap = 50) {
 
 function extractOns(pattern: number[]): number[] {
   const ons: number[] = [];
-  for (let i = 0; i < pattern.length; i += 2) {
+  const start = pattern[0] === 0 ? 1 : 0;
+  for (let i = start; i < pattern.length; i += 2) {
     if (typeof pattern[i] === "number") ons.push(pattern[i]);
   }
   return ons;
@@ -138,12 +153,10 @@ export function primeHaptics() {
   startHapticKeepAlive();
 }
 
-/** Mark primed only — never vibrate (avoids buzz on every tap). */
 export function refreshHapticUnlock() {
   primed = true;
 }
 
-/** Keep permission flag; no motor pulse (user does not want random buzz). */
 export function startHapticKeepAlive() {
   if (typeof window === "undefined") return;
   stopHapticKeepAlive();
@@ -180,7 +193,7 @@ export function haptic(kind: HapticKind) {
 
   const now = Date.now();
   const cooldown =
-    kind === "officer_warning" ? 600 : kind === "multi" ? 900 : kind === "start" ? 400 : 1200;
+    kind === "officer_warning" ? 500 : kind === "multi" ? 700 : kind === "start" ? 300 : 900;
   if (lastKind === kind && now - lastAt < cooldown) return;
   lastKind = kind;
   lastAt = now;
@@ -192,20 +205,20 @@ export function haptic(kind: HapticKind) {
 
   vibrateRaw(pattern);
   timers.push(
-    window.setTimeout(() => pulseTrain(ons, kind === "start" ? 55 : 40), 25),
-    window.setTimeout(() => vibrateRaw(pattern), 60),
+    window.setTimeout(() => pulseTrain(ons, kind === "start" ? 55 : 35), 30),
+    window.setTimeout(() => vibrateRaw(pattern), 80),
   );
 
   if (kind === "multi") {
-    timers.push(window.setTimeout(() => vibrateRaw([280, 40, 320, 40, 380]), 350));
+    timers.push(window.setTimeout(() => vibrateRaw([0, 280, 40, 320, 40, 380]), 300));
   }
 
   if (kind === "officer_warning") {
     timers.push(
-      window.setTimeout(() => vibrateRaw([300, 30, 350, 30, 400, 35, 450, 35, 500]), 200),
-      window.setTimeout(() => pulseTrain([300, 350, 400, 450, 500, 550], 40), 30),
-      window.setTimeout(() => vibrateRaw([350, 30, 400, 30, 500, 30, 600]), 700),
-      window.setTimeout(() => vibrateRaw([400, 30, 500, 30, 600]), 1200),
+      window.setTimeout(() => vibrateRaw([0, 300, 30, 350, 30, 400, 35, 450]), 150),
+      window.setTimeout(() => pulseTrain([300, 350, 400, 450, 500, 550], 35), 20),
+      window.setTimeout(() => vibrateRaw([0, 350, 30, 400, 30, 500, 30, 600]), 600),
+      window.setTimeout(() => vibrateRaw([0, 400, 30, 500, 30, 600]), 1100),
     );
   }
 }
