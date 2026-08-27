@@ -15,6 +15,8 @@ export function useLiveScreenPublish(opts: {
   getStream?: () => MediaStream | null;
 }) {
   const pubRef = useRef<LiveScreenPublisher | null>(null);
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
 
   useEffect(() => {
     const schoolId = String(opts.schoolId || "");
@@ -44,7 +46,7 @@ export function useLiveScreenPublish(opts: {
       attemptId,
       studentId,
       examId,
-      getStream: () => opts.getStream?.() || opts.stream,
+      getStream: () => optsRef.current.getStream?.() || optsRef.current.stream,
       intervalMs: 700,
     });
 

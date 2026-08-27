@@ -19,15 +19,16 @@ export function useLiveCamPublish(opts: {
   getTimeRemainingSec?: () => number | null;
 }) {
   const pubRef = useRef<LiveCamPublisher | null>(null);
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
 
   useEffect(() => {
     const schoolId = String(opts.schoolId || "");
     const studentId = String(opts.studentId || "");
     const examId = String(opts.examId || "");
     const attemptId = String(opts.attemptId || "");
-    const hasStream = Boolean(opts.stream || opts.getStream?.());
 
-    if (!opts.enabled || !schoolId || !studentId || !examId || !attemptId || !hasStream) {
+    if (!opts.enabled || !schoolId || !studentId || !examId || !attemptId) {
       try {
         pubRef.current?.stop();
       } catch {
@@ -48,15 +49,27 @@ export function useLiveCamPublish(opts: {
       attemptId,
       studentId,
       examId,
-      getStream: () => opts.getStream?.() || opts.stream,
-      getFaceMeta: () => ({
-        faceStatus: opts.getFaceStatus?.() || "ok",
-        cameraActive: true,
-        answeredCount: opts.getAnsweredCount?.(),
-        totalQuestions: opts.getTotalQuestions?.(),
-        timeRemainingSec: opts.getTimeRemainingSec?.() ?? null,
-      }),
-      intervalMs: 700,
+      getStream: () => {
+        const o = optsRef.current;
+        return o.getStream?.() || o.stream;
+      },
+      getFaceMeta: () => {
+        const o = optsRef.current;
+        const raw = String(o.getFaceStatus?.() || "ok").toLowerCase();
+        const faceStatus =
+          raw === "ok" || raw === "none" || raw === "multi" || raw === "unclear" || raw === "unavailable"
+            ? raw
+            : "ok";
+        const stream = o.getStream?.() || o.stream;
+        return {
+          faceStatus,
+          cameraActive: Boolean(stream),
+          answeredCount: o.getAnsweredCount?.(),
+          totalQuestions: o.getTotalQuestions?.(),
+          timeRemainingSec: o.getTimeRemainingSec?.() ?? null,
+        };
+      },
+      intervalMs: 600,
     });
 
     return () => {
