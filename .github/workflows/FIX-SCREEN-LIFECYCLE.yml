@@ -1,0 +1,49 @@
+name: FIX-SCREEN-LIFECYCLE
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-SCREEN-LIFECYCLE.yml
+      - patches/sslife_*.b64
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply screen-share lifecycle fix
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          import base64, json, pathlib
+          parts = sorted(pathlib.Path("patches").glob("sslife_*.b64"))
+          assert parts, "missing patch parts"
+          b64 = "".join(p.read_text().strip() for p in parts)
+          blob = json.loads(base64.b64decode(b64).decode())
+          for path, content_b64 in blob.items():
+              p = pathlib.Path(path)
+              p.parent.mkdir(parents=True, exist_ok=True)
+              data = base64.b64decode(content_b64)
+              assert b"PLACEHOLDER" not in data, path
+              p.write_bytes(data)
+              print("wrote", path, len(data))
+          java = pathlib.Path("android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java").read_text()
+          assert "ensureRunning" in java
+          assert "READY_LATCH" in pathlib.Path("android/app/src/main/java/com/d4exam/app/ScreenCaptureService.java").read_text()
+          assert "holdExamScreenShare" in pathlib.Path("src/lib/screen-share.ts").read_text()
+          assert "holdExamScreenShare" in pathlib.Path("src/components/cbt/CbtExamSession.impl.tsx").read_text()
+          print("ALL_OK")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java \
+            android/app/src/main/java/com/d4exam/app/ScreenCaptureService.java \
+            src/lib/screen-share.ts src/lib/use-live-screen-publish.ts \
+            src/components/cbt/ExamSecurityGate.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(screen): keep MediaProjection alive through exam start (API 34+ FGS + hold lock)"
+            git push
+          fi
