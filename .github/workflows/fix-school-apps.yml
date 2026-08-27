@@ -1,9 +1,9 @@
-name: Fix school identity + applications
+name: Fix school identity
 on:
   workflow_dispatch:
   push:
     paths:
-      - '.github/workflows/fix-school-apps.yml'
+      - ".github/workflows/fix-school-apps.yml"
 jobs:
   fix:
     runs-on: ubuntu-latest
@@ -13,114 +13,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Restore school-identity + patch routes
+      - name: Restore school-identity from good commit
         run: |
           set -euo pipefail
           git show f3958907eba70678a519a6e98e10f7bbb419287b:src/lib/school-identity.ts > src/lib/school-identity.ts
           test $(wc -c < src/lib/school-identity.ts) -gt 5000
-          python3 << 'PY'
-from pathlib import Path
-p = Path('src/lib/school-identity.ts')
-text = p.read_text()
-if 'compressViaHtmlImage' not in text:
-  old = '''async function fileToCompressedDataUrl(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  try {
-    const maxSide = 512;
-    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-    const w = Math.max(1, Math.round(bitmap.width * scale));
-    const h = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas not available");
-    ctx.drawImage(bitmap, 0, 0, w, h);
-    const isPng =
-      file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
-    return isPng ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85);
-  } finally {
-    try {
-      bitmap.close();
-    } catch {
-      /* ignore */
-    }
-  }
-}'''
-  new = '''function isPngFile(file: File) {
-  return file.type === "image/png" || file.name.toLowerCase().endsWith(".png");
-}
-
-async function compressViaHtmlImage(file: File): Promise<string> {
-  const objectUrl = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error("Image decode failed"));
-      el.src = objectUrl;
-    });
-    const maxSide = 640;
-    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
-    const w = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
-    const h = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas not available");
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-    return isPngFile(file) ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.88);
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
-
-async function compressViaBitmap(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  try {
-    const maxSide = 640;
-    const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-    const w = Math.max(1, Math.round(bitmap.width * scale));
-    const h = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas not available");
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(bitmap, 0, 0, w, h);
-    return isPngFile(file) ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.88);
-  } finally {
-    try { bitmap.close(); } catch { /* ignore */ }
-  }
-}
-
-async function fileToCompressedDataUrl(file: File): Promise<string> {
-  try {
-    return await compressViaHtmlImage(file);
-  } catch {
-    return await compressViaBitmap(file);
-  }
-}'''
-  if old not in text:
-    raise SystemExit('compress block missing')
-  text = text.replace(old, new, 1)
-  text = text.replace('if (opts.file.size <= 400_000)', 'if (opts.file.size <= 500_000)')
-  p.write_text(text)
-print('identity patched', p.stat().st_size)
-assert 'compressViaHtmlImage' in p.read_text()
-assert 'useSchoolIdentity' in p.read_text()
-assert 'PLACEHOLDER' not in p.read_text()
-PY
-          echo "redeploy $(date -u +%Y%m%d%H%M%S) school-identity restored + logo harden" > DEPLOY_TRIGGER.txt
+          grep -q useSchoolIdentity src/lib/school-identity.ts
+          grep -q uploadSchoolLogo src/lib/school-identity.ts
+          ! grep -q PLACEHOLDER src/lib/school-identity.ts
+          echo "redeploy $(date -u +%Y%m%d%H%M%S) school-identity restored" > DEPLOY_TRIGGER.txt
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add -A
+          git add src/lib/school-identity.ts DEPLOY_TRIGGER.txt
           if git diff --cached --quiet; then
             echo "No changes"
           else
-            git commit -m "fix: restore school-identity (logo upload) from good commit + harden PNG/JPG handling"
+            git commit -m "fix: restore school-identity.ts (logo upload + useSchoolIdentity)"
             git push origin HEAD:main
           fi
