@@ -1,9 +1,10 @@
 /**
  * Publishes student screen-share JPEG frames to officer live-monitor.
+ * On Android, frames come from MediaProjection via getLatestNativeScreenJpeg — no MediaStream required.
  */
 import { useEffect, useRef } from "react";
 import { startLiveScreenPublisher, type LiveScreenPublisher } from "@/lib/live-video";
-import { isNativeScreenShareActive } from "@/lib/screen-share";
+import { refreshNativeScreenShareState } from "@/lib/screen-share";
 
 export function useLiveScreenPublish(opts: {
   enabled: boolean;
@@ -23,9 +24,9 @@ export function useLiveScreenPublish(opts: {
     const studentId = String(opts.studentId || "");
     const examId = String(opts.examId || "");
     const attemptId = String(opts.attemptId || "");
-    const hasStream = Boolean(opts.stream || opts.getStream?.() || isNativeScreenShareActive());
 
-    if (!opts.enabled || !schoolId || !studentId || !examId || !attemptId || !hasStream) {
+    // Do not require stream up-front — native JPEG path works without MediaStream tracks
+    if (!opts.enabled || !schoolId || !studentId || !examId || !attemptId) {
       try {
         pubRef.current?.stop();
       } catch {
@@ -41,16 +42,23 @@ export function useLiveScreenPublish(opts: {
       /* ignore */
     }
 
+    void refreshNativeScreenShareState();
+
     pubRef.current = startLiveScreenPublisher({
       schoolId,
       attemptId,
       studentId,
       examId,
       getStream: () => optsRef.current.getStream?.() || optsRef.current.stream,
-      intervalMs: 700,
+      intervalMs: 600,
     });
 
+    const sync = window.setInterval(() => {
+      void refreshNativeScreenShareState();
+    }, 5000);
+
     return () => {
+      window.clearInterval(sync);
       try {
         pubRef.current?.stop();
       } catch {
