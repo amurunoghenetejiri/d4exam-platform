@@ -1,0 +1,44 @@
+name: FIX-MONITOR-SIMPLE
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-MONITOR-SIMPLE.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply simple sed patches
+        run: |
+          set -euo pipefail
+          # Faster presence heartbeat (8s -> 4s)
+          sed -i 's/setInterval(tick, 8000)/setInterval(tick, 4000)/g' src/components/cbt/CbtExamSession.impl.tsx
+          # Face alert cooldown
+          sed -i 's/ALERT_COOLDOWN_MS = 1800/ALERT_COOLDOWN_MS = 1400/g' src/components/cbt/ExamCameraPip.tsx
+          # Haptic cooldowns (stronger more frequent)
+          sed -i 's/officer_warning" ? 800 : kind === "multi" ? 1200 : kind === "start" ? 500 : 1600/officer_warning" ? 600 : kind === "multi" ? 900 : kind === "start" ? 400 : 1200/g' src/lib/haptic.ts
+          # live-video face meta defaults
+          sed -i 's/faceStatus: meta.faceStatus,/faceStatus: meta.faceStatus ?? "ok",/g' src/lib/live-video.ts
+          sed -i 's/cameraActive: meta.cameraActive,/cameraActive: meta.cameraActive !== false,/g' src/lib/live-video.ts
+          # screen share: ignore track ended while native still active
+          if ! grep -q 'isNativeAndroid() && nativeActive) return' src/lib/screen-share.ts; then
+            sed -i 's/const handler = () => {$/const handler = () => {\n    if (isNativeAndroid() \&\& nativeActive) return;/' src/lib/screen-share.ts
+          fi
+          # screenActive includes native
+          sed -i 's/screenActive: Boolean(screenStreamRef.current || screenStream),/screenActive: Boolean(screenStreamRef.current || screenStream || isNativeScreenShareActive()),/g' src/components/cbt/CbtExamSession.impl.tsx
+          echo ALL_OK
+          grep -n 'setInterval(tick, 4000)' src/components/cbt/CbtExamSession.impl.tsx | head -1
+          grep -n 'ALERT_COOLDOWN_MS = 1400' src/components/cbt/ExamCameraPip.tsx | head -1
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/haptic.ts src/lib/screen-share.ts src/lib/live-video.ts \
+            src/components/cbt/CbtExamSession.impl.tsx src/components/cbt/ExamCameraPip.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(monitor): faster presence, vibration, screen keep-alive, live frames"
+            git push
+          fi
