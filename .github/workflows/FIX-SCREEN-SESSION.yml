@@ -1,0 +1,112 @@
+name: FIX-SCREEN-SESSION
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-SCREEN-SESSION.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch CbtExamSession screen lifecycle
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+
+          # Import holdExamScreenShare
+          if "holdExamScreenShare" not in t:
+              t = t.replace(
+                  'from "@/lib/screen-share";',
+                  'from "@/lib/screen-share";\n// holdExamScreenShare patched below',
+                  1,
+              )
+              # proper import line
+              for old in [
+                  'import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, isNativeScreenShareActive, getActiveScreenStream } from "@/lib/screen-share";',
+                  'import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, isNativeScreenShareActive, getActiveScreenStream, refreshNativeScreenShareState } from "@/lib/screen-share";',
+              ]:
+                  if old in t:
+                      t = t.replace(old, 'import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, isNativeScreenShareActive, getActiveScreenStream, refreshNativeScreenShareState, holdExamScreenShare } from "@/lib/screen-share";', 1)
+                      break
+              else:
+                  # generic
+                  t = re.sub(
+                      r'import \{([^}]+)\} from "@/lib/screen-share";',
+                      lambda m: 'import { ' + m.group(1).strip().rstrip(',') + ', holdExamScreenShare, refreshNativeScreenShareState } from "@/lib/screen-share";'
+                      if 'holdExamScreenShare' not in m.group(1) else m.group(0),
+                      t,
+                      count=1,
+                  )
+
+          # Publish without !paused
+          t, n = re.subn(
+              r"enabled:\s*started\s*&&\s*!done\s*&&\s*!previewMode\s*&&\s*!paused\s*&&\s*\(Boolean\(screenStream\)\s*\|\|\s*isNativeScreenShareActive\(\)\),",
+              "enabled: started && !done && !previewMode && (Boolean(screenStream) || isNativeScreenShareActive()),",
+              t,
+              count=1,
+          )
+          print("enabled patch", n)
+
+          # shutdownMedia release hold
+          if "holdExamScreenShare(false)" not in t:
+              t = t.replace(
+                  "stopScreenShareStream(screenStreamRef.current);",
+                  "holdExamScreenShare(false);\n      stopScreenShareStream(screenStreamRef.current);",
+                  1,
+              )
+              print("shutdown hold release")
+
+          # Replace beginWithMedia screen block if still old pattern
+          if "SCREEN_SHARE_CONNECTED reused from gate" not in t:
+              old_start = "      // Screen share when teacher enabled and device supports it\n      if (!_opts.skipScreenShare) {"
+              idx = t.find(old_start)
+              if idx < 0:
+                  old_start = "      if (!_opts.skipScreenShare) {"
+                  # find near startScreenShareStream in beginWithMedia
+                  idx = t.find("const existing = screenStreamRef.current || getActiveScreenStream();")
+                  if idx > 0:
+                      # walk back to if
+                      idx = t.rfind("if (!_opts.skipScreenShare)", 0, idx)
+                      idx = t.rfind("\n", 0, idx) + 1
+              end_marker = "      // Always immersive during active CBT"
+              end = t.find(end_marker, idx if idx >= 0 else 0)
+              if idx >= 0 and end > idx:
+                  new_block = '''      // Screen share: REUSE native MediaProjection from gate — never re-prompt / never stop\n      if (!_opts.skipScreenShare) {\n        try {\n          holdExamScreenShare(true);\n          let shareOk = false;\n          const already = isNativeScreenShareActive() || (await refreshNativeScreenShareState());\n          if (already) {\n            const s = getActiveScreenStream() || screenStreamRef.current || new MediaStream();\n            screenStreamRef.current = s;\n            setScreenStream(s);\n            shareOk = true;\n            console.info("[cbt] SCREEN_SHARE_CONNECTED reused from gate");\n          } else {\n            const share = await startScreenShareStream();\n            if (share.ok) {\n              screenStreamRef.current = share.stream;\n              setScreenStream(share.stream);\n              shareOk = true;\n              console.info("[cbt] SCREEN_SHARE_CONNECTED started in beginWithMedia");\n            } else if (share.reason === "denied") {\n              holdExamScreenShare(false);\n              toast.error(share.message || "Screen share is required. Allow sharing to continue.");\n              return;\n            } else if (share.reason !== "unsupported") {\n              toast.message(share.message || "Screen share unavailable on this device");\n            }\n          }\n          if (shareOk) {\n            onScreenShareEnded(screenStreamRef.current || new MediaStream(), () => {\n              console.warn("[cbt] SCREEN_SHARE_DISCONNECTED during exam");\n              toast.error("Screen sharing was interrupted. Reconnect if prompted.");\n            });\n            toast.success("Screen sharing active");\n            try {\n              const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");\n              if (schoolId && student?.studentId && id) {\n                void logSecurityEvent({\n                  schoolId,\n                  examId: id,\n                  attemptId: attemptIdRef.current,\n                  studentId: student.studentId,\n                  eventType: "SCREEN_SHARE_STARTED",\n                  severity: "low",\n                  description: "Screen sharing started",\n                  extra: { source: "cbt_start" },\n                });\n              }\n            } catch { /* ignore */ }\n          }\n        } catch (e) {\n          console.warn("[cbt] screen share", e);\n        }\n      }\n\n'''
+                  t = t[:idx] + new_block + t[end:]
+                  print("beginWithMedia block replaced")
+              else:
+                  print("could not locate beginWithMedia block", idx, end)
+
+          # Heartbeat
+          if "holdExamScreenShare(true)" in t and "refreshNativeScreenShareState" in t:
+              if "Keep MediaProjection virtual display alive" not in t and "ensureRunning screen heartbeat" not in t:
+                  marker = "  useLiveScreenPublish({"
+                  pos = t.find(marker)
+                  if pos > 0:
+                      endp = t.find("});", pos)
+                      endp = t.find("\n", endp) + 1
+                      sync = '''\n  // Keep MediaProjection virtual display alive during exam\n  useEffect(() => {\n    if (!started || done || previewMode) return;\n    holdExamScreenShare(true);\n    let cancelled = false;\n    const tick = async () => {\n      try {\n        const on = await refreshNativeScreenShareState();\n        if (cancelled) return;\n        if (on) {\n          const s = getActiveScreenStream();\n          if (s) {\n            screenStreamRef.current = s;\n            setScreenStream((prev) => prev || s);\n          }\n        }\n      } catch { /* ignore */ }\n    };\n    void tick();\n    const id = window.setInterval(() => void tick(), 4000);\n    return () => { cancelled = true; window.clearInterval(id); };\n  }, [started, done, previewMode]);\n\n'''
+                      t = t[:endp] + sync + t[endp:]
+                      print("heartbeat inserted")
+
+          p.write_text(t)
+          assert "holdExamScreenShare" in t
+          print("ALL_OK", len(t))
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): hold MediaProjection through exam start; reuse gate grant"
+            git push
+          fi
