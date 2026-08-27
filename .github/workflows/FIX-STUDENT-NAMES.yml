@@ -1,0 +1,289 @@
+name: FIX-STUDENT-NAMES
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-STUDENT-NAMES.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 80
+      - name: Restore student context and patch names
+        run: |
+          set -euo pipefail
+          for f in src/lib/student.ts src/lib/student.server.ts; do
+            if ! grep -q 'useStudentContext\|getMyStudentContext\|StudentContext' "$f" 2>/dev/null; then
+              for rev in 5e8aab2dd8cf57c8d44ea24ef9a145c8707224ba 91959bee98eb4b2c00c984a47b6cd1cf7faed565 HEAD~20; do
+                if git cat-file -e "${rev}:${f}" 2>/dev/null; then
+                  git show "${rev}:${f}" > "$f"
+                  if grep -q 'export' "$f"; then
+                    echo "restored $f from $rev"
+                    break
+                  fi
+                fi
+              done
+            fi
+          done
+          test -s src/lib/student.ts
+          grep -q useStudentContext src/lib/student.ts
+
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("src/lib/student.ts")
+          t = p.read_text()
+          t = t.replace(
+              '"id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, status, departments(name), faculties(name), levels(name)"',
+              '"id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, status, full_name, departments(name), faculties(name), levels(name)"',
+          )
+          t = t.replace(
+              'fullName: (profile.full_name || "").trim() || String(student.matric_number || ""),',
+              'fullName: (profile.full_name || "").trim() || String((student as { full_name?: string | null }).full_name || "").trim() || String(student.matric_number || ""),',
+          )
+          p.write_text(t)
+          print("student.ts patched")
+
+          p2 = Path("src/lib/student.server.ts")
+          t2 = p2.read_text()
+          t2 = re.sub(
+              r'\.select\("id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, status, departments\(name\), faculties\(name\), levels\(name\)"\)',
+              '.select("id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, status, full_name, departments(name), faculties(name), levels(name)")',
+              t2,
+          )
+          old = '''      fullName:
+        ((profile.full_name as string | null) || "").trim() ||
+        (student.matric_number as string | null) ||'''
+          new = '''      fullName:
+        ((profile.full_name as string | null) || "").trim() ||
+        ((student as { full_name?: string | null }).full_name || "").trim() ||
+        (student.matric_number as string | null) ||'''
+          if old in t2:
+              t2 = t2.replace(old, new)
+          p2.write_text(t2)
+          print("student.server.ts patched")
+
+          login = Path("src/lib/login.server.ts")
+          lt = login.read_text()
+          lt = lt.replace(
+              'const STUDENT_COLS = "id, student_id, matric_number, status, profile_id";',
+              'const STUDENT_COLS = "id, student_id, matric_number, status, profile_id, full_name";',
+          )
+          if "let fullName = identifier;" in lt and "student as { full_name" not in lt:
+              lt = lt.replace(
+                  "  let fullName = identifier;",
+                  '  let fullName =\n    String((student as { full_name?: string | null }).full_name || "").trim() ||\n    identifier;',
+                  1,
+              )
+          lt = re.sub(
+              r"\n  if \(matricMatches\(identifier, matric\) \|\| normalizeMatric\(identifier\) === normalizeMatric\(matric\)\) \{\n    fullName = matric;\n  \}\n",
+              "\n",
+              lt,
+          )
+          login.write_text(lt)
+          print("login.server patched")
+
+          st = Path("src/routes/admin.structure.tsx")
+          s = st.read_text()
+          if "createSchoolUser" not in s:
+              s = s.replace(
+                  'import { useMemo, useState } from "react";',
+                  'import { useMemo, useState } from "react";\nimport { useServerFn } from "@tanstack/react-start";',
+              )
+              s = s.replace(
+                  'import { toast } from "sonner";',
+                  'import { toast } from "sonner";\nimport { createSchoolUser, importStudents } from "@/lib/import-students";',
+              )
+              s = s.replace(
+                  "  const qc = useQueryClient();",
+                  "  const qc = useQueryClient();\n  const createOne = useServerFn(createSchoolUser);\n  const importMany = useServerFn(importStudents);",
+              )
+
+          old_add = '''  async function addStudent() {
+    if (!schoolId || !facultyId || !departmentId || !levelId) return;
+    if (!sFull.trim() || !sMatric.trim()) {
+      toast.error("Full name and matric required");
+      return;
+    }
+    setBusy(true);
+    try {
+      const matric = sMatric.trim();
+      const { data: dup } = await supabase
+        .from("students")
+        .select("id")
+        .eq("school_id", schoolId)
+        .or(`matric_number.eq.${matric},student_id.eq.${matric}`)
+        .maybeSingle();
+      if (dup) {
+        toast.error("Matric already exists");
+        setBusy(false);
+        return;
+      }
+      const payload: Record<string, unknown> = {
+        school_id: schoolId,
+        student_id: matric,
+        matric_number: matric,
+        full_name: sFull.trim(),
+        faculty_id: facultyId,
+        department_id: departmentId,
+        level_id: levelId,
+        status: "active",
+      };
+      let { error } = await supabase.from("students").insert(payload as never);
+      if (error && /full_name/i.test(error.message)) {
+        delete payload.full_name;
+        ({ error } = await supabase.from("students").insert(payload as never));
+      }
+      if (error) throw error;
+      toast.success("Student added");
+      setSFull("");
+      setSMatric("");
+      setShowAdd(false);
+      await studentsQ.refetch();
+      await structureCountsQ.refetch();
+      await qc.invalidateQueries({ queryKey: ["struct-student-count"] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }'''
+          new_add = '''  async function addStudent() {
+    if (!schoolId || !facultyId || !departmentId || !levelId) return;
+    if (!sFull.trim() || !sMatric.trim()) {
+      toast.error("Full name and matric required");
+      return;
+    }
+    setBusy(true);
+    try {
+      const matric = sMatric.trim();
+      const full = sFull.trim();
+      const parts = full.split(/\\s+/).filter(Boolean);
+      const firstName = parts[0] || full;
+      const lastName = parts.slice(1).join(" ") || "Student";
+      await createOne({
+        data: {
+          role: "student",
+          firstName,
+          lastName,
+          identifier: matric,
+          matricNumber: matric,
+          facultyId,
+          departmentId,
+          levelId,
+        },
+      });
+      try {
+        await supabase
+          .from("students")
+          .update({ full_name: full } as never)
+          .eq("school_id", schoolId)
+          .or(`matric_number.eq.${matric},student_id.eq.${matric}`);
+      } catch { /* optional column */ }
+      toast.success("Student added — login: school code + matric as password");
+      setSFull("");
+      setSMatric("");
+      setShowAdd(false);
+      await studentsQ.refetch();
+      await structureCountsQ.refetch();
+      await qc.invalidateQueries({ queryKey: ["struct-student-count"] });
+      await qc.invalidateQueries({ queryKey: ["admin-all-students"] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }'''
+          if old_add in s:
+              s = s.replace(old_add, new_add)
+              print("addStudent fixed")
+          elif "await createOne" in s:
+              print("addStudent already fixed")
+          else:
+              print("WARN addStudent block not found")
+
+          old_imp = '''      for (const r of rows) {
+        const { data: dup } = await supabase
+          .from("students")
+          .select("id")
+          .eq("school_id", schoolId)
+          .or(`matric_number.eq.${r.matric},student_id.eq.${r.matric}`)
+          .maybeSingle();
+        if (dup) {
+          skipped++;
+          continue;
+        }
+        const payload: Record<string, unknown> = {
+          school_id: schoolId,
+          student_id: r.matric,
+          matric_number: r.matric,
+          full_name: r.full,
+          faculty_id: facultyId,
+          department_id: departmentId,
+          level_id: levelId,
+          status: "active",
+        };
+        let { error } = await supabase.from("students").insert(payload as never);
+        if (error && /full_name/i.test(error.message)) {
+          delete payload.full_name;
+          ({ error } = await supabase.from("students").insert(payload as never));
+        }
+        if (!error) created++;
+        else skipped++;
+      }
+      toast.success(`Imported ${created}${skipped ? `, skipped ${skipped}` : ""}`);'''
+          new_imp = '''      const res = (await importMany({
+        data: {
+          rows: rows.map((r, i) => {
+            const parts = r.full.split(/\\s+/).filter(Boolean);
+            const firstName = parts[0] || r.full || "Student";
+            const lastName = parts.slice(1).join(" ") || "Student";
+            return {
+              rowNumber: i + 2,
+              firstName,
+              lastName,
+              identifier: r.matric,
+              matricNumber: r.matric,
+              facultyId,
+              departmentId,
+              levelId,
+            };
+          }),
+        },
+      })) as { created?: number; updated?: number; failed?: number };
+      created = Number(res.created ?? 0) + Number(res.updated ?? 0);
+      skipped = Number(res.failed ?? 0);
+      for (const r of rows) {
+        try {
+          await supabase
+            .from("students")
+            .update({ full_name: r.full } as never)
+            .eq("school_id", schoolId)
+            .or(`matric_number.eq.${r.matric},student_id.eq.${r.matric}`);
+        } catch { /* ignore */ }
+      }
+      toast.success(`Imported ${created}${skipped ? `, failed ${skipped}` : ""}`);'''
+          if old_imp in s:
+              s = s.replace(old_imp, new_imp)
+              print("import fixed")
+          elif "await importMany" in s:
+              print("import already fixed")
+          else:
+              print("WARN import block not found")
+
+          st.write_text(s)
+          print("ALL DONE")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/student.ts src/lib/student.server.ts src/lib/login.server.ts src/routes/admin.structure.tsx
+          git status
+          git commit -m "fix(students): restore context, save full name on add/import, show names in admin + login" || echo "no changes"
+          git push origin HEAD:main
