@@ -1,0 +1,89 @@
+name: RESTORE-SCREEN-SHARE-NOW
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/RESTORE-SCREEN-SHARE-NOW.yml
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore screen-share from known-good commit and patch listeners
+        run: |
+          set -euo pipefail
+          # Known good: keep MediaProjection active + exports
+          git show 310e749dea1369d51caf48fdb8202fd7e9485352:src/lib/screen-share.ts > src/lib/screen-share.ts
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/lib/screen-share.ts")
+          t = p.read_text()
+          assert "PLACEHOLDER" not in t and "isNativeScreenShareActive" in t
+          # Ensure listeners when reusing active session (isActive path)
+          old = '''      if (st?.active) {
+        nativeActive = true;
+        if (!nativeStream) nativeStream = new MediaStream();
+        return { ok: true, stream: nativeStream };
+      }'''
+          new = '''      if (st?.active) {
+        nativeActive = true;
+        if (!nativeStream) nativeStream = new MediaStream();
+        if (!nativeFrameUnsub) {
+          latestNativeScreenJpeg = null;
+          nativeFrameUnsub = await D4ScreenShare().addListener("frame", (data) => {
+            if (!data?.jpeg) return;
+            try {
+              latestNativeScreenJpeg = `data:image/jpeg;base64,${data.jpeg}`;
+            } catch { /* ignore */ }
+          });
+        }
+        if (!nativeStoppedUnsub) {
+          nativeStoppedUnsub = await D4ScreenShare().addListener("stopped", () => {
+            nativeActive = false;
+            latestNativeScreenJpeg = null;
+          });
+        }
+        return { ok: true, stream: nativeStream };
+      }'''
+          if old in t:
+            t = t.replace(old, new, 1)
+            print("patched isActive reuse")
+          else:
+            print("isActive reuse already ok or different")
+          # nativeActive path: also attach if missing
+          old2 = '''    if (nativeActive && nativeStream) {
+      return { ok: true, stream: nativeStream };
+    }'''
+          new2 = '''    if (nativeActive && nativeStream) {
+      if (!nativeFrameUnsub) {
+        try {
+          latestNativeScreenJpeg = null;
+          nativeFrameUnsub = await D4ScreenShare().addListener("frame", (data) => {
+            if (!data?.jpeg) return;
+            try {
+              latestNativeScreenJpeg = `data:image/jpeg;base64,${data.jpeg}`;
+            } catch { /* ignore */ }
+          });
+        } catch { /* ignore */ }
+      }
+      return { ok: true, stream: nativeStream };
+    }'''
+          if old2 in t:
+            t = t.replace(old2, new2, 1)
+            print("patched nativeActive reuse")
+          p.write_text(t)
+          print("OK", len(t))
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/screen-share.ts
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(screen): restore screen-share.ts + re-attach frame listeners on reuse"
+            git push
+          fi
