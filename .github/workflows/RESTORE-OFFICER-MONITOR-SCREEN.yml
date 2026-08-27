@@ -1,0 +1,55 @@
+name: RESTORE-OFFICER-MONITOR-SCREEN
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/RESTORE-OFFICER-MONITOR-SCREEN.yml
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore monitor file and wire screen subscriber
+        run: |
+          set -euo pipefail
+          # Recover last known-good monitor before accidental overwrite
+          git show 71ca325ffa9dc88b6902552fa96d1902ef3fcfcf:src/routes/officer.live-monitor.tsx > src/routes/officer.live-monitor.tsx
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/routes/officer.live-monitor.tsx")
+          t = p.read_text()
+          # Import Monitor icon (used in screen pane empty state)
+          old_imp = """  MessageSquareWarning,\n  Loader2,\n  ChevronLeft,\n} from \"lucide-react\";"""
+          new_imp = """  MessageSquareWarning,\n  Loader2,\n  ChevronLeft,\n  Monitor,\n} from \"lucide-react\";"""
+          if "Monitor," not in t.split('from "lucide-react"')[0]:
+              if old_imp not in t:
+                  raise SystemExit("lucide import block not found")
+              t = t.replace(old_imp, new_imp, 1)
+              print("added Monitor import")
+          # Subscribe to student screen frames (was missing — screenFrames stayed empty)
+          if "startLiveScreenSubscriber({" not in t:
+              needle = "    return () => sub.stop();\n  }, [schoolId]);\n\n  useRealtimeInvalidate("
+              insert = """    return () => sub.stop();\n  }, [schoolId]);\n\n  useEffect(() => {\n    if (!schoolId) return;\n    const sub = startLiveScreenSubscriber({\n      schoolId,\n      onFrame: (p: LiveScreenFramePayload) => {\n        const attemptId = p.attemptId || (p as { attempt_id?: string }).attempt_id;\n        if (!attemptId || !p.frame) return;\n        const entry = { src: p.frame, ts: p.ts || Date.now() };\n        const sid = String(p.studentId || (p as { student_id?: string }).student_id || \"\");\n        setScreenFrames((prev) => {\n          const next = { ...prev, [attemptId]: entry };\n          if (sid) next[`student:${sid}`] = entry;\n          return next;\n        });\n      },\n    });\n    return () => sub.stop();\n  }, [schoolId]);\n\n  useRealtimeInvalidate("""
+              if needle not in t:
+                  raise SystemExit("cam subscriber end not found")
+              t = t.replace(needle, insert, 1)
+              print("added startLiveScreenSubscriber")
+          p.write_text(t)
+          assert "startLiveScreenSubscriber({" in t
+          assert "Monitor," in t
+          print("ok", len(t))
+          PY
+      - name: Commit restored monitor
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/officer.live-monitor.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(monitor): restore live-monitor + subscribe to student screen frames"
+            git push
+          fi
