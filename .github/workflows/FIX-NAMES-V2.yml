@@ -1,0 +1,106 @@
+name: FIX-NAMES-V2
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-NAMES-V2.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/routes/admin.structure.tsx")
+          s = p.read_text()
+          changed = False
+          if 'from "@/lib/import-students"' not in s:
+              s = s.replace(
+                  'import { toast } from "sonner";',
+                  'import { toast } from "sonner";\nimport { useServerFn } from "@tanstack/react-start";\nimport { createSchoolUser, importStudents } from "@/lib/import-students";',
+              )
+              s = s.replace(
+                  "  const qc = useQueryClient();",
+                  "  const qc = useQueryClient();\n  const createOne = useServerFn(createSchoolUser);\n  const importMany = useServerFn(importStudents);",
+              )
+              changed = True
+              print("imports")
+          needle = """      const matric = sMatric.trim();
+      const { data: dup } = await supabase
+        .from("students")
+        .select("id")
+        .eq("school_id", schoolId)
+        .or(`matric_number.eq.${matric},student_id.eq.${matric}`)
+        .maybeSingle();
+      if (dup) {
+        toast.error("Matric already exists");
+        setBusy(false);
+        return;
+      }
+      const payload: Record<string, unknown> = {
+        school_id: schoolId,
+        student_id: matric,
+        matric_number: matric,
+        full_name: sFull.trim(),
+        faculty_id: facultyId,
+        department_id: departmentId,
+        level_id: levelId,
+        status: "active",
+      };
+      let { error } = await supabase.from("students").insert(payload as never);
+      if (error && /full_name/i.test(error.message)) {
+        delete payload.full_name;
+        ({ error } = await supabase.from("students").insert(payload as never));
+      }
+      if (error) throw error;
+      toast.success("Student added");"""
+          repl = """      const matric = sMatric.trim();
+      const full = sFull.trim();
+      const parts = full.split(/\\s+/).filter(Boolean);
+      const firstName = parts[0] || full;
+      const lastName = parts.slice(1).join(" ") || "Student";
+      await createOne({
+        data: {
+          role: "student",
+          firstName,
+          lastName,
+          identifier: matric,
+          matricNumber: matric,
+          facultyId,
+          departmentId,
+          levelId,
+        },
+      });
+      try {
+        await supabase
+          .from("students")
+          .update({ full_name: full } as never)
+          .eq("school_id", schoolId)
+          .or(`matric_number.eq.${matric},student_id.eq.${matric}`);
+      } catch { /* optional column */ }
+      toast.success("Student added — login: school code + matric as password");"""
+          if needle in s:
+              s = s.replace(needle, repl)
+              changed = True
+              print("add body replaced")
+          else:
+              print("needle missing")
+              i = s.find("const matric = sMatric.trim()")
+              print(repr(s[i:i+120]))
+          if changed:
+              p.write_text(s)
+          assert "createOne" in p.read_text()
+          print("OK")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/admin.structure.tsx
+          git commit -m "fix(students): structure add uses createSchoolUser so full name is saved" || echo no-changes
+          git push origin HEAD:main
