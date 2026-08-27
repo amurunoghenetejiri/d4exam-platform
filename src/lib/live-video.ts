@@ -286,12 +286,13 @@ export function startLiveScreenPublisher(opts: {
       let frame = getLatestNativeScreenJpeg();
       if (!frame) {
         const stream = opts.getStream();
-        if (!stream) return;
-        frame = await captureJpegFromStream(stream, {
-          maxWidth: 720,
-          quality: 0.55,
-          mirror: false,
-        });
+        if (stream) {
+          frame = await captureJpegFromStream(stream, {
+            maxWidth: 720,
+            quality: 0.55,
+            mirror: false,
+          });
+        }
       }
       if (stopped || !frame || !channel) return;
       void channel.send({

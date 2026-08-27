@@ -29,7 +29,7 @@ import {
   requestExamMediaPermissions,
   openAppPermissionSettings,
 } from "@/native/cameraService";
-import { canAttemptScreenShare, startScreenShareStream, stopScreenShareStream } from "@/lib/screen-share";
+import { canAttemptScreenShare, startScreenShareStream } from "@/lib/screen-share";
 
 type Props = {
   examTitle: string;
@@ -142,7 +142,7 @@ export function ExamSecurityGate({
         try {
           const share = await startScreenShareStream();
           if (share.ok) {
-            stopScreenShareStream(share.stream);
+            // Keep MediaProjection active for exam reuse
             setScreenGranted(true);
           } else if (share.reason === "denied") {
             setScreenGranted(false);

@@ -22,7 +22,7 @@ import { logSecurityEvent } from "@/lib/cbt-security";
 import { mapFaceSecurityEvent } from "@/lib/live-monitor";
 import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
 import { useLiveScreenPublish } from "@/lib/use-live-screen-publish";
-import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream } from "@/lib/screen-share";
+import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, isNativeScreenShareActive, getActiveScreenStream } from "@/lib/screen-share";
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
 import { haptic } from "@/lib/haptic";
@@ -171,13 +171,13 @@ export function CbtExamPage() {
   });
 
   useLiveScreenPublish({
-    enabled: started && !done && !previewMode && !paused && Boolean(screenStream),
+    enabled: started && !done && !previewMode && !paused && (Boolean(screenStream) || isNativeScreenShareActive()),
     schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,
     studentId: student?.studentId,
     examId: id,
     attemptId: liveAttemptId || attemptIdRef.current,
     stream: screenStream,
-    getStream: () => screenStreamRef.current || screenStream,
+    getStream: () => screenStreamRef.current || screenStream || getActiveScreenStream(),
   });
 
   useEffect(() => {
@@ -669,9 +669,9 @@ export function CbtExamPage() {
       // Screen share when teacher enabled and device supports it
       if (!_opts.skipScreenShare) {
         try {
-          const share = await startScreenShareStream();
+          const existing = screenStreamRef.current || getActiveScreenStream();
+          const share = (isNativeScreenShareActive() && existing) ? { ok: true as const, stream: existing } : await startScreenShareStream();
           if (share.ok) {
-            stopScreenShareStream(screenStreamRef.current);
             screenStreamRef.current = share.stream;
             setScreenStream(share.stream);
             onScreenShareEnded(share.stream, () => {
