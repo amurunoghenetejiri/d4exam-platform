@@ -21,7 +21,14 @@ type D4ScreenSharePlugin = {
   addListener(event: "stopped", cb: () => void): Promise<{ remove: () => void }>;
 };
 
-const D4ScreenShare = registerPlugin<D4ScreenSharePlugin>("D4ScreenShare");
+/** Lazy plugin — avoid registerPlugin at module load (breaks Vercel/SSR). */
+let _plugin: D4ScreenSharePlugin | null = null;
+function D4ScreenShare(): D4ScreenSharePlugin {
+  if (!_plugin) {
+    _plugin = registerPlugin<D4ScreenSharePlugin>("D4ScreenShare");
+  }
+  return _plugin;
+}
 
 let nativeFrameUnsub: { remove: () => void } | null = null;
 let nativeStoppedUnsub: { remove: () => void } | null = null;
@@ -43,16 +50,11 @@ function hasGetDisplayMedia(): boolean {
   return typeof (navigator.mediaDevices as MediaDevices & { getDisplayMedia?: unknown }).getDisplayMedia === "function";
 }
 
-/** True when the runtime can attempt screen capture (web getDisplayMedia OR native Android plugin). */
 export function canAttemptScreenShare(): boolean {
   if (isNativeAndroid()) return true;
   return hasGetDisplayMedia();
 }
 
-/**
- * Native Android APK is always treated as screen-share capable (MediaProjection).
- * Web requires getDisplayMedia + secure context.
- */
 export function isScreenShareSupported(): boolean {
   if (isNativeAndroid()) return true;
   if (!hasGetDisplayMedia()) return false;
@@ -65,7 +67,7 @@ export function isScreenShareSupported(): boolean {
 
 async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
   try {
-    const avail = await D4ScreenShare.isAvailable();
+    const avail = await D4ScreenShare().isAvailable();
     if (!avail?.available) {
       return {
         ok: false,
@@ -98,7 +100,7 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
       nativeStream = stream;
     }
 
-    await D4ScreenShare.start();
+    await D4ScreenShare().start();
     nativeActive = true;
 
     if (nativeFrameUnsub) {
@@ -109,7 +111,7 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
       }
     }
     latestNativeScreenJpeg = null;
-    nativeFrameUnsub = await D4ScreenShare.addListener("frame", (data) => {
+    nativeFrameUnsub = await D4ScreenShare().addListener("frame", (data) => {
       if (!data?.jpeg) return;
       try {
         latestNativeScreenJpeg = `data:image/jpeg;base64,${data.jpeg}`;
@@ -134,7 +136,7 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
       }
     });
 
-    nativeStoppedUnsub = await D4ScreenShare.addListener("stopped", () => {
+    nativeStoppedUnsub = await D4ScreenShare().addListener("stopped", () => {
       nativeActive = false;
       latestNativeScreenJpeg = null;
     });
@@ -222,7 +224,7 @@ export function stopScreenShareStream(stream: MediaStream | null | undefined): v
     nativeActive = false;
     latestNativeScreenJpeg = null;
     try {
-      void D4ScreenShare.stop();
+      void D4ScreenShare().stop();
     } catch {
       /* ignore */
     }
@@ -272,10 +274,8 @@ export function onScreenShareEnded(stream: MediaStream, onEnded: () => void): ()
     }
   };
   track.addEventListener("ended", handler);
-  let nativeStopHandler: (() => void) | null = null;
   if (isNativeAndroid()) {
-    nativeStopHandler = () => handler();
-    void D4ScreenShare.addListener("stopped", nativeStopHandler).then((h) => {
+    void D4ScreenShare().addListener("stopped", handler).then((h) => {
       nativeStoppedUnsub = h;
     });
   }
