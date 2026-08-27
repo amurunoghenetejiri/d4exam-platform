@@ -16,6 +16,8 @@ on:
       - "src/native/**"
       - "scripts/prepare-capacitor-dist.mjs"
       - "scripts/generate-capacitor-index.mjs"
+      - "scripts/generate-android-splash.py"
+      - "scripts/assets/**"
       - ".github/workflows/build-android.yml"
       - "DEPLOY_TRIGGER.txt"
 
@@ -134,9 +136,6 @@ jobs:
           find "$RES" -type f \( -name 'ic_launcher.xml' -o -name 'ic_launcher_round.xml' -o -name 'ic_launcher_foreground.xml' -o -name 'ic_launcher_foreground.png' \) -delete || true
           rm -rf "$RES/mipmap-anydpi-v26" || true
 
-          # Generate bold launcher + white status-bar icons from public/logo.png.
-          # Status bar icons MUST be white-on-transparent silhouettes; coloured
-          # launcher icons render as a tiny unreadable blob in the notification shade.
           python3 << 'PY'
           from pathlib import Path
           from PIL import Image, ImageFilter
@@ -145,7 +144,6 @@ jobs:
           res = Path("android/app/src/main/res")
 
           def make_launcher(size: int, dest: Path) -> None:
-              """Full-colour app icon — fill ~90% so the whole logo is bold and clear."""
               inner = max(1, int(size * 0.90))
               scaled = logo.copy()
               scaled.thumbnail((inner, inner), Image.Resampling.LANCZOS)
@@ -157,14 +155,11 @@ jobs:
               canvas.save(dest, format="PNG")
 
           def make_stat(size: int, dest: Path) -> None:
-              """Pure white silhouette for status bar / notification smallIcon."""
               inner = max(1, int(size * 0.95))
               scaled = logo.copy()
               scaled.thumbnail((inner, inner), Image.Resampling.LANCZOS)
               alpha = scaled.split()[3]
-              # Hard threshold → solid shape (no soft grey edges)
               alpha = alpha.point(lambda p: 255 if p > 40 else 0)
-              # Thicken so the mark reads bold at 24dp (like Phoenix / other apps)
               for _ in range(2):
                   alpha = alpha.filter(ImageFilter.MaxFilter(3))
               white = Image.new("RGBA", scaled.size, (255, 255, 255, 0))
@@ -189,6 +184,13 @@ jobs:
 
           echo "Generated icons:"
           find "$RES" -name 'ic_stat_d4exam.png' -o -name 'ic_launcher.png' | sort
+
+      - name: Generate branded D4EXAM splash drawables
+        run: |
+          set -euo pipefail
+          python3 scripts/generate-android-splash.py
+          echo "Splash assets:"
+          find android/app/src/main/res -name 'splash*.png' -o -name 'splash*.xml' 2>/dev/null | sort || true
 
       - name: Optional google-services.json for FCM (native push)
         env:
