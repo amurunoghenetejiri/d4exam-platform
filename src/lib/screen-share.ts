@@ -2,6 +2,8 @@
  * D4EXAM screen share for exam monitoring (Android APK first).
  * - Web / desktop: getDisplayMedia
  * - Native Android APK: D4ScreenShare MediaProjection plugin (system share-screen dialog)
+ *
+ * Frames are emitted as JPEG events from native; publisher reads getLatestNativeScreenJpeg().
  */
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
@@ -36,6 +38,7 @@ let nativeCanvas: HTMLCanvasElement | null = null;
 let nativeStream: MediaStream | null = null;
 let nativeActive = false;
 let latestNativeScreenJpeg: string | null = null;
+let endedCallbacks: Array<() => void> = [];
 
 export function isNativeAndroid(): boolean {
   try {
@@ -88,12 +91,12 @@ async function ensureNativeFrameListeners(): Promise<void> {
   if (!nativeStream) nativeStream = new MediaStream();
 
   if (!nativeFrameUnsub) {
-    latestNativeScreenJpeg = null;
     try {
       nativeFrameUnsub = await D4ScreenShare().addListener("frame", (data) => {
         if (!data?.jpeg) return;
         try {
           latestNativeScreenJpeg = `data:image/jpeg;base64,${data.jpeg}`;
+          nativeActive = true;
           if (!nativeCanvas) return;
           const img = new Image();
           img.onload = () => {
@@ -124,6 +127,15 @@ async function ensureNativeFrameListeners(): Promise<void> {
       nativeStoppedUnsub = await D4ScreenShare().addListener("stopped", () => {
         nativeActive = false;
         latestNativeScreenJpeg = null;
+        const cbs = endedCallbacks.slice();
+        endedCallbacks = [];
+        for (const cb of cbs) {
+          try {
+            cb();
+          } catch {
+            /* ignore */
+          }
+        }
       });
     } catch {
       /* ignore */
@@ -133,7 +145,6 @@ async function ensureNativeFrameListeners(): Promise<void> {
 
 async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
   try {
-    // Reuse path: MediaProjection already running (e.g. after ExamSecurityGate grant)
     if (nativeActive && nativeStream) {
       await ensureNativeFrameListeners();
       return { ok: true, stream: nativeStream };
@@ -244,7 +255,7 @@ export async function startScreenShareStream(): Promise<ScreenShareStartResult> 
 }
 
 export function stopScreenShareStream(stream: MediaStream | null | undefined): void {
-  if (isNativeAndroid() && nativeActive) {
+  if (isNativeAndroid() && (nativeActive || latestNativeScreenJpeg)) {
     nativeActive = false;
     latestNativeScreenJpeg = null;
     try {
@@ -269,6 +280,7 @@ export function stopScreenShareStream(stream: MediaStream | null | undefined): v
     }
     nativeStoppedUnsub = null;
   }
+  endedCallbacks = [];
   if (stream) {
     try {
       stream.getTracks().forEach((t) => t.stop());
@@ -288,23 +300,37 @@ export function stopScreenShareStream(stream: MediaStream | null | undefined): v
 }
 
 export function onScreenShareEnded(stream: MediaStream, onEnded: () => void): () => void {
-  const track = stream.getVideoTracks()[0];
-  if (!track) {
-    if (isNativeAndroid()) {
-      void D4ScreenShare().addListener("stopped", () => {
+  if (isNativeAndroid()) {
+    endedCallbacks.push(onEnded);
+    void ensureNativeFrameListeners();
+    const track = stream?.getVideoTracks?.()?.[0];
+    if (track) {
+      const handler = () => {
+        if (nativeActive) return;
         try {
           onEnded();
         } catch {
           /* ignore */
         }
-      }).then((h) => {
-        nativeStoppedUnsub = h;
-      });
+      };
+      track.addEventListener("ended", handler);
+      return () => {
+        endedCallbacks = endedCallbacks.filter((c) => c !== onEnded);
+        try {
+          track.removeEventListener("ended", handler);
+        } catch {
+          /* ignore */
+        }
+      };
     }
-    return () => {};
+    return () => {
+      endedCallbacks = endedCallbacks.filter((c) => c !== onEnded);
+    };
   }
+
+  const track = stream?.getVideoTracks?.()?.[0];
+  if (!track) return () => {};
   const handler = () => {
-    if (isNativeAndroid() && nativeActive) return;
     try {
       onEnded();
     } catch {
@@ -312,11 +338,6 @@ export function onScreenShareEnded(stream: MediaStream, onEnded: () => void): ()
     }
   };
   track.addEventListener("ended", handler);
-  if (isNativeAndroid()) {
-    void D4ScreenShare().addListener("stopped", handler).then((h) => {
-      nativeStoppedUnsub = h;
-    });
-  }
   return () => {
     try {
       track.removeEventListener("ended", handler);
@@ -335,9 +356,25 @@ export function clearNativeScreenJpeg(): void {
 }
 
 export function isNativeScreenShareActive(): boolean {
-  return nativeActive;
+  return nativeActive || Boolean(latestNativeScreenJpeg);
 }
 
 export function getActiveScreenStream(): MediaStream | null {
   return nativeStream;
+}
+
+/** Sync JS flag from native isActive (call periodically during exam). */
+export async function refreshNativeScreenShareState(): Promise<boolean> {
+  if (!isNativeAndroid()) return false;
+  try {
+    await ensureNativeFrameListeners();
+    const st = await D4ScreenShare().isActive();
+    if (st?.active) {
+      nativeActive = true;
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return nativeActive;
 }
