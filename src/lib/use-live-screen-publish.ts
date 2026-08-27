@@ -1,10 +1,18 @@
 /**
  * Publishes student screen-share JPEG frames to officer live-monitor.
- * On Android, frames come from MediaProjection via getLatestNativeScreenJpeg — no MediaStream required.
+ * On Android, frames come from MediaProjection via getLatestNativeScreenJpeg —
+ * no MediaStream tracks required.
+ *
+ * Uses a stable publisher that restarts only when identity keys change.
+ * Falls back to studentId:examId when attemptId is not yet available so
+ * frames can start flowing as soon as capture is active.
  */
 import { useEffect, useRef } from "react";
 import { startLiveScreenPublisher, type LiveScreenPublisher } from "@/lib/live-video";
-import { refreshNativeScreenShareState } from "@/lib/screen-share";
+import {
+  isNativeScreenShareActive,
+  refreshNativeScreenShareState,
+} from "@/lib/screen-share";
 
 export function useLiveScreenPublish(opts: {
   enabled: boolean;
@@ -19,14 +27,18 @@ export function useLiveScreenPublish(opts: {
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
-  useEffect(() => {
-    const schoolId = String(opts.schoolId || "");
-    const studentId = String(opts.studentId || "");
-    const examId = String(opts.examId || "");
-    const attemptId = String(opts.attemptId || "");
+  const schoolId = String(opts.schoolId || "");
+  const studentId = String(opts.studentId || "");
+  const examId = String(opts.examId || "");
+  // Prefer real attempt id; provisional key keeps channel identity stable until attempt is created
+  const attemptId = String(opts.attemptId || "") || (studentId && examId ? `pending:${studentId}:${examId}` : "");
+  const enabled =
+    opts.enabled &&
+    Boolean(schoolId && studentId && examId && attemptId) &&
+    (Boolean(opts.stream) || isNativeScreenShareActive() || Boolean(opts.getStream));
 
-    // Do not require stream up-front — native JPEG path works without MediaStream tracks
-    if (!opts.enabled || !schoolId || !studentId || !examId || !attemptId) {
+  useEffect(() => {
+    if (!enabled) {
       try {
         pubRef.current?.stop();
       } catch {
@@ -50,12 +62,12 @@ export function useLiveScreenPublish(opts: {
       studentId,
       examId,
       getStream: () => optsRef.current.getStream?.() || optsRef.current.stream,
-      intervalMs: 600,
+      intervalMs: 550,
     });
 
     const sync = window.setInterval(() => {
       void refreshNativeScreenShareState();
-    }, 5000);
+    }, 4000);
 
     return () => {
       window.clearInterval(sync);
@@ -66,6 +78,5 @@ export function useLiveScreenPublish(opts: {
       }
       pubRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opts.enabled, opts.schoolId, opts.studentId, opts.examId, opts.attemptId, opts.stream]);
+  }, [enabled, schoolId, studentId, examId, attemptId]);
 }
