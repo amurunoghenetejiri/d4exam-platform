@@ -57,7 +57,6 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
         description: `Application for ${app.school_name} marked ${data.decision}`,
       });
 
-      // Notify applicant (in-app + push) for reject / more info
       try {
         const email = String(app.applicant_email || app.official_email || "").trim().toLowerCase();
         const schoolName = String(app.school_name || "School");
@@ -93,7 +92,6 @@ export const reviewSchoolApplication = createServerFn({ method: "POST" })
       };
     }
 
-    // ── Approval: create school + school admin, issue credentials, notify ──
     const schoolName = String(app.school_name || "School").trim();
     const applicantName = String(app.applicant_name || "Applicant").trim();
     const applicantEmail = String(app.applicant_email || app.official_email || "").trim().toLowerCase();
@@ -447,4 +445,27 @@ export const importStudentsBulk = createServerFn({ method: "POST" })
       processed,
       failures,
     };
+  });
+
+/** Superadmin: list all school applications (bypasses RLS via service role). */
+export const listSchoolApplications = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data: isSuper } = await context.supabase.rpc("is_super_admin");
+    if (!isSuper) throw new Error("Forbidden");
+
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
+      .from("school_applications")
+      .select(
+        "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes, documents",
+      )
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    if (error) {
+      console.error("[listSchoolApplications]", error);
+      throw new Error(error.message || "Could not load applications");
+    }
+    return (data ?? []) as Array<Record<string, unknown>>;
   });
