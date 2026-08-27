@@ -1,0 +1,36 @@
+name: REPAIR-MONITOR-JSX
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/REPAIR-MONITOR-JSX.yml
+      - scripts/repair_monitor_jsx.py
+      - scripts/_alerts_panel_tail.tsx
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Repair JSX
+        run: |
+          set -euo pipefail
+          python3 scripts/repair_monitor_jsx.py
+          grep -q 'function AlertsPanel' src/routes/officer.live-monitor.tsx
+          ! grep -q 'hidden" aria-hidden />\n\n      <ul className="max-h-\[22rem\]' src/routes/officer.live-monitor.tsx || true
+      - name: Verify build
+        run: |
+          set -euo pipefail
+          npm install --no-fund --no-audit
+          npm run build
+      - name: Commit fixed source
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/officer.live-monitor.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(build): repair officer live-monitor JSX for Vercel/APK"
+            git push
+          fi
