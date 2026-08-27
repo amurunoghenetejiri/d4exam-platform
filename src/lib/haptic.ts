@@ -180,7 +180,7 @@ export function haptic(kind: HapticKind) {
 
   const now = Date.now();
   const cooldown =
-    kind === "officer_warning" ? 800 : kind === "multi" ? 1200 : kind === "start" ? 500 : 1600;
+    kind === "officer_warning" ? 600 : kind === "multi" ? 900 : kind === "start" ? 400 : 1200;
   if (lastKind === kind && now - lastAt < cooldown) return;
   lastKind = kind;
   lastAt = now;

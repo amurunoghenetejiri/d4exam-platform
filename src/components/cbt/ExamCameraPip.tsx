@@ -19,7 +19,7 @@ function haptic(kind: SecurityAlertKind) {
   fireHaptic(map[kind]);
 }
 
-const ALERT_COOLDOWN_MS = 1800;
+const ALERT_COOLDOWN_MS = 1400;
 
 const ALERT_COPY: Record<
   SecurityAlertKind,

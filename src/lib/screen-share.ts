@@ -304,6 +304,7 @@ export function onScreenShareEnded(stream: MediaStream, onEnded: () => void): ()
     return () => {};
   }
   const handler = () => {
+    if (isNativeAndroid() && nativeActive) return;
     try {
       onEnded();
     } catch {

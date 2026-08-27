@@ -188,7 +188,7 @@ export function CbtExamPage() {
       const meta = {
         lastSeenAt: new Date().toISOString(),
         cameraActive: Boolean(mediaStreamRef.current || liveStream),
-        screenActive: Boolean(screenStreamRef.current || screenStream),
+        screenActive: Boolean(screenStreamRef.current || screenStream || isNativeScreenShareActive()),
         faceStatus: faceStatusRef.current || "ok",
         answeredCount: answeredCountRef.current,
         totalQuestions: totalQuestionsRef.current,
@@ -199,7 +199,7 @@ export function CbtExamPage() {
       void supabase.from("exam_attempts").update({ metadata: meta, updated_at: new Date().toISOString() } as never).eq("id", aid);
     };
     tick();
-    const t = window.setInterval(tick, 8000);
+    const t = window.setInterval(tick, 4000);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, done, previewMode, liveStream, session?.fullName, student?.fullName]);
