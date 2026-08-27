@@ -1,0 +1,29 @@
+name: APPLY-MONITOR-NAMES-V3
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/APPLY-MONITOR-NAMES-V3.yml
+      - scripts/patch_monitor_names_screen_v3.py
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch names + dual grid ratio
+        run: |
+          set -euo pipefail
+          python3 scripts/patch_monitor_names_screen_v3.py
+          grep -q studentNamesQ src/routes/officer.live-monitor.tsx
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/officer.live-monitor.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(monitor): resolve student full names + wider camera pane"
+            git push
+          fi

@@ -1,9 +1,11 @@
 /**
  * Live camera + screen JPEG frame publish/subscribe over Supabase Realtime broadcast.
  * Camera frames are mirrored (selfie); screen frames are not.
+ * Android native screen uses MediaProjection JPEGs directly when available.
  */
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { getLatestNativeScreenJpeg } from "@/lib/screen-share";
 
 let sharedVideo: HTMLVideoElement | null = null;
 let sharedCanvas: HTMLCanvasElement | null = null;
@@ -35,7 +37,7 @@ export async function captureJpegFromStream(
 
   const maxWidth = opts?.maxWidth ?? 360;
   const quality = opts?.quality ?? 0.52;
-  const mirror = opts?.mirror !== false; // default true for selfie cam; false for screen
+  const mirror = opts?.mirror !== false;
 
   const video = getSharedVideo();
   const canvas = getSharedCanvas();
@@ -278,15 +280,19 @@ export function startLiveScreenPublisher(opts: {
 
   const sendFrame = async () => {
     if (stopped || publishing) return;
-    const stream = opts.getStream();
-    if (!stream) return;
     publishing = true;
     try {
-      const frame = await captureJpegFromStream(stream, {
-        maxWidth: 720,
-        quality: 0.55,
-        mirror: false,
-      });
+      // Prefer native MediaProjection JPEG (Android APK) — canvas.captureStream often has 0 videoWidth in WebView
+      let frame = getLatestNativeScreenJpeg();
+      if (!frame) {
+        const stream = opts.getStream();
+        if (!stream) return;
+        frame = await captureJpegFromStream(stream, {
+          maxWidth: 720,
+          quality: 0.55,
+          mirror: false,
+        });
+      }
       if (stopped || !frame || !channel) return;
       void channel.send({
         type: "broadcast",
