@@ -1,1 +1,8 @@
-PLACEHOLDER_COLORS
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#070D1B</color>
+    <color name="colorPrimaryDark">#070D1B</color>
+    <color name="colorAccent">#3B82F6</color>
+    <!-- Matches D4EXAM splash artwork deep navy (no white/black flash on cold start) -->
+    <color name="splash_background">#00081D</color>
+</resources>
