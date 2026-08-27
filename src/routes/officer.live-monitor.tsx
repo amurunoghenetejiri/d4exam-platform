@@ -437,6 +437,47 @@ function Page() {
   const events = Array.isArray(eventsQ.data) ? eventsQ.data : [];
   const now = Date.now();
 
+
+  const studentIdsKey = useMemo(() => {
+    const ids = new Set<string>();
+    for (const a of attemptsQ.data ?? []) ids.add(String(a.student_id));
+    for (const a of recentDoneQ.data ?? []) ids.add(String(a.student_id));
+    return Array.from(ids).sort().join(",");
+  }, [attemptsQ.data, recentDoneQ.data]);
+
+  const studentNamesQ = useQuery({
+    queryKey: ["officer-live-student-names", schoolId, studentIdsKey],
+    enabled: Boolean(schoolId && studentIdsKey),
+    staleTime: 30_000,
+    queryFn: async () => {
+      const ids = studentIdsKey.split(",").filter(Boolean);
+      if (!ids.length) return {} as Record<string, string>;
+      const map: Record<string, string> = {};
+      const { data: studs } = await supabase
+        .from("students")
+        .select("id, full_name, matric_number, profiles(full_name)")
+        .eq("school_id", schoolId!)
+        .in("id", ids);
+      for (const s of studs ?? []) {
+        const row = s as {
+          id: string;
+          full_name?: string | null;
+          matric_number?: string | null;
+          profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
+        };
+        const matric = String(row.matric_number || "").trim();
+        let name = String(row.full_name || "").trim();
+        const prof = row.profiles;
+        const pName = Array.isArray(prof)
+          ? String(prof[0]?.full_name || "").trim()
+          : String((prof as { full_name?: string | null } | null)?.full_name || "").trim();
+        if (!name || name.toLowerCase() === matric.toLowerCase()) name = pName || name;
+        if (name && name.toLowerCase() !== matric.toLowerCase()) map[row.id] = name;
+      }
+      return map;
+    },
+  });
+
   const cards = useMemo(() => {
     const inProgress = attemptsQ.data ?? [];
     const recentDone = recentDoneQ.data ?? [];
@@ -499,7 +540,8 @@ function Page() {
           else if (fs === "none" || fs === "unclear") sev = "warning";
           else sev = "normal";
         }
-        const name = studentDisplayName(a);
+        const resolved = studentNamesQ.data?.[String(a.student_id)];
+        const name = (resolved && resolved.trim()) || studentDisplayName(a);
         const matric = String(a.students?.matric_number || a.students?.student_id || "—").trim() || "—";
         const _c = a.examinations?.courses as unknown;
         const course = Array.isArray(_c)
@@ -526,7 +568,7 @@ function Page() {
         }
         return true;
       });
-  }, [attemptsQ.data, recentDoneQ.data, now, frames, screenFrames, feedMode]);
+  }, [attemptsQ.data, recentDoneQ.data, now, frames, screenFrames, feedMode, studentNamesQ.data]);
 
   const stats = useMemo(() => {
     let online = 0,
@@ -980,7 +1022,7 @@ function Page() {
                 <div
                   className={cn(
                     "shrink-0 gap-1.5 bg-slate-100 p-1.5 sm:gap-2 sm:p-2",
-                    dual ? "grid grid-cols-1 sm:grid-cols-2" : "grid grid-cols-1",
+                    dual ? "grid grid-cols-1 sm:grid-cols-[1.35fr_1fr]" : "grid grid-cols-1",
                   )}
                 >
                   {showCam && (
