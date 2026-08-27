@@ -6,39 +6,102 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 import androidx.core.app.NotificationCompat;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Required foreground service while MediaProjection is active (Android 10+). */
+/**
+ * Foreground service required while MediaProjection is active (Android 10+ / API 34+).
+ * Must reach startForeground BEFORE getMediaProjection is called.
+ *
+ * Notification icons:
+ * - smallIcon = white monochrome ic_stat_d4exam (status bar + compact notification)
+ * - largeIcon = full-color ic_launcher (expanded notification panel)
+ */
 public class ScreenCaptureService extends Service {
+  private static final String TAG = "D4ScreenCaptureSvc";
   private static final String CHANNEL_ID = "d4exam_screen_share";
   private static final int NOTIF_ID = 4402;
+  /** Brand navy accent shown next to the notification icon on Android 8+. */
+  private static final int NOTIF_COLOR = 0xFF0B1B3A;
+
+  /** Set when startForeground has completed — plugin waits on this. */
+  public static final AtomicBoolean FOREGROUND_READY = new AtomicBoolean(false);
+  public static volatile CountDownLatch READY_LATCH = new CountDownLatch(1);
+
+  public static void resetReady() {
+    FOREGROUND_READY.set(false);
+    READY_LATCH = new CountDownLatch(1);
+  }
 
   @Override
   public void onCreate() {
     super.onCreate();
+    promoteToForeground();
+  }
+
+  private void promoteToForeground() {
     createChannel();
-    Notification notification =
+
+    NotificationCompat.Builder builder =
         new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("D4EXAM")
             .setContentText("Screen monitoring is active during your exam.")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            // Status bar + compact row: MUST be a white silhouette drawable
+            .setSmallIcon(R.drawable.ic_stat_d4exam)
+            .setColor(NOTIF_COLOR)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build();
-    if (Build.VERSION.SDK_INT >= 29) {
-      startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-    } else {
-      startForeground(NOTIF_ID, notification);
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+
+    // Expanded notification: full-color app logo (bold and easy to recognize)
+    try {
+      Bitmap large = BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
+      if (large != null) {
+        builder.setLargeIcon(large);
+      }
+    } catch (Exception e) {
+      Log.w(TAG, "largeIcon load failed", e);
     }
+
+    Notification notification = builder.build();
+    try {
+      if (Build.VERSION.SDK_INT >= 29) {
+        startForeground(
+            NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+      } else {
+        startForeground(NOTIF_ID, notification);
+      }
+    } catch (Exception e) {
+      Log.w(TAG, "startForeground typed failed, fallback", e);
+      try {
+        startForeground(NOTIF_ID, notification);
+      } catch (Exception ignored) {
+      }
+    }
+    FOREGROUND_READY.set(true);
+    try {
+      READY_LATCH.countDown();
+    } catch (Exception ignored) {
+    }
+    Log.i(TAG, "FOREGROUND_READY");
   }
 
   private void createChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       NotificationChannel channel =
-          new NotificationChannel(CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_LOW);
+          new NotificationChannel(
+              CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_LOW);
       channel.setDescription("Shown while screen share is active during an examination");
+      channel.setShowBadge(false);
+      channel.setSound(null, null);
       NotificationManager nm = getSystemService(NotificationManager.class);
       if (nm != null) nm.createNotificationChannel(channel);
     }
@@ -46,11 +109,21 @@ public class ScreenCaptureService extends Service {
 
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
+    if (!FOREGROUND_READY.get()) {
+      promoteToForeground();
+    }
     return START_STICKY;
   }
 
   @Override
   public IBinder onBind(Intent intent) {
     return null;
+  }
+
+  @Override
+  public void onDestroy() {
+    FOREGROUND_READY.set(false);
+    Log.i(TAG, "onDestroy");
+    super.onDestroy();
   }
 }

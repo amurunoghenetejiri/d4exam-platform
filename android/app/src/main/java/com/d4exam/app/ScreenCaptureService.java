@@ -6,6 +6,8 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -16,11 +18,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Foreground service required while MediaProjection is active (Android 10+ / API 34+).
  * Must reach startForeground BEFORE getMediaProjection is called.
+ *
+ * Notification icons:
+ * - smallIcon = white monochrome ic_stat_d4exam (status bar + compact notification)
+ * - largeIcon = full-color ic_launcher (expanded notification panel)
  */
 public class ScreenCaptureService extends Service {
   private static final String TAG = "D4ScreenCaptureSvc";
   private static final String CHANNEL_ID = "d4exam_screen_share";
   private static final int NOTIF_ID = 4402;
+  /** Brand navy accent shown next to the notification icon on Android 8+. */
+  private static final int NOTIF_COLOR = 0xFF0B1B3A;
 
   /** Set when startForeground has completed — plugin waits on this. */
   public static final AtomicBoolean FOREGROUND_READY = new AtomicBoolean(false);
@@ -39,16 +47,31 @@ public class ScreenCaptureService extends Service {
 
   private void promoteToForeground() {
     createChannel();
-    Notification notification =
+
+    NotificationCompat.Builder builder =
         new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("D4EXAM")
             .setContentText("Screen monitoring is active during your exam.")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            // Status bar + compact row: MUST be a white silhouette drawable
+            .setSmallIcon(R.drawable.ic_stat_d4exam)
+            .setColor(NOTIF_COLOR)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setSilent(true)
-            .build();
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+
+    // Expanded notification: full-color app logo (bold and easy to recognize)
+    try {
+      Bitmap large = BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
+      if (large != null) {
+        builder.setLargeIcon(large);
+      }
+    } catch (Exception e) {
+      Log.w(TAG, "largeIcon load failed", e);
+    }
+
+    Notification notification = builder.build();
     try {
       if (Build.VERSION.SDK_INT >= 29) {
         startForeground(
