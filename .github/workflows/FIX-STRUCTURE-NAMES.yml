@@ -1,0 +1,141 @@
+name: FIX-STRUCTURE-NAMES
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-STRUCTURE-NAMES.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch structure add/import to save full names
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+          st = Path("src/routes/admin.structure.tsx")
+          s = st.read_text()
+          if "createSchoolUser" not in s:
+              s = s.replace(
+                  'import { useMemo, useState } from "react";',
+                  'import { useMemo, useState } from "react";\nimport { useServerFn } from "@tanstack/react-start";',
+              )
+              s = s.replace(
+                  'import { toast } from "sonner";',
+                  'import { toast } from "sonner";\nimport { createSchoolUser, importStudents } from "@/lib/import-students";',
+              )
+              s = s.replace(
+                  "  const qc = useQueryClient();",
+                  "  const qc = useQueryClient();\n  const createOne = useServerFn(createSchoolUser);\n  const importMany = useServerFn(importStudents);",
+              )
+          m = re.search(r'  async function addStudent\(\) \{.*?\n  \}\n\n  function parseStudentCsv', s, re.S)
+          if m and "await createOne" not in m.group(0):
+              new_add = '''  async function addStudent() {
+    if (!schoolId || !facultyId || !departmentId || !levelId) return;
+    if (!sFull.trim() || !sMatric.trim()) {
+      toast.error("Full name and matric required");
+      return;
+    }
+    setBusy(true);
+    try {
+      const matric = sMatric.trim();
+      const full = sFull.trim();
+      const parts = full.split(/\\s+/).filter(Boolean);
+      const firstName = parts[0] || full;
+      const lastName = parts.slice(1).join(" ") || "Student";
+      await createOne({
+        data: {
+          role: "student",
+          firstName,
+          lastName,
+          identifier: matric,
+          matricNumber: matric,
+          facultyId,
+          departmentId,
+          levelId,
+        },
+      });
+      try {
+        await supabase
+          .from("students")
+          .update({ full_name: full } as never)
+          .eq("school_id", schoolId)
+          .or(`matric_number.eq.${matric},student_id.eq.${matric}`);
+      } catch { /* optional */ }
+      toast.success("Student added — login: school code + matric as password");
+      setSFull("");
+      setSMatric("");
+      setShowAdd(false);
+      await studentsQ.refetch();
+      await structureCountsQ.refetch();
+      await qc.invalidateQueries({ queryKey: ["struct-student-count"] });
+      await qc.invalidateQueries({ queryKey: ["admin-all-students"] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function parseStudentCsv'''
+              s = s[:m.start()] + new_add + s[m.end():]
+              print("addStudent fixed")
+          elif "await createOne" in s:
+              print("addStudent already ok")
+          else:
+              raise SystemExit("addStudent block missing")
+
+          m2 = re.search(r'      for \(const r of rows\) \{.*?toast\.success\(`Imported \$\{created\}.*?`\);', s, re.S)
+          if m2 and "importMany" not in m2.group(0):
+              new_imp = '''      const res = (await importMany({
+        data: {
+          rows: rows.map((r, i) => {
+            const parts = r.full.split(/\\s+/).filter(Boolean);
+            const firstName = parts[0] || r.full || "Student";
+            const lastName = parts.slice(1).join(" ") || "Student";
+            return {
+              rowNumber: i + 2,
+              firstName,
+              lastName,
+              identifier: r.matric,
+              matricNumber: r.matric,
+              facultyId,
+              departmentId,
+              levelId,
+            };
+          }),
+        },
+      })) as { created?: number; updated?: number; failed?: number };
+      created = Number(res.created ?? 0) + Number(res.updated ?? 0);
+      skipped = Number(res.failed ?? 0);
+      for (const r of rows) {
+        try {
+          await supabase
+            .from("students")
+            .update({ full_name: r.full } as never)
+            .eq("school_id", schoolId)
+            .or(`matric_number.eq.${r.matric},student_id.eq.${r.matric}`);
+        } catch { /* ignore */ }
+      }
+      toast.success(`Imported ${created}${skipped ? `, failed ${skipped}` : ""}`);'''
+              s = s[:m2.start()] + new_imp + s[m2.end():]
+              print("import fixed")
+          elif "await importMany" in s:
+              print("import already ok")
+          else:
+              print("WARN import not found")
+          st.write_text(s)
+          assert "createSchoolUser" in s and "await createOne" in s
+          print("OK")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/admin.structure.tsx
+          git commit -m "fix(students): structure Add student saves full name to profile" || echo "no changes"
+          git push origin HEAD:main
