@@ -1,0 +1,121 @@
+name: FIX-SESSION-SCREEN-SYNC
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-SESSION-SCREEN-SYNC.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch session + plugin interval + pip cooldown
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          # ScreenSharePlugin frame interval
+          p = Path("android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java")
+          t = p.read_text()
+          t = t.replace("MIN_FRAME_INTERVAL_MS = 800", "MIN_FRAME_INTERVAL_MS = 600")
+          p.write_text(t)
+          print("plugin interval ok")
+
+          # ExamCameraPip cooldown
+          p = Path("src/components/cbt/ExamCameraPip.tsx")
+          t = p.read_text()
+          for old in ("const ALERT_COOLDOWN_MS = 1800;", "const ALERT_COOLDOWN_MS = 1400;"):
+              t = t.replace(old, "const ALERT_COOLDOWN_MS = 1000;")
+          p.write_text(t)
+          print("pip cooldown ok")
+
+          # CbtExamSession: import + enable without paused + sync effect
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          old_imp = 'import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, isNativeScreenShareActive, getActiveScreenStream } from "@/lib/screen-share";'
+          new_imp = 'import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, isNativeScreenShareActive, getActiveScreenStream, refreshNativeScreenShareState } from "@/lib/screen-share";'
+          if old_imp in t:
+              t = t.replace(old_imp, new_imp, 1)
+              print("import ok")
+          elif "refreshNativeScreenShareState" in t:
+              print("import already")
+          else:
+              raise SystemExit("import line not found")
+
+          old_en = "enabled: started && !done && !previewMode && !paused && (Boolean(screenStream) || isNativeScreenShareActive()),"
+          new_en = "enabled: started && !done && !previewMode && (Boolean(screenStream) || isNativeScreenShareActive()),"
+          if old_en in t:
+              t = t.replace(old_en, new_en, 1)
+              print("enabled ok")
+          elif new_en in t:
+              print("enabled already")
+          else:
+              # try looser
+              import re
+              t2, n = re.subn(
+                  r"enabled:\s*started\s*&&\s*!done\s*&&\s*!previewMode\s*&&\s*!paused\s*&&\s*\(Boolean\(screenStream\)\s*\|\|\s*isNativeScreenShareActive\(\)\),",
+                  new_en,
+                  t,
+                  count=1,
+              )
+              if n:
+                  t = t2
+                  print("enabled regex ok")
+              else:
+                  print("enabled line missing - skip")
+
+          if "refreshNativeScreenShareState" not in t or "Keep native MediaProjection flag" not in t:
+              marker = "  useLiveScreenPublish({"
+              idx = t.find(marker)
+              if idx < 0:
+                  raise SystemExit("useLiveScreenPublish missing")
+              end = t.find("});", idx)
+              end = t.find("\n", end) + 1
+              sync = '''
+  // Keep native MediaProjection flag + stream ref in sync so publish stays enabled
+  useEffect(() => {
+    if (!started || done || previewMode) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const on = await refreshNativeScreenShareState();
+        if (cancelled) return;
+        if (on) {
+          const s = getActiveScreenStream();
+          if (s && screenStreamRef.current !== s) {
+            screenStreamRef.current = s;
+            setScreenStream(s);
+          } else if (!screenStreamRef.current && s) {
+            screenStreamRef.current = s;
+            setScreenStream(s);
+          }
+        }
+      } catch { /* ignore */ }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 4000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [started, done, previewMode]);
+
+'''
+              t = t[:end] + sync + t[end:]
+              print("sync effect inserted")
+          else:
+              print("sync already present")
+
+          p.write_text(t)
+          print("session ok", len(t))
+          print("ALL_OK")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/CbtExamSession.impl.tsx src/components/cbt/ExamCameraPip.tsx android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): keep screen publish live + faster frames + vibration cooldown"
+            git push
+          fi
