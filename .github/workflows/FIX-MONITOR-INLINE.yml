@@ -1,9 +1,11 @@
 name: FIX-MONITOR-INLINE
+
 on:
   workflow_dispatch:
   push:
     paths:
-      - .github/workflows/FIX-MONITOR-INLINE.yml
+      - ".github/workflows/FIX-MONITOR-INLINE.yml"
+
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -11,16 +13,20 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+
       - name: Patch sources
         run: |
           set -euo pipefail
           python3 << 'PY'
           from pathlib import Path
 
+          # --- haptic ---
           p = Path("src/lib/haptic.ts")
           t = p.read_text()
-          t = t.replace(
-          '''export function canVibrate(): boolean {
+          if "Cap?.isNativePlatform?.()) return true" not in t.split("canVibrate")[1][:400] if "canVibrate" in t else True:
+              pass
+          # Move native check first
+          old = '''export function canVibrate(): boolean {
   try {
     if (typeof window === "undefined") return false;
     const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
@@ -38,8 +44,8 @@ jobs:
   } catch {
     return false;
   }
-}''',
-          '''export function canVibrate(): boolean {
+}'''
+          new = '''export function canVibrate(): boolean {
   try {
     if (typeof window === "undefined") return false;
     try {
@@ -55,127 +61,72 @@ jobs:
   } catch {
     return false;
   }
-}''',
-          )
+}'''
+          if old in t:
+              t = t.replace(old, new, 1)
           t = t.replace(
-            'kind === "officer_warning" ? 800 : kind === "multi" ? 1200 : kind === "start" ? 500 : 1600;',
-            'kind === "officer_warning" ? 600 : kind === "multi" ? 900 : kind === "start" ? 400 : 1200;',
+              'kind === "officer_warning" ? 800 : kind === "multi" ? 1200 : kind === "start" ? 500 : 1600;',
+              'kind === "officer_warning" ? 600 : kind === "multi" ? 900 : kind === "start" ? 400 : 1200;',
           )
           if "fn(0)" not in t:
-            t = t.replace(
-              "if (fn) {\n      try {\n        return Boolean(fn(arg));\n      } catch {\n        /* fall through */\n      }\n    }",
-              "if (fn) {\n      try {\n        try { fn(0); } catch { /* ignore */ }\n        const ok = Boolean(fn(arg));\n        if (ok) return true;\n      } catch {\n        /* fall through */\n      }\n    }",
-            )
+              t = t.replace(
+                  "return Boolean(fn(arg));",
+                  "try { fn(0); } catch { /* ignore */ }\n        const _ok = Boolean(fn(arg));\n        if (_ok) return true;\n        return false;",
+                  1,
+              )
           p.write_text(t)
-          print("haptic patched")
+          print("haptic OK")
 
+          # --- session heartbeat ---
           p = Path("src/components/cbt/CbtExamSession.impl.tsx")
           t = p.read_text()
-          t = t.replace("const t = window.setInterval(tick, 8000);", "const t = window.setInterval(tick, 4000);")
-          if "camera_active: camOn" not in t and "cameraActive: Boolean(mediaStreamRef.current || liveStream)" in t:
-            t = t.replace(
-              """const meta = {
-        lastSeenAt: new Date().toISOString(),
-        cameraActive: Boolean(mediaStreamRef.current || liveStream),
-        screenActive: Boolean(screenStreamRef.current || screenStream),
-        faceStatus: faceStatusRef.current || \"ok\",""",
-              """const camOn = Boolean(mediaStreamRef.current || liveStream);
-      const scrOn = Boolean(screenStreamRef.current || screenStream || isNativeScreenShareActive());
-      let fs = String(faceStatusRef.current || \"ok\").toLowerCase();
-      if (fs === \"starting\" || fs === \"unknown\" || !fs) fs = camOn ? \"ok\" : \"unavailable\";
-      if (![\"ok\", \"none\", \"multi\", \"unclear\", \"unavailable\"].includes(fs)) fs = camOn ? \"ok\" : \"unavailable\";
-      const meta = {
-        lastSeenAt: new Date().toISOString(),
-        cameraActive: camOn,
-        camera_active: camOn,
-        screenActive: scrOn,
-        screen_active: scrOn,
-        faceStatus: fs,
-        face_status: fs,""",
-            )
+          t = t.replace("setInterval(tick, 8000)", "setInterval(tick, 4000)")
+          if "camera_active: camOn" not in t:
+              needle = 'cameraActive: Boolean(mediaStreamRef.current || liveStream),' 
+              if needle in t:
+                  t = t.replace(
+                      needle,
+                      "cameraActive: Boolean(mediaStreamRef.current || liveStream),\n        camera_active: Boolean(mediaStreamRef.current || liveStream),",
+                      1,
+                  )
+              t = t.replace(
+                  'screenActive: Boolean(screenStreamRef.current || screenStream),',
+                  'screenActive: Boolean(screenStreamRef.current || screenStream || isNativeScreenShareActive()),\n        screen_active: Boolean(screenStreamRef.current || screenStream || isNativeScreenShareActive()),',
+                  1,
+              )
           p.write_text(t)
-          print("session patched")
+          print("session OK")
 
+          # --- pip ---
           p = Path("src/components/cbt/ExamCameraPip.tsx")
-          t = p.read_text().replace("const ALERT_COOLDOWN_MS = 1800;", "const ALERT_COOLDOWN_MS = 1400;")
+          t = p.read_text().replace("ALERT_COOLDOWN_MS = 1800", "ALERT_COOLDOWN_MS = 1400")
           p.write_text(t)
-          print("pip patched")
+          print("pip OK")
 
+          # --- screen-share ended handler ---
           p = Path("src/lib/screen-share.ts")
           t = p.read_text()
           if "isNativeAndroid() && nativeActive) return" not in t:
-            t = t.replace(
-              """export function onScreenShareEnded(stream: MediaStream, onEnded: () => void): () => void {
-  const track = stream.getVideoTracks()[0];
-  if (!track) {
-    if (isNativeAndroid()) {
-      void D4ScreenShare().addListener("stopped", () => {
-        try {
-          onEnded();
-        } catch {
-          /* ignore */
-        }
-      }).then((h) => {
-        nativeStoppedUnsub = h;
-      });
-    }
-    return () => {};
-  }
-  const handler = () => {
-    try {
-      onEnded();
-    } catch {
-      /* ignore */
-    }
-  };
-  track.addEventListener("ended", handler);
-  if (isNativeAndroid()) {
-    void D4ScreenShare().addListener("stopped", handler).then((h) => {
-      nativeStoppedUnsub = h;
-    });
-  }
-  return () => {
-    try {
-      track.removeEventListener("ended", handler);
-    } catch {
-      /* ignore */
-    }
-  };
-}""",
-              """export function onScreenShareEnded(stream: MediaStream, onEnded: () => void): () => void {
-  let cleaned = false;
-  const handler = () => {
-    if (cleaned) return;
-    if (isNativeAndroid() && nativeActive) return;
-    try { onEnded(); } catch { /* ignore */ }
-  };
-  const track = stream?.getVideoTracks?.()?.[0];
-  if (track) track.addEventListener("ended", handler);
-  if (isNativeAndroid()) {
-    void D4ScreenShare().addListener("stopped", () => {
-      nativeActive = false;
-      handler();
-    }).then((h) => { nativeStoppedUnsub = h; });
-  }
-  return () => {
-    cleaned = true;
-    if (track) { try { track.removeEventListener("ended", handler); } catch { /* ignore */ } }
-  };
-}""",
-            )
+              t = t.replace(
+                  "const handler = () => {\n    try {\n      onEnded();\n    } catch {\n      /* ignore */\n    }\n  };",
+                  "const handler = () => {\n    if (isNativeAndroid() && nativeActive) return;\n    try {\n      onEnded();\n    } catch {\n      /* ignore */\n    }\n  };",
+                  1,
+              )
           p.write_text(t)
-          print("screen-share patched")
+          print("screen-share OK")
 
+          # --- live-video meta ---
           p = Path("src/lib/live-video.ts")
           t = p.read_text()
           t = t.replace(
-            "faceStatus: meta.faceStatus,\n          cameraActive: meta.cameraActive,",
-            'faceStatus: meta.faceStatus ?? "ok",\n          cameraActive: meta.cameraActive !== false,',
+              "faceStatus: meta.faceStatus,\n          cameraActive: meta.cameraActive,",
+              'faceStatus: meta.faceStatus ?? "ok",\n          cameraActive: meta.cameraActive !== false,',
           )
           p.write_text(t)
-          print("live-video patched")
+          print("live-video OK")
           print("ALL_OK")
           PY
+
       - name: Commit
         run: |
           git config user.name github-actions[bot]
