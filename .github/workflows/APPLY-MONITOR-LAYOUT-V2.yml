@@ -1,0 +1,32 @@
+name: APPLY-MONITOR-LAYOUT-V2
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/APPLY-MONITOR-LAYOUT-V2.yml
+      - scripts/apply_monitor_layout_v2.py
+      - scripts/_dual_pane_snippet.tsx
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply dual-pane monitor layout
+        run: |
+          set -euo pipefail
+          python3 scripts/apply_monitor_layout_v2.py
+          grep -q 'Feed mode + dual pane' src/routes/officer.live-monitor.tsx
+          grep -q 'from-black/90 via-black/55' src/routes/officer.live-monitor.tsx
+          grep -q 'max-w-3xl' src/routes/officer.live-monitor.tsx
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/officer.live-monitor.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "ui(monitor): dual-pane Camera|Screen|Both + name on video cards"
+            git push
+          fi
