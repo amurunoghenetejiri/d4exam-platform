@@ -1,13 +1,33 @@
 /**
  * D4EXAM screen share for exam monitoring (Android APK first).
- * Uses getDisplayMedia when available (Capacitor WebView / modern browsers).
- * Teacher "required" = must share when device supports it; unsupported devices may continue without share.
+ * - Web / desktop: getDisplayMedia
+ * - Native Android APK: D4ScreenShare MediaProjection plugin (system share-screen dialog)
  */
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 
 export type ScreenShareStartResult =
   | { ok: true; stream: MediaStream }
   | { ok: false; reason: "unsupported" | "denied" | "error"; message: string };
+
+type D4ScreenSharePlugin = {
+  isAvailable(): Promise<{ available: boolean; platform?: string }>;
+  start(): Promise<{ active: boolean }>;
+  stop(): Promise<{ active: boolean }>;
+  isActive(): Promise<{ active: boolean }>;
+  addListener(
+    event: "frame",
+    cb: (data: { jpeg: string; width: number; height: number; ts: number }) => void,
+  ): Promise<{ remove: () => void }>;
+  addListener(event: "stopped", cb: () => void): Promise<{ remove: () => void }>;
+};
+
+const D4ScreenShare = registerPlugin<D4ScreenSharePlugin>("D4ScreenShare");
+
+let nativeFrameUnsub: { remove: () => void } | null = null;
+let nativeStoppedUnsub: { remove: () => void } | null = null;
+let nativeCanvas: HTMLCanvasElement | null = null;
+let nativeStream: MediaStream | null = null;
+let nativeActive = false;
 
 export function isNativeAndroid(): boolean {
   try {
@@ -17,19 +37,24 @@ export function isNativeAndroid(): boolean {
   }
 }
 
-/** True when the runtime can attempt screen capture. */
-export function canAttemptScreenShare(): boolean {
+function hasGetDisplayMedia(): boolean {
   if (typeof navigator === "undefined" || !navigator.mediaDevices) return false;
   return typeof (navigator.mediaDevices as MediaDevices & { getDisplayMedia?: unknown }).getDisplayMedia === "function";
 }
 
+/** True when the runtime can attempt screen capture (web getDisplayMedia OR native Android plugin). */
+export function canAttemptScreenShare(): boolean {
+  if (isNativeAndroid()) return true;
+  return hasGetDisplayMedia();
+}
+
 /**
- * Native Android APK is treated as screen-share capable when getDisplayMedia exists.
- * Plain website without getDisplayMedia → not supported (student continues if teacher enabled share).
+ * Native Android APK is always treated as screen-share capable (MediaProjection).
+ * Web requires getDisplayMedia + secure context.
  */
 export function isScreenShareSupported(): boolean {
-  if (!canAttemptScreenShare()) return false;
   if (isNativeAndroid()) return true;
+  if (!hasGetDisplayMedia()) return false;
   try {
     return typeof window !== "undefined" && window.isSecureContext === true;
   } catch {
@@ -37,12 +62,105 @@ export function isScreenShareSupported(): boolean {
   }
 }
 
-export async function startScreenShareStream(): Promise<ScreenShareStartResult> {
-  if (!canAttemptScreenShare()) {
+async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
+  try {
+    const avail = await D4ScreenShare.isAvailable();
+    if (!avail?.available) {
+      return {
+        ok: false,
+        reason: "unsupported",
+        message: "Screen sharing is not available on this device.",
+      };
+    }
+
+    if (typeof document !== "undefined") {
+      nativeCanvas = document.createElement("canvas");
+      nativeCanvas.width = 720;
+      nativeCanvas.height = 1280;
+      const ctx = nativeCanvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#0b1b3a";
+        ctx.fillRect(0, 0, nativeCanvas.width, nativeCanvas.height);
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const stream: MediaStream | null =
+        typeof (nativeCanvas as any).captureStream === "function"
+          ? (nativeCanvas as HTMLCanvasElement & { captureStream: (fps?: number) => MediaStream }).captureStream(5)
+          : null;
+      if (!stream) {
+        return {
+          ok: false,
+          reason: "unsupported",
+          message: "Screen capture stream is not supported on this WebView.",
+        };
+      }
+      nativeStream = stream;
+    }
+
+    await D4ScreenShare.start();
+    nativeActive = true;
+
+    if (nativeFrameUnsub) {
+      try {
+        nativeFrameUnsub.remove();
+      } catch {
+        /* ignore */
+      }
+    }
+    nativeFrameUnsub = await D4ScreenShare.addListener("frame", (data) => {
+      if (!nativeCanvas || !data?.jpeg) return;
+      try {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            if (!nativeCanvas) return;
+            if (nativeCanvas.width !== img.width || nativeCanvas.height !== img.height) {
+              nativeCanvas.width = img.width;
+              nativeCanvas.height = img.height;
+            }
+            const c = nativeCanvas.getContext("2d");
+            c?.drawImage(img, 0, 0);
+          } catch {
+            /* ignore */
+          }
+        };
+        img.src = `data:image/jpeg;base64,${data.jpeg}`;
+      } catch {
+        /* ignore */
+      }
+    });
+
+    nativeStoppedUnsub = await D4ScreenShare.addListener("stopped", () => {
+      nativeActive = false;
+    });
+
+    if (!nativeStream) {
+      return { ok: false, reason: "error", message: "No screen stream created." };
+    }
+    return { ok: true, stream: nativeStream };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/denied|cancel|permission/i.test(msg)) {
+      return {
+        ok: false,
+        reason: "denied",
+        message: "Screen sharing was denied. Enable screen share to continue the exam.",
+      };
+    }
+    return {
+      ok: false,
+      reason: "error",
+      message: msg || "Could not start screen sharing.",
+    };
+  }
+}
+
+async function startWebScreenShare(): Promise<ScreenShareStartResult> {
+  if (!hasGetDisplayMedia()) {
     return {
       ok: false,
       reason: "unsupported",
-      message: "Screen sharing is not available on this device. Use the D4EXAM Android app for screen monitoring.",
+      message: "Screen sharing is not available in this browser. Use the D4EXAM Android app.",
     };
   }
   try {
@@ -87,10 +205,40 @@ export async function startScreenShareStream(): Promise<ScreenShareStartResult> 
   }
 }
 
+export async function startScreenShareStream(): Promise<ScreenShareStartResult> {
+  if (isNativeAndroid()) {
+    return startNativeScreenShare();
+  }
+  return startWebScreenShare();
+}
+
 export function stopScreenShareStream(stream: MediaStream | null | undefined): void {
-  if (!stream) return;
+  if (isNativeAndroid() && nativeActive) {
+    nativeActive = false;
+    try {
+      void D4ScreenShare.stop();
+    } catch {
+      /* ignore */
+    }
+    try {
+      nativeFrameUnsub?.remove();
+    } catch {
+      /* ignore */
+    }
+    nativeFrameUnsub = null;
+    try {
+      nativeStoppedUnsub?.remove();
+    } catch {
+      /* ignore */
+    }
+    nativeStoppedUnsub = null;
+    nativeCanvas = null;
+  }
+  const s = stream || nativeStream;
+  nativeStream = null;
+  if (!s) return;
   try {
-    stream.getTracks().forEach((t) => {
+    s.getTracks().forEach((t) => {
       try {
         t.stop();
       } catch {
@@ -104,6 +252,16 @@ export function stopScreenShareStream(stream: MediaStream | null | undefined): v
 
 /** Fires once when the user stops sharing (system UI or track end). */
 export function onScreenShareEnded(stream: MediaStream, cb: () => void): () => void {
+  if (isNativeAndroid()) {
+    let removed = false;
+    const unsubPromise = D4ScreenShare.addListener("stopped", () => {
+      if (!removed) cb();
+    });
+    return () => {
+      removed = true;
+      void unsubPromise.then((u) => u.remove()).catch(() => undefined);
+    };
+  }
   const tracks = stream.getVideoTracks();
   const handlers: Array<{ track: MediaStreamTrack; fn: () => void }> = [];
   for (const track of tracks) {
@@ -123,6 +281,7 @@ export function onScreenShareEnded(stream: MediaStream, cb: () => void): () => v
 }
 
 export function screenShareActive(stream: MediaStream | null | undefined): boolean {
+  if (isNativeAndroid() && nativeActive) return true;
   if (!stream) return false;
   return stream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled !== false);
 }
