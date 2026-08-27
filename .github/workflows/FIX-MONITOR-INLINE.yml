@@ -1,0 +1,188 @@
+name: FIX-MONITOR-INLINE
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/FIX-MONITOR-INLINE.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch sources
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          p = Path("src/lib/haptic.ts")
+          t = p.read_text()
+          t = t.replace(
+          '''export function canVibrate(): boolean {
+  try {
+    if (typeof window === "undefined") return false;
+    const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
+    const win = window as Window & { navigator?: Navigator; vibrate?: (p: number | number[]) => boolean };
+    if (typeof nav?.vibrate === "function" || typeof win?.vibrate === "function") return true;
+    // Capacitor Android WebView often exposes vibrate only after a user gesture;
+    // still treat as available so integrity alerts attempt vibration.
+    try {
+      const Cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+      if (Cap?.isNativePlatform?.()) return true;
+    } catch {
+      /* ignore */
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}''',
+          '''export function canVibrate(): boolean {
+  try {
+    if (typeof window === "undefined") return false;
+    try {
+      const Cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+      if (Cap?.isNativePlatform?.()) return true;
+    } catch {
+      /* ignore */
+    }
+    const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
+    const win = window as Window & { navigator?: Navigator; vibrate?: (p: number | number[]) => boolean };
+    if (typeof nav?.vibrate === "function" || typeof win?.vibrate === "function") return true;
+    return false;
+  } catch {
+    return false;
+  }
+}''',
+          )
+          t = t.replace(
+            'kind === "officer_warning" ? 800 : kind === "multi" ? 1200 : kind === "start" ? 500 : 1600;',
+            'kind === "officer_warning" ? 600 : kind === "multi" ? 900 : kind === "start" ? 400 : 1200;',
+          )
+          if "fn(0)" not in t:
+            t = t.replace(
+              "if (fn) {\n      try {\n        return Boolean(fn(arg));\n      } catch {\n        /* fall through */\n      }\n    }",
+              "if (fn) {\n      try {\n        try { fn(0); } catch { /* ignore */ }\n        const ok = Boolean(fn(arg));\n        if (ok) return true;\n      } catch {\n        /* fall through */\n      }\n    }",
+            )
+          p.write_text(t)
+          print("haptic patched")
+
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          t = t.replace("const t = window.setInterval(tick, 8000);", "const t = window.setInterval(tick, 4000);")
+          if "camera_active: camOn" not in t and "cameraActive: Boolean(mediaStreamRef.current || liveStream)" in t:
+            t = t.replace(
+              """const meta = {
+        lastSeenAt: new Date().toISOString(),
+        cameraActive: Boolean(mediaStreamRef.current || liveStream),
+        screenActive: Boolean(screenStreamRef.current || screenStream),
+        faceStatus: faceStatusRef.current || \"ok\",""",
+              """const camOn = Boolean(mediaStreamRef.current || liveStream);
+      const scrOn = Boolean(screenStreamRef.current || screenStream || isNativeScreenShareActive());
+      let fs = String(faceStatusRef.current || \"ok\").toLowerCase();
+      if (fs === \"starting\" || fs === \"unknown\" || !fs) fs = camOn ? \"ok\" : \"unavailable\";
+      if (![\"ok\", \"none\", \"multi\", \"unclear\", \"unavailable\"].includes(fs)) fs = camOn ? \"ok\" : \"unavailable\";
+      const meta = {
+        lastSeenAt: new Date().toISOString(),
+        cameraActive: camOn,
+        camera_active: camOn,
+        screenActive: scrOn,
+        screen_active: scrOn,
+        faceStatus: fs,
+        face_status: fs,""",
+            )
+          p.write_text(t)
+          print("session patched")
+
+          p = Path("src/components/cbt/ExamCameraPip.tsx")
+          t = p.read_text().replace("const ALERT_COOLDOWN_MS = 1800;", "const ALERT_COOLDOWN_MS = 1400;")
+          p.write_text(t)
+          print("pip patched")
+
+          p = Path("src/lib/screen-share.ts")
+          t = p.read_text()
+          if "isNativeAndroid() && nativeActive) return" not in t:
+            t = t.replace(
+              """export function onScreenShareEnded(stream: MediaStream, onEnded: () => void): () => void {
+  const track = stream.getVideoTracks()[0];
+  if (!track) {
+    if (isNativeAndroid()) {
+      void D4ScreenShare().addListener("stopped", () => {
+        try {
+          onEnded();
+        } catch {
+          /* ignore */
+        }
+      }).then((h) => {
+        nativeStoppedUnsub = h;
+      });
+    }
+    return () => {};
+  }
+  const handler = () => {
+    try {
+      onEnded();
+    } catch {
+      /* ignore */
+    }
+  };
+  track.addEventListener("ended", handler);
+  if (isNativeAndroid()) {
+    void D4ScreenShare().addListener("stopped", handler).then((h) => {
+      nativeStoppedUnsub = h;
+    });
+  }
+  return () => {
+    try {
+      track.removeEventListener("ended", handler);
+    } catch {
+      /* ignore */
+    }
+  };
+}""",
+              """export function onScreenShareEnded(stream: MediaStream, onEnded: () => void): () => void {
+  let cleaned = false;
+  const handler = () => {
+    if (cleaned) return;
+    if (isNativeAndroid() && nativeActive) return;
+    try { onEnded(); } catch { /* ignore */ }
+  };
+  const track = stream?.getVideoTracks?.()?.[0];
+  if (track) track.addEventListener("ended", handler);
+  if (isNativeAndroid()) {
+    void D4ScreenShare().addListener("stopped", () => {
+      nativeActive = false;
+      handler();
+    }).then((h) => { nativeStoppedUnsub = h; });
+  }
+  return () => {
+    cleaned = true;
+    if (track) { try { track.removeEventListener("ended", handler); } catch { /* ignore */ } }
+  };
+}""",
+            )
+          p.write_text(t)
+          print("screen-share patched")
+
+          p = Path("src/lib/live-video.ts")
+          t = p.read_text()
+          t = t.replace(
+            "faceStatus: meta.faceStatus,\n          cameraActive: meta.cameraActive,",
+            'faceStatus: meta.faceStatus ?? "ok",\n          cameraActive: meta.cameraActive !== false,',
+          )
+          p.write_text(t)
+          print("live-video patched")
+          print("ALL_OK")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/haptic.ts src/lib/screen-share.ts src/lib/live-video.ts \
+            src/components/cbt/CbtExamSession.impl.tsx src/components/cbt/ExamCameraPip.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(monitor): presence heartbeat, screen keep-alive, vibration, live frames"
+            git push
+          fi
