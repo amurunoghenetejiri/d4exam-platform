@@ -107,6 +107,36 @@ function locationLine(app: AppRow): string {
   return [app.city, app.state, app.country].filter(Boolean).join(", ") || "—";
 }
 
+async function fetchApplicationsClient(): Promise<AppRow[]> {
+  const colsWithDocs =
+    "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes, documents";
+  const colsNoDocs =
+    "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes";
+
+  let { data, error } = await supabase
+    .from("school_applications")
+    .select(colsWithDocs)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (error) {
+    console.warn("[applications] client select with docs failed:", error.message);
+    const retry = await supabase
+      .from("school_applications")
+      .select(colsNoDocs)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    data = retry.data;
+    error = retry.error;
+  }
+
+  if (error) {
+    console.warn("[applications] client select failed:", error.message);
+    throw new Error(error.message);
+  }
+  return (data ?? []) as AppRow[];
+}
+
 function Page() {
   const review = useServerFn(reviewSchoolApplication);
   const listApps = useServerFn(listSchoolApplications);
@@ -115,12 +145,20 @@ function Page() {
   const { data, isLoading, refetch, error: listError } = useQuery({
     queryKey: ["super-admin", "school_applications"],
     queryFn: async () => {
-      const rows = await listApps();
-      return (rows ?? []) as AppRow[];
+      try {
+        const rows = await listApps({});
+        if (Array.isArray(rows) && rows.length > 0) {
+          return rows as AppRow[];
+        }
+      } catch (e) {
+        console.warn("[applications] server list failed, trying client:", e);
+      }
+      return await fetchApplicationsClient();
     },
-    staleTime: 5_000,
+    staleTime: 3_000,
     refetchOnWindowFocus: true,
-    refetchInterval: 15_000,
+    refetchInterval: 12_000,
+    retry: 1,
   });
 
   useEffect(() => {
