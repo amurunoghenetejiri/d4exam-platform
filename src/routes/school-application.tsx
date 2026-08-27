@@ -205,24 +205,28 @@ function Page() {
       }
 
       const code = makeTrackingCode();
+      // Match actual DB columns (no "notes" column — store notes inside documents JSON)
       const { data, error: insertError } = await supabase
         .from("school_applications")
         .insert({
           school_name: schoolName.trim(),
-          school_type: schoolType,
+          school_type: schoolType || "other",
           country: country.trim() || null,
           state: state.trim() || null,
           city: city.trim() || null,
           address: address.trim() || null,
-          official_email: officialEmail.trim() || null,
+          official_email: officialEmail.trim() || applicantEmail.trim(),
           official_phone: officialPhone.trim() || null,
           applicant_name: applicantName.trim(),
           applicant_email: applicantEmail.trim(),
           applicant_phone: applicantPhone.trim() || null,
-          notes: notes.trim() || null,
           tracking_code: code,
           status: "pending",
-          documents: { logo_url: logoUrl, logo_name: logoFile.name } as never,
+          documents: {
+            logo_url: logoUrl,
+            logo_name: logoFile.name,
+            notes: notes.trim() || null,
+          } as never,
         })
         .select("id, tracking_code")
         .single();
