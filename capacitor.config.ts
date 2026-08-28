@@ -36,10 +36,11 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      // Held until AnimatedSplash paints and later dismisses (min 9s + app ready).
-      // Background matches app theme navy (status bar / native chrome).
-      launchShowDuration: 9000,
-      launchAutoHide: false,
+      // Native layer is ONLY a brief solid theme bridge (never the logo-only stuck screen).
+      // Branded AnimatedSplash in the WebView owns the real 9s experience.
+      // launchAutoHide MUST be true so the logo splash can never hang forever.
+      launchShowDuration: 1500,
+      launchAutoHide: true,
       backgroundColor: "#0b1b3a",
       androidSplashResourceName: "splash",
       androidScaleType: "CENTER_CROP",
