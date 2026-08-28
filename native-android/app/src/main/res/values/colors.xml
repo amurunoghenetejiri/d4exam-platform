@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#070D1B</color>
-    <color name="colorPrimaryDark">#070D1B</color>
+    <color name="colorPrimary">#0b1b3a</color>
+    <color name="colorPrimaryDark">#0b1b3a</color>
     <color name="colorAccent">#3B82F6</color>
-    <!-- Matches D4EXAM splash artwork deep navy (no white/black flash on cold start) -->
-    <color name="splash_background">#00081D</color>
+    <!-- App theme navy — solid system splash (no centered logo flash) -->
+    <color name="splash_background">#0b1b3a</color>
 </resources>
