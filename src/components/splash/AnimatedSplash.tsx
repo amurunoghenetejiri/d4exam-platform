@@ -14,6 +14,7 @@ const SESSION_KEY = "d4exam_splash_shown_v3";
  * - Stays up until the app shell has finished loading
  * - Hides the native logo-only splash as soon as this layer is painted
  * - Offline-safe (bundled /logo.png)
+ * - Background matches app theme navy (#0b1b3a)
  */
 export function AnimatedSplash({ force = false }: { force?: boolean }) {
   const startRef = useRef<number>(typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -118,7 +119,7 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     <div
       className={cn(
         "fixed inset-0 z-[99999] flex flex-col items-center justify-center overflow-hidden",
-        "bg-[#00081D] text-white select-none",
+        "bg-[#0b1b3a] text-white select-none",
         exiting && "pointer-events-none opacity-0 transition-opacity duration-450 ease-out",
       )}
       style={{ transitionDuration: exiting ? "450ms" : undefined }}
@@ -132,7 +133,7 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
         )}
         style={{
           background:
-            "radial-gradient(ellipse 55% 40% at 50% 32%, rgba(37,99,235,0.35) 0%, rgba(0,8,29,0) 70%)",
+            "radial-gradient(ellipse 55% 40% at 50% 32%, rgba(37,99,235,0.35) 0%, rgba(11,27,58,0) 70%)",
         }}
       />
 
