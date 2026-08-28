@@ -31,15 +31,16 @@ const config: CapacitorConfig = {
   },
   android: {
     allowMixedContent: false,
-    backgroundColor: "#00081D",
+    backgroundColor: "#0b1b3a",
     webContentsDebuggingEnabled: false,
   },
   plugins: {
     SplashScreen: {
       // Held until AnimatedSplash paints and later dismisses (min 9s + app ready).
+      // Background matches app theme navy (status bar / native chrome).
       launchShowDuration: 9000,
       launchAutoHide: false,
-      backgroundColor: "#00081D",
+      backgroundColor: "#0b1b3a",
       androidSplashResourceName: "splash",
       androidScaleType: "CENTER_CROP",
       showSpinner: false,
