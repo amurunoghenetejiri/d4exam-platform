@@ -6,33 +6,76 @@ import { hideSplashSafely } from "@/native/statusBar";
 const SPLASH_MIN_MS = 9000;
 /** Absolute safety cap so splash never blocks forever. */
 const SPLASH_MAX_MS = 45000;
-const SESSION_KEY = "d4exam_splash_shown_v3";
+/** Marks splash already shown for this app process / tab session. */
+const SESSION_KEY = "d4exam_splash_shown_v4";
 
 /**
- * Live animated D4EXAM splash.
- * - Minimum 9 seconds
- * - Stays up until the app shell has finished loading
- * - ALWAYS dismisses the native logo-only splash (never stuck)
- * - Background matches app theme navy (#0b1b3a)
+ * Splash is ONLY for:
+ * - Capacitor Android/iOS native shell
+ * - Installed PWA (Add to Home Screen / standalone)
+ *
+ * Never on the regular website browser, and never again after
+ * in-app / in-PWA navigation within the same session.
+ */
+function isAppShellContext(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const cap = (window as unknown as {
+      Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
+    }).Capacitor;
+    if (cap?.isNativePlatform?.()) return true;
+    const p = cap?.getPlatform?.();
+    if (p === "android" || p === "ios") return true;
+  } catch {
+    /* ignore */
+  }
+  try {
+    // Installed PWA (Android / desktop)
+    if (window.matchMedia("(display-mode: standalone)").matches) return true;
+    if (window.matchMedia("(display-mode: fullscreen)").matches) return true;
+    if (window.matchMedia("(display-mode: minimal-ui)").matches) return true;
+    // iOS Safari "Add to Home Screen"
+    const nav = window.navigator as Navigator & { standalone?: boolean };
+    if (nav.standalone === true) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+function markSplashShown(): void {
+  try {
+    sessionStorage.setItem(SESSION_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
+function wasSplashShownThisSession(): boolean {
+  try {
+    return sessionStorage.getItem(SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Live animated D4EXAM splash (native app + installed PWA only).
+ * - Minimum 9 seconds on cold open
+ * - Stays until the app shell is ready (capped at 45s)
+ * - Background = app theme navy (#0b1b3a)
  * - Offline-safe (bundled /logo.png)
  */
 export function AnimatedSplash({ force = false }: { force?: boolean }) {
   const startRef = useRef<number>(typeof performance !== "undefined" ? performance.now() : Date.now());
   const [visible, setVisible] = useState(() => {
     if (force) return true;
-    try {
-      // Native app cold start: always show branded splash (never skip to blank/logo).
-      const cap =
-        typeof window !== "undefined"
-          ? (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
-          : undefined;
-      if (cap?.isNativePlatform?.()) return true;
-      if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(SESSION_KEY) === "1") {
-        return false;
-      }
-    } catch {
-      /* ignore */
-    }
+    // Website (browser tab): never show splash
+    if (!isAppShellContext()) return false;
+    // Already shown this app session (login redirect / route change): skip
+    if (wasSplashShownThisSession()) return false;
+    // Cold open of native app or installed PWA — show once
+    markSplashShown();
     return true;
   });
   const [exiting, setExiting] = useState(false);
@@ -50,9 +93,9 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     }
   }, []);
 
-  // ALWAYS dismiss the native logo-only splash immediately so it can never stick.
-  // Branded AnimatedSplash (or the app) takes over right away.
+  // Dismiss native logo-only splash only when we are in the app shell
   useEffect(() => {
+    if (!isAppShellContext()) return;
     void hideSplashSafely();
     const t1 = window.setTimeout(() => void hideSplashSafely(), 400);
     const t2 = window.setTimeout(() => void hideSplashSafely(), 1500);
@@ -108,11 +151,7 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
       if (elapsed >= SPLASH_MIN_MS && appReady) {
         dismissedRef.current = true;
         setExiting(true);
-        try {
-          sessionStorage.setItem(SESSION_KEY, "1");
-        } catch {
-          /* ignore */
-        }
+        markSplashShown();
         window.setTimeout(() => setVisible(false), 450);
         return;
       }
