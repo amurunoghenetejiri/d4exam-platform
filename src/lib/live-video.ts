@@ -5,7 +5,7 @@
  */
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import { getLatestNativeScreenJpeg } from "@/lib/screen-share";
+import { awaitLatestNativeScreenJpeg, getLatestNativeScreenJpeg } from "@/lib/screen-share";
 
 let sharedVideo: HTMLVideoElement | null = null;
 let sharedCanvas: HTMLCanvasElement | null = null;
@@ -282,8 +282,14 @@ export function startLiveScreenPublisher(opts: {
     if (stopped || publishing) return;
     publishing = true;
     try {
-      // Prefer native MediaProjection JPEG (Android APK) — canvas.captureStream often has 0 videoWidth in WebView
-      let frame = getLatestNativeScreenJpeg();
+      // Prefer native MediaProjection JPEG (Android APK). Await plugin getLatestFrame so
+      // frames flow even when the Capacitor "frame" listener misses an instance.
+      let frame: string | null = null;
+      try {
+        frame = await awaitLatestNativeScreenJpeg();
+      } catch {
+        frame = getLatestNativeScreenJpeg();
+      }
       if (!frame) {
         const stream = opts.getStream();
         if (stream) {
@@ -314,12 +320,24 @@ export function startLiveScreenPublisher(opts: {
     }
   };
 
+  const startTimer = () => {
+    if (stopped || timer) return;
+    void sendFrame();
+    timer = setInterval(() => void sendFrame(), intervalMs);
+  };
+
   void channel.subscribe((status) => {
-    if (status === "SUBSCRIBED" && !stopped) {
-      void sendFrame();
-      timer = setInterval(() => void sendFrame(), intervalMs);
+    if (stopped) return;
+    if (status === "SUBSCRIBED") {
+      startTimer();
+    } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+      console.warn("[live-screen] channel status", status);
     }
   });
+  // Fallback: if subscribe callback is delayed, still start publishing shortly
+  window.setTimeout(() => {
+    if (!stopped && !timer) startTimer();
+  }, 1200);
 
   return {
     stop: () => {
