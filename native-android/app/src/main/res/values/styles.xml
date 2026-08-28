@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Base application theme. -->
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
@@ -17,19 +16,17 @@
     </style>
 
     <!--
-      Launch theme: full-bleed D4EXAM splash (exact branding art).
-      Uses AndroidX SplashScreen + Capacitor SplashScreen plugin.
-      Background matches the navy of the splash artwork to avoid white/black flash.
+      System launch splash = solid app theme navy only (no centered logo icon).
+      The real branded D4EXAM splash is AnimatedSplash in the WebView after load.
     -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
-        <item name="windowSplashScreenAnimationDuration">700</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/splash_background</item>
+        <item name="windowSplashScreenAnimationDuration">0</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
-        <!-- Legacy full-screen branding image (pre-12 / Capacitor drawable) -->
-        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:windowBackground">@color/splash_background</item>
         <item name="android:statusBarColor">@color/splash_background</item>
         <item name="android:navigationBarColor">@color/splash_background</item>
-        <item name="android:windowFullscreen">false</item>
     </style>
 </resources>
