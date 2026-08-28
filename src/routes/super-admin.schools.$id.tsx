@@ -81,6 +81,9 @@ function Page() {
 
   const schoolQ = useQuery({
     queryKey: ["sa-school", id],
+    enabled: Boolean(id),
+    staleTime: 10_000,
+    retry: 1,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("schools")
@@ -316,10 +319,29 @@ function Page() {
     [stats],
   );
 
-  if (schoolQ.isLoading) {
+  if ((schoolQ.isLoading || schoolQ.isFetching) && !school) {
     return (
       <div className="flex min-h-[30vh] items-center justify-center gap-2 text-sm text-slate-500">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading school…
+      </div>
+    );
+  }
+
+  if (schoolQ.isError) {
+    return (
+      <div className="mx-auto max-w-md text-center">
+        <p className="font-bold text-slate-900">Could not load school</p>
+        <p className="mt-1 text-sm text-slate-500">
+          {(schoolQ.error as Error)?.message || "Check your connection and try again."}
+        </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <Button className="font-semibold" onClick={() => void schoolQ.refetch()}>
+            Try again
+          </Button>
+          <Button variant="outline" className="font-semibold" asChild>
+            <Link to="/super-admin/schools">Back to schools</Link>
+          </Button>
+        </div>
       </div>
     );
   }
