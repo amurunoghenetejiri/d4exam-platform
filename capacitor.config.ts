@@ -36,9 +36,8 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      // Branded full-screen splash (generated from scripts/assets/splash-screen.b64).
-      // Short enough to feel premium; long enough for logo entrance + tagline settle.
-      launchShowDuration: 1800,
+      // Branded full-screen splash + live web AnimatedSplash (~5s total experience).
+      launchShowDuration: 5000,
       launchAutoHide: true,
       backgroundColor: "#00081D",
       androidSplashResourceName: "splash",
