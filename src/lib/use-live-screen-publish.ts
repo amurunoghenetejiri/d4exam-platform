@@ -62,12 +62,12 @@ export function useLiveScreenPublish(opts: {
       studentId,
       examId,
       getStream: () => optsRef.current.getStream?.() || optsRef.current.stream,
-      intervalMs: 550,
+      intervalMs: 600,
     });
 
     const sync = window.setInterval(() => {
       void refreshNativeScreenShareState();
-    }, 2500);
+    }, 2000);
 
     return () => {
       window.clearInterval(sync);
