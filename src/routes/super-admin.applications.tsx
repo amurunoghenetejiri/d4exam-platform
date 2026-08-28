@@ -59,6 +59,7 @@ function SchoolLogo({
   name: string;
   size?: "sm" | "md" | "lg" | "xl";
 }) {
+  const [failed, setFailed] = useState(false);
   const dim =
     size === "xl"
       ? "h-20 w-20"
@@ -67,12 +68,14 @@ function SchoolLogo({
         : size === "sm"
           ? "h-9 w-9"
           : "h-12 w-12";
-  if (url) {
+  const src = url && !failed ? url : null;
+  if (src) {
     return (
       <img
-        src={url}
+        src={src}
         alt={`${name} logo`}
         className={cn(dim, "shrink-0 rounded-xl border border-slate-200 bg-white object-contain p-1 shadow-sm")}
+        onError={() => setFailed(true)}
       />
     );
   }
@@ -89,60 +92,118 @@ function SchoolLogo({
   );
 }
 
-function notesFromApp(app: AppRow): string | null {
-  const docs = app.documents;
+function parseDocuments(raw: unknown): {
+  logo_url?: string | null;
+  logo_name?: string | null;
+  notes?: string | null;
+} | null {
+  if (raw == null) return null;
+  let docs: unknown = raw;
+  if (typeof docs === "string") {
+    try {
+      docs = JSON.parse(docs);
+    } catch {
+      return null;
+    }
+  }
   if (!docs || typeof docs !== "object") return null;
-  const n = (docs as { notes?: string | null }).notes;
+  return docs as { logo_url?: string | null; logo_name?: string | null; notes?: string | null };
+}
+
+function notesFromApp(app: AppRow): string | null {
+  const docs = parseDocuments(app.documents);
+  if (!docs) return null;
+  const n = docs.notes;
   return typeof n === "string" && n.trim() ? n.trim() : null;
 }
 
 function logoFromApp(app: AppRow): string | null {
-  const docs = app.documents;
-  if (!docs || typeof docs !== "object") return null;
-  const u = (docs as { logo_url?: string | null }).logo_url;
-  return typeof u === "string" && u.trim() ? u.trim() : null;
+  const docs = parseDocuments(app.documents);
+  if (!docs) return null;
+  const candidates = [docs.logo_url, (docs as { url?: string }).url, (docs as { logo?: string }).logo];
+  for (const u of candidates) {
+    if (typeof u === "string" && u.trim()) return u.trim();
+  }
+  return null;
 }
 
 function locationLine(app: AppRow): string {
   return [app.city, app.state, app.country].filter(Boolean).join(", ") || "—";
 }
 
+async function attachDocuments(rows: AppRow[]): Promise<AppRow[]> {
+  if (!rows.length) return rows;
+  try {
+    const ids = rows.map((r) => r.id);
+    const { data: docRows, error } = await supabase
+      .from("school_applications")
+      .select("id, documents")
+      .in("id", ids);
+    if (!error && docRows?.length) {
+      const byId = new Map<string, unknown>();
+      for (const d of docRows) {
+        byId.set(String((d as { id: string }).id), (d as { documents?: unknown }).documents);
+      }
+      for (const r of rows) {
+        if (byId.has(r.id)) r.documents = parseDocuments(byId.get(r.id)) as AppRow["documents"];
+      }
+      return rows;
+    }
+  } catch (e) {
+    console.warn("[applications] bulk documents failed:", e);
+  }
+  await Promise.all(
+    rows.map(async (r) => {
+      try {
+        const { data } = await supabase
+          .from("school_applications")
+          .select("documents")
+          .eq("id", r.id)
+          .maybeSingle();
+        if (data) r.documents = parseDocuments((data as { documents?: unknown }).documents) as AppRow["documents"];
+      } catch {
+        /* skip */
+      }
+    }),
+  );
+  return rows;
+}
+
 async function fetchApplicationsClient(): Promise<AppRow[]> {
-  const baseCols =
+  const colsWithDocs =
+    "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes, documents";
+  const colsNoDocs =
     "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes";
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("school_applications")
-    .select(baseCols)
+    .select(colsWithDocs)
     .order("created_at", { ascending: false })
     .limit(200);
+
+  if (error) {
+    console.warn("[applications] select with documents failed:", error.message);
+    const retry = await supabase
+      .from("school_applications")
+      .select(colsNoDocs)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.error("[applications] client select:", error);
     throw new Error(error.message || "Could not load applications");
   }
 
-  const rows = (data ?? []) as AppRow[];
-  if (rows.length === 0) return rows;
-
-  try {
-    const ids = rows.map((r) => r.id);
-    const { data: docRows } = await supabase
-      .from("school_applications")
-      .select("id, documents")
-      .in("id", ids);
-    const byId = new Map<string, AppRow["documents"]>();
-    for (const d of docRows ?? []) {
-      byId.set(String((d as { id: string }).id), (d as { documents?: AppRow["documents"] }).documents);
-    }
-    for (const r of rows) {
-      const docs = byId.get(r.id);
-      if (docs) r.documents = docs;
-    }
-  } catch (e) {
-    console.warn("[applications] documents enrich skipped:", e);
+  let rows = (data ?? []) as AppRow[];
+  for (const r of rows) {
+    r.documents = parseDocuments(r.documents) as AppRow["documents"];
   }
-
+  if (rows.some((r) => !logoFromApp(r))) {
+    rows = await attachDocuments(rows);
+  }
   return rows;
 }
 
@@ -163,7 +224,13 @@ function Page() {
 
       try {
         const rows = await listApps();
-        if (Array.isArray(rows) && rows.length > 0) return rows as AppRow[];
+        if (Array.isArray(rows) && rows.length > 0) {
+          const normalized = (rows as AppRow[]).map((r) => ({
+            ...r,
+            documents: parseDocuments(r.documents) as AppRow["documents"],
+          }));
+          return normalized;
+        }
       } catch (e) {
         console.warn("[applications] server list failed:", e);
       }
