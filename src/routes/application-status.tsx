@@ -119,9 +119,33 @@ function Page() {
         (payload) => {
           const next = payload.new as AppRow | undefined;
           if (!next?.id) return;
-          setRows((prev) =>
-            prev ? prev.map((r) => (r.id === next.id ? { ...r, ...next } : r)) : prev,
-          );
+          setRows((prev) => {
+            const prevRow = prev?.find((r) => r.id === next.id);
+            const prevStatus = prevRow ? String(prevRow.status || "").toLowerCase() : "";
+            const nextStatus = String(next.status || "").toLowerCase();
+            if (prevStatus && nextStatus && prevStatus !== nextStatus) {
+              try {
+                if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+                  const title =
+                    nextStatus === "approved"
+                      ? "School application approved"
+                      : nextStatus === "rejected"
+                        ? "School application update"
+                        : "School application update";
+                  const body =
+                    nextStatus === "approved"
+                      ? `${next.school_name || "Your school"} was approved on D4EXAM.`
+                      : nextStatus === "rejected"
+                        ? `${next.school_name || "Your school"} application was not approved.`
+                        : `${next.school_name || "Your school"} is now ${nextStatus.replaceAll("_", " ")}.`;
+                  new Notification(title, { body, icon: "/icon-192.png" });
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+            return prev ? prev.map((r) => (r.id === next.id ? { ...r, ...next } : r)) : prev;
+          });
         },
       )
       .subscribe();
@@ -175,6 +199,23 @@ function Page() {
       } catch {
         /* ignore */
       }
+      // Soft-request notification permission so applicants get live status updates
+      try {
+        if (typeof Notification !== "undefined" && Notification.permission === "default") {
+          void Notification.requestPermission().then((perm) => {
+            try {
+              localStorage.setItem(
+                "d4exam_applicant_notify",
+                JSON.stringify({ trackingCode: code, permission: perm, at: Date.now() }),
+              );
+            } catch {
+              /* ignore */
+            }
+          });
+        }
+      } catch {
+        /* ignore */
+      }
     } finally {
       setLoading(false);
     }
@@ -209,7 +250,6 @@ function Page() {
 
     setPwdBusy(true);
     try {
-      // Client-side: uses the same Supabase client that already found this application.
       let userId: string | null = null;
 
       const { data: signedUp, error: signUpErr } = await supabase.auth.signUp({
