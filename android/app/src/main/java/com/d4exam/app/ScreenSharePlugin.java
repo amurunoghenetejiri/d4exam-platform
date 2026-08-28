@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   when the student moves from the security gate into the live CBT session.
  * - stop() is ignored while keepAlive is true (exam hold).
  * - handleOnDestroy does NOT tear down projection while keepAlive is true.
- * - Frames are emitted as JPEG base64 via the "frame" listener.
+ * - Frames are emitted as JPEG base64 via the "frame" listener and cached for getLatestFrame.
  */
 @CapacitorPlugin(name = "D4ScreenShare")
 public class ScreenSharePlugin extends Plugin {
@@ -57,6 +57,11 @@ public class ScreenSharePlugin extends Plugin {
   private static volatile int sScreenHeight = 1280;
   private static volatile int sScreenDensity = 320;
   private static volatile long sLastEmitMs = 0;
+  /** Latest JPEG base64 (no data: prefix) — readable even if WebView plugin instance was recreated. */
+  private static volatile String sLatestJpeg = null;
+  private static volatile long sLatestTs = 0;
+  private static volatile int sLatestW = 0;
+  private static volatile int sLatestH = 0;
   private static final long MIN_FRAME_INTERVAL_MS = 500;
   /** Weak ref to the live plugin instance for notifyListeners. */
   private static volatile ScreenSharePlugin sLivePlugin = null;
@@ -237,6 +242,27 @@ public class ScreenSharePlugin extends Plugin {
     call.resolve(ret);
   }
 
+  /**
+   * Return the newest captured JPEG for the WebView publisher.
+   * Works even when notifyListeners has no live plugin instance (keepAlive across navigation).
+   */
+  @PluginMethod
+  public void getLatestFrame(PluginCall call) {
+    sLivePlugin = this;
+    JSObject ret = new JSObject();
+    boolean active =
+        isReallyActive()
+            || (sLatestJpeg != null && (System.currentTimeMillis() - sLatestTs) < 12000);
+    ret.put("active", active);
+    if (sLatestJpeg != null && sLatestJpeg.length() > 0) {
+      ret.put("jpeg", sLatestJpeg);
+      ret.put("ts", sLatestTs);
+      ret.put("width", sLatestW);
+      ret.put("height", sLatestH);
+    }
+    call.resolve(ret);
+  }
+
   @PluginMethod
   public void ensureRunning(PluginCall call) {
     sLivePlugin = this;
@@ -321,6 +347,10 @@ public class ScreenSharePlugin extends Plugin {
             sLastEmitMs = now;
             String jpegB64 = imageToJpegBase64(image);
             if (jpegB64 != null) {
+              sLatestJpeg = jpegB64;
+              sLatestTs = now;
+              sLatestW = sScreenWidth;
+              sLatestH = sScreenHeight;
               JSObject data = new JSObject();
               data.put("jpeg", jpegB64);
               data.put("width", sScreenWidth);
@@ -414,6 +444,8 @@ public class ScreenSharePlugin extends Plugin {
   private void stopCaptureInternal(boolean stopService) {
     Log.i(TAG, "stopCaptureInternal stopService=" + stopService);
     sKeepAlive.set(false);
+    sLatestJpeg = null;
+    sLatestTs = 0;
     releaseProjectionOnly();
     if (stopService) {
       try {
