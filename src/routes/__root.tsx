@@ -23,6 +23,7 @@ import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
 import { applyNativeStatusBar, hideSplashSafely } from "@/native/statusBar";
 import { registerAndroidBackButton } from "@/native/backButton";
+import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
 
 function NativeBootstrap() {
   const { data: session } = useSessionUser();
@@ -217,6 +218,7 @@ function RootComponent() {
       <NotificationPermissionPrompt />
       <Outlet />
       <NativeBootstrap />
+      <AnimatedSplash />
       <Toaster />
     </QueryClientProvider>
   );
