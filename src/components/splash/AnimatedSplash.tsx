@@ -12,15 +12,21 @@ const SESSION_KEY = "d4exam_splash_shown_v3";
  * Live animated D4EXAM splash.
  * - Minimum 9 seconds
  * - Stays up until the app shell has finished loading
- * - Hides the native logo-only splash as soon as this layer is painted
- * - Offline-safe (bundled /logo.png)
+ * - ALWAYS dismisses the native logo-only splash (never stuck)
  * - Background matches app theme navy (#0b1b3a)
+ * - Offline-safe (bundled /logo.png)
  */
 export function AnimatedSplash({ force = false }: { force?: boolean }) {
   const startRef = useRef<number>(typeof performance !== "undefined" ? performance.now() : Date.now());
   const [visible, setVisible] = useState(() => {
     if (force) return true;
     try {
+      // Native app cold start: always show branded splash (never skip to blank/logo).
+      const cap =
+        typeof window !== "undefined"
+          ? (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
+          : undefined;
+      if (cap?.isNativePlatform?.()) return true;
       if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(SESSION_KEY) === "1") {
         return false;
       }
@@ -44,11 +50,17 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     }
   }, []);
 
-  // As soon as the branded splash is on screen, hide the native logo-only splash
+  // ALWAYS dismiss the native logo-only splash immediately so it can never stick.
+  // Branded AnimatedSplash (or the app) takes over right away.
   useEffect(() => {
-    if (!visible) return;
     void hideSplashSafely();
-  }, [visible]);
+    const t1 = window.setTimeout(() => void hideSplashSafely(), 400);
+    const t2 = window.setTimeout(() => void hideSplashSafely(), 1500);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, []);
 
   // Track when the app document / shell is ready to show
   useEffect(() => {
