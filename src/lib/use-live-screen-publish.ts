@@ -32,10 +32,10 @@ export function useLiveScreenPublish(opts: {
   const examId = String(opts.examId || "");
   // Prefer real attempt id; provisional key keeps channel identity stable until attempt is created
   const attemptId = String(opts.attemptId || "") || (studentId && examId ? `pending:${studentId}:${examId}` : "");
+  // Publish whenever the exam session is active and identity is known.
+  // Native MediaProjection frames may arrive before React has a MediaStream.
   const enabled =
-    opts.enabled &&
-    Boolean(schoolId && studentId && examId && attemptId) &&
-    (Boolean(opts.stream) || isNativeScreenShareActive() || Boolean(opts.getStream));
+    opts.enabled && Boolean(schoolId && studentId && examId && attemptId);
 
   useEffect(() => {
     if (!enabled) {
@@ -67,7 +67,7 @@ export function useLiveScreenPublish(opts: {
 
     const sync = window.setInterval(() => {
       void refreshNativeScreenShareState();
-    }, 4000);
+    }, 2500);
 
     return () => {
       window.clearInterval(sync);
