@@ -30,6 +30,61 @@ export const Route = createFileRoute("/school-application")({
 const TRACK_KEY = "d4exam_school_application_track";
 const DRAFT_KEY = "d4exam_school_application_draft";
 
+async function requestApplicantNotifyPermission(trackingCode: string) {
+  try {
+    if (typeof window === "undefined") return;
+    if ("Notification" in window) {
+      const perm = await Notification.requestPermission();
+      try {
+        localStorage.setItem(
+          "d4exam_applicant_notify",
+          JSON.stringify({ trackingCode, permission: perm, at: Date.now() }),
+        );
+      } catch {
+        /* ignore */
+      }
+      if (perm === "granted") {
+        try {
+          new Notification("D4EXAM", {
+            body: "You will be notified about your school application status.",
+            icon: "/icon-192.png",
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Best-effort shrink for data-URL logos so they fit in JSON documents. Never throws. */
+async function shrinkDataUrl(dataUrl: string, maxSide = 512, quality = 0.72): Promise<string> {
+  try {
+    if (typeof document === "undefined") return dataUrl;
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("img"));
+      img.src = dataUrl;
+    });
+    const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+    const w = Math.max(1, Math.round((img.width || 1) * scale));
+    const h = Math.max(1, Math.round((img.height || 1) * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return dataUrl;
+    ctx.drawImage(img, 0, 0, w, h);
+    const out = canvas.toDataURL("image/jpeg", quality);
+    return out && out.startsWith("data:") ? out : dataUrl;
+  } catch {
+    return dataUrl;
+  }
+}
+
 function makeTrackingCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "D4";
@@ -195,13 +250,26 @@ function Page() {
     setLoading(true);
     try {
       const folder = `applications/${Date.now()}`;
-      let logoUrl: string | null = null;
+      // Prefer storage public URL; always fall back to the preview data-URL so the logo is never lost
+      let logoUrl: string | null = logoPreview && logoPreview.startsWith("data:") ? logoPreview : null;
       try {
         const uploaded = await uploadSchoolLogo({ file: logoFile, folder });
-        logoUrl = uploaded?.url || null;
+        if (uploaded?.url) logoUrl = uploaded.url;
       } catch (logoErr) {
         console.warn("[school-application] logo upload skipped:", logoErr);
-        logoUrl = null;
+      }
+      // Shrink large data-URLs so PostgREST/JSON can store them reliably
+      if (logoUrl && logoUrl.startsWith("data:") && logoUrl.length > 400_000) {
+        try {
+          logoUrl = await shrinkDataUrl(logoUrl, 512, 0.72);
+        } catch {
+          /* keep original */
+        }
+      }
+      if (!logoUrl) {
+        setError("Could not save the school logo. Please try a smaller PNG or JPG (under 2MB).");
+        setLoading(false);
+        return;
       }
 
       const code = makeTrackingCode();
@@ -293,6 +361,19 @@ function Page() {
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-mono text-lg font-bold text-emerald-900">
             {trackingCode || refId}
           </p>
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-600">
+            <p className="font-semibold text-slate-900">Get updates on this application</p>
+            <p className="mt-1">
+              Allow D4EXAM notifications so you are told when your school is approved or if more information is needed.
+            </p>
+            <Button
+              type="button"
+              className="mt-3 w-full font-semibold"
+              onClick={() => void requestApplicantNotifyPermission(trackingCode || refId)}
+            >
+              Allow notifications
+            </Button>
+          </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
             <Button asChild className="font-semibold">
               <Link to="/application-status">Check application status</Link>
