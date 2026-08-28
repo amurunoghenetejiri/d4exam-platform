@@ -21,7 +21,7 @@ import { NotificationPermissionPrompt } from "@/components/NotificationPermissio
 import { useSessionUser } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
-import { applyNativeStatusBar } from "@/native/statusBar";
+import { applyNativeStatusBar, hideSplashSafely } from "@/native/statusBar";
 import { registerAndroidBackButton } from "@/native/backButton";
 import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
 
@@ -34,8 +34,11 @@ function NativeBootstrap() {
       try {
         document.documentElement.classList.add("d4-native");
         await applyNativeStatusBar();
-        // Native logo splash is hidden by AnimatedSplash once the branded layer is painted.
-        // Do not hide here — avoids a flash of the default logo-only screen / empty WebView.
+        // Safety: never leave the system logo splash stuck if AnimatedSplash is delayed.
+        await hideSplashSafely();
+        window.setTimeout(() => {
+          void hideSplashSafely();
+        }, 800);
         const unsubBack = await registerAndroidBackButton();
         if (cancelled) {
           unsubBack();
