@@ -1,6 +1,6 @@
 /**
  * Publishes student screen-share JPEG frames to officer live-monitor.
- * On Android, frames come from MediaProjection via getLatestNativeScreenJpeg —
+ * On Android, frames come from MediaProjection via awaitLatestNativeScreenJpeg —
  * no MediaStream tracks required.
  *
  * Uses a stable publisher that restarts only when identity keys change.
@@ -10,7 +10,7 @@
 import { useEffect, useRef } from "react";
 import { startLiveScreenPublisher, type LiveScreenPublisher } from "@/lib/live-video";
 import {
-  isNativeScreenShareActive,
+  holdExamScreenShare,
   refreshNativeScreenShareState,
 } from "@/lib/screen-share";
 
@@ -31,7 +31,9 @@ export function useLiveScreenPublish(opts: {
   const studentId = String(opts.studentId || "");
   const examId = String(opts.examId || "");
   // Prefer real attempt id; provisional key keeps channel identity stable until attempt is created
-  const attemptId = String(opts.attemptId || "") || (studentId && examId ? `pending:${studentId}:${examId}` : "");
+  const attemptId =
+    String(opts.attemptId || "") ||
+    (studentId && examId ? `pending:${studentId}:${examId}` : "");
   // Publish whenever the exam session is active and identity is known.
   // Native MediaProjection frames may arrive before React has a MediaStream.
   const enabled =
@@ -47,6 +49,9 @@ export function useLiveScreenPublish(opts: {
       pubRef.current = null;
       return;
     }
+
+    // Keep MediaProjection alive for the whole publish window
+    holdExamScreenShare(true);
 
     try {
       pubRef.current?.stop();
@@ -65,6 +70,7 @@ export function useLiveScreenPublish(opts: {
       intervalMs: 600,
     });
 
+    // Re-assert capture + pull frames while exam runs
     const sync = window.setInterval(() => {
       void refreshNativeScreenShareState();
     }, 2000);
