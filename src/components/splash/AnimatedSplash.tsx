@@ -1,18 +1,37 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { hideSplashSafely } from "@/native/statusBar";
 
-const SPLASH_MS = 5000;
-const SESSION_KEY = "d4exam_splash_shown_v2";
+/** Minimum time the branded splash stays on screen (ms). */
+const SPLASH_MIN_MS = 9000;
+/** Absolute safety cap so splash never blocks forever. */
+const SPLASH_MAX_MS = 45000;
+const SESSION_KEY = "d4exam_splash_shown_v3";
 
 /**
- * Live animated D4EXAM splash — branding matches the official splash artwork.
- * GPU-friendly transforms/opacity only. Offline-safe (bundled /logo.png).
- * Shows once per browser/app session for ~5s then fades into the app.
+ * Live animated D4EXAM splash.
+ * - Minimum 9 seconds
+ * - Stays up until the app shell has finished loading
+ * - Hides the native logo-only splash as soon as this layer is painted
+ * - Offline-safe (bundled /logo.png)
  */
 export function AnimatedSplash({ force = false }: { force?: boolean }) {
-  const [visible, setVisible] = useState(false);
+  const startRef = useRef<number>(typeof performance !== "undefined" ? performance.now() : Date.now());
+  const [visible, setVisible] = useState(() => {
+    if (force) return true;
+    try {
+      if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(SESSION_KEY) === "1") {
+        return false;
+      }
+    } catch {
+      /* ignore */
+    }
+    return true;
+  });
   const [exiting, setExiting] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [appReady, setAppReady] = useState(false);
+  const dismissedRef = useRef(false);
 
   useEffect(() => {
     try {
@@ -22,30 +41,74 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     } catch {
       /* ignore */
     }
+  }, []);
 
-    try {
-      if (!force && sessionStorage.getItem(SESSION_KEY) === "1") {
-        setVisible(false);
+  // As soon as the branded splash is on screen, hide the native logo-only splash
+  useEffect(() => {
+    if (!visible) return;
+    void hideSplashSafely();
+  }, [visible]);
+
+  // Track when the app document / shell is ready to show
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+
+    const markReady = () => {
+      if (cancelled) return;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!cancelled) setAppReady(true);
+        });
+      });
+    };
+
+    if (typeof document !== "undefined" && document.readyState === "complete") {
+      markReady();
+    } else if (typeof window !== "undefined") {
+      window.addEventListener("load", markReady, { once: true });
+    } else {
+      markReady();
+    }
+
+    const maxTimer = window.setTimeout(() => {
+      if (!cancelled) setAppReady(true);
+    }, SPLASH_MAX_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(maxTimer);
+      if (typeof window !== "undefined") {
+        window.removeEventListener("load", markReady);
+      }
+    };
+  }, [visible]);
+
+  // Dismiss only after min 9s AND app is ready
+  useEffect(() => {
+    if (!visible || dismissedRef.current) return;
+
+    const tick = () => {
+      if (dismissedRef.current) return;
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const elapsed = now - startRef.current;
+      if (elapsed >= SPLASH_MIN_MS && appReady) {
+        dismissedRef.current = true;
+        setExiting(true);
+        try {
+          sessionStorage.setItem(SESSION_KEY, "1");
+        } catch {
+          /* ignore */
+        }
+        window.setTimeout(() => setVisible(false), 450);
         return;
       }
-    } catch {
-      /* ignore */
-    }
-
-    setVisible(true);
-    try {
-      sessionStorage.setItem(SESSION_KEY, "1");
-    } catch {
-      /* ignore */
-    }
-
-    const fadeAt = window.setTimeout(() => setExiting(true), SPLASH_MS - 450);
-    const hideAt = window.setTimeout(() => setVisible(false), SPLASH_MS);
-    return () => {
-      window.clearTimeout(fadeAt);
-      window.clearTimeout(hideAt);
+      window.setTimeout(tick, 120);
     };
-  }, [force]);
+
+    const id = window.setTimeout(tick, 120);
+    return () => window.clearTimeout(id);
+  }, [visible, appReady]);
 
   if (!visible) return null;
 
