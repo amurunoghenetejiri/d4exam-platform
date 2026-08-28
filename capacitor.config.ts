@@ -36,10 +36,10 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      // Native layer is ONLY a brief solid theme bridge (never the logo-only stuck screen).
-      // Branded AnimatedSplash in the WebView owns the real 9s experience.
-      // launchAutoHide MUST be true so the logo splash can never hang forever.
-      launchShowDuration: 1500,
+      // Solid theme-navy bridge only (no centered logo icon).
+      // Holds briefly while WebView loads; branded AnimatedSplash takes over.
+      // launchAutoHide MUST be true so the system splash can never hang forever.
+      launchShowDuration: 2800,
       launchAutoHide: true,
       backgroundColor: "#0b1b3a",
       androidSplashResourceName: "splash",
