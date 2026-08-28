@@ -108,33 +108,42 @@ function locationLine(app: AppRow): string {
 }
 
 async function fetchApplicationsClient(): Promise<AppRow[]> {
-  const colsWithDocs =
-    "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes, documents";
-  const colsNoDocs =
+  const baseCols =
     "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes";
 
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from("school_applications")
-    .select(colsWithDocs)
+    .select(baseCols)
     .order("created_at", { ascending: false })
     .limit(200);
 
   if (error) {
-    console.warn("[applications] client select with docs failed:", error.message);
-    const retry = await supabase
-      .from("school_applications")
-      .select(colsNoDocs)
-      .order("created_at", { ascending: false })
-      .limit(200);
-    data = retry.data;
-    error = retry.error;
+    console.error("[applications] client select:", error);
+    throw new Error(error.message || "Could not load applications");
   }
 
-  if (error) {
-    console.warn("[applications] client select failed:", error.message);
-    throw new Error(error.message);
+  const rows = (data ?? []) as AppRow[];
+  if (rows.length === 0) return rows;
+
+  try {
+    const ids = rows.map((r) => r.id);
+    const { data: docRows } = await supabase
+      .from("school_applications")
+      .select("id, documents")
+      .in("id", ids);
+    const byId = new Map<string, AppRow["documents"]>();
+    for (const d of docRows ?? []) {
+      byId.set(String((d as { id: string }).id), (d as { documents?: AppRow["documents"] }).documents);
+    }
+    for (const r of rows) {
+      const docs = byId.get(r.id);
+      if (docs) r.documents = docs;
+    }
+  } catch (e) {
+    console.warn("[applications] documents enrich skipped:", e);
   }
-  return (data ?? []) as AppRow[];
+
+  return rows;
 }
 
 function Page() {
@@ -146,19 +155,25 @@ function Page() {
     queryKey: ["super-admin", "school_applications"],
     queryFn: async () => {
       try {
-        const rows = await listApps({});
-        if (Array.isArray(rows) && rows.length > 0) {
-          return rows as AppRow[];
-        }
+        const clientRows = await fetchApplicationsClient();
+        if (clientRows.length > 0) return clientRows;
       } catch (e) {
-        console.warn("[applications] server list failed, trying client:", e);
+        console.warn("[applications] client list failed:", e);
       }
+
+      try {
+        const rows = await listApps();
+        if (Array.isArray(rows) && rows.length > 0) return rows as AppRow[];
+      } catch (e) {
+        console.warn("[applications] server list failed:", e);
+      }
+
       return await fetchApplicationsClient();
     },
-    staleTime: 3_000,
+    staleTime: 2_000,
     refetchOnWindowFocus: true,
-    refetchInterval: 12_000,
-    retry: 1,
+    refetchInterval: 10_000,
+    retry: 2,
   });
 
   useEffect(() => {
