@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   Bell,
   Building2,
@@ -34,6 +34,7 @@ import { initials, signOut, useSessionUser, type AppRole } from "@/lib/session";
 import { useSchoolIdentity } from "@/lib/school-identity";
 import { useUnreadNotificationCount } from "@/lib/queries";
 import { useRealtimeInvalidate } from "@/lib/realtime";
+import { isAppLikeShell } from "@/native/platform";
 import type { RoleConfig } from "@/components/navigation/navConfig";
 
 export interface AppUser {
@@ -206,6 +207,15 @@ export function AppShell({
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { data: session } = useSessionUser();
   const { data: school } = useSchoolIdentity(session?.schoolId);
+
+  /** App / installed PWA → navy theme bar. Plain website browser → white body bar. */
+  const appShellNav = useMemo(() => {
+    try {
+      return isAppLikeShell();
+    } catch {
+      return false;
+    }
+  }, []);
 
   useRealtimeInvalidate(
     `shell-notifs-${session?.userId ?? "x"}`,
@@ -453,9 +463,10 @@ export function AppShell({
         <nav
           className={cn(
             "fixed inset-x-0 bottom-0 z-40 lg:hidden",
-            "border-t border-white/10 bg-[#0b1b3a]",
             "pb-[env(safe-area-inset-bottom,0px)]",
-            "shadow-[0_-4px_16px_rgba(11,27,58,0.35)]",
+            appShellNav
+              ? "border-t border-white/10 bg-[#0b1b3a] shadow-[0_-4px_16px_rgba(11,27,58,0.35)]"
+              : "border-t border-slate-200/90 bg-white shadow-[0_-2px_10px_rgba(15,23,42,0.06)]",
           )}
           aria-label="Primary"
         >
@@ -473,14 +484,32 @@ export function AppShell({
                     aria-current={active ? "page" : undefined}
                     className={cn(
                       "flex h-full min-h-[3.5rem] w-full flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-semibold",
-                      active ? "text-white" : "text-slate-400",
+                      appShellNav
+                        ? active
+                          ? "text-white"
+                          : "text-slate-400"
+                        : active
+                          ? "text-primary"
+                          : "text-slate-500",
                     )}
                   >
                     <item.icon
-                      className={cn("h-5 w-5 shrink-0", active && "stroke-[2.25] text-blue-300")}
+                      className={cn(
+                        "h-5 w-5 shrink-0",
+                        appShellNav
+                          ? active && "stroke-[2.25] text-blue-300"
+                          : active && "stroke-[2.25] text-primary",
+                      )}
                       aria-hidden
                     />
-                    <span className={cn("truncate max-w-full", active && "font-bold text-white")}>
+                    <span
+                      className={cn(
+                        "truncate max-w-full",
+                        appShellNav
+                          ? active && "font-bold text-white"
+                          : active && "font-bold text-primary",
+                      )}
+                    >
                       {item.label}
                     </span>
                   </Link>
