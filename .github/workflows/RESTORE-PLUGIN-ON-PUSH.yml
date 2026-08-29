@@ -1,0 +1,95 @@
+name: RESTORE-PLUGIN-ON-PUSH
+on:
+  push:
+    paths:
+      - "DEPLOY_TRIGGER_PLUGIN.txt"
+      - ".github/workflows/RESTORE-PLUGIN-ON-PUSH.yml"
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore and harden plugins
+        run: |
+          set -euo pipefail
+          # Prefer last known-good full plugin (before SEE_FILE / stub)
+          for sha in 3f7272fa20ea34af798be8089abbba298c010e71 a6502e531e47e94d204d9b37d23e599827a10db6 df882b70fd26d240679e10a24725c6c13abc1f8d; do
+            if git cat-file -e "$sha:android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java" 2>/dev/null; then
+              git show "$sha:android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java" > /tmp/plugin.java
+              if grep -q 'onScreenPermission' /tmp/plugin.java && ! grep -q 'SEE_FILE\|TEMPORARY STUB' /tmp/plugin.java; then
+                echo "restored from $sha"
+                break
+              fi
+            fi
+          done
+          test -s /tmp/plugin.java
+          grep -q 'onScreenPermission' /tmp/plugin.java
+
+          python3 << 'INNER'
+          from pathlib import Path
+          t = Path("/tmp/plugin.java").read_text()
+          assert "onScreenPermission" in t
+          assert "SEE_FILE" not in t
+
+          # Require typed FGS before getMediaProjection
+          if "proceeding anyway" in t:
+              t = t.replace(
+                  """      if (!ready || !ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready in time — proceeding anyway");
+      }""",
+                  """      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready — retry startForegroundService");
+        try {
+          ScreenCaptureService.resetReady();
+          Intent svcRetry = new Intent(getContext(), ScreenCaptureService.class);
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(svcRetry);
+          } else {
+            getContext().startService(svcRetry);
+          }
+          ScreenCaptureService.READY_LATCH.await(5, TimeUnit.SECONDS);
+        } catch (Exception retryEx) {
+          Log.e(TAG, "FGS retry failed", retryEx);
+        }
+      }
+      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        call.reject("Screen monitoring service failed to start. Allow notifications for D4EXAM in system settings, then try again.");
+        return;
+      }
+      try { Thread.sleep(300); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }""",
+                  1,
+              )
+              print("hardened proceed-anyway")
+
+          # Wrap getMediaProjection in try/catch SecurityException if not already
+          if "SecurityException" not in t and "getMediaProjection" in t:
+              t = t.replace(
+                  "MediaProjection mp =\n          projectionManager.getMediaProjection(result.getResultCode(), result.getData());",
+                  "MediaProjection mp;\n      try {\n        mp = projectionManager.getMediaProjection(result.getResultCode(), result.getData());\n      } catch (SecurityException se) {\n        Log.e(TAG, \"getMediaProjection SecurityException\", se);\n        call.reject(\"Media projection requires an active mediaProjection foreground service. Allow notifications and try again.\");\n        return;\n      }",
+                  1,
+              )
+              print("added SecurityException guard")
+
+          assert "proceeding anyway" not in t
+          assert "getMediaProjection" in t
+          for path in [
+              "android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java",
+              "native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java",
+          ]:
+              Path(path).parent.mkdir(parents=True, exist_ok=True)
+              Path(path).write_text(t)
+              print("wrote", path, len(t))
+          INNER
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java \
+                  native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
+          git commit -m "fix(android): restore ScreenSharePlugin; require typed FGS before getMediaProjection" || echo no changes
+          git push origin HEAD:main
