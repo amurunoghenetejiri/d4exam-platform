@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "scripts/patch_screen_share_exam.py"
+      - "scripts/patch_android_screenshare.py"
       - ".github/workflows/run-screen-share-fix.yml"
 jobs:
   apply:
@@ -12,12 +13,14 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - run: python3 scripts/patch_screen_share_exam.py
+      - run: |
+          python3 scripts/patch_screen_share_exam.py || true
+          python3 scripts/patch_android_screenshare.py || true
       - name: Commit
         run: |
           git config user.name "d4exam-bot"
           git config user.email "bot@d4exam.local"
           git add -A
-          git commit -m "fix: screen share hold until submit, no crash on allow" || echo none
+          git commit -m "fix: screen share hold until submit, harden MediaProjection" || echo none
           git pull --rebase origin main || true
           git push origin main
