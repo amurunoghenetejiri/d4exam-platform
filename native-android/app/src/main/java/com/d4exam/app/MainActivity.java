@@ -1,6 +1,9 @@
 package com.d4exam.app;
 
+import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
+import android.view.Window;
 import android.view.View;
 import androidx.core.splashscreen.SplashScreen;
 import com.getcapacitor.BridgeActivity;
@@ -22,6 +25,16 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(ExamImmersivePlugin.class);
     registerPlugin(ScreenSharePlugin.class);
     super.onCreate(savedInstanceState);
+    try {
+      Window w = getWindow();
+      if (w != null) {
+        w.setStatusBarColor(Color.parseColor("#0b1b3a"));
+        w.setNavigationBarColor(Color.parseColor("#0b1b3a"));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+          w.setNavigationBarContrastEnforced(false);
+        }
+      }
+    } catch (Exception ignored) { }
 
     // Subtle fade-in of web content after splash (decorative only).
     try {

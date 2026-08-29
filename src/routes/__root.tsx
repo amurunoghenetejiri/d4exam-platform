@@ -149,7 +149,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           "D4EXAM is a professional CBT and examination management platform for schools, colleges and universities worldwide.",
       },
       { name: "author", content: "D4EXAM" },
-      { name: "theme-color", content: "#f8fafc" },
+      { name: "theme-color", content: "#0b1b3a" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
