@@ -23,7 +23,7 @@ import { mapFaceSecurityEvent } from "@/lib/live-monitor";
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
 import { haptic } from "@/lib/haptic";
-import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream } from "@/lib/screen-share";
+import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, holdExamScreenShare } from "@/lib/screen-share";
 import { useLiveScreenPublish } from "@/lib/use-live-screen-publish";
 import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
 
@@ -149,6 +149,7 @@ export function CbtExamPage() {
     stopMediaStream(mediaStreamRef.current);
     mediaStreamRef.current = null;
     setLiveStream(null);
+    try { holdExamScreenShare(false); } catch { /* ignore */ }
     try { stopScreenShareStream(screenStreamRef.current); } catch { /* ignore */ }
     screenStreamRef.current = null;
     setScreenStream(null);
@@ -513,20 +514,29 @@ export function CbtExamPage() {
       }
       const needScreen = Boolean(security.requireScreenShare) && !_opts.skipScreenShare;
       if (needScreen) {
-        const share = await startScreenShareStream();
-        if (!share.ok) {
-          toast.error(share.message || "Screen sharing is required for this examination.");
+        let share;
+        try {
+          share = await startScreenShareStream();
+        } catch (e) {
+          console.warn("[exam] screen share threw", e);
+          toast.error("Screen sharing failed. Try again.");
           return;
         }
-        try { stopScreenShareStream(screenStreamRef.current); } catch { /* ignore */ }
+        if (!share?.ok) {
+          toast.error(share?.message || "Screen sharing is required for this examination.");
+          return;
+        }
+        holdExamScreenShare(true);
         screenStreamRef.current = share.stream;
         setScreenStream(share.stream);
         onScreenShareEnded(share.stream, () => {
-          toast.error("Screen sharing stopped. Re-enable to continue the exam.");
-          setPaused(true);
-          setPauseReason("Screen sharing stopped");
-          setScreenStream(null);
-          screenStreamRef.current = null;
+          try {
+            toast.error("Screen sharing stopped. Re-enable to continue the exam.");
+            setPaused(true);
+            setPauseReason("Screen sharing stopped");
+            setScreenStream(null);
+            screenStreamRef.current = null;
+          } catch { /* ignore */ }
         });
         toast.success("Screen sharing active");
       }

@@ -407,6 +407,21 @@ async function startWebScreenShare(): Promise<ScreenShareStartResult> {
 
 export async function startScreenShareStream(): Promise<ScreenShareStartResult> {
   try {
+    return await startScreenShareStreamInner();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[screen-share] startScreenShareStream outer catch", msg);
+    status = "error";
+    return {
+      ok: false,
+      reason: /denied|cancel|permission/i.test(msg) ? "denied" : "error",
+      message: msg || "Screen share could not start. You can continue if screen share is optional.",
+    };
+  }
+}
+
+async function startScreenShareStreamInner(): Promise<ScreenShareStartResult> {
+  try {
     if (isNativeAndroid()) {
       return await startNativeScreenShare();
     }

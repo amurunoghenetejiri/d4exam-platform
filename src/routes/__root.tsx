@@ -197,7 +197,7 @@ const BOOT_SPLASH_SCRIPT = `
       if (navigator.standalone === true) shell = true;
     } catch(e){}
     if (!shell) return;
-    if (sessionStorage.getItem('d4exam_splash_shown_v5') === '1') return;
+    if (sessionStorage.getItem('d4exam_splash_shown_v6') === '1') return;
     var el = document.getElementById('d4-boot-splash');
     if (el) el.style.display = 'flex';
   } catch(e){}
