@@ -79,7 +79,7 @@ export async function sendSchoolApprovalEmail(params: {
   const appUrl = (
     process.env["APP_URL"] ||
     process.env["VITE_APP_URL"] ||
-    "https://platform.vercel.app"
+    "https://d4exam-platform.vercel.app"
   ).replace(/\/$/, "");
   const loginUrl = `${appUrl}/login`;
 
