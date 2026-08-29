@@ -14,7 +14,8 @@ import { FIREBASE_WEB_CONFIG, FIREBASE_VAPID_KEY } from "@/lib/firebase-config";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { isNativeShell, getRuntimePlatform } from "@/native/platform";
-import { showD4ExamNativeNotification } from "@/native/localNotify";
+import { showD4ExamNativeNotification, bindLocalNotificationActions } from "@/native/localNotify";
+import { notificationsEnabledConfirm } from "@/lib/notify-messages";
 
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
@@ -186,8 +187,23 @@ async function bindNativePushListeners(userId: string, role?: string | null): Pr
       try {
         const title = notification.title || "D4EXAM";
         const body = notification.body || "";
+        const data = notification.data as Record<string, string> | undefined;
         toast.info(title, { description: body });
-        void showD4ExamNativeNotification(title, body);
+        void showD4ExamNativeNotification(title, body, data?.link);
+        // If payload includes exam countdown start, client may start local live timer
+        if (data?.examCountdown === "1" && data.examId && data.startIso) {
+          void import("@/native/localNotify").then((m) => {
+            m.startExamCountdownNotification({
+              examId: data.examId!,
+              studentName: data.studentName || "Student",
+              courseCode: data.courseCode || data.examTitle || "Examination",
+              startIso: data.startIso!,
+              endIso: data.endIso || null,
+              startLink: data.link || `/student/exam/${data.examId}`,
+              viewLink: data.link || `/student/exam/${data.examId}`,
+            });
+          });
+        }
       } catch {
         /* ignore */
       }
@@ -206,6 +222,7 @@ async function bindNativePushListeners(userId: string, role?: string | null): Pr
     });
 
     nativeListenersBound = true;
+    void bindLocalNotificationActions();
   } catch (e) {
     console.warn("[D4EXAM] bindNativePushListeners failed", e);
   }
@@ -220,7 +237,6 @@ async function enableNativePushNotifications(
     await disableWebPushInNativeShell();
     await disableWebPushDevicesForUser(userId);
 
-    // Prefer Local Notifications permission (shows as D4EXAM app, not Chrome)
     try {
       const { LocalNotifications } = await import("@capacitor/local-notifications");
       let lp = await LocalNotifications.checkPermissions();
@@ -230,17 +246,26 @@ async function enableNativePushNotifications(
       }
       if (lp.display === "granted") {
         nativePermissionCache = "granted";
-        // Only show the one-time confirmation when the user JUST allowed notifications —
-        // never on every app open / login.
+        // Confirmation ONLY when user just granted (not on every login)
         if (!wasGranted) {
           try {
             const key = `d4_notif_enabled_once:${userId}`;
             if (typeof localStorage !== "undefined" && localStorage.getItem(key) !== "1") {
               localStorage.setItem(key, "1");
-              await showD4ExamNativeNotification(
-                "D4EXAM notifications enabled",
-                "You will receive alerts as D4EXAM, not Chrome.",
-              );
+              const copy = notificationsEnabledConfirm();
+              const settings =
+                role === "student"
+                  ? "/student/settings"
+                  : role === "teacher"
+                    ? "/teacher/settings"
+                    : role === "examination_officer"
+                      ? "/officer/settings"
+                      : role === "school_admin"
+                        ? "/admin/settings"
+                        : role === "super_admin"
+                          ? "/super-admin/settings"
+                          : "/";
+              await showD4ExamNativeNotification(copy.title, copy.message, settings);
             }
           } catch {
             /* ignore storage */
@@ -257,13 +282,7 @@ async function enableNativePushNotifications(
       if (permStatus.receive !== "granted" && opts?.requestPermission !== false) {
         permStatus = await PushNotifications.requestPermissions();
       }
-      const state: PushPermissionState =
-        permStatus.receive === "granted"
-          ? "granted"
-          : permStatus.receive === "denied"
-            ? "denied"
-            : "default";
-      if (state === "granted") nativePermissionCache = "granted";
+      if (permStatus.receive === "granted") nativePermissionCache = "granted";
 
       if (permStatus.receive === "granted") {
         try {
@@ -284,7 +303,6 @@ async function enableNativePushNotifications(
       /* ignore */
     }
 
-    // Register a native device row so server can target this install
     const token = `native-${userId}-${getRuntimePlatform()}`;
     await saveDeviceToken(userId, token, role);
     return { ok: true, token };
@@ -424,7 +442,6 @@ export async function enablePushNotifications(
       requestPermission: opts?.requestPermission !== false,
     });
   }
-  // Web: only open browser permission dialog when explicitly requested
   if (opts?.requestPermission === false) {
     const st = typeof Notification !== "undefined" ? Notification.permission : "denied";
     if (st === "granted") return enableWebPushNotifications(userId, role);
