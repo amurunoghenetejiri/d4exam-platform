@@ -3,22 +3,6 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - .github/workflows/APPLY-SWITCH-REAUTH.yml
-      - scripts/write_switch_files.py
-      - scripts/as_z_0.txt
-      - scripts/as_z_1.txt
-      - scripts/as_z_2.txt
-      - scripts/as_z_3.txt
-      - scripts/as_z_4.txt
-      - scripts/as_z_5.txt
-      - scripts/as_z_6.txt
-      - scripts/as_z_7.txt
-      - scripts/sc_z_0.txt
-      - scripts/sc_z_1.txt
-      - scripts/sc_z_2.txt
-      - scripts/sc_z_3.txt
-      - scripts/patch_login_switch.py
 jobs:
   apply:
     runs-on: ubuntu-latest
