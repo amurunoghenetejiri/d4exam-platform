@@ -1,17 +1,14 @@
 /**
  * Publishes student screen-share JPEG frames to officer live-monitor.
- * On Android, frames come from MediaProjection via awaitLatestNativeScreenJpeg —
- * no MediaStream tracks required.
- *
- * Uses a stable publisher that restarts only when identity keys change.
- * Falls back to studentId:examId when attemptId is not yet available so
- * frames can start flowing as soon as capture is active.
+ * On Android, frames come from MediaProjection via awaitLatestNativeScreenJpeg.
+ * Publisher stays up for the whole exam session (not tied to one React mount only).
  */
 import { useEffect, useRef } from "react";
 import { startLiveScreenPublisher, type LiveScreenPublisher } from "@/lib/live-video";
 import {
   holdExamScreenShare,
   refreshNativeScreenShareState,
+  isNativeScreenShareActive,
 } from "@/lib/screen-share";
 
 export function useLiveScreenPublish(opts: {
@@ -30,12 +27,12 @@ export function useLiveScreenPublish(opts: {
   const schoolId = String(opts.schoolId || "");
   const studentId = String(opts.studentId || "");
   const examId = String(opts.examId || "");
-  // Prefer real attempt id; provisional key keeps channel identity stable until attempt is created
   const attemptId =
     String(opts.attemptId || "") ||
     (studentId && examId ? `pending:${studentId}:${examId}` : "");
-  // Publish whenever the exam session is active and identity is known.
-  // Native MediaProjection frames may arrive before React has a MediaStream.
+
+  // Publish for entire active exam once identity is known.
+  // Native frames may exist even when React MediaStream is empty.
   const enabled =
     opts.enabled && Boolean(schoolId && studentId && examId && attemptId);
 
@@ -50,7 +47,6 @@ export function useLiveScreenPublish(opts: {
       return;
     }
 
-    // Keep MediaProjection alive for the whole publish window
     holdExamScreenShare(true);
 
     try {
@@ -67,13 +63,17 @@ export function useLiveScreenPublish(opts: {
       studentId,
       examId,
       getStream: () => optsRef.current.getStream?.() || optsRef.current.stream,
-      intervalMs: 600,
+      // ~2 fps — enough for monitoring without saturating Realtime
+      intervalMs: 500,
     });
 
-    // Re-assert capture + pull frames while exam runs
     const sync = window.setInterval(() => {
-      void refreshNativeScreenShareState();
-    }, 2000);
+      void refreshNativeScreenShareState().then((on) => {
+        if (!on && isNativeScreenShareActive()) {
+          /* already marked from recent frames */
+        }
+      });
+    }, 1500);
 
     return () => {
       window.clearInterval(sync);
@@ -83,6 +83,7 @@ export function useLiveScreenPublish(opts: {
         /* ignore */
       }
       pubRef.current = null;
+      // Do NOT release exam hold here — only submit/shutdown clears hold.
     };
   }, [enabled, schoolId, studentId, examId, attemptId]);
 }
