@@ -20,14 +20,15 @@
     </style>
 
     <!--
-      Launch theme: solid app-theme navy.
-      Blank icon so the system never shows a stuck centered logo.
-      Branded AnimatedSplash takes over as soon as the WebView paints.
+      System launch splash = solid app theme navy only (no centered logo).
+      Avoids blank/icon intermediate; AnimatedSplash is the only branded screen
+      (logo + SMART. SECURE. SEAMLESS.).
     -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
         <item name="windowSplashScreenIconBackgroundColor">@color/splash_background</item>
+        <item name="windowSplashScreenAnimationDuration">0</item>
         <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
         <item name="android:windowBackground">@color/splash_background</item>
         <item name="android:statusBarColor">@color/splash_background</item>
