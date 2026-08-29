@@ -37,6 +37,7 @@ type D4ScreenSharePlugin = {
     ts?: number;
     width?: number;
     height?: number;
+    keepAlive?: boolean;
   }>;
   setKeepAlive(opts: { hold: boolean }): Promise<{ keepAlive: boolean; active: boolean }>;
   addListener(
@@ -102,7 +103,9 @@ export function isScreenShareSupported(): boolean {
 }
 
 export function getScreenShareStatus(): ScreenShareStatus {
-  if (nativeActive || (lastFrameAt > 0 && Date.now() - lastFrameAt < 8000)) return "active";
+  if (examHoldLock || nativeActive || (lastFrameAt > 0 && Date.now() - lastFrameAt < 8000)) {
+    return "active";
+  }
   return status;
 }
 
@@ -131,6 +134,10 @@ export function holdExamScreenShare(hold: boolean): void {
   }
 }
 
+export function isExamScreenShareHeld(): boolean {
+  return examHoldLock;
+}
+
 async function ensureNativeFrameListeners(): Promise<void> {
   if (!nativeStream) {
     nativeStream = new MediaStream();
@@ -156,6 +163,7 @@ async function ensureNativeFrameListeners(): Promise<void> {
     try {
       nativeStoppedUnsub = await D4ScreenShare().addListener("stopped", () => {
         console.warn("[screen-share] SCREEN_SHARE_DISCONNECTED native stopped event");
+        // System killed MediaProjection — clear hold so student can re-grant if required
         examHoldLock = false;
         nativeActive = false;
         latestNativeScreenJpeg = null;
@@ -184,8 +192,8 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
 
     try {
       const st = await D4ScreenShare().isActive();
-      if (st?.active) {
-        nativeActive = true;
+      if (st?.active || st?.keepAlive) {
+        nativeActive = Boolean(st?.active);
         status = "active";
         examHoldLock = true;
         try {
@@ -196,6 +204,7 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
         try {
           const fr = await D4ScreenShare().getLatestFrame();
           applyNativeJpeg(fr?.jpeg, fr?.ts);
+          if (fr?.active) nativeActive = true;
         } catch {
           /* ignore */
         }
@@ -266,14 +275,14 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
     }
     await ensureNativeFrameListeners();
 
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 12; i++) {
       try {
         const fr = await D4ScreenShare().getLatestFrame();
         if (applyNativeJpeg(fr?.jpeg, fr?.ts)) break;
       } catch {
         /* ignore */
       }
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     console.info(
@@ -521,9 +530,6 @@ export async function awaitLatestNativeScreenJpeg(): Promise<string | null> {
   } catch {
     /* ignore */
   }
-  if (latestNativeScreenJpeg && lastFrameAt > 0 && Date.now() - lastFrameAt < 10000) {
-    return latestNativeScreenJpeg;
-  }
   return latestNativeScreenJpeg;
 }
 
@@ -531,7 +537,13 @@ export function clearNativeScreenJpeg(): void {
   latestNativeScreenJpeg = null;
 }
 
+/**
+ * True when capture is producing frames OR the exam still holds the session.
+ * Holding keeps the officer publisher enabled across gate → exam navigation
+ * before the next JPEG is observed in JS.
+ */
 export function isNativeScreenShareActive(): boolean {
+  if (isNativeAndroid() && examHoldLock) return true;
   return nativeActive || (lastFrameAt > 0 && Date.now() - lastFrameAt < 8000);
 }
 
@@ -540,7 +552,7 @@ export function getActiveScreenStream(): MediaStream | null {
 }
 
 export async function refreshNativeScreenShareState(): Promise<boolean> {
-  if (!isNativeAndroid()) return false;
+  if (!isNativeAndroid()) return examHoldLock || nativeActive;
   try {
     await ensureNativeFrameListeners();
     try {
@@ -560,6 +572,9 @@ export async function refreshNativeScreenShareState(): Promise<boolean> {
         status = "active";
         return true;
       }
+      if (fr?.keepAlive) {
+        examHoldLock = true;
+      }
     } catch {
       /* older APK */
     }
@@ -569,6 +584,10 @@ export async function refreshNativeScreenShareState(): Promise<boolean> {
       status = "active";
       return true;
     }
+    if (st?.keepAlive) {
+      examHoldLock = true;
+      return true;
+    }
   } catch {
     /* ignore */
   }
@@ -576,5 +595,5 @@ export async function refreshNativeScreenShareState(): Promise<boolean> {
     nativeActive = true;
     return true;
   }
-  return nativeActive;
+  return nativeActive || examHoldLock;
 }
