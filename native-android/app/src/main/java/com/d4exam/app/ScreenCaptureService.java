@@ -17,20 +17,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Foreground service required while MediaProjection is active (Android 10+ / API 34+).
- * Must reach startForeground BEFORE getMediaProjection is called.
- *
- * Notification icons:
- * - smallIcon = white monochrome ic_stat_d4exam (status bar + compact notification)
- * - largeIcon = full-color ic_launcher (expanded notification panel)
+ * Must reach startForeground with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+ * BEFORE getMediaProjection is called.
  */
 public class ScreenCaptureService extends Service {
   private static final String TAG = "D4ScreenCaptureSvc";
   private static final String CHANNEL_ID = "d4exam_screen_share";
   private static final int NOTIF_ID = 4402;
-  /** Brand navy accent shown next to the notification icon on Android 8+. */
   private static final int NOTIF_COLOR = 0xFF0B1B3A;
 
-  /** Set when startForeground has completed — plugin waits on this. */
   public static final AtomicBoolean FOREGROUND_READY = new AtomicBoolean(false);
   public static volatile CountDownLatch READY_LATCH = new CountDownLatch(1);
 
@@ -48,30 +43,36 @@ public class ScreenCaptureService extends Service {
   private void promoteToForeground() {
     createChannel();
 
+    int smallIcon = android.R.drawable.ic_menu_camera;
+    try {
+      int resId = getResources().getIdentifier("ic_stat_d4exam", "drawable", getPackageName());
+      if (resId != 0) smallIcon = resId;
+    } catch (Exception ignored) {
+    }
+
     NotificationCompat.Builder builder =
         new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("D4EXAM")
-            .setContentText("Screen monitoring is active during your exam.")
-            // Status bar + compact row: MUST be a white silhouette drawable
-            .setSmallIcon(R.drawable.ic_stat_d4exam)
+            .setContentTitle("D4EXAM exam monitoring")
+            .setContentText("Screen sharing stays on until you submit the exam.")
+            .setSmallIcon(smallIcon)
             .setColor(NOTIF_COLOR)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setSilent(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE);
 
-    // Expanded notification: full-color app logo (bold and easy to recognize)
     try {
       Bitmap large = BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
-      if (large != null) {
-        builder.setLargeIcon(large);
-      }
+      if (large != null) builder.setLargeIcon(large);
     } catch (Exception e) {
       Log.w(TAG, "largeIcon load failed", e);
     }
 
     Notification notification = builder.build();
+
     try {
       if (Build.VERSION.SDK_INT >= 29) {
         startForeground(
@@ -79,26 +80,42 @@ public class ScreenCaptureService extends Service {
       } else {
         startForeground(NOTIF_ID, notification);
       }
+      FOREGROUND_READY.set(true);
+      Log.i(TAG, "FOREGROUND_READY typed=" + (Build.VERSION.SDK_INT >= 29));
     } catch (Exception e) {
-      Log.w(TAG, "startForeground typed failed, fallback", e);
+      Log.e(TAG, "startForeground MEDIA_PROJECTION failed", e);
       try {
-        startForeground(NOTIF_ID, notification);
-      } catch (Exception ignored) {
+        Notification fallback =
+            new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("D4EXAM")
+                .setContentText("Screen monitoring active")
+                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .build();
+        if (Build.VERSION.SDK_INT >= 29) {
+          startForeground(
+              NOTIF_ID, fallback, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+        } else {
+          startForeground(NOTIF_ID, fallback);
+        }
+        FOREGROUND_READY.set(true);
+      } catch (Exception e2) {
+        Log.e(TAG, "startForeground fallback failed", e2);
+        FOREGROUND_READY.set(false);
       }
     }
-    FOREGROUND_READY.set(true);
     try {
       READY_LATCH.countDown();
     } catch (Exception ignored) {
     }
-    Log.i(TAG, "FOREGROUND_READY");
   }
 
   private void createChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       NotificationChannel channel =
           new NotificationChannel(
-              CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_LOW);
+              CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_DEFAULT);
       channel.setDescription("Shown while screen share is active during an examination");
       channel.setShowBadge(false);
       channel.setSound(null, null);
