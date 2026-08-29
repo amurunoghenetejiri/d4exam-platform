@@ -212,16 +212,22 @@ public class ScreenSharePlugin extends Plugin {
     if (call == null) return;
     if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
       Log.w(TAG, "permission denied");
-      call.reject("Screen share permission denied");
+      try { call.reject("Screen share permission denied"); } catch (Exception ignored) {}
       return;
     }
     try {
+      Activity activity = getActivity();
+      Context ctx = getContext();
+      if (ctx == null) {
+        try { call.reject("Context not available after permission"); } catch (Exception ignored) {}
+        return;
+      }
       ScreenCaptureService.resetReady();
-      Intent svc = new Intent(getContext(), ScreenCaptureService.class);
+      Intent svc = new Intent(ctx, ScreenCaptureService.class);
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        getContext().startForegroundService(svc);
+        ctx.startForegroundService(svc);
       } else {
-        getContext().startService(svc);
+        ctx.startService(svc);
       }
       boolean ready = false;
       try {
@@ -234,9 +240,14 @@ public class ScreenSharePlugin extends Plugin {
       }
 
       if (projectionManager == null) {
+        Context svcCtx = activity != null ? activity : ctx;
         projectionManager =
             (MediaProjectionManager)
-                getActivity().getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+                svcCtx.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+      }
+      if (projectionManager == null) {
+        try { call.reject("MediaProjection service unavailable"); } catch (Exception ignored) {}
+        return;
       }
       MediaProjection mp =
           projectionManager.getMediaProjection(result.getResultCode(), result.getData());
