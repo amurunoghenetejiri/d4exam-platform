@@ -14,11 +14,14 @@ function DefaultPending() {
 
 function DefaultError({ error }: { error: Error }) {
   const msg = String(error?.message ?? "").toLowerCase();
+  // Only treat as offline when the browser reports offline.
+  // Do NOT use isOnlineNow() alone — a failed probe used to poison the whole site.
+  const browserOffline =
+    typeof navigator !== "undefined" && navigator.onLine === false;
   const network =
-    !isOnlineNow() ||
-    msg.includes("failed to fetch") ||
-    msg.includes("network") ||
-    msg.includes("load failed");
+    browserOffline ||
+    (msg.includes("failed to fetch") && !isOnlineNow()) ||
+    (msg.includes("networkerror") && !isOnlineNow());
 
   return (
     <div className="mx-auto flex min-h-[50vh] max-w-md flex-col items-center justify-center gap-4 px-6 py-16 text-center">
