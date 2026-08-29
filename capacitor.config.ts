@@ -9,6 +9,9 @@ import type { CapacitorConfig } from "@capacitor/cli";
  *
  * When offline, errorPath shows the bundled offline page (not Chrome error).
  * StatusBar.overlaysWebView MUST be false so content is not clipped under the bar.
+ *
+ * Splash: launchAutoHide false so the solid theme splash stays until
+ * AnimatedSplash calls SplashScreen.hide() — eliminates the blank navy gap.
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
@@ -36,11 +39,10 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      // Solid theme-navy bridge only (no centered logo icon).
-      // Holds briefly while WebView loads; branded AnimatedSplash takes over.
-      // launchAutoHide MUST be true so the system splash can never hang forever.
-      launchShowDuration: 2800,
-      launchAutoHide: true,
+      // Hold solid theme-navy until AnimatedSplash is mounted and calls hide.
+      // Do NOT auto-hide early — that caused blank navy before branded splash.
+      launchShowDuration: 30000,
+      launchAutoHide: false,
       backgroundColor: "#0b1b3a",
       androidSplashResourceName: "splash",
       androidScaleType: "CENTER_CROP",
