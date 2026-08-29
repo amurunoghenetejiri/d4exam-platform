@@ -1,0 +1,117 @@
+name: RESTORE-SCREEN-PLUGIN-NOW
+on:
+  push:
+    paths:
+      - .github/workflows/RESTORE-SCREEN-PLUGIN-NOW.yml
+  workflow_dispatch:
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore plugin and apply FGS gate
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import subprocess, urllib.request
+
+          GOOD_SHA = "cfc466110423d858cf0f94c9f8370547c3505843"  # last good blob
+          path = "native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java"
+
+          def load():
+              try:
+                  return subprocess.check_output(["git", "cat-file", "-p", GOOD_SHA], text=True)
+              except Exception:
+                  url = f"https://raw.githubusercontent.com/amurunoghenetejiri/d4exam-platform/df374358b86eb281871ff3a3f25ae09155bc37b5/{path}"
+                  # try previous commit parents for content
+                  for ref in [
+                      "df374358b86eb281871ff3a3f25ae09155bc37b5",
+                      "3f7272fa20ea34af798be8089abbba298c010e71",
+                      "df882b70fd26d240679e10a24725c6c13abc1f8d",
+                  ]:
+                      try:
+                          u = f"https://raw.githubusercontent.com/amurunoghenetejiri/d4exam-platform/{ref}/{path}"
+                          print("try", u)
+                          data = urllib.request.urlopen(u).read().decode()
+                          if "PLACEHOLDER" not in data and "getMediaProjection" in data:
+                              return data
+                      except Exception as e:
+                          print("fail", e)
+                  raise SystemExit("could not load good plugin")
+
+          t = load()
+          assert "getMediaProjection" in t
+          assert "PLACEHOLDER" not in t
+
+          old = '''      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready after await — proceeding anyway (check notification permission)");
+      }'''
+          old2 = '''      if (!ready || !ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready in time — proceeding anyway");
+      }'''
+          gate = '''      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready — extra startForegroundService attempt");
+        try {
+          ScreenCaptureService.resetReady();
+          Intent svc3 = new Intent(getContext(), ScreenCaptureService.class);
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(svc3);
+          } else {
+            getContext().startService(svc3);
+          }
+          ScreenCaptureService.READY_LATCH.await(6, TimeUnit.SECONDS);
+        } catch (Exception retry3) {
+          Log.e(TAG, "FGS extra attempt failed", retry3);
+        }
+      }
+      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        call.reject(
+            "Could not start screen monitoring service. Allow notifications for D4EXAM in system settings, then try again.");
+        return;
+      }
+      try {
+        Thread.sleep(300);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+      }'''
+
+          if old in t:
+              t = t.replace(old, gate, 1)
+          elif old2 in t:
+              t = t.replace(old2, gate, 1)
+          elif "extra startForegroundService attempt" not in t:
+              key = "projectionManager.getMediaProjection"
+              idx = t.find(key)
+              if idx < 0:
+                  raise SystemExit("no getMediaProjection")
+              line_start = t.rfind("\n", 0, idx) + 1
+              prev = t.rfind("MediaProjection mp", 0, idx)
+              if prev > 0:
+                  line_start = t.rfind("\n", 0, prev) + 1
+              t = t[:line_start] + gate + "\n" + t[line_start:]
+
+          assert "proceeding anyway" not in t
+          assert "getMediaProjection" in t
+          assert "PLACEHOLDER" not in t
+          Path(path).write_text(t)
+          print("restored", path, len(t))
+
+          # also copy to android/
+          ap = Path("android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java")
+          ap.parent.mkdir(parents=True, exist_ok=True)
+          ap.write_text(t)
+          print("copied to android/")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java \
+                  android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
+          git commit -m "fix(android): restore ScreenSharePlugin + require typed FGS before getMediaProjection" || echo nochange
+          git push origin HEAD:main
