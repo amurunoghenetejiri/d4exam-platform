@@ -1,0 +1,33 @@
+name: FIX-SCREEN-AND-SWITCH
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/FIX-SCREEN-AND-SWITCH.yml
+      - scripts/patch_screen_no_crash.py
+      - scripts/patch_switch_card.py
+      - scripts/patch_session_vault.py
+      - .github/workflows/build-android.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patches
+        run: |
+          set -euo pipefail
+          python3 scripts/patch_screen_no_crash.py
+          python3 scripts/patch_switch_card.py
+          python3 scripts/patch_session_vault.py
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java native-android/app/src/main/java/com/d4exam/app/ScreenCaptureService.java src/components/settings/SwitchAccountCard.tsx src/lib/session.ts src/lib/account-switcher.ts
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(android+auth): screen share no process kill + account vault refresh"
+            git push
+          fi
