@@ -1,1 +1,1 @@
-switch-reauth-20260829f
+fix-offline-sw-v7-and-switch-script-20260829

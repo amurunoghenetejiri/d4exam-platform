@@ -3,52 +3,74 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b1b3a" />
+    <meta name="theme-color" content="#f8fafc" />
     <title>D4EXAM — Offline</title>
     <style>
       * { box-sizing: border-box; }
       body {
         margin: 0; min-height: 100dvh; display: grid; place-items: center;
         font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        background: #0b1b3a; color: #e2e8f0; text-align: center;
+        background: #f8fafc; color: #0f172a; text-align: center;
         padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem max(1.25rem, env(safe-area-inset-bottom));
       }
       .mark {
-        width: 72px; height: 72px; margin: 0 auto 1rem; border-radius: 18px;
-        background: #1e3a5f; display: grid; place-items: center;
-        font-weight: 800; font-size: 1.25rem; color: #93c5fd;
+        width: 56px; height: 56px; margin: 0 auto 1rem; border-radius: 14px;
+        background: #e2e8f0; display: grid; place-items: center;
+        font-weight: 800; font-size: 1rem; color: #475569;
       }
-      h1 { font-size: 1.15rem; margin: 0 0 0.45rem; font-weight: 700; }
-      p { margin: 0 auto; font-size: 0.9rem; color: #94a3b8; max-width: 22rem; line-height: 1.45; }
-      button {
-        margin-top: 1.25rem; border: 0; border-radius: 0.75rem;
-        background: #2563eb; color: #fff; font-weight: 600;
-        padding: 0.75rem 1.35rem; font-size: 0.9rem; cursor: pointer;
+      h1 { font-size: 1.1rem; margin: 0 0 0.45rem; font-weight: 700; }
+      p { margin: 0 auto; font-size: 0.88rem; color: #64748b; max-width: 22rem; line-height: 1.45; }
+      .actions { margin-top: 1.25rem; display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }
+      button, a.btn {
+        border: 0; border-radius: 9999px; text-decoration: none;
+        font-weight: 600; padding: 0.65rem 1.2rem; font-size: 0.88rem; cursor: pointer;
+        display: inline-flex; align-items: center;
       }
-      .hint { margin-top: 1rem; font-size: 0.75rem; color: #64748b; max-width: 22rem; }
+      .primary { background: #0f172a; color: #fff; }
+      .secondary { background: #fff; color: #0f172a; border: 1px solid #e2e8f0; }
     </style>
   </head>
   <body>
     <div>
       <div class="mark">D4</div>
       <h1>You're offline</h1>
-      <p>Connect to the Internet and tap Retry to open D4EXAM. After you use the app online once, previously opened pages load from saved data when the connection drops.</p>
-      <button type="button" id="retry">Retry</button>
-      <p class="hint">Content not available offline yet will appear as a friendly message inside the app — not a browser error page.</p>
+      <p>Connect to the Internet once to download this content. Pages you already opened will work from saved data.</p>
+      <div class="actions">
+        <button type="button" class="primary" id="retry">Try again</button>
+        <a class="btn secondary" id="home" href="/">Go home</a>
+      </div>
     </div>
     <script>
       (function () {
         var LIVE = "https://d4exam-platform.vercel.app/";
-        function go() {
+        function go(path) {
+          var target = (path || LIVE) + (String(path || LIVE).indexOf("?") >= 0 ? "&" : "?") + "offline_retry=" + Date.now();
           try {
-            window.location.replace(LIVE + "?offline_retry=" + Date.now());
+            // Unregister broken service workers so a stuck offline shell cannot loop
+            if ("serviceWorker" in navigator) {
+              navigator.serviceWorker.getRegistrations().then(function (regs) {
+                return Promise.all(regs.map(function (r) { return r.unregister(); }));
+              }).catch(function () {}).finally(function () {
+                try { window.location.replace(target); } catch (e) { window.location.href = target; }
+              });
+              return;
+            }
+            window.location.replace(target);
           } catch (e) {
             window.location.href = LIVE;
           }
         }
-        document.getElementById("retry").addEventListener("click", go);
+        document.getElementById("retry").addEventListener("click", function () { go(LIVE); });
+        document.getElementById("home").addEventListener("click", function (ev) {
+          ev.preventDefault();
+          go(LIVE);
+        });
+        // If we are actually online, leave this page automatically
+        if (navigator.onLine) {
+          setTimeout(function () { go(LIVE); }, 600);
+        }
         window.addEventListener("online", function () {
-          setTimeout(go, 400);
+          setTimeout(function () { go(LIVE); }, 300);
         });
       })();
     </script>

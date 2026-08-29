@@ -1,4 +1,4 @@
-/* D4EXAM Firebase Messaging + offline-first app shell */
+/* D4EXAM Firebase Messaging + offline shell (network-first navigations) */
 /* global importScripts, firebase */
 importScripts("https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/11.0.2/firebase-messaging-compat.js");
@@ -15,11 +15,10 @@ firebase.initializeApp({
 
 var messaging = firebase.messaging();
 
-var SHELL_CACHE = "d4exam-shell-v5";
-var RUNTIME_CACHE = "d4exam-runtime-v5";
+/* Bump versions whenever offline/SW behaviour changes so clients drop stale caches */
+var SHELL_CACHE = "d4exam-shell-v7";
+var RUNTIME_CACHE = "d4exam-runtime-v7";
 var SHELL_URLS = [
-  "/",
-  "/index.html",
   "/offline.html",
   "/icon-192.png",
   "/icon-512.png",
@@ -43,18 +42,15 @@ self.addEventListener("activate", function (event) {
     caches.keys().then(function (keys) {
       return Promise.all(
         keys.map(function (k) {
-          if (
-            k !== SHELL_CACHE &&
-            k !== RUNTIME_CACHE &&
-            (k.indexOf("d4exam-shell-") === 0 || k.indexOf("d4exam-runtime-") === 0)
-          ) {
+          if (k !== SHELL_CACHE && k !== RUNTIME_CACHE) {
             return caches.delete(k);
           }
         }),
       );
+    }).then(function () {
+      return self.clients.claim();
     }),
   );
-  self.clients.claim();
 });
 
 function isStaticAsset(pathname) {
@@ -74,29 +70,37 @@ function isStaticAsset(pathname) {
 self.addEventListener("fetch", function (event) {
   var req = event.request;
   if (req.method !== "GET") return;
-  var url = new URL(req.url);
+  var url;
+  try {
+    url = new URL(req.url);
+  } catch (e) {
+    return;
+  }
   if (url.origin !== self.location.origin) return;
   if (url.pathname.indexOf("/api") === 0) return;
 
+  /* Navigations: always try network first. Only fall back to cache/offline when offline. */
   if (req.mode === "navigate") {
     event.respondWith(
       fetch(req)
         .then(function (res) {
-          try {
-            var copy = res.clone();
-            caches.open(RUNTIME_CACHE).then(function (c) {
-              c.put(req, copy);
-            });
-          } catch (e) {}
+          if (res && res.ok) {
+            try {
+              var copy = res.clone();
+              caches.open(RUNTIME_CACHE).then(function (c) {
+                c.put(req, copy);
+              });
+            } catch (e) {}
+          }
           return res;
         })
         .catch(function () {
           return caches.match(req).then(function (cached) {
             if (cached) return cached;
-            return caches.match("/index.html").then(function (idx) {
-              if (idx) return idx;
-              return caches.match("/").then(function (root) {
-                if (root) return root;
+            return caches.match("/").then(function (root) {
+              if (root) return root;
+              return caches.match("/index.html").then(function (idx) {
+                if (idx) return idx;
                 return caches.match("/offline.html");
               });
             });
@@ -108,37 +112,29 @@ self.addEventListener("fetch", function (event) {
 
   if (isStaticAsset(url.pathname)) {
     event.respondWith(
-      caches.match(req).then(function (cached) {
-        var fetchPromise = fetch(req)
-          .then(function (res) {
-            if (res && res.ok) {
+      fetch(req)
+        .then(function (res) {
+          if (res && res.ok) {
+            try {
               var copy = res.clone();
               caches.open(RUNTIME_CACHE).then(function (c) {
                 c.put(req, copy);
               });
-            }
-            return res;
-          })
-          .catch(function () {
-            return cached;
-          });
-        return cached || fetchPromise;
-      }),
+            } catch (e) {}
+          }
+          return res;
+        })
+        .catch(function () {
+          return caches.match(req);
+        }),
     );
     return;
   }
 
   event.respondWith(
-    fetch(req)
-      .then(function (res) {
-        return res;
-      })
-      .catch(function () {
-        return caches.match(req).then(function (cached) {
-          if (cached) return cached;
-          return caches.match("/offline.html");
-        });
-      }),
+    fetch(req).catch(function () {
+      return caches.match(req);
+    }),
   );
 });
 
