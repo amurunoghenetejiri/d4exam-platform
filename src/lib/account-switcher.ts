@@ -212,112 +212,188 @@ export async function removeAccountFromDevice(userId: string): Promise<void> {
   if (getActiveAccountId() === userId) setActiveAccountId(null);
 }
 
-/** Switch active session to a saved account. Full page navigation to role home. */
-export async function switchToAccount(userId: string): Promise<{ ok: true } | { ok: false; error: string; needsLogin?: boolean }> {
+function finishSwitchNavigation(account: SavedAccount): void {
+  setActiveAccountId(account.userId);
+  if (account.role) seedPendingLoginRole(account.role);
+  const path =
+    account.role && account.role in roleHome ? roleHome[account.role] : "/";
+  if (typeof window !== "undefined") {
+    window.location.replace(path);
+  }
+}
+
+/**
+ * Switch active session to a saved account.
+ * CRITICAL: never sign out the current user until the target session is confirmed.
+ * Otherwise a failed switch leaves an empty shell (no name / default logo).
+ */
+export async function switchToAccount(
+  userId: string,
+): Promise<{ ok: true } | { ok: false; error: string; needsLogin?: boolean }> {
   const vault = readVault();
   const account = vault.accounts.find((a) => a.userId === userId);
   if (!account) return { ok: false, error: "Account not found on this device." };
   if (!account.refreshToken) {
-    return { ok: false, error: "No saved session for that account. Sign in again.", needsLogin: true };
+    return {
+      ok: false,
+      error: "No saved session for that account. Sign in again.",
+      needsLogin: true,
+    };
   }
 
-  const path =
-    account.role && account.role in roleHome ? roleHome[account.role] : "/";
-
+  // Snapshot current session so we can restore if switch fails
+  let previousAccess: string | null = null;
+  let previousRefresh: string | null = null;
+  let previousUserId: string | null = null;
   try {
-    try {
-      const { data: cur } = await supabase.auth.getSession();
-      if (cur.session?.user?.id === userId) {
-        setActiveAccountId(userId);
-        if (account.role) seedPendingLoginRole(account.role);
-        if (cur.session.access_token && cur.session.refresh_token) {
-          account.accessToken = cur.session.access_token;
-          account.refreshToken = cur.session.refresh_token;
-          account.lastUsedAt = Date.now();
-          const idx = vault.accounts.findIndex((a) => a.userId === userId);
-          if (idx >= 0) vault.accounts[idx] = account;
-          writeVault(vault);
-        }
-        if (typeof window !== "undefined") window.location.replace(path);
+    const { data: cur } = await supabase.auth.getSession();
+    if (cur.session?.access_token && cur.session.refresh_token) {
+      previousAccess = cur.session.access_token;
+      previousRefresh = cur.session.refresh_token;
+      previousUserId = cur.session.user?.id ?? null;
+      if (previousUserId === userId) {
+        account.accessToken = cur.session.access_token;
+        account.refreshToken = cur.session.refresh_token;
+        account.lastUsedAt = Date.now();
+        const idx = vault.accounts.findIndex((a) => a.userId === userId);
+        if (idx >= 0) vault.accounts[idx] = account;
+        writeVault(vault);
+        finishSwitchNavigation(account);
         return { ok: true };
       }
-    } catch {
-      /* continue */
-    }
-
-    let access = account.accessToken;
-    let refresh = account.refreshToken;
-    let sessionOk = false;
-
-    try {
-      const { data: refData, error: refErr } = await supabase.auth.refreshSession({
-        refresh_token: refresh,
-      });
-      if (!refErr && refData.session?.access_token && refData.session.refresh_token) {
-        access = refData.session.access_token;
-        refresh = refData.session.refresh_token;
-        sessionOk = true;
+      // Persist current account tokens before leaving
+      if (previousUserId) {
+        const pIdx = vault.accounts.findIndex((a) => a.userId === previousUserId);
+        if (pIdx >= 0) {
+          vault.accounts[pIdx] = {
+            ...vault.accounts[pIdx],
+            accessToken: previousAccess,
+            refreshToken: previousRefresh,
+            lastUsedAt: Date.now(),
+          };
+          writeVault(vault);
+        }
       }
-    } catch {
-      /* try setSession */
     }
+  } catch {
+    /* continue */
+  }
 
-    if (!sessionOk) {
-      try {
-        await supabase.auth.signOut({ scope: "local" });
-      } catch {
-        /* ignore */
-      }
-      const { data: setData, error: setErr } = await supabase.auth.setSession({
-        access_token: access,
-        refresh_token: refresh,
-      });
-      if (!setErr && setData.session?.access_token && setData.session.refresh_token) {
+  let access = account.accessToken;
+  let refresh = account.refreshToken;
+  let sessionOk = false;
+
+  // 1) Prefer setSession with stored tokens (no signOut first)
+  try {
+    const { data: setData, error: setErr } = await supabase.auth.setSession({
+      access_token: access,
+      refresh_token: refresh,
+    });
+    if (!setErr && setData.session?.access_token && setData.session.refresh_token) {
+      if (setData.session.user?.id === userId || !setData.session.user?.id) {
         access = setData.session.access_token;
         refresh = setData.session.refresh_token;
         sessionOk = true;
       }
     }
+  } catch {
+    /* try refresh */
+  }
 
-    if (!sessionOk) {
-      try {
-        const { data: ref2, error: refErr2 } = await supabase.auth.refreshSession({
-          refresh_token: refresh,
-        });
-        if (!refErr2 && ref2.session?.access_token && ref2.session.refresh_token) {
-          access = ref2.session.access_token;
-          refresh = ref2.session.refresh_token;
+  // 2) Refresh using stored refresh token
+  if (!sessionOk) {
+    try {
+      const { data: refData, error: refErr } = await supabase.auth.refreshSession({
+        refresh_token: refresh,
+      });
+      if (!refErr && refData.session?.access_token && refData.session.refresh_token) {
+        const uid = refData.session.user?.id;
+        if (!uid || uid === userId) {
+          access = refData.session.access_token;
+          refresh = refData.session.refresh_token;
           sessionOk = true;
         }
+      }
+    } catch {
+      /* fail */
+    }
+  }
+
+  // 3) One more setSession with refreshed tokens if we got them
+  if (!sessionOk && access && refresh) {
+    try {
+      const { data: set2, error: err2 } = await supabase.auth.setSession({
+        access_token: access,
+        refresh_token: refresh,
+      });
+      if (!err2 && set2.session?.access_token && set2.session.refresh_token) {
+        access = set2.session.access_token;
+        refresh = set2.session.refresh_token;
+        sessionOk = true;
+      }
+    } catch {
+      /* fail */
+    }
+  }
+
+  if (!sessionOk) {
+    // Restore previous session — do NOT leave user logged out
+    if (previousAccess && previousRefresh) {
+      try {
+        await supabase.auth.setSession({
+          access_token: previousAccess,
+          refresh_token: previousRefresh,
+        });
       } catch {
-        /* fail */
+        /* ignore */
       }
     }
+    return {
+      ok: false,
+      error: "Session expired for that account. Sign in again with Add Account.",
+      needsLogin: true,
+    };
+  }
 
-    if (!sessionOk) {
+  // Confirm session belongs to target user
+  try {
+    const { data: check } = await supabase.auth.getSession();
+    const sid = check.session?.user?.id;
+    if (sid && sid !== userId) {
+      if (previousAccess && previousRefresh) {
+        try {
+          await supabase.auth.setSession({
+            access_token: previousAccess,
+            refresh_token: previousRefresh,
+          });
+        } catch {
+          /* ignore */
+        }
+      }
       return {
         ok: false,
-        error: "Session expired for that account. Sign in again.",
+        error: "Could not activate that account. Sign in again with Add Account.",
         needsLogin: true,
       };
     }
-
-    account.accessToken = access;
-    account.refreshToken = refresh;
-    account.lastUsedAt = Date.now();
-    const idx = vault.accounts.findIndex((a) => a.userId === userId);
-    if (idx >= 0) vault.accounts[idx] = account;
-    else vault.accounts.push(account);
-    writeVault(vault);
-    setActiveAccountId(userId);
-
-    if (account.role) seedPendingLoginRole(account.role);
-
-    if (typeof window !== "undefined") window.location.replace(path);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: (e as Error).message || "Could not switch account." };
+    if (check.session?.access_token && check.session.refresh_token) {
+      access = check.session.access_token;
+      refresh = check.session.refresh_token;
+    }
+  } catch {
+    /* proceed with tokens we have */
   }
+
+  account.accessToken = access;
+  account.refreshToken = refresh;
+  account.lastUsedAt = Date.now();
+  const idx = vault.accounts.findIndex((a) => a.userId === userId);
+  if (idx >= 0) vault.accounts[idx] = account;
+  else vault.accounts.push(account);
+  writeVault(vault);
+
+  finishSwitchNavigation(account);
+  return { ok: true };
 }
 
 /** Log out of the current account only; keep other saved accounts. */
@@ -347,6 +423,12 @@ export async function signOutThisAccount(): Promise<void> {
 
   const remaining = listSavedAccounts();
   if (remaining.length > 0) {
+    // Auto-switch to the most recently used remaining account
+    const next = remaining[0];
+    if (next?.userId) {
+      const result = await switchToAccount(next.userId);
+      if (result.ok) return;
+    }
     if (typeof window !== "undefined") {
       window.location.href = "/login?switched=1";
     }
