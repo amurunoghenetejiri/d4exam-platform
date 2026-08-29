@@ -18,8 +18,8 @@
     </style>
 
     <!--
-      System launch splash = solid app theme navy only (no centered logo icon).
-      The real branded D4EXAM splash is AnimatedSplash in the WebView after load.
+      System launch splash = solid app theme navy only (no centered logo).
+      AnimatedSplash is the only branded screen (logo + SMART. SECURE. SEAMLESS.).
     -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
