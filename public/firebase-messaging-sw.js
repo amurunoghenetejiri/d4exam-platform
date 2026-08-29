@@ -16,8 +16,8 @@ firebase.initializeApp({
 var messaging = firebase.messaging();
 
 /* Bump versions whenever offline/SW behaviour changes so clients drop stale caches */
-var SHELL_CACHE = "d4exam-shell-v7";
-var RUNTIME_CACHE = "d4exam-runtime-v7";
+var SHELL_CACHE = "d4exam-shell-v8";
+var RUNTIME_CACHE = "d4exam-runtime-v8";
 var SHELL_URLS = [
   "/offline.html",
   "/icon-192.png",
@@ -79,10 +79,10 @@ self.addEventListener("fetch", function (event) {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.indexOf("/api") === 0) return;
 
-  /* Navigations: always try network first. Only fall back to cache/offline when offline. */
+  /* Navigations: always try network first. Only fall back to cache/offline when truly offline. */
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: "no-store" })
         .then(function (res) {
           if (res && res.ok) {
             try {

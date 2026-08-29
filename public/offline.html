@@ -37,40 +37,69 @@
       <p>Connect to the Internet once to download this content. Pages you already opened will work from saved data.</p>
       <div class="actions">
         <button type="button" class="primary" id="retry">Try again</button>
-        <a class="btn secondary" id="home" href="/">Go home</a>
+        <a class="btn secondary" id="home" href="https://d4exam-platform.vercel.app/">Go home</a>
       </div>
     </div>
     <script>
       (function () {
         var LIVE = "https://d4exam-platform.vercel.app/";
-        function go(path) {
-          var target = (path || LIVE) + (String(path || LIVE).indexOf("?") >= 0 ? "&" : "?") + "offline_retry=" + Date.now();
-          try {
-            // Unregister broken service workers so a stuck offline shell cannot loop
-            if ("serviceWorker" in navigator) {
-              navigator.serviceWorker.getRegistrations().then(function (regs) {
-                return Promise.all(regs.map(function (r) { return r.unregister(); }));
-              }).catch(function () {}).finally(function () {
-                try { window.location.replace(target); } catch (e) { window.location.href = target; }
-              });
-              return;
-            }
-            window.location.replace(target);
-          } catch (e) {
-            window.location.href = LIVE;
+        function clearAndGo(path) {
+          var target =
+            (path || LIVE) +
+            (String(path || LIVE).indexOf("?") >= 0 ? "&" : "?") +
+            "offline_retry=" +
+            Date.now();
+
+          var tasks = [];
+
+          if (typeof caches !== "undefined" && caches.keys) {
+            tasks.push(
+              caches.keys().then(function (keys) {
+                return Promise.all(keys.map(function (k) {
+                  return caches.delete(k);
+                }));
+              }).catch(function () {})
+            );
           }
+
+          if ("serviceWorker" in navigator) {
+            tasks.push(
+              navigator.serviceWorker.getRegistrations().then(function (regs) {
+                return Promise.all(
+                  regs.map(function (r) {
+                    return r.unregister();
+                  })
+                );
+              }).catch(function () {})
+            );
+          }
+
+          Promise.all(tasks).finally(function () {
+            try {
+              window.location.replace(target);
+            } catch (e) {
+              window.location.href = target;
+            }
+          });
         }
-        document.getElementById("retry").addEventListener("click", function () { go(LIVE); });
+
+        document.getElementById("retry").addEventListener("click", function () {
+          clearAndGo(LIVE);
+        });
         document.getElementById("home").addEventListener("click", function (ev) {
           ev.preventDefault();
-          go(LIVE);
+          clearAndGo(LIVE);
         });
-        // If we are actually online, leave this page automatically
+
         if (navigator.onLine) {
-          setTimeout(function () { go(LIVE); }, 600);
+          setTimeout(function () {
+            clearAndGo(LIVE);
+          }, 400);
         }
         window.addEventListener("online", function () {
-          setTimeout(function () { go(LIVE); }, 300);
+          setTimeout(function () {
+            clearAndGo(LIVE);
+          }, 200);
         });
       })();
     </script>
