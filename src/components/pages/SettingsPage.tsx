@@ -14,7 +14,7 @@ import {
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { useSessionUser, signOut } from "@/lib/session";
+import { useSessionUser } from "@/lib/session";
 import {
   DEFAULT_NOTIFICATION_PREFS,
   DEFAULT_DISPLAY_PREFS,
@@ -36,6 +36,8 @@ import {
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { Loader2, Upload, Building2 } from "lucide-react";
 import { PushSettingsCard } from "@/components/settings/PushSettingsCard";
+import { SwitchAccountCard } from "@/components/settings/SwitchAccountCard";
+import { signOutThisAccount, signOutAllAccounts, listSavedAccounts } from "@/lib/account-switcher";
 
 export function SettingsPage({ scope }: { scope: string }) {
   const { data: session } = useSessionUser();
@@ -299,13 +301,32 @@ export function SettingsPage({ scope }: { scope: string }) {
           </div>
         </SectionCard>
 
+        <SwitchAccountCard />
+
         <SectionCard title="Session" description="Device and access information">
           <InfoRow label="Account scope" value={scope} />
           <InfoRow label="Signed-in email" value={session?.email || "—"} />
-          <div className="pt-4">
-            <Button variant="outline" onClick={() => void signOut()}>
+          <InfoRow label="Name" value={session?.fullName || "—"} />
+          <div className="flex flex-wrap gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (window.confirm("Sign out of this account?")) void signOutThisAccount();
+              }}
+            >
               Sign out
             </Button>
+            {listSavedAccounts().length > 1 ? (
+              <Button
+                variant="ghost"
+                className="text-red-600"
+                onClick={() => {
+                  if (window.confirm("Sign out of all accounts on this device?")) void signOutAllAccounts();
+                }}
+              >
+                Sign out all
+              </Button>
+            ) : null}
           </div>
         </SectionCard>
       </div>
