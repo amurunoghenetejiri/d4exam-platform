@@ -10,102 +10,277 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Restore plugins from known-good commit and harden
+      - name: Require typed mediaProjection FGS before getMediaProjection
         run: |
           set -euo pipefail
           python3 << 'PY'
           from pathlib import Path
-          import subprocess
-          import urllib.request
 
-          GOOD = "df882b70fd26d240679e10a24725c6c13abc1f8d"
+          SERVICE = Path("native-android/app/src/main/java/com/d4exam/app/ScreenCaptureService.java").read_text()
+          # Rewrite promoteToForeground success logic: only FOREGROUND_READY on typed startForeground
+          # Already mostly correct; ensure no untyped-only success path on API 29+
 
-          def load(path: str) -> str:
-              try:
-                  return subprocess.check_output(
-                      ["git", "show", f"{GOOD}:{path}"], text=True
-                  )
-              except Exception:
-                  url = f"https://raw.githubusercontent.com/amurunoghenetejiri/d4exam-platform/{GOOD}/{path}"
-                  print("fetch", url)
-                  with urllib.request.urlopen(url) as r:
-                      return r.read().decode("utf-8")
+          SERVICE_FIXED = SERVICE
+          # Ensure FOREGROUND_READY only set when typed start succeeds
+          if "FOREGROUND_READY.set(true)" in SERVICE_FIXED and "FOREGROUND_READY.set(ok)" not in SERVICE_FIXED:
+              # leave as-is if structure differs; rewrite whole service from known template below if needed
+              pass
 
-          def harden(t: str) -> str:
-              hard = (
-                  '      if (!ScreenCaptureService.FOREGROUND_READY.get()) {\n'
-                  '        call.reject(\n'
-                  '            "Could not start screen monitoring service. Allow notifications for D4EXAM and try again.");\n'
-                  '        return;\n'
-                  '      }'
-              )
-              soft = (
-                  '      if (!ScreenCaptureService.FOREGROUND_READY.get()) {\n'
-                  '        Log.w(TAG, "FGS not ready after await — proceeding anyway (check notification permission)");\n'
-                  '      }'
-              )
-              if hard in t:
-                  t = t.replace(hard, soft)
-              if "import android.Manifest;" not in t:
-                  t = t.replace(
-                      "import android.app.Activity;",
-                      "import android.Manifest;\nimport android.app.Activity;",
-                  )
-              if "import android.content.pm.PackageManager;" not in t:
-                  t = t.replace(
-                      "import android.content.Context;",
-                      "import android.content.Context;\nimport android.content.pm.PackageManager;",
-                  )
-              if "import androidx.core.app.ActivityCompat;" not in t:
-                  t = t.replace(
-                      "import androidx.activity.result.ActivityResult;",
-                      "import androidx.activity.result.ActivityResult;\n"
-                      "import androidx.core.app.ActivityCompat;\n"
-                      "import androidx.core.content.ContextCompat;",
-                  )
-              if "requestPermissions" not in t:
-                  marker = "ScreenCaptureService.resetReady();"
-                  notif = (
-                      "// Android 13+: request notification permission so FGS can post monitoring notification\n"
-                      "      try {\n"
-                      "        if (Build.VERSION.SDK_INT >= 33) {\n"
-                      "          Activity act = getActivity();\n"
-                      "          if (act != null\n"
-                      "              && ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS)\n"
-                      "                  != PackageManager.PERMISSION_GRANTED) {\n"
-                      "            ActivityCompat.requestPermissions(\n"
-                      "                act, new String[] {Manifest.permission.POST_NOTIFICATIONS}, 4403);\n"
-                      "            try { Thread.sleep(600); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }\n"
-                      "          }\n"
-                      "        }\n"
-                      "      } catch (Exception permEx) {\n"
-                      "        Log.w(TAG, \"notification permission request skipped\", permEx);\n"
-                      "      }\n"
-                      "      ScreenCaptureService.resetReady();"
-                  )
-                  if marker in t:
-                      t = t.replace(marker, notif, 1)
-              return t
+          SERVICE_FIXED = r'''package com.d4exam.app;
 
-          paths = [
-              "android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java",
-              "native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java",
-          ]
-          for path in paths:
-              raw = load(path)
-              fixed = harden(raw)
-              assert "PLACEHOLDER" not in fixed, path
-              assert "Could not start screen monitoring" not in fixed, path
-              assert "POST_NOTIFICATIONS" in fixed, path
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
+import android.content.Intent;
+import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.os.Build;
+import android.os.IBinder;
+import android.util.Log;
+import androidx.core.app.NotificationCompat;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/** Foreground service required for MediaProjection (must be typed MEDIA_PROJECTION before getMediaProjection). */
+public class ScreenCaptureService extends Service {
+  private static final String TAG = "D4ScreenCaptureSvc";
+  private static final String CHANNEL_ID = "d4exam_screen_share";
+  private static final int NOTIF_ID = 4402;
+  private static final int NOTIF_COLOR = 0xFF0B1B3A;
+
+  public static final AtomicBoolean FOREGROUND_READY = new AtomicBoolean(false);
+  public static volatile CountDownLatch READY_LATCH = new CountDownLatch(1);
+
+  public static void resetReady() {
+    FOREGROUND_READY.set(false);
+    READY_LATCH = new CountDownLatch(1);
+  }
+
+  @Override
+  public void onCreate() {
+    super.onCreate();
+    promoteToForeground();
+  }
+
+  private void promoteToForeground() {
+    createChannel();
+    int smallIcon = android.R.drawable.ic_menu_camera;
+    try {
+      int resId = getResources().getIdentifier("ic_stat_d4exam", "drawable", getPackageName());
+      if (resId != 0) smallIcon = resId;
+    } catch (Exception ignored) {}
+
+    NotificationCompat.Builder builder =
+        new NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("D4EXAM exam monitoring")
+            .setContentText("Screen sharing stays on until you submit the exam.")
+            .setSmallIcon(smallIcon)
+            .setColor(NOTIF_COLOR)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE);
+
+    try {
+      Bitmap large = BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
+      if (large != null) builder.setLargeIcon(large);
+    } catch (Exception e) {
+      Log.w(TAG, "largeIcon load failed", e);
+    }
+
+    Notification notification = builder.build();
+    boolean ok = false;
+    try {
+      if (Build.VERSION.SDK_INT >= 29) {
+        startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+      } else {
+        startForeground(NOTIF_ID, notification);
+      }
+      ok = true;
+    } catch (Exception e) {
+      Log.e(TAG, "startForeground MEDIA_PROJECTION failed", e);
+      try {
+        Notification fallback =
+            new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("D4EXAM")
+                .setContentText("Screen monitoring active")
+                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .build();
+        if (Build.VERSION.SDK_INT >= 29) {
+          startForeground(NOTIF_ID, fallback, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+        } else {
+          startForeground(NOTIF_ID, fallback);
+        }
+        ok = true;
+      } catch (Exception e2) {
+        Log.e(TAG, "typed fallback failed", e2);
+        ok = false;
+      }
+    }
+    FOREGROUND_READY.set(ok);
+    Log.i(TAG, "FOREGROUND_READY=" + ok + " api=" + Build.VERSION.SDK_INT);
+    try { READY_LATCH.countDown(); } catch (Exception ignored) {}
+  }
+
+  private void createChannel() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      NotificationChannel channel =
+          new NotificationChannel(CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_DEFAULT);
+      channel.setDescription("Shown while screen share is active during an examination");
+      channel.setShowBadge(false);
+      channel.setSound(null, null);
+      NotificationManager nm = getSystemService(NotificationManager.class);
+      if (nm != null) nm.createNotificationChannel(channel);
+    }
+  }
+
+  @Override
+  public int onStartCommand(Intent intent, int flags, int startId) {
+    if (!FOREGROUND_READY.get()) promoteToForeground();
+    return START_STICKY;
+  }
+
+  @Override
+  public IBinder onBind(Intent intent) { return null; }
+
+  @Override
+  public void onDestroy() {
+    FOREGROUND_READY.set(false);
+    Log.i(TAG, "onDestroy");
+    super.onDestroy();
+  }
+}
+'''
+
+          for path in [
+              "native-android/app/src/main/java/com/d4exam/app/ScreenCaptureService.java",
+              "android/app/src/main/java/com/d4exam/app/ScreenCaptureService.java",
+          ]:
               Path(path).parent.mkdir(parents=True, exist_ok=True)
-              Path(path).write_text(fixed)
-              print("wrote", path, len(fixed))
+              Path(path).write_text(SERVICE_FIXED)
+              print("service", path)
+
+          GATE = '''      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready — extra startForegroundService attempt");
+        try {
+          ScreenCaptureService.resetReady();
+          Intent svc3 = new Intent(getContext(), ScreenCaptureService.class);
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(svc3);
+          } else {
+            getContext().startService(svc3);
+          }
+          ScreenCaptureService.READY_LATCH.await(6, TimeUnit.SECONDS);
+        } catch (Exception retry3) {
+          Log.e(TAG, "FGS extra attempt failed", retry3);
+        }
+      }
+      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        call.reject(
+            "Could not start screen monitoring service. Allow notifications for D4EXAM in system settings, then try again.");
+        return;
+      }
+      try {
+        Thread.sleep(300);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+      }
+'''
+
+          def harden_plugin(path: str) -> None:
+              p = Path(path)
+              if not p.exists():
+                  print("skip", path)
+                  return
+              t = p.read_text()
+              # Remove soft-proceed paths
+              for soft in [
+                  '''      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready after await — proceeding anyway (check notification permission)");
+      }''',
+                  '''      if (!ready || !ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready in time — proceeding anyway");
+      }''',
+                  '''      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready after await — proceeding anyway (check notification permission)");
+      }
+''',
+              ]:
+                  if soft in t:
+                      t = t.replace(soft, GATE)
+              if "extra startForegroundService attempt" not in t:
+                  # Insert before getMediaProjection
+                  key = "projectionManager.getMediaProjection"
+                  idx = t.find(key)
+                  if idx < 0:
+                      raise SystemExit("getMediaProjection not found in " + path)
+                  # walk back to assignment line start
+                  line_start = t.rfind("\n", 0, idx) + 1
+                  # include MediaProjection mp = line start if present
+                  prev = t.rfind("MediaProjection mp", 0, idx)
+                  if prev > 0 and prev > line_start - 200:
+                      line_start = t.rfind("\n", 0, prev) + 1
+                  t = t[:line_start] + GATE + t[line_start:]
+
+              assert "getMediaProjection" in t
+              assert "extra startForegroundService attempt" in t or "Could not start screen monitoring" in t
+              # must not soft-proceed
+              assert "proceeding anyway" not in t
+              p.write_text(t)
+              print("plugin", path, len(t))
+
+          harden_plugin("native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java")
+          harden_plugin("android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java")
+
+          # build-android: re-apply service after cap sync
+          bw = Path(".github/workflows/build-android.yml")
+          bt = bw.read_text()
+          if "Re-apply ScreenCaptureService after cap sync" not in bt:
+              marker = "      - name: Build debug APK"
+              inject = '''      - name: Re-apply ScreenCaptureService after cap sync
+        run: |
+          set -euo pipefail
+          MAN="android/app/src/main/AndroidManifest.xml"
+          test -f "$MAN"
+          if ! grep -q 'ScreenCaptureService' "$MAN"; then
+            sed -i 's|</application>|        <service android:name=".ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />\n    </application>|' "$MAN"
+          fi
+          if ! grep -q 'FOREGROUND_SERVICE_MEDIA_PROJECTION' "$MAN"; then
+            sed -i 's|</manifest>|    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />\n</manifest>|' "$MAN" || true
+          fi
+          if ! grep -q 'POST_NOTIFICATIONS' "$MAN"; then
+            sed -i 's|</manifest>|    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n</manifest>|' "$MAN" || true
+          fi
+          grep -q 'ScreenCaptureService' "$MAN"
+          grep -q 'mediaProjection' "$MAN"
+          grep -q 'FOREGROUND_SERVICE_MEDIA_PROJECTION' "$MAN"
+          echo "OK final manifest has mediaProjection FGS"
+
+'''
+              if marker not in bt:
+                  raise SystemExit("build marker missing")
+              bw.write_text(bt.replace(marker, inject + marker, 1))
+              print("build-android patched")
+          else:
+              print("build-android already patched")
+          print("DONE")
           PY
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java \
-                  native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
-          git commit -m "fix(android): ScreenSharePlugin POST_NOTIFICATIONS + soft FGS (no hard reject)" || echo "no changes"
+          git add native-android/app/src/main/java/com/d4exam/app/ScreenCaptureService.java \
+                  native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java \
+                  android/app/src/main/java/com/d4exam/app/ScreenCaptureService.java \
+                  android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java \
+                  .github/workflows/build-android.yml || true
+          git commit -m "fix(android): block getMediaProjection until typed mediaProjection FGS is ready" || echo "no changes"
           git push origin HEAD:main
