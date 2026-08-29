@@ -1,0 +1,25 @@
+name: PATCH-CBT-SUBMIT-FS
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/PATCH-CBT-SUBMIT-FS.yml
+      - scripts/patch_cbt_submit_fs.py
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/patch_cbt_submit_fs.py
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt): submit without return-to-fullscreen gate"
+            git push
+          fi

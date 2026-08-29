@@ -25,6 +25,7 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(ExamImmersivePlugin.class);
     registerPlugin(ScreenSharePlugin.class);
     super.onCreate(savedInstanceState);
+    applyChromeColors();
     try {
       Window w = getWindow();
       if (w != null) {
@@ -47,4 +48,32 @@ public class MainActivity extends BridgeActivity {
       // Never block launch
     }
   }
+
+  @Override
+  public void onResume() {
+    super.onResume();
+    applyChromeColors();
+  }
+
+  private void applyChromeColors() {
+    try {
+      Window w = getWindow();
+      if (w == null) return;
+      int navy = Color.parseColor("#0b1b3a");
+      w.setStatusBarColor(navy);
+      w.setNavigationBarColor(navy);
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        w.setNavigationBarContrastEnforced(false);
+      }
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        View decor = w.getDecorView();
+        int flags = decor.getSystemUiVisibility();
+        flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        decor.setSystemUiVisibility(flags);
+      }
+    } catch (Exception ignored) {
+    }
+  }
+
 }
