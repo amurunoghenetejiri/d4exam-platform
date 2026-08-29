@@ -21,7 +21,7 @@ import { NotificationPermissionPrompt } from "@/components/NotificationPermissio
 import { useSessionUser } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
-import { applyNativeStatusBar, hideSplashSafely } from "@/native/statusBar";
+import { applyNativeStatusBar } from "@/native/statusBar";
 import { registerAndroidBackButton } from "@/native/backButton";
 import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
 
@@ -34,11 +34,8 @@ function NativeBootstrap() {
       try {
         document.documentElement.classList.add("d4-native");
         await applyNativeStatusBar();
-        // Safety: never leave the system logo splash stuck if AnimatedSplash is delayed.
-        await hideSplashSafely();
-        window.setTimeout(() => {
-          void hideSplashSafely();
-        }, 800);
+        // Do NOT hide SplashScreen here — AnimatedSplash owns hideSplashSafely()
+        // so the user never sees blank navy between system splash and branded splash.
         const unsubBack = await registerAndroidBackButton();
         if (cancelled) {
           unsubBack();
@@ -178,13 +175,61 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
+/**
+ * Instant paint for native/PWA cold start: solid theme navy until React mounts
+ * AnimatedSplash. Removed as soon as AnimatedSplash is visible.
+ * Website browsers: boot splash is never shown (script checks shell).
+ */
+const BOOT_SPLASH_SCRIPT = `
+(function(){
+  try {
+    var shell = false;
+    try {
+      var c = window.Capacitor;
+      if (c && (c.isNativePlatform && c.isNativePlatform() || c.getPlatform && (c.getPlatform()==='android'||c.getPlatform()==='ios'))) shell = true;
+    } catch(e){}
+    try {
+      var ua = navigator.userAgent || '';
+      if (/Android/i.test(ua) && (/; wv\\)/i.test(ua) || /Capacitor/i.test(ua))) shell = true;
+    } catch(e){}
+    try {
+      if (window.matchMedia && (window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches)) shell = true;
+      if (navigator.standalone === true) shell = true;
+    } catch(e){}
+    if (!shell) return;
+    if (sessionStorage.getItem('d4exam_splash_shown_v5') === '1') return;
+    var el = document.getElementById('d4-boot-splash');
+    if (el) el.style.display = 'flex';
+  } catch(e){}
+})();
+`;
+
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
         <HeadContent />
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
+#d4-boot-splash{display:none;position:fixed;inset:0;z-index:2147483646;align-items:center;justify-content:center;flex-direction:column;background:#0b1b3a;color:#fff;font-family:system-ui,sans-serif}
+#d4-boot-splash img{width:min(40vw,160px);height:min(40vw,160px);object-fit:contain}
+#d4-boot-splash .t{margin-top:1.25rem;font-weight:800;letter-spacing:.14em;font-size:clamp(1.5rem,6vw,2.25rem)}
+#d4-boot-splash .t span.b{color:#2563eb}
+#d4-boot-splash .s{margin-top:.5rem;font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:#94a3b8;font-weight:600}
+`,
+          }}
+        />
       </head>
       <body className="min-h-dvh bg-background text-foreground antialiased">
+        <div id="d4-boot-splash" aria-hidden="true">
+          <img src="/logo.png" alt="" width="160" height="160" />
+          <div className="t">
+            D<span className="b">4</span>EXAM
+          </div>
+          <div className="s">Smart Examination System</div>
+        </div>
+        <script dangerouslySetInnerHTML={{ __html: BOOT_SPLASH_SCRIPT }} />
         {children}
         <Scripts />
       </body>
