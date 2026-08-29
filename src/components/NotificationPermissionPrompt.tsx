@@ -1,6 +1,7 @@
 /**
- * Soft prompt after login / application — does not block UI.
- * Asks once per role until granted or dismissed.
+ * Soft prompt after login — does not block UI.
+ * NEVER re-ask if permission already granted.
+ * Confirmation native notification only when user JUST enables.
  */
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -11,8 +12,10 @@ import {
   refreshNativePushPermissionState,
 } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
+import { notificationsEnabledConfirm } from "@/lib/notify-messages";
+import { showD4ExamNativeNotification } from "@/native/localNotify";
 
-const PROMPT_KEY = "d4_notif_prompt_v1";
+const PROMPT_KEY = "d4_notif_prompt_v2";
 
 function alreadyPrompted(userId: string, role: string): boolean {
   try {
@@ -28,6 +31,16 @@ function markPrompted(userId: string, role: string) {
   } catch {
     /* ignore */
   }
+}
+
+function settingsLinkForRole(role?: string | null): string {
+  const r = (role || "").toLowerCase();
+  if (r.includes("super")) return "/super-admin/settings";
+  if (r.includes("school") || r === "admin") return "/admin/settings";
+  if (r.includes("officer")) return "/officer/settings";
+  if (r.includes("teacher")) return "/teacher/settings";
+  if (r.includes("student")) return "/student/settings";
+  return "/";
 }
 
 export function NotificationPermissionPrompt() {
@@ -46,6 +59,8 @@ export function NotificationPermissionPrompt() {
       if (isNativeShell()) {
         state = await refreshNativePushPermissionState();
       }
+
+      // Already granted / denied / unsupported → NEVER show Allow prompt again
       if (state === "granted" || state === "denied" || state === "unsupported") {
         markPrompted(session.userId, session.role);
         try {
@@ -59,25 +74,42 @@ export function NotificationPermissionPrompt() {
         return;
       }
 
-      // Delay so login UI settles
       await new Promise((r) => setTimeout(r, 1800));
       if (fired.current) return;
       fired.current = true;
       markPrompted(session.userId, session.role);
 
-      toast.message("Stay updated on D4EXAM", {
+      toast.message("Stay updated with D4EXAM 🔔", {
         description:
-          "Enable notifications for exams, results, and important school updates. You can change this later in Settings.",
-        duration: 12_000,
+          "Allow notifications to receive: exam reminders, examination approvals, result releases, important security alerts, and school/application updates.",
+        duration: 14_000,
         action: {
-          label: "Enable",
+          label: "Allow Notifications",
           onClick: () => {
             if (busy) return;
             setBusy(true);
             void enablePushNotifications(session.userId, session.role)
-              .then((r) => {
-                if (r.ok) toast.success("Notifications enabled");
-                else toast.error(r.error || "Could not enable notifications");
+              .then(async (r) => {
+                if (r.ok) {
+                  toast.success("Notifications enabled");
+                  // One-time confirmation notification (native D4EXAM, not Chrome)
+                  try {
+                    const key = `d4_notif_enabled_once:${session.userId}`;
+                    if (localStorage.getItem(key) !== "1") {
+                      localStorage.setItem(key, "1");
+                      const copy = notificationsEnabledConfirm();
+                      if (isNativeShell()) {
+                        await showD4ExamNativeNotification(
+                          copy.title,
+                          copy.message,
+                          settingsLinkForRole(session.role),
+                        );
+                      }
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                } else toast.error(r.error || "Could not enable notifications");
               })
               .finally(() => setBusy(false));
           },
@@ -100,6 +132,14 @@ export function promptNotificationsAfterApplication(opts?: {
     if (typeof window === "undefined") return;
     const key = `d4_app_prompt:${opts?.userId || "anon"}`;
     if (localStorage.getItem(key) === "1") return;
+
+    // If already granted, never show enable prompt
+    const state = getPushPermissionState();
+    if (state === "granted" || state === "denied") {
+      localStorage.setItem(key, "1");
+      return;
+    }
+
     localStorage.setItem(key, "1");
     toast.message("Get application updates", {
       description:
@@ -109,17 +149,24 @@ export function promptNotificationsAfterApplication(opts?: {
         label: "Enable",
         onClick: () => {
           if (opts?.userId) {
-            void enablePushNotifications(opts.userId, opts.role || null).then((r) => {
-              if (r.ok) toast.success("Notifications enabled");
-              else toast.error(r.error || "Could not enable");
+            void enablePushNotifications(opts.userId, opts.role || null).then(async (r) => {
+              if (r.ok) {
+                toast.success("Notifications enabled");
+                const copy = notificationsEnabledConfirm();
+                if (isNativeShell()) {
+                  await showD4ExamNativeNotification(copy.title, copy.message, "/application-status");
+                }
+              } else toast.error(r.error || "Could not enable");
             });
           } else if (isNativeShell()) {
-            void import("@capacitor/local-notifications").then(async ({ LocalNotifications }) => {
-              await LocalNotifications.requestPermissions();
-              toast.success("Notifications enabled on this device");
-            }).catch(() => {
-              toast.message("Open Settings later to enable notifications after you sign in.");
-            });
+            void import("@capacitor/local-notifications")
+              .then(async ({ LocalNotifications }) => {
+                await LocalNotifications.requestPermissions();
+                toast.success("Notifications enabled on this device");
+              })
+              .catch(() => {
+                toast.message("Open Settings later to enable notifications after you sign in.");
+              });
           } else if ("Notification" in window) {
             void Notification.requestPermission().then((p) => {
               if (p === "granted") toast.success("Notifications enabled");
