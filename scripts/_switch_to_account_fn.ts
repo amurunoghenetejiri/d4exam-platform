@@ -15,6 +15,14 @@ export async function switchToAccount(userId: string): Promise<{ ok: true } | { 
       if (cur.session?.user?.id === userId) {
         setActiveAccountId(userId);
         if (account.role) seedPendingLoginRole(account.role);
+        if (cur.session.access_token && cur.session.refresh_token) {
+          account.accessToken = cur.session.access_token;
+          account.refreshToken = cur.session.refresh_token;
+          account.lastUsedAt = Date.now();
+          const idx = vault.accounts.findIndex((a) => a.userId === userId);
+          if (idx >= 0) vault.accounts[idx] = account;
+          writeVault(vault);
+        }
         if (typeof window !== "undefined") window.location.replace(path);
         return { ok: true };
       }
@@ -22,36 +30,61 @@ export async function switchToAccount(userId: string): Promise<{ ok: true } | { 
       /* continue */
     }
 
-    try {
-      await supabase.auth.signOut({ scope: "local" });
-    } catch {
-      /* ignore */
-    }
-
     let access = account.accessToken;
     let refresh = account.refreshToken;
+    let sessionOk = false;
 
-    const { data: setData, error: setErr } = await supabase.auth.setSession({
-      access_token: access,
-      refresh_token: refresh,
-    });
-
-    if (!setErr && setData.session?.access_token && setData.session.refresh_token) {
-      access = setData.session.access_token;
-      refresh = setData.session.refresh_token;
-    } else {
+    try {
       const { data: refData, error: refErr } = await supabase.auth.refreshSession({
         refresh_token: refresh,
       });
-      if (refErr || !refData.session?.access_token || !refData.session.refresh_token) {
-        return {
-          ok: false,
-          error: "Session expired for that account. Sign in again.",
-          needsLogin: true,
-        };
+      if (!refErr && refData.session?.access_token && refData.session.refresh_token) {
+        access = refData.session.access_token;
+        refresh = refData.session.refresh_token;
+        sessionOk = true;
       }
-      access = refData.session.access_token;
-      refresh = refData.session.refresh_token;
+    } catch {
+      /* try setSession */
+    }
+
+    if (!sessionOk) {
+      try {
+        await supabase.auth.signOut({ scope: "local" });
+      } catch {
+        /* ignore */
+      }
+      const { data: setData, error: setErr } = await supabase.auth.setSession({
+        access_token: access,
+        refresh_token: refresh,
+      });
+      if (!setErr && setData.session?.access_token && setData.session.refresh_token) {
+        access = setData.session.access_token;
+        refresh = setData.session.refresh_token;
+        sessionOk = true;
+      }
+    }
+
+    if (!sessionOk) {
+      try {
+        const { data: ref2, error: refErr2 } = await supabase.auth.refreshSession({
+          refresh_token: refresh,
+        });
+        if (!refErr2 && ref2.session?.access_token && ref2.session.refresh_token) {
+          access = ref2.session.access_token;
+          refresh = ref2.session.refresh_token;
+          sessionOk = true;
+        }
+      } catch {
+        /* fail */
+      }
+    }
+
+    if (!sessionOk) {
+      return {
+        ok: false,
+        error: "Session expired for that account. Sign in again.",
+        needsLogin: true,
+      };
     }
 
     account.accessToken = access;

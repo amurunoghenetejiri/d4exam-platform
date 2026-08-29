@@ -10,6 +10,10 @@ on:
       - scripts/cbt_fix_b64_1.txt
       - scripts/cbt_fix_b64_2.txt
       - scripts/cbt_fix_b64_3.txt
+      - scripts/patch_switch_account.py
+      - scripts/_switch_to_account_fn.ts
+      - scripts/patch_switch_card.py
+      - scripts/patch_ensure_screen.py
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -17,13 +21,24 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - run: python3 scripts/write_cbt_fix.py
+      - name: Apply all patches
+        run: |
+          set -euo pipefail
+          if [ -f scripts/write_cbt_fix.py ] && [ -f scripts/cbt_fix_b64_0.txt ]; then
+            python3 scripts/write_cbt_fix.py
+          fi
+          python3 scripts/patch_switch_account.py || true
+          python3 scripts/patch_switch_card.py || true
+          python3 scripts/patch_ensure_screen.py || true
+          grep -q 'restoreMediaAfterReturn' src/components/cbt/CbtExamSession.impl.tsx
+          grep -q 'overflow-y-auto' src/components/cbt/CbtExamSession.impl.tsx
+          grep -q 'refreshSession' src/lib/account-switcher.ts
       - name: Commit
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/components/cbt/CbtExamSession.impl.tsx
+          git add src/components/cbt/CbtExamSession.impl.tsx src/lib/account-switcher.ts src/components/settings/SwitchAccountCard.tsx src/lib/screen-share.ts
           if git diff --cached --quiet; then echo No changes; else
-            git commit -m "fix(cbt): scrollable exam, tab-threshold pause, face warn-only, media restore on return"
+            git commit -m "fix(cbt+auth): tab pause, face warn-only, media restore, switch account"
             git push
           fi
