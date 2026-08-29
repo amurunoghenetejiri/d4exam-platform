@@ -1,14 +1,22 @@
 /**
  * Publishes student screen-share JPEG frames to officer live-monitor.
- * On Android, frames come from MediaProjection via awaitLatestNativeScreenJpeg.
- * Publisher stays up for the whole exam session (not tied to one React mount only).
+ * On Android, frames come from MediaProjection via awaitLatestNativeScreenJpeg —
+ * no MediaStream tracks required.
+ *
+ * Uses a stable publisher that restarts only when identity keys change.
+ * Falls back to studentId:examId when attemptId is not yet available so
+ * frames can start flowing as soon as capture is active.
+ *
+ * CRITICAL: once enabled for an exam session, keep publishing until the
+ * session ends — do not tear down on brief isNativeScreenShareActive gaps.
  */
 import { useEffect, useRef } from "react";
 import { startLiveScreenPublisher, type LiveScreenPublisher } from "@/lib/live-video";
 import {
   holdExamScreenShare,
-  refreshNativeScreenShareState,
+  isExamScreenShareHold,
   isNativeScreenShareActive,
+  refreshNativeScreenShareState,
 } from "@/lib/screen-share";
 
 export function useLiveScreenPublish(opts: {
@@ -23,6 +31,7 @@ export function useLiveScreenPublish(opts: {
   const pubRef = useRef<LiveScreenPublisher | null>(null);
   const optsRef = useRef(opts);
   optsRef.current = opts;
+  const wasActiveRef = useRef(false);
 
   const schoolId = String(opts.schoolId || "");
   const studentId = String(opts.studentId || "");
@@ -30,11 +39,14 @@ export function useLiveScreenPublish(opts: {
   const attemptId =
     String(opts.attemptId || "") ||
     (studentId && examId ? `pending:${studentId}:${examId}` : "");
-
-  // Publish for entire active exam once identity is known.
-  // Native frames may exist even when React MediaStream is empty.
+  const identityOk = Boolean(schoolId && studentId && examId && attemptId);
   const enabled =
-    opts.enabled && Boolean(schoolId && studentId && examId && attemptId);
+    opts.enabled &&
+    identityOk &&
+    (Boolean(opts.stream) ||
+      isNativeScreenShareActive() ||
+      isExamScreenShareHold() ||
+      wasActiveRef.current);
 
   useEffect(() => {
     if (!enabled) {
@@ -44,9 +56,11 @@ export function useLiveScreenPublish(opts: {
         /* ignore */
       }
       pubRef.current = null;
+      wasActiveRef.current = false;
       return;
     }
 
+    wasActiveRef.current = true;
     holdExamScreenShare(true);
 
     try {
@@ -63,17 +77,12 @@ export function useLiveScreenPublish(opts: {
       studentId,
       examId,
       getStream: () => optsRef.current.getStream?.() || optsRef.current.stream,
-      // ~2 fps — enough for monitoring without saturating Realtime
-      intervalMs: 500,
+      intervalMs: 700,
     });
 
     const sync = window.setInterval(() => {
-      void refreshNativeScreenShareState().then((on) => {
-        if (!on && isNativeScreenShareActive()) {
-          /* already marked from recent frames */
-        }
-      });
-    }, 1500);
+      void refreshNativeScreenShareState();
+    }, 2000);
 
     return () => {
       window.clearInterval(sync);
@@ -83,7 +92,6 @@ export function useLiveScreenPublish(opts: {
         /* ignore */
       }
       pubRef.current = null;
-      // Do NOT release exam hold here — only submit/shutdown clears hold.
     };
   }, [enabled, schoolId, studentId, examId, attemptId]);
 }
