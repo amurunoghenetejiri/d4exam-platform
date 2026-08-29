@@ -15,11 +15,7 @@ import androidx.core.app.NotificationCompat;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Foreground service required while MediaProjection is active (Android 10+ / API 34+).
- * Must reach startForeground with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
- * BEFORE getMediaProjection is called.
- */
+/** Foreground service required for MediaProjection (typed MEDIA_PROJECTION before getMediaProjection). */
 public class ScreenCaptureService extends Service {
   private static final String TAG = "D4ScreenCaptureSvc";
   private static final String CHANNEL_ID = "d4exam_screen_share";
@@ -42,13 +38,11 @@ public class ScreenCaptureService extends Service {
 
   private void promoteToForeground() {
     createChannel();
-
     int smallIcon = android.R.drawable.ic_menu_camera;
     try {
       int resId = getResources().getIdentifier("ic_stat_d4exam", "drawable", getPackageName());
       if (resId != 0) smallIcon = resId;
-    } catch (Exception ignored) {
-    }
+    } catch (Exception ignored) {}
 
     NotificationCompat.Builder builder =
         new NotificationCompat.Builder(this, CHANNEL_ID)
@@ -72,16 +66,14 @@ public class ScreenCaptureService extends Service {
     }
 
     Notification notification = builder.build();
-
+    boolean ok = false;
     try {
       if (Build.VERSION.SDK_INT >= 29) {
-        startForeground(
-            NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+        startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
       } else {
         startForeground(NOTIF_ID, notification);
       }
-      FOREGROUND_READY.set(true);
-      Log.i(TAG, "FOREGROUND_READY typed=" + (Build.VERSION.SDK_INT >= 29));
+      ok = true;
     } catch (Exception e) {
       Log.e(TAG, "startForeground MEDIA_PROJECTION failed", e);
       try {
@@ -92,30 +84,28 @@ public class ScreenCaptureService extends Service {
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .build();
         if (Build.VERSION.SDK_INT >= 29) {
-          startForeground(
-              NOTIF_ID, fallback, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+          startForeground(NOTIF_ID, fallback, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
         } else {
           startForeground(NOTIF_ID, fallback);
         }
-        FOREGROUND_READY.set(true);
+        ok = true;
       } catch (Exception e2) {
-        Log.e(TAG, "startForeground fallback failed", e2);
-        FOREGROUND_READY.set(false);
+        Log.e(TAG, "typed fallback failed", e2);
+        ok = false;
       }
     }
-    try {
-      READY_LATCH.countDown();
-    } catch (Exception ignored) {
-    }
+    FOREGROUND_READY.set(ok);
+    Log.i(TAG, "FOREGROUND_READY=" + ok + " api=" + Build.VERSION.SDK_INT);
+    try { READY_LATCH.countDown(); } catch (Exception ignored) {}
   }
 
   private void createChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       NotificationChannel channel =
-          new NotificationChannel(
-              CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_DEFAULT);
+          new NotificationChannel(CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_DEFAULT);
       channel.setDescription("Shown while screen share is active during an examination");
       channel.setShowBadge(false);
       channel.setSound(null, null);
@@ -126,16 +116,12 @@ public class ScreenCaptureService extends Service {
 
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
-    if (!FOREGROUND_READY.get()) {
-      promoteToForeground();
-    }
+    if (!FOREGROUND_READY.get()) promoteToForeground();
     return START_STICKY;
   }
 
   @Override
-  public IBinder onBind(Intent intent) {
-    return null;
-  }
+  public IBinder onBind(Intent intent) { return null; }
 
   @Override
   public void onDestroy() {
