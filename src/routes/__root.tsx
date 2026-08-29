@@ -176,9 +176,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 });
 
 /**
- * Instant solid navy bridge for native/PWA cold start until React mounts
- * AnimatedSplash (the only branded splash: logo + SMART. SECURE. SEAMLESS.).
- * No intermediate logo-only screen. Website browsers never show this layer.
+ * Instant app splash for native/PWA cold start (same simple logo design as
+ * AnimatedSplash + slogan SMART. SECURE. SEAMLESS.). Website browsers never show this.
  */
 const BOOT_SPLASH_SCRIPT = `
 (function(){
@@ -197,7 +196,7 @@ const BOOT_SPLASH_SCRIPT = `
       if (navigator.standalone === true) shell = true;
     } catch(e){}
     if (!shell) return;
-    if (sessionStorage.getItem('d4exam_splash_shown_v5') === '1') return;
+    if (sessionStorage.getItem('d4exam_splash_shown_v6') === '1') return;
     var el = document.getElementById('d4-boot-splash');
     if (el) el.style.display = 'flex';
   } catch(e){}
@@ -212,15 +211,32 @@ function RootShell({ children }: { children: ReactNode }) {
         <style
           dangerouslySetInnerHTML={{
             __html: `
-/* Solid navy bridge only — no logo/text intermediate.
-   Full branded splash is AnimatedSplash (logo + SMART. SECURE. SEAMLESS.). */
-#d4-boot-splash{display:none;position:fixed;inset:0;z-index:2147483646;background:#0b1b3a}
+/* Instant app splash (native/PWA only) — same design as AnimatedSplash */
+#d4-boot-splash{display:none;position:fixed;inset:0;z-index:2147483646;flex-direction:column;align-items:center;justify-content:center;background:#0b1b3a;color:#fff;font-family:system-ui,sans-serif}
+#d4-boot-splash .boot-main{display:flex;flex:1;flex-direction:column;align-items:center;justify-content:center;padding:0 1.5rem}
+#d4-boot-splash img{width:min(40vw,160px);height:min(40vw,160px);object-fit:contain}
+#d4-boot-splash .t{margin-top:1.25rem;font-weight:800;letter-spacing:.14em;font-size:clamp(1.5rem,6vw,2.25rem)}
+#d4-boot-splash .t span.b{color:#2563eb}
+#d4-boot-splash .s{margin-top:.5rem;font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:#94a3b8;font-weight:600}
+#d4-boot-splash .slogan{position:absolute;bottom:max(1.5rem,env(safe-area-inset-bottom));left:0;right:0;text-align:center;font-size:10px;letter-spacing:.28em;color:#94a3b8;font-weight:600;padding:0 2rem}
+#d4-boot-splash .slogan span.hi{color:#60a5fa}
 `,
           }}
         />
       </head>
       <body className="min-h-dvh bg-background text-foreground antialiased">
-        <div id="d4-boot-splash" aria-hidden="true" />
+        <div id="d4-boot-splash" aria-hidden="true">
+          <div className="boot-main">
+            <img src="/logo.png" alt="" width="160" height="160" />
+            <div className="t">
+              D<span className="b">4</span>EXAM
+            </div>
+            <div className="s">Smart Examination System</div>
+          </div>
+          <div className="slogan">
+            SMART. <span className="hi">SECURE.</span> SEAMLESS.
+          </div>
+        </div>
         <script dangerouslySetInnerHTML={{ __html: BOOT_SPLASH_SCRIPT }} />
         {children}
         <Scripts />
