@@ -1,9 +1,7 @@
 /**
  * D4EXAM screen share for exam monitoring (Android APK first).
  * Native MediaProjection lifecycle is independent of React/WebView re-renders.
- * Frames arrive as JPEG events; publisher uses getLatestNativeScreenJpeg /
- * awaitLatestNativeScreenJpeg. setKeepAlive + static native state keep capture
- * alive through the entire exam session.
+ * All native calls are soft-failed so a plugin crash cannot kill the exam page.
  */
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
@@ -124,7 +122,7 @@ export function holdExamScreenShare(hold: boolean): void {
   console.info("[screen-share] SCREEN_SHARE_EXAM_HOLD", hold ? "on" : "off");
   if (isNativeAndroid()) {
     try {
-      void D4ScreenShare().setKeepAlive({ hold });
+      void D4ScreenShare().setKeepAlive({ hold }).catch(() => undefined);
     } catch {
       /* older APK without setKeepAlive */
     }
@@ -132,8 +130,16 @@ export function holdExamScreenShare(hold: boolean): void {
 }
 
 async function ensureNativeFrameListeners(): Promise<void> {
-  if (!nativeStream) {
-    nativeStream = new MediaStream();
+  try {
+    if (!nativeStream) {
+      nativeStream = new MediaStream();
+    }
+  } catch {
+    try {
+      nativeStream = new MediaStream([]);
+    } catch {
+      nativeStream = null;
+    }
   }
   if (listenersReady && nativeFrameUnsub && nativeStoppedUnsub) return;
 
@@ -200,7 +206,7 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
           /* ignore */
         }
         console.info("[screen-share] SCREEN_SHARE_CONNECTED reused active capture");
-        return { ok: true, stream: nativeStream! };
+        return { ok: true, stream: nativeStream || new MediaStream() };
       }
     } catch {
       /* continue */
@@ -214,10 +220,21 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
       } catch {
         /* ignore */
       }
-      return { ok: true, stream: nativeStream! };
+      return { ok: true, stream: nativeStream || new MediaStream() };
     }
 
-    const avail = await D4ScreenShare().isAvailable();
+    let avail: { available?: boolean } | null = null;
+    try {
+      avail = await D4ScreenShare().isAvailable();
+    } catch (e) {
+      console.warn("[screen-share] isAvailable failed", e);
+      status = "error";
+      return {
+        ok: false,
+        reason: "unsupported",
+        message: "Screen sharing plugin is not available on this build.",
+      };
+    }
     if (!avail?.available) {
       status = "error";
       return {
@@ -229,13 +246,34 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
 
     status = "starting";
     console.info("[screen-share] SCREEN_SHARE_PERMISSION_REQUESTED");
-    const result = await D4ScreenShare().start();
+
+    let result: { active?: boolean; reused?: boolean; rebuilt?: boolean } | null = null;
+    try {
+      result = await D4ScreenShare().start();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn("[screen-share] native start threw", msg);
+      status = "error";
+      if (/denied|cancel|permission/i.test(msg)) {
+        return {
+          ok: false,
+          reason: "denied",
+          message: "Screen sharing was denied. You can continue the exam without screen share if allowed.",
+        };
+      }
+      return {
+        ok: false,
+        reason: "error",
+        message: msg || "Could not start screen sharing. Continue the exam if screen share is optional.",
+      };
+    }
+
     if (!result?.active) {
       status = "error";
       return {
         ok: false,
         reason: "error",
-        message: "Screen capture did not start. Please try again.",
+        message: "Screen capture did not start. You can try again or continue if optional.",
       };
     }
 
@@ -247,33 +285,39 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
     } catch {
       /* ignore */
     }
-    listenersReady = false;
-    if (nativeFrameUnsub) {
-      try {
-        nativeFrameUnsub.remove();
-      } catch {
-        /* ignore */
-      }
-      nativeFrameUnsub = null;
-    }
-    if (nativeStoppedUnsub) {
-      try {
-        nativeStoppedUnsub.remove();
-      } catch {
-        /* ignore */
-      }
-      nativeStoppedUnsub = null;
-    }
-    await ensureNativeFrameListeners();
 
-    for (let i = 0; i < 8; i++) {
+    // Re-bind listeners after start without throwing
+    try {
+      listenersReady = false;
+      if (nativeFrameUnsub) {
+        try {
+          nativeFrameUnsub.remove();
+        } catch {
+          /* ignore */
+        }
+        nativeFrameUnsub = null;
+      }
+      if (nativeStoppedUnsub) {
+        try {
+          nativeStoppedUnsub.remove();
+        } catch {
+          /* ignore */
+        }
+        nativeStoppedUnsub = null;
+      }
+      await ensureNativeFrameListeners();
+    } catch (e) {
+      console.warn("[screen-share] listener rebind failed", e);
+    }
+
+    for (let i = 0; i < 6; i++) {
       try {
         const fr = await D4ScreenShare().getLatestFrame();
         if (applyNativeJpeg(fr?.jpeg, fr?.ts)) break;
       } catch {
         /* ignore */
       }
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 200));
     }
 
     console.info(
@@ -282,15 +326,16 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
       "frame=",
       Boolean(latestNativeScreenJpeg),
     );
-    return { ok: true, stream: nativeStream! };
+    return { ok: true, stream: nativeStream || new MediaStream() };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[screen-share] startNativeScreenShare outer catch", msg);
     status = "error";
     if (/denied|cancel|permission/i.test(msg)) {
       return {
         ok: false,
         reason: "denied",
-        message: "Screen sharing was denied. Enable screen share to continue the exam.",
+        message: "Screen sharing was denied.",
       };
     }
     return {
@@ -342,7 +387,7 @@ async function startWebScreenShare(): Promise<ScreenShareStartResult> {
       return {
         ok: false,
         reason: "denied",
-        message: "Screen sharing was denied. Enable screen share to continue the exam.",
+        message: "Screen sharing was denied.",
       };
     }
     if (name === "NotSupportedError" || name === "NotFoundError") {
@@ -361,13 +406,21 @@ async function startWebScreenShare(): Promise<ScreenShareStartResult> {
 }
 
 export async function startScreenShareStream(): Promise<ScreenShareStartResult> {
-  if (isNativeAndroid()) {
-    return startNativeScreenShare();
+  try {
+    if (isNativeAndroid()) {
+      return await startNativeScreenShare();
+    }
+    return await startWebScreenShare();
+  } catch (e) {
+    console.warn("[screen-share] startScreenShareStream fatal catch", e);
+    status = "error";
+    return {
+      ok: false,
+      reason: "error",
+      message: e instanceof Error ? e.message : "Screen share failed unexpectedly.",
+    };
   }
-  return startWebScreenShare();
 }
-
-/** Explicit stop only (exam submit / leave). Exam hold lock blocks accidental stop. */
 
 /** Re-attach / restart native capture if exam hold is on but frames stopped. */
 export async function ensureScreenShareRunning(): Promise<boolean> {
@@ -379,7 +432,11 @@ export async function ensureScreenShareRunning(): Promise<boolean> {
       nativeActive = true;
       status = "active";
       examHoldLock = true;
-      try { await D4ScreenShare().setKeepAlive({ hold: true }); } catch { /* ignore */ }
+      try {
+        await D4ScreenShare().setKeepAlive({ hold: true });
+      } catch {
+        /* ignore */
+      }
     }
     return active;
   } catch {
@@ -412,6 +469,13 @@ export function stopScreenShareStream(stream: MediaStream | null | undefined): v
       void D4ScreenShare()
         .setKeepAlive({ hold: false })
         .then(() => {
+          try {
+            void D4ScreenShare().stop();
+          } catch {
+            /* ignore */
+          }
+        })
+        .catch(() => {
           try {
             void D4ScreenShare().stop();
           } catch {
@@ -545,17 +609,10 @@ export function clearNativeScreenJpeg(): void {
   latestNativeScreenJpeg = null;
 }
 
-/**
- * True only when capture is actually producing frames / native reports active.
- * Do NOT treat examHoldLock alone as active — that skipped the MediaProjection
- * permission dialog and left the status-bar icon off.
- * Use isExamScreenShareHold() for publish sticky / stop-guard.
- */
 export function isNativeScreenShareActive(): boolean {
   return nativeActive || (lastFrameAt > 0 && Date.now() - lastFrameAt < 8000);
 }
 
-/** Whether the exam session currently holds the MediaProjection (do not stop). */
 export function isExamScreenShareHold(): boolean {
   return examHoldLock;
 }
