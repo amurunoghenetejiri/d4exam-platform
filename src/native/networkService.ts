@@ -1,6 +1,6 @@
 /**
  * Network status — browser online/offline + real connectivity probe.
- * Capacitor Network can replace this later without UI changes.
+ * Does NOT treat a failed asset fetch (404) as offline when navigator is online.
  */
 
 export type NetworkStatus = {
@@ -27,8 +27,7 @@ export function getNetworkStatus(): NetworkStatus {
 }
 
 /**
- * Hit a same-origin lightweight URL to confirm real connectivity.
- * Falls back to navigator.onLine if the probe itself fails for CORS/path reasons.
+ * Confirm real connectivity without poisoning online state on 404/HTML errors.
  */
 export async function probeConnectivity(timeoutMs = 4000): Promise<boolean> {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
@@ -44,14 +43,16 @@ export async function probeConnectivity(timeoutMs = 4000): Promise<boolean> {
   try {
     const ctrl = new AbortController();
     const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
-    const url = `${window.location.origin}/site.webmanifest?_ping=${now}`;
+    const url = `${window.location.origin}/favicon.png?_ping=${now}`;
     const res = await fetch(url, {
       method: "GET",
       cache: "no-store",
       signal: ctrl.signal,
     });
     window.clearTimeout(t);
-    lastProbeOk = res.ok || res.status === 304 || res.type === "opaque";
+    // Any completed network response means the device has Internet.
+    lastProbeOk = true;
+    void res;
   } catch {
     lastProbeOk = typeof navigator !== "undefined" ? navigator.onLine : false;
   }
@@ -59,10 +60,18 @@ export async function probeConnectivity(timeoutMs = 4000): Promise<boolean> {
   return lastProbeOk;
 }
 
+/** Force mark online (e.g. after successful API call). */
+export function markNetworkReachable(): void {
+  lastProbeOk = true;
+  lastProbeAt = Date.now();
+}
+
 export function subscribeNetworkStatus(cb: (status: NetworkStatus) => void): () => void {
   if (typeof window === "undefined") return () => undefined;
   const fire = () => cb(getNetworkStatus());
   const onOnline = () => {
+    lastProbeOk = true;
+    lastProbeAt = Date.now();
     void probeConnectivity().then(() => fire());
   };
   const onOffline = () => {

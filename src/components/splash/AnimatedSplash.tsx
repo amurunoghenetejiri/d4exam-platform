@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
 import { hideSplashSafely } from "@/native/statusBar";
 
-/** Minimum time the branded splash stays on screen (ms). */
-const SPLASH_MIN_MS = 9000;
-/** Absolute safety cap so splash never blocks forever. */
-const SPLASH_MAX_MS = 45000;
-/** Marks splash already dismissed for this app process / tab session. */
-const SESSION_KEY = "d4exam_splash_shown_v5";
+/** Plain branded splash duration (ms). */
+const SPLASH_MIN_MS = 2200;
+const SPLASH_MAX_MS = 8000;
+const SESSION_KEY = "d4exam_splash_shown_v6";
 
 function isAppShellContext(): boolean {
   if (typeof window === "undefined") return false;
@@ -23,16 +20,13 @@ function isAppShellContext(): boolean {
   }
   try {
     const ua = navigator.userAgent || "";
-    if (/Android/i.test(ua) && (/; wv\)/i.test(ua) || /Capacitor/i.test(ua))) {
-      return true;
-    }
+    if (/Android/i.test(ua) && (/; wv\)/i.test(ua) || /Capacitor/i.test(ua))) return true;
   } catch {
     /* ignore */
   }
   try {
     if (window.matchMedia("(display-mode: standalone)").matches) return true;
     if (window.matchMedia("(display-mode: fullscreen)").matches) return true;
-    if (window.matchMedia("(display-mode: minimal-ui)").matches) return true;
     const nav = window.navigator as Navigator & { standalone?: boolean };
     if (nav.standalone === true) return true;
   } catch {
@@ -63,7 +57,7 @@ function removeBootSplashDom(): void {
     if (el) {
       el.style.opacity = "0";
       el.style.pointerEvents = "none";
-      window.setTimeout(() => el.remove(), 200);
+      window.setTimeout(() => el.remove(), 150);
     }
   } catch {
     /* ignore */
@@ -71,9 +65,8 @@ function removeBootSplashDom(): void {
 }
 
 /**
- * Live animated D4EXAM splash (native app + installed PWA only).
- * Background = app theme navy (#0b1b3a)
- * Minimum 9s on cold open, stays until app ready (max 45s)
+ * Plain static D4EXAM splash (native / PWA only).
+ * No animation rings — solid navy + logo + title + motto at bottom.
  */
 export function AnimatedSplash({ force = false }: { force?: boolean }) {
   const startRef = useRef<number>(
@@ -82,82 +75,28 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
   const [visible, setVisible] = useState(() => {
     if (force) return true;
     if (typeof window === "undefined") return false;
+    if (!isAppShellContext()) return false;
     if (wasSplashShownThisSession()) return false;
-    return isAppShellContext();
+    return true;
   });
-  const [exiting, setExiting] = useState(false);
-  const [reduceMotion, setReduceMotion] = useState(false);
   const [appReady, setAppReady] = useState(false);
-  const dismissedRef = useRef(false);
 
   useEffect(() => {
-    if (force || visible || wasSplashShownThisSession()) return;
-    const tryShow = () => {
-      if (!dismissedRef.current && isAppShellContext() && !wasSplashShownThisSession()) {
-        setVisible(true);
-        startRef.current =
-          typeof performance !== "undefined" ? performance.now() : Date.now();
-      }
-    };
-    tryShow();
-    const t1 = window.setTimeout(tryShow, 80);
-    const t2 = window.setTimeout(tryShow, 400);
-    const t3 = window.setTimeout(tryShow, 1200);
-    return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-      window.clearTimeout(t3);
-    };
-  }, [force, visible]);
-
-  useEffect(() => {
-    try {
-      if (typeof window !== "undefined" && window.matchMedia) {
-        setReduceMotion(window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-      }
-    } catch {
-      /* ignore */
+    if (!visible) {
+      removeBootSplashDom();
+      void hideSplashSafely();
+      return;
     }
-  }, []);
-
-  // When branded splash is up: drop HTML boot layer + native Capacitor splash
-  useEffect(() => {
-    if (!visible) return;
     removeBootSplashDom();
     void hideSplashSafely();
-    const t1 = window.setTimeout(() => void hideSplashSafely(), 150);
-    const t2 = window.setTimeout(() => void hideSplashSafely(), 600);
-    const t3 = window.setTimeout(() => void hideSplashSafely(), 1500);
-    return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-      window.clearTimeout(t3);
-    };
-  }, [visible]);
-
-  // If we never show splash (website), still remove boot node if present
-  useEffect(() => {
-    if (visible) return;
-    if (!isAppShellContext() || wasSplashShownThisSession()) {
-      removeBootSplashDom();
-      // Safety: if splash already done this session, ensure native is not stuck
-      void hideSplashSafely();
-    }
   }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-
     const markReady = () => {
-      if (cancelled) return;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (!cancelled) setAppReady(true);
-        });
-      });
+      if (!cancelled) setAppReady(true);
     };
-
     if (typeof document !== "undefined" && document.readyState === "complete") {
       markReady();
     } else if (typeof window !== "undefined") {
@@ -165,264 +104,62 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     } else {
       markReady();
     }
-
-    const maxTimer = window.setTimeout(() => {
-      if (!cancelled) setAppReady(true);
-    }, SPLASH_MAX_MS);
-
+    const maxTimer = window.setTimeout(markReady, SPLASH_MAX_MS);
     return () => {
       cancelled = true;
       window.clearTimeout(maxTimer);
-      if (typeof window !== "undefined") {
-        window.removeEventListener("load", markReady);
-      }
     };
   }, [visible]);
 
   useEffect(() => {
-    if (!visible || dismissedRef.current) return;
-
-    const tick = () => {
-      if (dismissedRef.current) return;
-      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const elapsed = now - startRef.current;
-      if (elapsed >= SPLASH_MIN_MS && appReady) {
-        dismissedRef.current = true;
-        setExiting(true);
-        markSplashShown();
-        window.setTimeout(() => setVisible(false), 450);
-        return;
-      }
-      window.setTimeout(tick, 120);
-    };
-
-    const id = window.setTimeout(tick, 120);
-    return () => window.clearTimeout(id);
+    if (!visible || !appReady) return;
+    const elapsed =
+      (typeof performance !== "undefined" ? performance.now() : Date.now()) - startRef.current;
+    const wait = Math.max(0, SPLASH_MIN_MS - elapsed);
+    const t = window.setTimeout(() => {
+      markSplashShown();
+      setVisible(false);
+    }, wait);
+    return () => window.clearTimeout(t);
   }, [visible, appReady]);
 
   if (!visible) return null;
 
-  const motionOff = reduceMotion;
-
   return (
     <div
-      className={cn(
-        "fixed inset-0 z-[99999] flex flex-col items-center justify-center overflow-hidden",
-        "bg-[#0b1b3a] text-white select-none",
-        exiting && "pointer-events-none opacity-0 transition-opacity duration-450 ease-out",
-      )}
-      style={{ transitionDuration: exiting ? "450ms" : undefined }}
-      role="img"
-      aria-label="D4EXAM loading"
+      className="fixed inset-0 z-[2147483645] flex flex-col items-center justify-center"
+      style={{ background: "#0b1b3a" }}
+      role="status"
+      aria-label="Loading D4EXAM"
     >
-      <div
-        className={cn(
-          "pointer-events-none absolute inset-0",
-          !motionOff && "animate-[d4SplashGlow_3.2s_ease-in-out_infinite]",
-        )}
-        style={{
-          background:
-            "radial-gradient(ellipse 55% 40% at 50% 28%, rgba(37,99,235,0.38) 0%, rgba(11,27,58,0) 68%)",
-        }}
-      />
-
-      {!motionOff && (
-        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-          {Array.from({ length: 16 }).map((_, i) => (
-            <span
-              key={i}
-              className="absolute h-1 w-1 rounded-full bg-sky-300/70 animate-[d4SplashParticle_6s_ease-in-out_infinite]"
-              style={{
-                left: `${6 + ((i * 19) % 88)}%`,
-                top: `${10 + ((i * 23) % 72)}%`,
-                animationDelay: `${(i % 7) * 0.35}s`,
-                opacity: 0.3 + (i % 5) * 0.1,
-              }}
-            />
-          ))}
-        </div>
-      )}
-
-      <div className="relative z-10 flex w-full max-w-[min(100%,520px)] flex-col items-center px-5 pt-[6vh] sm:max-w-[560px] sm:px-8 md:max-w-[640px] lg:max-w-[720px]">
-        <div
-          className={cn(
-            "relative grid place-items-center",
-            !motionOff && "animate-[d4SplashLogoIn_0.75s_cubic-bezier(0.22,1,0.36,1)_both]",
-          )}
-        >
-          {!motionOff && (
-            <>
-              <span
-                className="absolute h-[min(56vw,220px)] w-[min(56vw,220px)] rounded-full border border-sky-400/25 sm:h-[240px] sm:w-[240px] md:h-[280px] md:w-[280px] animate-[d4SplashSpin_18s_linear_infinite]"
-                aria-hidden
-              />
-              <span
-                className="absolute h-[min(70vw,280px)] w-[min(70vw,280px)] rounded-full border border-blue-400/15 sm:h-[300px] sm:w-[300px] md:h-[340px] md:w-[340px] animate-[d4SplashSpin_28s_linear_infinite_reverse]"
-                aria-hidden
-              />
-              <span
-                className="absolute h-[min(44vw,170px)] w-[min(44vw,170px)] rounded-full border border-cyan-300/20 sm:h-[190px] sm:w-[190px] md:h-[220px] md:w-[220px] animate-[d4SplashSpin_12s_linear_infinite]"
-                style={{ borderStyle: "dashed" }}
-                aria-hidden
-              />
-            </>
-          )}
-
-          <div
-            className={cn(
-              "absolute h-[min(40vw,160px)] w-[min(40vw,160px)] rounded-full bg-blue-500/25 blur-2xl sm:h-[180px] sm:w-[180px] md:h-[210px] md:w-[210px]",
-              !motionOff && "animate-[d4SplashPulse_2.8s_ease-in-out_infinite]",
-            )}
-            aria-hidden
-          />
-
-          <img
-            src="/logo.png"
-            alt="D4EXAM"
-            className="relative z-10 h-[min(40vw,160px)] w-[min(40vw,160px)] object-contain drop-shadow-[0_10px_32px_rgba(37,99,235,0.5)] sm:h-[180px] sm:w-[180px] md:h-[210px] md:w-[210px] lg:h-[240px] lg:w-[240px]"
-            draggable={false}
-            decoding="async"
-          />
-        </div>
-
-        <div
-          className={cn(
-            "mt-6 text-center sm:mt-8",
-            !motionOff && "animate-[d4SplashTextIn_0.65s_0.3s_cubic-bezier(0.22,1,0.36,1)_both]",
-          )}
-        >
-          <h1 className="text-[clamp(1.85rem,7.5vw,3rem)] font-extrabold tracking-[0.14em] sm:tracking-[0.16em]">
-            <span className="text-white">D</span>
-            <span className="text-[#2563eb]">4</span>
-            <span className="text-white">EXAM</span>
-          </h1>
-          <p className="mt-2 text-[clamp(9px,2.4vw,13px)] font-semibold uppercase tracking-[0.32em] text-slate-300/95">
-            Smart Examination System
-          </p>
-        </div>
-
-        <div
-          className={cn(
-            "mt-8 flex w-full max-w-md items-start justify-center gap-5 sm:mt-10 sm:gap-10 md:gap-14",
-            !motionOff && "animate-[d4SplashTextIn_0.55s_0.5s_cubic-bezier(0.22,1,0.36,1)_both]",
-          )}
-        >
-          {(
-            [
-              {
-                label: "SMART.",
-                delay: "0.55s",
-                icon: (
-                  <svg viewBox="0 0 24 24" className="h-6 w-6 sm:h-7 sm:w-7" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-                    <path d="M12 3a5.5 5.5 0 0 1 5.5 5.5c0 2.2-1.3 4.1-3.2 5v1.2H9.7V13.5A5.5 5.5 0 0 1 12 3Z" />
-                    <path d="M9.5 16.5h5M10 19h4" strokeLinecap="round" />
-                  </svg>
-                ),
-              },
-              {
-                label: "SECURE.",
-                delay: "0.75s",
-                icon: (
-                  <svg viewBox="0 0 24 24" className="h-6 w-6 sm:h-7 sm:w-7" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-                    <rect x="5" y="11" width="14" height="10" rx="2" />
-                    <path d="M8 11V8a4 4 0 0 1 8 0v3" strokeLinecap="round" />
-                  </svg>
-                ),
-              },
-              {
-                label: "SEAMLESS.",
-                delay: "0.95s",
-                icon: (
-                  <svg viewBox="0 0 24 24" className="h-6 w-6 sm:h-7 sm:w-7" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-                    <path d="M7 17a4 4 0 1 1 1.2-7.8A5.5 5.5 0 0 1 18.5 12 3.5 3.5 0 0 1 17 18.5H7.5" strokeLinecap="round" />
-                  </svg>
-                ),
-              },
-            ] as const
-          ).map((item, idx) => (
-            <div
-              key={item.label}
-              className={cn(
-                "flex flex-1 flex-col items-center gap-2 text-sky-300/90",
-                !motionOff && "animate-[d4SplashWord_0.5s_cubic-bezier(0.22,1,0.36,1)_both]",
-                idx > 0 && "border-l border-slate-600/50 pl-5 sm:pl-10",
-              )}
-              style={!motionOff ? { animationDelay: item.delay } : undefined}
-            >
-              {item.icon}
-              <span className="text-[10px] font-bold tracking-[0.16em] text-slate-200 sm:text-[11px]">
-                {item.label}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[26vh] overflow-hidden sm:h-[22vh]">
-        <div
-          className={cn(
-            "absolute inset-0 opacity-75",
-            !motionOff && "animate-[d4SplashWave_10s_linear_infinite]",
-          )}
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 18% 80%, rgba(59,130,246,0.4) 0%, transparent 42%), radial-gradient(circle at 82% 90%, rgba(14,165,233,0.28) 0%, transparent 38%), repeating-linear-gradient(90deg, transparent 0 6px, rgba(59,130,246,0.14) 6px 7px)",
-            maskImage: "linear-gradient(to top, black 15%, transparent 95%)",
-            WebkitMaskImage: "linear-gradient(to top, black 15%, transparent 95%)",
-          }}
+      <div className="flex flex-1 flex-col items-center justify-center px-6">
+        <img
+          src="/apple-touch-icon.png"
+          alt="D4EXAM"
+          width={160}
+          height={160}
+          className="h-[min(40vw,160px)] w-[min(40vw,160px)] object-contain"
+          draggable={false}
         />
-      </div>
-
-      <div className="absolute bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-0 right-0 z-20 flex flex-col items-center gap-3 px-8">
-        <p className="text-[10px] font-semibold tracking-[0.28em] text-slate-400 sm:text-[11px]">
-          SMART. <span className="text-blue-400">SECURE.</span> SEAMLESS.
+        <h1
+          className="mt-6 text-center font-extrabold tracking-[0.14em] text-white"
+          style={{ fontSize: "clamp(1.5rem, 6vw, 2.25rem)" }}
+        >
+          D<span style={{ color: "#2563eb" }}>4</span>EXAM
+        </h1>
+        <p className="mt-2 text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-400">
+          Smart Examination System
         </p>
-        <div className="h-1 w-28 overflow-hidden rounded-full bg-slate-700/80 sm:w-36">
-          <div
-            className={cn(
-              "h-full rounded-full bg-gradient-to-r from-blue-600 via-sky-400 to-blue-600",
-              motionOff ? "w-full" : "animate-[d4SplashBar_1.4s_ease-in-out_infinite]",
-            )}
-            style={{ width: motionOff ? "100%" : "40%" }}
-          />
-        </div>
       </div>
 
-      <style>{`
-        @keyframes d4SplashSpin { to { transform: rotate(360deg); } }
-        @keyframes d4SplashPulse {
-          0%, 100% { opacity: 0.35; transform: scale(0.92); }
-          50% { opacity: 0.7; transform: scale(1.05); }
-        }
-        @keyframes d4SplashGlow {
-          0%, 100% { opacity: 0.75; }
-          50% { opacity: 1; }
-        }
-        @keyframes d4SplashLogoIn {
-          from { opacity: 0; transform: scale(0.86); }
-          to { opacity: 1; transform: scale(1); }
-        }
-        @keyframes d4SplashTextIn {
-          from { opacity: 0; transform: translateY(12px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes d4SplashWord {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes d4SplashParticle {
-          0%, 100% { transform: translateY(0); opacity: 0.2; }
-          50% { transform: translateY(-18px); opacity: 0.75; }
-        }
-        @keyframes d4SplashWave {
-          from { transform: translateX(0); }
-          to { transform: translateX(-40px); }
-        }
-        @keyframes d4SplashBar {
-          0% { transform: translateX(-120%); }
-          100% { transform: translateX(320%); }
-        }
-      `}</style>
+      <div
+        className="pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-4 text-center"
+        style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}
+      >
+        <p className="text-[10px] font-semibold tracking-[0.28em] text-slate-400 sm:text-[11px]">
+          SMART. <span style={{ color: "#60a5fa" }}>SECURE.</span> SEAMLESS.
+        </p>
+      </div>
     </div>
   );
 }
