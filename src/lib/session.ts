@@ -219,8 +219,13 @@ export function useSessionUser() {
 
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "USER_UPDATED") {
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "USER_UPDATED" || event === "TOKEN_REFRESHED") {
         void queryClient.invalidateQueries({ queryKey: ["session-user"] });
+      }
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        void import("@/lib/account-switcher")
+          .then((m) => m.touchActiveAccountTokens?.() ?? m.saveCurrentAccountToVault?.())
+          .catch(() => {});
       }
     });
     return () => sub.subscription.unsubscribe();

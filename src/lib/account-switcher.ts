@@ -40,7 +40,7 @@ function readVault(): Vault {
     if (!raw) return { accounts: [] };
     const parsed = JSON.parse(raw) as Vault;
     if (!parsed || !Array.isArray(parsed.accounts)) return { accounts: [] };
-    return { accounts: parsed.accounts.filter((a) => a && a.userId && a.refreshToken) };
+    return { accounts: parsed.accounts.filter((a) => a && a.userId) };
   } catch {
     return { accounts: [] };
   }

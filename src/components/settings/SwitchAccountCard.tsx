@@ -51,10 +51,19 @@ export function SwitchAccountCard() {
     }
     setBusyId(userId);
     try {
+      if (session?.userId) {
+        try {
+          await saveCurrentAccountToVault(session);
+        } catch {
+          /* ignore */
+        }
+      }
       const result = await switchToAccount(userId);
       if (!result.ok) {
         if (result.needsLogin) {
-          toast.error("Session expired for that account. Sign in again to switch.");
+          toast.error(
+            "That account needs a fresh sign-in on this device. Use Add Account and sign in once, then switch will work.",
+          );
           refresh();
         } else {
           toast.error(result.error);

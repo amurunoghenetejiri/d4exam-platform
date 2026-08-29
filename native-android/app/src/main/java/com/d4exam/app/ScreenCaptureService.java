@@ -37,7 +37,11 @@ public class ScreenCaptureService extends Service {
   @Override
   public void onCreate() {
     super.onCreate();
-    promoteToForeground();
+    try {
+      promoteToForeground();
+    } catch (Throwable t) {
+      Log.e(TAG, "onCreate promote failed", t);
+    }
   }
 
   private void promoteToForeground() {

@@ -47,6 +47,8 @@ public class ScreenSharePlugin extends Plugin {
   private static volatile Handler sHandler = null;
   private static final AtomicBoolean sCapturing = new AtomicBoolean(false);
   private static final AtomicBoolean sKeepAlive = new AtomicBoolean(false);
+  private static volatile Intent sPendingResultData = null;
+  private static volatile int sPendingResultCode = 0;
   private static volatile int sScreenWidth = 720;
   private static volatile int sScreenHeight = 1280;
   private static volatile int sScreenDensity = 320;
@@ -203,13 +205,22 @@ public class ScreenSharePlugin extends Plugin {
       call.reject("Screen share permission denied");
       return;
     }
+    sPendingResultCode = result.getResultCode();
+    sPendingResultData = result.getData();
     try {
+      try { Thread.sleep(250); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
       ScreenCaptureService.resetReady();
       Intent svc = new Intent(getContext(), ScreenCaptureService.class);
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        getContext().startForegroundService(svc);
-      } else {
-        getContext().startService(svc);
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          getContext().startForegroundService(svc);
+        } else {
+          getContext().startService(svc);
+        }
+      } catch (Exception startEx) {
+        Log.e(TAG, "startForegroundService failed", startEx);
+        call.reject("Could not start screen monitoring service: " + startEx.getMessage());
+        return;
       }
       try {
         ScreenCaptureService.READY_LATCH.await(8, TimeUnit.SECONDS);
@@ -540,6 +551,11 @@ public class ScreenSharePlugin extends Plugin {
     if (plugin != null) {
       plugin.notifyListeners("stopped", data);
     }
+  }
+
+  @Override
+  protected void handleOnPause() {
+    super.handleOnPause();
   }
 
   @Override
