@@ -14,6 +14,7 @@ import { sendTestNotificationToSelf } from "@/lib/push-send.functions";
 import { sendNotification } from "@/lib/notifications";
 import { isNativeShell } from "@/native/platform";
 import { showD4ExamNativeNotification } from "@/native/localNotify";
+import { notificationsEnabledConfirm } from "@/lib/notify-messages";
 import { useQueryClient } from "@tanstack/react-query";
 
 export function PushSettingsCard({ scope }: { scope?: string }) {
@@ -49,10 +50,14 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
-            disabled={pushBusy || (!native && pushStatus === "unsupported")}
+            disabled={pushBusy || (!native && pushStatus === "unsupported") || pushStatus === "granted"}
             onClick={() => {
               if (!session?.userId) {
                 toast.error("Sign in required.");
+                return;
+              }
+              if (pushStatus === "granted") {
+                toast.message("Notifications are already enabled.");
                 return;
               }
               setPushBusy(true);
@@ -60,14 +65,31 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
                 .then(async (r) => {
                   if (native) setPushStatus(await refreshNativePushPermissionState());
                   else setPushStatus(getPushPermissionState());
-                  if (r.ok) toast.success("Notifications enabled on this device.");
-                  else toast.error(r.error || "Could not enable notifications.");
+                  if (r.ok) {
+                    toast.success("Notifications enabled on this device.");
+                    try {
+                      const key = `d4_notif_enabled_once:${session.userId}`;
+                      if (localStorage.getItem(key) !== "1") {
+                        localStorage.setItem(key, "1");
+                        const copy = notificationsEnabledConfirm();
+                        if (native) {
+                          await showD4ExamNativeNotification(
+                            copy.title,
+                            copy.message,
+                            scope ? `/${scope}/settings` : "/",
+                          );
+                        }
+                      }
+                    } catch {
+                      /* ignore */
+                    }
+                  } else toast.error(r.error || "Could not enable notifications.");
                 })
                 .finally(() => setPushBusy(false));
             }}
           >
             {pushBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Enable notifications
+            {pushStatus === "granted" ? "Notifications enabled" : "Enable notifications"}
           </Button>
           <Button
             type="button"
@@ -112,7 +134,6 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
 
                   toast.success(title, { description: message, duration: 6000 });
 
-                  // Native tray as D4EXAM (never browser Notification / Chrome)
                   if (native) {
                     await showD4ExamNativeNotification(title, message, link);
                   }
