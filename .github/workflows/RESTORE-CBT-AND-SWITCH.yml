@@ -5,11 +5,12 @@ on:
     branches: [main]
     paths:
       - .github/workflows/RESTORE-CBT-AND-SWITCH.yml
-      - scripts/write_cbt_restored.py
-      - scripts/cbt_restored_b64_0.txt
-      - scripts/cbt_restored_b64_1.txt
-      - scripts/cbt_restored_b64_2.txt
-      - src/lib/account-switcher.ts
+      - scripts/apply-cbt-session-z.sh
+      - scripts/patch_cbt_screen_after_restore.py
+      - scripts/patch_switch_account.py
+      - scripts/patch_theme_nav.py
+      - scripts/_switch_to_account_fn.ts
+      - scripts/cbt-session-z/**
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -17,19 +18,24 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Restore full CBT exam page
+      - name: Restore CBT + patches
         run: |
           set -euo pipefail
-          python3 scripts/write_cbt_restored.py
+          bash scripts/apply-cbt-session-z.sh
+          python3 scripts/patch_cbt_screen_after_restore.py
+          python3 scripts/patch_switch_account.py
+          python3 scripts/patch_theme_nav.py
           grep -q 'export function CbtExamPage' src/components/cbt/CbtExamSession.impl.tsx
-          grep -q 'startScreenShareStream' src/components/cbt/CbtExamSession.impl.tsx
           ! grep -q 'Full exam UI is being restored' src/components/cbt/CbtExamSession.impl.tsx
+          grep -q 'startScreenShareStream' src/components/cbt/CbtExamSession.impl.tsx
+          grep -q 'refreshSession' src/lib/account-switcher.ts
+          grep -q '#0b1b3a' src/routes/__root.tsx
       - name: Commit
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/components/cbt/CbtExamSession.impl.tsx
-          if git diff --cached --quiet; then echo No CBT changes; else
-            git commit -m "fix(cbt): restore full exam session UI + screen share publish"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/lib/account-switcher.ts src/routes/__root.tsx native-android/app/src/main/java/com/d4exam/app/MainActivity.java
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix: restore exam UI, account switch, navy system nav, screen share"
             git push
           fi
