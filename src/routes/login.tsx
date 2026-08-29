@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchSessionUser, roleHome, seedPendingLoginRole, type AppRole } from "@/lib/session";
 import { signInWithSchoolCode } from "@/lib/auth.functions";
 import { ensureLoginAccount } from "@/lib/ensure-login.functions";
+import { saveCurrentAccountToVault, consumeAddAccountFlow, listSavedAccounts } from "@/lib/account-switcher";
 
 import {
   Eye,
@@ -31,6 +32,14 @@ export const Route = createFileRoute("/login")({
     ],
   }),
   beforeLoad: async () => {
+    try {
+      if (typeof window !== "undefined") {
+        const q = new URLSearchParams(window.location.search);
+        if (q.get("addAccount") === "1") return;
+      }
+    } catch {
+      /* ignore */
+    }
     try {
       const user = await Promise.race([
         fetchSessionUser(),
@@ -83,11 +92,19 @@ function friendlyLoginError(err: unknown): string {
 }
 
 /** Full page load so Capacitor WebView always applies the new session. */
-function goToRoleHome(role: string) {
+async function goToRoleHome(role: string, rememberDevice = true) {
   const path = roleHome[role as AppRole];
   if (!path) return false;
   try {
     seedPendingLoginRole(role);
+  } catch {
+    /* ignore */
+  }
+  try {
+    const addFlow = consumeAddAccountFlow();
+    if (rememberDevice || addFlow || listSavedAccounts().length > 0) {
+      await saveCurrentAccountToVault();
+    }
   } catch {
     /* ignore */
   }
@@ -108,18 +125,21 @@ function LoginPage() {
   const [code, setCode] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(true);
   const inFlight = useRef(false);
+  const isAddAccount =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("addAccount") === "1";
+  const savedCount = typeof window !== "undefined" ? listSavedAccounts().length : 0;
 
   async function resolveRoleAndGoHome(): Promise<boolean> {
-    // Fast path: role from session APIs
     try {
       const user = await Promise.race([
         fetchSessionUser(),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_500)),
       ]);
       if (user?.role && user.role in roleHome) {
-        return goToRoleHome(user.role);
+        return await goToRoleHome(user.role, remember);
       }
     } catch {
       /* continue */
@@ -140,7 +160,7 @@ function LoginPage() {
         "student",
       ] as const;
       const found = priority.find((r) => list.map((x) => x.toLowerCase()).includes(r));
-      if (found) return goToRoleHome(found);
+      if (found) return await goToRoleHome(found, remember);
     } catch {
       /* ignore */
     }
@@ -164,7 +184,7 @@ function LoginPage() {
           "student",
         ] as const;
         const found = priority.find((r) => list.includes(r));
-        if (found) return goToRoleHome(found);
+        if (found) return await goToRoleHome(found, remember);
       }
     } catch {
       /* ignore */
@@ -199,7 +219,6 @@ function LoginPage() {
       const pass = password;
       const looksEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ident);
 
-      // 1) Server login (with hard timeout)
       try {
         const result = await Promise.race([
           loginFn({
@@ -220,7 +239,7 @@ function LoginPage() {
           if (!sessErr) {
             if (result.role && result.role in roleHome) {
               navigated = true;
-              goToRoleHome(String(result.role));
+              await goToRoleHome(String(result.role), remember);
               return;
             }
             if (await resolveRoleAndGoHome()) {
@@ -237,7 +256,6 @@ function LoginPage() {
         lastServerMsg = friendlyLoginError(serverErr);
       }
 
-      // 2) Direct Supabase client sign-in
       const emailsToTry: string[] = [];
       if (looksEmail) emailsToTry.push(ident.toLowerCase());
       if (!looksEmail && schoolCode) {
@@ -267,10 +285,9 @@ function LoginPage() {
               navigated = true;
               return;
             }
-            // Session exists but role lag — still leave login page for school admin default only if email login
             if (looksEmail) {
               navigated = true;
-              goToRoleHome("school_admin");
+              await goToRoleHome("school_admin", remember);
               return;
             }
           }
@@ -280,7 +297,6 @@ function LoginPage() {
         }
       }
 
-      // 3) ensureLoginAccount repair then retry once
       if (looksEmail) {
         try {
           const fixed = await Promise.race([
@@ -304,7 +320,7 @@ function LoginPage() {
                 return;
               }
               navigated = true;
-              goToRoleHome("school_admin");
+              await goToRoleHome("school_admin", remember);
               return;
             }
           }
@@ -365,8 +381,20 @@ function LoginPage() {
             <div className="mb-8 flex items-center gap-2 lg:hidden">
               <Logo className="h-9 w-auto" />
             </div>
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">Sign in</h1>
-            <p className="mt-1 text-sm text-slate-500">Enter your credentials to continue.</p>
+            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
+              {isAddAccount ? "Add account" : "Sign in"}
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              {isAddAccount
+                ? "Sign in with another D4EXAM account. Existing accounts stay on this device."
+                : "Enter your credentials to continue."}
+            </p>
+            {savedCount > 0 ? (
+              <p className="mt-2 text-xs font-medium text-slate-500">
+                {savedCount} account{savedCount === 1 ? "" : "s"} saved on this device — switch
+                anytime from Settings.
+              </p>
+            ) : null}
 
             {error ? (
               <Alert variant="destructive" className="mt-4">
@@ -440,7 +468,7 @@ function LoginPage() {
                   disabled={loading}
                 />
                 <Label htmlFor="remember" className="text-sm font-normal text-slate-600">
-                  Remember this device
+                  Save this account on this device (for quick switch)
                 </Label>
               </div>
               <Button type="submit" className="h-11 w-full font-semibold" disabled={loading}>
@@ -451,7 +479,8 @@ function LoginPage() {
                   </>
                 ) : (
                   <>
-                    Sign in <ArrowRight className="ml-2 h-4 w-4" />
+                    {isAddAccount ? "Add account" : "Sign in"}{" "}
+                    <ArrowRight className="ml-2 h-4 w-4" />
                   </>
                 )}
               </Button>
