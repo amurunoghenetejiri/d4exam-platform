@@ -176,9 +176,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 });
 
 /**
- * Instant paint for native/PWA cold start: solid theme navy until React mounts
- * AnimatedSplash. Removed as soon as AnimatedSplash is visible.
- * Website browsers: boot splash is never shown (script checks shell).
+ * Instant solid navy bridge for native/PWA cold start until React mounts
+ * AnimatedSplash (the only branded splash: logo + SMART. SECURE. SEAMLESS.).
+ * No intermediate logo-only screen. Website browsers never show this layer.
  */
 const BOOT_SPLASH_SCRIPT = `
 (function(){
@@ -212,23 +212,15 @@ function RootShell({ children }: { children: ReactNode }) {
         <style
           dangerouslySetInnerHTML={{
             __html: `
-#d4-boot-splash{display:none;position:fixed;inset:0;z-index:2147483646;align-items:center;justify-content:center;flex-direction:column;background:#0b1b3a;color:#fff;font-family:system-ui,sans-serif}
-#d4-boot-splash img{width:min(40vw,160px);height:min(40vw,160px);object-fit:contain}
-#d4-boot-splash .t{margin-top:1.25rem;font-weight:800;letter-spacing:.14em;font-size:clamp(1.5rem,6vw,2.25rem)}
-#d4-boot-splash .t span.b{color:#2563eb}
-#d4-boot-splash .s{margin-top:.5rem;font-size:10px;letter-spacing:.28em;text-transform:uppercase;color:#94a3b8;font-weight:600}
+/* Solid navy bridge only — no logo/text intermediate.
+   Full branded splash is AnimatedSplash (logo + SMART. SECURE. SEAMLESS.). */
+#d4-boot-splash{display:none;position:fixed;inset:0;z-index:2147483646;background:#0b1b3a}
 `,
           }}
         />
       </head>
       <body className="min-h-dvh bg-background text-foreground antialiased">
-        <div id="d4-boot-splash" aria-hidden="true">
-          <img src="/logo.png" alt="" width="160" height="160" />
-          <div className="t">
-            D<span className="b">4</span>EXAM
-          </div>
-          <div className="s">Smart Examination System</div>
-        </div>
+        <div id="d4-boot-splash" aria-hidden="true" />
         <script dangerouslySetInnerHTML={{ __html: BOOT_SPLASH_SCRIPT }} />
         {children}
         <Scripts />
