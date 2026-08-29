@@ -1,4 +1,4 @@
-/** School applicant notifications (in-app + push). */
+/** School applicant notifications (in-app + push). NEVER include passwords. */
 import { supabase } from "@/integrations/supabase/client";
 import { notifyUser, listSuperAdminUserIds, notifyMany } from "@/lib/notify";
 import {
@@ -49,19 +49,21 @@ export async function notifyApplicantApplicationApproved(opts: {
   schoolName: string;
   schoolId: string;
   applicationId: string;
+  applicantName?: string | null;
+  /** Ignored for push body — credentials only inside authenticated app */
   loginHint?: string | null;
 }): Promise<void> {
   try {
+    // NO password / temporary password / PIN in title or message
     const copy = schoolApplicationApproved({
       schoolName: opts.schoolName,
-      schoolId: opts.schoolId,
-      loginHint: opts.loginHint,
+      applicantName: opts.applicantName,
     });
     let uid = opts.recipientUserId || "";
     if (!uid && opts.applicantEmail) {
       const { data } = await supabase
         .from("profiles")
-        .select("auth_user_id")
+        .select("auth_user_id, full_name")
         .eq("email", opts.applicantEmail)
         .maybeSingle();
       uid = (data as { auth_user_id?: string } | null)?.auth_user_id || "";
@@ -72,7 +74,7 @@ export async function notifyApplicantApplicationApproved(opts: {
         title: copy.title,
         message: copy.message,
         type: "success",
-        link: "/login",
+        link: "/application-status",
         entityType: "school_application",
         entityId: opts.applicationId,
         dedupeMinutes: 10,
