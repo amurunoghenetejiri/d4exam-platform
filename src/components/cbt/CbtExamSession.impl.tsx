@@ -233,7 +233,6 @@ export function CbtExamPage() {
     };
 
     const onFsChange = () => {
-      if (finishingRef.current || doneRef.current) return;
       if (!security.fullscreen) return;
       if (document.fullscreenElement) {
         setFsGate(false);
@@ -362,10 +361,9 @@ export function CbtExamPage() {
   async function finishAttempt(auto = false) {
     if (done || finishingRef.current) return;
     finishingRef.current = true;
-    doneRef.current = true;
+    shutdownMedia();
     setFsGate(false);
     setPaused(false);
-    shutdownMedia();
     void leaveExamFullscreen();
     if (previewMode) {
       toast.message("Preview ended — nothing was saved");
