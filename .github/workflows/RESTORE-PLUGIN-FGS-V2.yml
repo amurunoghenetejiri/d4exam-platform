@@ -1,0 +1,136 @@
+name: RESTORE-PLUGIN-FGS-V2
+on:
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore and harden plugins
+        run: |
+          set -euo pipefail
+          git show a6502e531e47e94d204d9b37d23e599827a10db6:android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java > /tmp/plugin.java 2>/dev/null || \
+          git show 3f7272fa20ea34af798be8089abbba298c010e71:android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java > /tmp/plugin.java
+
+          python3 << 'INNER'
+          from pathlib import Path
+          t = Path("/tmp/plugin.java").read_text()
+          assert "package com.d4exam.app" in t
+          assert "SEE_FILE" not in t
+
+          old = """      if (!ready || !ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready in time — proceeding anyway");
+      }
+
+      if (projectionManager == null) {
+        projectionManager =
+            (MediaProjectionManager)
+                getActivity().getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+      }
+      MediaProjection mp =
+          projectionManager.getMediaProjection(result.getResultCode(), result.getData());
+      if (mp == null) {
+        call.reject("Could not create MediaProjection");
+        return;
+      }"""
+
+          new = """      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready — retry startForegroundService");
+        try {
+          ScreenCaptureService.resetReady();
+          Intent svcRetry = new Intent(getContext(), ScreenCaptureService.class);
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(svcRetry);
+          } else {
+            getContext().startService(svcRetry);
+          }
+          ScreenCaptureService.READY_LATCH.await(5, TimeUnit.SECONDS);
+        } catch (Exception retryEx) {
+          Log.e(TAG, "FGS retry failed", retryEx);
+        }
+      }
+      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        call.reject(
+            "Screen monitoring service failed to start. Allow notifications for D4EXAM in system settings, then try again.");
+        return;
+      }
+      try { Thread.sleep(300); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+
+      if (projectionManager == null) {
+        projectionManager =
+            (MediaProjectionManager)
+                getActivity().getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+      }
+      MediaProjection mp;
+      try {
+        mp = projectionManager.getMediaProjection(result.getResultCode(), result.getData());
+      } catch (SecurityException se) {
+        Log.e(TAG, "getMediaProjection SecurityException", se);
+        call.reject(
+            "Media projection requires an active mediaProjection foreground service. Allow notifications and try again.");
+        return;
+      }
+      if (mp == null) {
+        call.reject("Could not create MediaProjection");
+        return;
+      }"""
+
+          if old in t:
+              t = t.replace(old, new, 1)
+              print("replaced proceed-anyway block")
+          elif "Screen monitoring service failed to start" in t:
+              print("already hardened")
+          elif "proceeding anyway" in t:
+              t = t.replace(
+                  """      if (!ready || !ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready in time — proceeding anyway");
+      }""",
+                  """      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready — retry");
+        try {
+          ScreenCaptureService.resetReady();
+          Intent svcRetry = new Intent(getContext(), ScreenCaptureService.class);
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(svcRetry);
+          } else {
+            getContext().startService(svcRetry);
+          }
+          ScreenCaptureService.READY_LATCH.await(5, TimeUnit.SECONDS);
+        } catch (Exception retryEx) {
+          Log.e(TAG, "FGS retry failed", retryEx);
+        }
+      }
+      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        call.reject("Screen monitoring service failed to start. Allow notifications for D4EXAM in system settings, then try again.");
+        return;
+      }
+      try { Thread.sleep(300); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }""",
+                  1,
+              )
+              print("replaced short proceed-anyway")
+          else:
+              raise SystemExit("could not find proceed-anyway block")
+
+          assert "proceeding anyway" not in t
+          assert "getMediaProjection" in t
+          assert "SEE_FILE" not in t
+          for path in [
+              "android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java",
+              "native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java",
+          ]:
+              Path(path).parent.mkdir(parents=True, exist_ok=True)
+              Path(path).write_text(t)
+              print("wrote", path, len(t))
+          INNER
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java \
+                  native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
+          git commit -m "fix(android): restore ScreenSharePlugin; require typed FGS before getMediaProjection" || echo no changes
+          git push origin HEAD:main
