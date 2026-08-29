@@ -1,0 +1,111 @@
+name: FIX-SCREEN-NOTIF-FGS
+on:
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore plugins from df882b70 and harden
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import subprocess
+
+          def load_from_commit(path: str) -> str:
+              return subprocess.check_output(
+                  ["git", "show", f"df882b70:{path}"], text=True
+              )
+
+          def harden(t: str) -> str:
+              # Soft-proceed instead of hard reject
+              hard = (
+                  '      if (!ScreenCaptureService.FOREGROUND_READY.get()) {\n'
+                  '        call.reject(\n'
+                  '            "Could not start screen monitoring service. Allow notifications for D4EXAM and try again.");\n'
+                  '        return;\n'
+                  '      }'
+              )
+              soft = (
+                  '      if (!ScreenCaptureService.FOREGROUND_READY.get()) {\n'
+                  '        Log.w(TAG, "FGS not ready after await — proceeding anyway (check notification permission)");\n'
+                  '      }'
+              )
+              if hard in t:
+                  t = t.replace(hard, soft)
+              # Imports
+              if "import android.Manifest;" not in t:
+                  t = t.replace(
+                      "import android.app.Activity;",
+                      "import android.Manifest;\nimport android.app.Activity;",
+                  )
+              if "import android.content.pm.PackageManager;" not in t:
+                  t = t.replace(
+                      "import android.content.Context;",
+                      "import android.content.Context;\nimport android.content.pm.PackageManager;",
+                  )
+              if "import androidx.core.app.ActivityCompat;" not in t:
+                  t = t.replace(
+                      "import androidx.activity.result.ActivityResult;",
+                      "import androidx.activity.result.ActivityResult;\n"
+                      "import androidx.core.app.ActivityCompat;\n"
+                      "import androidx.core.content.ContextCompat;",
+                  )
+              # Request POST_NOTIFICATIONS before FGS
+              if "POST_NOTIFICATIONS" not in t or "requestPermissions" not in t:
+                  marker = "ScreenCaptureService.resetReady();"
+                  notif = (
+                      "// Android 13+: request notification permission so FGS can post monitoring notification\n"
+                      "      try {\n"
+                      "        if (Build.VERSION.SDK_INT >= 33) {\n"
+                      "          Activity act = getActivity();\n"
+                      "          if (act != null\n"
+                      "              && ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS)\n"
+                      "                  != PackageManager.PERMISSION_GRANTED) {\n"
+                      "            ActivityCompat.requestPermissions(\n"
+                      "                act, new String[] {Manifest.permission.POST_NOTIFICATIONS}, 4403);\n"
+                      "            try { Thread.sleep(600); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }\n"
+                      "          }\n"
+                      "        }\n"
+                      "      } catch (Exception permEx) {\n"
+                      "        Log.w(TAG, \"notification permission request skipped\", permEx);\n"
+                      "      }\n"
+                      "      ScreenCaptureService.resetReady();"
+                  )
+                  if marker in t:
+                      t = t.replace(marker, notif, 1)
+              return t
+
+          paths = [
+              "android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java",
+              "native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java",
+          ]
+          for path in paths:
+              try:
+                  raw = load_from_commit(path)
+              except Exception:
+                  # fall back to current tree if path missing at that commit
+                  p = Path(path)
+                  if not p.exists():
+                      print("skip missing", path)
+                      continue
+                  raw = p.read_text()
+              fixed = harden(raw)
+              assert "PLACEHOLDER" not in fixed
+              assert "Could not start screen monitoring" not in fixed
+              assert "POST_NOTIFICATIONS" in fixed
+              Path(path).parent.mkdir(parents=True, exist_ok=True)
+              Path(path).write_text(fixed)
+              print("wrote", path, len(fixed))
+          PY
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java \
+                  native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
+          git commit -m "fix(android): ScreenSharePlugin POST_NOTIFICATIONS + soft FGS (no hard reject)" || echo "no changes"
+          git push origin HEAD:main
