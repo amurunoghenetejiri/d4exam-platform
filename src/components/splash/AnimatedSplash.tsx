@@ -9,14 +9,6 @@ const SPLASH_MAX_MS = 45000;
 /** Marks splash already dismissed for this app process / tab session. */
 const SESSION_KEY = "d4exam_splash_shown_v5";
 
-/**
- * Splash is ONLY for:
- * - Capacitor Android/iOS native shell
- * - Installed PWA (Add to Home Screen / standalone)
- *
- * Never on the regular website browser, and never again after
- * in-app navigation within the same session.
- */
 function isAppShellContext(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -31,7 +23,6 @@ function isAppShellContext(): boolean {
   }
   try {
     const ua = navigator.userAgent || "";
-    // Capacitor Android WebView heuristic (works even if bridge is late)
     if (/Android/i.test(ua) && (/; wv\)/i.test(ua) || /Capacitor/i.test(ua))) {
       return true;
     }
@@ -66,21 +57,28 @@ function wasSplashShownThisSession(): boolean {
   }
 }
 
+function removeBootSplashDom(): void {
+  try {
+    const el = document.getElementById("d4-boot-splash");
+    if (el) {
+      el.style.opacity = "0";
+      el.style.pointerEvents = "none";
+      window.setTimeout(() => el.remove(), 200);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Live animated D4EXAM splash (native app + installed PWA only).
- * Matches the official branded reference: shield logo, D4EXAM title,
- * SMART / SECURE / SEAMLESS, wave, loading bar.
- * - Background = app theme navy (#0b1b3a)
- * - Minimum 9s on cold open, stays until app ready (max 45s)
- * - Responsive: larger on laptop / tablet
- * - Offline-safe (bundled /logo.png)
+ * Background = app theme navy (#0b1b3a)
+ * Minimum 9s on cold open, stays until app ready (max 45s)
  */
 export function AnimatedSplash({ force = false }: { force?: boolean }) {
   const startRef = useRef<number>(
     typeof performance !== "undefined" ? performance.now() : Date.now(),
   );
-  // IMPORTANT: do NOT mark session in the initializer (React remount would hide splash).
-  // Only mark when the splash is actually dismissed.
   const [visible, setVisible] = useState(() => {
     if (force) return true;
     if (typeof window === "undefined") return false;
@@ -92,7 +90,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
   const [appReady, setAppReady] = useState(false);
   const dismissedRef = useRef(false);
 
-  // Re-check shell context shortly after mount (Capacitor bridge can appear slightly late)
   useEffect(() => {
     if (force || visible || wasSplashShownThisSession()) return;
     const tryShow = () => {
@@ -123,13 +120,14 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     }
   }, []);
 
-  // Hide native solid splash as soon as branded layer is up
+  // When branded splash is up: drop HTML boot layer + native Capacitor splash
   useEffect(() => {
     if (!visible) return;
+    removeBootSplashDom();
     void hideSplashSafely();
-    const t1 = window.setTimeout(() => void hideSplashSafely(), 200);
-    const t2 = window.setTimeout(() => void hideSplashSafely(), 800);
-    const t3 = window.setTimeout(() => void hideSplashSafely(), 1600);
+    const t1 = window.setTimeout(() => void hideSplashSafely(), 150);
+    const t2 = window.setTimeout(() => void hideSplashSafely(), 600);
+    const t3 = window.setTimeout(() => void hideSplashSafely(), 1500);
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
@@ -137,7 +135,16 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     };
   }, [visible]);
 
-  // Track when the app document / shell is ready
+  // If we never show splash (website), still remove boot node if present
+  useEffect(() => {
+    if (visible) return;
+    if (!isAppShellContext() || wasSplashShownThisSession()) {
+      removeBootSplashDom();
+      // Safety: if splash already done this session, ensure native is not stuck
+      void hideSplashSafely();
+    }
+  }, [visible]);
+
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -172,7 +179,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     };
   }, [visible]);
 
-  // Dismiss only after min 9s AND app is ready
   useEffect(() => {
     if (!visible || dismissedRef.current) return;
 
@@ -209,7 +215,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
       role="img"
       aria-label="D4EXAM loading"
     >
-      {/* Soft center glow — theme navy base */}
       <div
         className={cn(
           "pointer-events-none absolute inset-0",
@@ -221,7 +226,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
         }}
       />
 
-      {/* Particles */}
       {!motionOff && (
         <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
           {Array.from({ length: 16 }).map((_, i) => (
@@ -239,7 +243,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
         </div>
       )}
 
-      {/* Main brand block — scales up on tablet/laptop */}
       <div className="relative z-10 flex w-full max-w-[min(100%,520px)] flex-col items-center px-5 pt-[6vh] sm:max-w-[560px] sm:px-8 md:max-w-[640px] lg:max-w-[720px]">
         <div
           className={cn(
@@ -247,7 +250,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
             !motionOff && "animate-[d4SplashLogoIn_0.75s_cubic-bezier(0.22,1,0.36,1)_both]",
           )}
         >
-          {/* Rotating rings */}
           {!motionOff && (
             <>
               <span
@@ -274,7 +276,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
             aria-hidden
           />
 
-          {/* Official shield logo (bundled) */}
           <img
             src="/logo.png"
             alt="D4EXAM"
@@ -284,7 +285,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
           />
         </div>
 
-        {/* Title block matching reference */}
         <div
           className={cn(
             "mt-6 text-center sm:mt-8",
@@ -301,7 +301,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
           </p>
         </div>
 
-        {/* Feature row: SMART / SECURE / SEAMLESS with icons */}
         <div
           className={cn(
             "mt-8 flex w-full max-w-md items-start justify-center gap-5 sm:mt-10 sm:gap-10 md:gap-14",
@@ -359,7 +358,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
         </div>
       </div>
 
-      {/* Bottom wave */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[26vh] overflow-hidden sm:h-[22vh]">
         <div
           className={cn(
@@ -375,7 +373,6 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
         />
       </div>
 
-      {/* Footer tagline + loading bar */}
       <div className="absolute bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-0 right-0 z-20 flex flex-col items-center gap-3 px-8">
         <p className="text-[10px] font-semibold tracking-[0.28em] text-slate-400 sm:text-[11px]">
           SMART. <span className="text-blue-400">SECURE.</span> SEAMLESS.
