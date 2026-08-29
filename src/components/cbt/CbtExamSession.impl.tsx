@@ -226,6 +226,18 @@ export function CbtExamPage() {
         setWarnBanner(description);
         try { haptic("tab_switch"); } catch { /* ignore */ }
         window.setTimeout(() => setWarnBanner(null), 6000);
+      } else if (action === "pause") {
+        const secs = Math.max(5, Number(security.pauseDurationSeconds ?? 30) || 30);
+        setPauseReason(`${description} (paused ${secs}s)`);
+        setPaused(true);
+        try { haptic("strong"); } catch { /* ignore */ }
+        setWarnBanner(`Exam paused for ${secs}s due to integrity rules.`);
+        window.setTimeout(() => {
+          setPaused(false);
+          setPauseReason("");
+          setWarnBanner(null);
+          void restoreMediaAfterReturn();
+        }, secs * 1000);
       } else if (action === "terminate") {
         setDoneTerminated(true);
         await finishAttempt(true);
@@ -251,6 +263,11 @@ export function CbtExamPage() {
     };
 
     const onVis = () => {
+      if (finishingRef.current || doneRef.current) return;
+      if (document.visibilityState === "visible") {
+        void restoreMediaAfterReturn();
+        return;
+      }
       if (!security.tabMonitoring) return;
       if (document.visibilityState !== "hidden") return;
       tabSwitchCountRef.current += 1;
@@ -282,7 +299,7 @@ export function CbtExamPage() {
     };
     // finishAttempt is stable enough via refs for this monitoring effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, done, previewMode, paused, security.fullscreen, security.tabMonitoring, security.maxTabSwitches, security.thresholdAction, id, index, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId]);
+  }, [started, done, previewMode, paused, security.fullscreen, security.tabMonitoring, security.maxTabSwitches, security.thresholdAction, security.pauseDurationSeconds, id, index, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId]);
 
   const questionsToAnswer = useMemo(() => {
     const row = (settingsQ.data as { questions_to_answer?: number } | null)?.questions_to_answer;
@@ -315,6 +332,52 @@ export function CbtExamPage() {
   const answeredCount = Object.keys(answers).length;
 
   const faceWarnCountRef = useRef(0);
+
+  async function restoreMediaAfterReturn() {
+    if (doneRef.current || finishingRef.current || !startedRef.current) return;
+    try {
+      if (security.requireCamera) {
+        const dead = !mediaStreamRef.current || mediaStreamRef.current.getTracks().every((tr) => tr.readyState !== "live");
+        if (dead) {
+          try {
+            const stream = await openCameraStream({
+              facingMode: "user",
+              audio: Boolean(security.requireMicrophone),
+            });
+            stopMediaStream(mediaStreamRef.current);
+            mediaStreamRef.current = stream;
+            setLiveStream(stream);
+          } catch (e) {
+            console.warn("[cbt] camera restore failed", e);
+          }
+        }
+      }
+      if (security.requireScreenShare) {
+        try {
+          const mod = await import("@/lib/screen-share");
+          let ok = false;
+          try { ok = await mod.ensureScreenShareRunning(); } catch { ok = false; }
+          if (!ok) {
+            const share = await mod.startScreenShareStream();
+            if (share.ok && share.stream) {
+              try { mod.stopScreenShareStream(screenStreamRef.current); } catch { /* ignore */ }
+              screenStreamRef.current = share.stream;
+              setScreenStream(share.stream);
+              mod.onScreenShareEnded(share.stream, () => {
+                setScreenStream(null);
+                screenStreamRef.current = null;
+              });
+            }
+          }
+        } catch (e) {
+          console.warn("[cbt] screen restore failed", e);
+        }
+      }
+    } catch (e) {
+      console.warn("[cbt] restoreMediaAfterReturn", e);
+    }
+  }
+
   const onFaceSecurityEvent = useCallback((ev: FaceSecurityEvent) => {
     if (previewMode || doneRef.current) return;
     const mapped = mapFaceSecurityEvent(ev.kind, ev.faceCount);
@@ -323,13 +386,20 @@ export function CbtExamPage() {
     if (!schoolId || !studentId || !id) return;
     const isViolation = ev.kind === "none" || ev.kind === "multi" || ev.kind === "camera_blocked";
     if (isViolation) faceWarnCountRef.current += 1;
+    if (isViolation) {
+      try {
+        if (ev.kind === "multi") haptic("multi");
+        else if (ev.kind === "none" || ev.kind === "unclear") haptic("none");
+        else if (ev.kind === "camera_blocked") haptic("camera_blocked");
+      } catch { /* ignore */ }
+    }
     void logSecurityEvent({
       schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
       eventType: mapped.eventType, severity: mapped.severity, description: mapped.description,
       extra: { faceCount: ev.faceCount, source: "ExamCameraPip", warnCount: faceWarnCountRef.current },
     });
     const maxW = security.maxFaceWarnings ?? 5;
-    const action = security.faceViolationAction || security.thresholdAction || "flag";
+    const action = security.faceViolationAction || "flag";
     if (!isViolation) return;
     if (faceWarnCountRef.current < maxW) {
       setWarnBanner(mapped.description || "Face integrity warning");
@@ -339,9 +409,6 @@ export function CbtExamPage() {
     if (action === "warn" || action === "flag") {
       setWarnBanner(mapped.description || "Face integrity threshold reached");
       window.setTimeout(() => setWarnBanner(null), 6000);
-    } else if (action === "pause") {
-      setPauseReason(mapped.description || "Face integrity violation");
-      setPaused(true);
     } else if (action === "terminate") {
       setDoneTerminated(true);
       void finishAttempt(true);
@@ -602,7 +669,7 @@ export function CbtExamPage() {
   const mm = String(Math.floor((seconds ?? 0) / 60)).padStart(2, "0");
   const ss = String((seconds ?? 0) % 60).padStart(2, "0");
   return (
-    <div className="flex min-h-dvh flex-col bg-slate-50 select-none">
+    <div className="flex min-h-dvh flex-col overflow-y-auto bg-slate-50 select-none">
       {previewMode && (
         <div className="bg-amber-500 px-3 py-1.5 text-center text-xs font-bold text-white">
           OFFICER PREVIEW — answers are not saved
@@ -689,7 +756,7 @@ export function CbtExamPage() {
           maxFaceWarnings={security.maxFaceWarnings ?? 3}
           stream={liveStream}
           onSecurityEvent={onFaceSecurityEvent}
-          onNeedReconnect={() => {}}
+          onNeedReconnect={() => { void restoreMediaAfterReturn(); }}
         />
       )}
       {warnBanner && started && !done && (

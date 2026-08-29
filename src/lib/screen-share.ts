@@ -368,6 +368,25 @@ export async function startScreenShareStream(): Promise<ScreenShareStartResult> 
 }
 
 /** Explicit stop only (exam submit / leave). Exam hold lock blocks accidental stop. */
+
+/** Re-attach / restart native capture if exam hold is on but frames stopped. */
+export async function ensureScreenShareRunning(): Promise<boolean> {
+  if (!isNativeAndroid()) return false;
+  try {
+    const ensured = await D4ScreenShare().ensureRunning();
+    const active = Boolean((ensured as { active?: boolean })?.active ?? ensured);
+    if (active) {
+      nativeActive = true;
+      status = "active";
+      examHoldLock = true;
+      try { await D4ScreenShare().setKeepAlive({ hold: true }); } catch { /* ignore */ }
+    }
+    return active;
+  } catch {
+    return false;
+  }
+}
+
 export function stopScreenShareStream(stream: MediaStream | null | undefined): void {
   if (examHoldLock && isNativeAndroid()) {
     console.warn("[screen-share] stop ignored — exam hold lock active");
