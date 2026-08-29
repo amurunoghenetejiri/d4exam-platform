@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { hideSplashSafely } from "@/native/statusBar";
 
-/** Plain branded splash duration (ms). */
-const SPLASH_MIN_MS = 2200;
-const SPLASH_MAX_MS = 8000;
-const SESSION_KEY = "d4exam_splash_shown_v6";
+/** Single branded splash: min 7s, hold until page ready (no blank navy / second splash). */
+const SPLASH_MIN_MS = 7000;
+const SPLASH_MAX_MS = 20000;
+const SESSION_KEY = "d4exam_splash_shown_v7";
 
 function isAppShellContext(): boolean {
   if (typeof window === "undefined") return false;
@@ -57,7 +57,7 @@ function removeBootSplashDom(): void {
     if (el) {
       el.style.opacity = "0";
       el.style.pointerEvents = "none";
-      window.setTimeout(() => el.remove(), 150);
+      window.setTimeout(() => el.remove(), 120);
     }
   } catch {
     /* ignore */
@@ -65,8 +65,8 @@ function removeBootSplashDom(): void {
 }
 
 /**
- * Plain static D4EXAM splash (native / PWA only).
- * No animation rings — solid navy + logo + title + motto at bottom.
+ * Only splash the user should ever see: solid navy + logo + title + slogan.
+ * No second splash. Stays at least 7s and until the page has finished loading.
  */
 export function AnimatedSplash({ force = false }: { force?: boolean }) {
   const startRef = useRef<number>(
@@ -81,6 +81,8 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
   });
   const [appReady, setAppReady] = useState(false);
 
+  // Take over immediately: remove HTML boot layer and hide native system splash
+  // so the user only ever sees this one branded screen (no blank navy gap).
   useEffect(() => {
     if (!visible) {
       removeBootSplashDom();
@@ -91,6 +93,7 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     void hideSplashSafely();
   }, [visible]);
 
+  // Page ready when window load fires (or already complete). Cap wait at MAX.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -111,6 +114,7 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
     };
   }, [visible]);
 
+  // Dismiss only after min 7s AND page ready — keeps splash while still loading.
   useEffect(() => {
     if (!visible || !appReady) return;
     const elapsed =
@@ -156,8 +160,8 @@ export function AnimatedSplash({ force = false }: { force?: boolean }) {
         className="pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-4 text-center"
         style={{ paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))" }}
       >
-        <p className="text-[10px] font-semibold tracking-[0.28em] text-slate-400 sm:text-[11px]">
-          SMART. <span style={{ color: "#60a5fa" }}>SECURE.</span> SEAMLESS.
+        <p className="text-[11px] font-semibold tracking-[0.22em] text-slate-300 sm:text-xs">
+          Smart, Secure, and Seamless
         </p>
       </div>
     </div>
