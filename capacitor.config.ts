@@ -7,11 +7,8 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * causes a blank navy/blue screen after splash. The working product loads the
  * production Vercel app inside the native shell (push, camera, status bar still work).
  *
- * When offline, errorPath shows the bundled offline page (not Chrome error).
- * StatusBar.overlaysWebView MUST be false so content is not clipped under the bar.
- *
- * Splash: launchAutoHide false so the solid theme splash stays until
- * AnimatedSplash calls SplashScreen.hide() — eliminates the blank navy gap.
+ * Splash: launchAutoHide=false so native solid theme stays until AnimatedSplash
+ * paints the branded 9s experience — no navy blank gap between system splash and WebView.
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
@@ -39,9 +36,9 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      // Hold solid theme-navy until AnimatedSplash is mounted and calls hide.
-      // Do NOT auto-hide early — that caused blank navy before branded splash.
-      launchShowDuration: 30000,
+      // Hold native splash until AnimatedSplash explicitly hides it.
+      // Prevents the navy blank gap while the remote WebView boots.
+      launchShowDuration: 0,
       launchAutoHide: false,
       backgroundColor: "#0b1b3a",
       androidSplashResourceName: "splash",
