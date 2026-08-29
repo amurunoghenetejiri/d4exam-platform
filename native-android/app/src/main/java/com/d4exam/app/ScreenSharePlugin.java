@@ -212,9 +212,28 @@ public class ScreenSharePlugin extends Plugin {
         getContext().startService(svc);
       }
       try {
-        ScreenCaptureService.READY_LATCH.await(4, TimeUnit.SECONDS);
+        ScreenCaptureService.READY_LATCH.await(8, TimeUnit.SECONDS);
       } catch (InterruptedException ie) {
         Thread.currentThread().interrupt();
+      }
+      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        Log.w(TAG, "FGS not ready after await — retry startForegroundService");
+        try {
+          ScreenCaptureService.resetReady();
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(svc);
+          } else {
+            getContext().startService(svc);
+          }
+          ScreenCaptureService.READY_LATCH.await(5, TimeUnit.SECONDS);
+        } catch (Exception retryEx) {
+          Log.e(TAG, "FGS retry failed", retryEx);
+        }
+      }
+      if (!ScreenCaptureService.FOREGROUND_READY.get()) {
+        call.reject(
+            "Could not start screen monitoring service. Allow notifications for D4EXAM and try again.");
+        return;
       }
 
       if (projectionManager == null) {
@@ -234,9 +253,21 @@ public class ScreenSharePlugin extends Plugin {
           new MediaProjection.Callback() {
             @Override
             public void onStop() {
+              Log.w(TAG, "MediaProjection onStop keepAlive=" + sKeepAlive.get());
               sCapturing.set(false);
               releaseDisplayOnly();
               sMediaProjection = null;
+              if (sKeepAlive.get()) {
+                try {
+                  Intent svc2 = new Intent(getContext(), ScreenCaptureService.class);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getContext().startForegroundService(svc2);
+                  } else {
+                    getContext().startService(svc2);
+                  }
+                } catch (Exception ignored) {
+                }
+              }
               notifyStopped();
             }
           },
