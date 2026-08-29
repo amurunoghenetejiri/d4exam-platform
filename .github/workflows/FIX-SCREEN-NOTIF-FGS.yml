@@ -8,20 +8,30 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Restore plugins from df882b70 and harden
+        with:
+          fetch-depth: 0
+      - name: Restore plugins from known-good commit and harden
         run: |
           set -euo pipefail
           python3 << 'PY'
           from pathlib import Path
           import subprocess
+          import urllib.request
 
-          def load_from_commit(path: str) -> str:
-              return subprocess.check_output(
-                  ["git", "show", f"df882b70:{path}"], text=True
-              )
+          GOOD = "df882b70fd26d240679e10a24725c6c13abc1f8d"
+
+          def load(path: str) -> str:
+              try:
+                  return subprocess.check_output(
+                      ["git", "show", f"{GOOD}:{path}"], text=True
+                  )
+              except Exception:
+                  url = f"https://raw.githubusercontent.com/amurunoghenetejiri/d4exam-platform/{GOOD}/{path}"
+                  print("fetch", url)
+                  with urllib.request.urlopen(url) as r:
+                      return r.read().decode("utf-8")
 
           def harden(t: str) -> str:
-              # Soft-proceed instead of hard reject
               hard = (
                   '      if (!ScreenCaptureService.FOREGROUND_READY.get()) {\n'
                   '        call.reject(\n'
@@ -36,7 +46,6 @@ jobs:
               )
               if hard in t:
                   t = t.replace(hard, soft)
-              # Imports
               if "import android.Manifest;" not in t:
                   t = t.replace(
                       "import android.app.Activity;",
@@ -54,8 +63,7 @@ jobs:
                       "import androidx.core.app.ActivityCompat;\n"
                       "import androidx.core.content.ContextCompat;",
                   )
-              # Request POST_NOTIFICATIONS before FGS
-              if "POST_NOTIFICATIONS" not in t or "requestPermissions" not in t:
+              if "requestPermissions" not in t:
                   marker = "ScreenCaptureService.resetReady();"
                   notif = (
                       "// Android 13+: request notification permission so FGS can post monitoring notification\n"
@@ -84,19 +92,11 @@ jobs:
               "native-android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java",
           ]
           for path in paths:
-              try:
-                  raw = load_from_commit(path)
-              except Exception:
-                  # fall back to current tree if path missing at that commit
-                  p = Path(path)
-                  if not p.exists():
-                      print("skip missing", path)
-                      continue
-                  raw = p.read_text()
+              raw = load(path)
               fixed = harden(raw)
-              assert "PLACEHOLDER" not in fixed
-              assert "Could not start screen monitoring" not in fixed
-              assert "POST_NOTIFICATIONS" in fixed
+              assert "PLACEHOLDER" not in fixed, path
+              assert "Could not start screen monitoring" not in fixed, path
+              assert "POST_NOTIFICATIONS" in fixed, path
               Path(path).parent.mkdir(parents=True, exist_ok=True)
               Path(path).write_text(fixed)
               print("wrote", path, len(fixed))
