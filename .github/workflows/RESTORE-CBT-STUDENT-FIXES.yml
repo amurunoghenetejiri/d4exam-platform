@@ -4,7 +4,9 @@ on:
   push:
     paths:
       - .github/workflows/RESTORE-CBT-STUDENT-FIXES.yml
-      - scripts/restore_cbt_student_fixes.py
+      - scripts/restore_exam_gz.py
+      - scripts/restore_index_gz.py
+      - scripts/restore_cbt_gz.py
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -12,8 +14,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Restore fixed CBT + student files
-        run: python3 scripts/restore_cbt_student_fixes.py
+      - name: Restore fixed files
+        run: |
+          python3 scripts/restore_index_gz.py
+          python3 scripts/restore_exam_gz.py
+          python3 scripts/restore_cbt_gz.py
       - name: Verify markers
         run: |
           set -euo pipefail
