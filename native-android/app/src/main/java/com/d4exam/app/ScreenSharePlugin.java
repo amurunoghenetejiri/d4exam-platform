@@ -35,18 +35,10 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Native screen capture for D4EXAM exam monitoring (MediaProjection).
- *
- * Capture state is STATIC so it survives Capacitor plugin / WebView recreation
- * when the student moves from the security gate into the live CBT session.
- * stop() is ignored while keepAlive is true (exam hold).
- * A watchdog rebuilds the VirtualDisplay if frames stop while keepAlive is on.
- */
+/** Native MediaProjection screen capture for D4EXAM exam monitoring. */
 @CapacitorPlugin(name = "D4ScreenShare")
 public class ScreenSharePlugin extends Plugin {
   private static final String TAG = "D4ScreenShare";
-
   private static volatile MediaProjection sMediaProjection = null;
   private static volatile VirtualDisplay sVirtualDisplay = null;
   private static volatile ImageReader sImageReader = null;
@@ -81,12 +73,6 @@ public class ScreenSharePlugin extends Plugin {
                       || (sLatestTs > 0 && age > FRAME_STALE_MS)
                       || (sLatestTs == 0 && sCapturing.get());
               if (needsRebuild) {
-                Log.w(
-                    TAG,
-                    "watchdog rebuild capturing="
-                        + sCapturing.get()
-                        + " ageMs="
-                        + age);
                 try {
                   startCaptureInternalStatic();
                 } catch (Exception e) {
@@ -112,7 +98,6 @@ public class ScreenSharePlugin extends Plugin {
     super.load();
     sLivePlugin = this;
     ensureWatchdog();
-    Log.i(TAG, "plugin load capturing=" + sCapturing.get() + " keepAlive=" + sKeepAlive.get());
   }
 
   private static void ensureWatchdog() {
@@ -137,7 +122,6 @@ public class ScreenSharePlugin extends Plugin {
   public void setKeepAlive(PluginCall call) {
     boolean hold = Boolean.TRUE.equals(call.getBoolean("hold", false));
     sKeepAlive.set(hold);
-    Log.i(TAG, "setKeepAlive=" + hold);
     if (hold) {
       ensureWatchdog();
       if (sMediaProjection != null && !isReallyActive()) {
@@ -164,9 +148,7 @@ public class ScreenSharePlugin extends Plugin {
       call.reject("Activity not available");
       return;
     }
-
     if (isReallyActive()) {
-      Log.i(TAG, "start: already capturing — reuse");
       sKeepAlive.set(true);
       ensureWatchdog();
       JSObject ret = new JSObject();
@@ -175,9 +157,7 @@ public class ScreenSharePlugin extends Plugin {
       call.resolve(ret);
       return;
     }
-
     if (sMediaProjection != null && !sCapturing.get()) {
-      Log.i(TAG, "start: projection alive, rebuilding virtual display");
       try {
         ensureMetrics(activity);
         startCaptureInternalStatic();
@@ -189,23 +169,28 @@ public class ScreenSharePlugin extends Plugin {
         call.resolve(ret);
         return;
       } catch (Exception e) {
-        Log.e(TAG, "rebuild failed", e);
         releaseDisplayOnly();
       }
     }
-
     try {
       ensureMetrics(activity);
     } catch (Exception ignored) {
     }
-
+    try {
+      if (Build.VERSION.SDK_INT >= 33
+          && ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS)
+              != PackageManager.PERMISSION_GRANTED) {
+        ActivityCompat.requestPermissions(
+            activity, new String[] {Manifest.permission.POST_NOTIFICATIONS}, 4403);
+      }
+    } catch (Exception ignored) {
+    }
     projectionManager =
         (MediaProjectionManager) activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
     if (projectionManager == null) {
       call.reject("MediaProjection not available");
       return;
     }
-    Log.i(TAG, "start: requesting MediaProjection permission");
     Intent intent = projectionManager.createScreenCaptureIntent();
     startActivityForResult(call, intent, "onScreenPermission");
   }
@@ -215,123 +200,130 @@ public class ScreenSharePlugin extends Plugin {
     sLivePlugin = this;
     if (call == null) return;
     if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
-      Log.w(TAG, "permission denied");
       call.reject("Screen share permission denied");
       return;
     }
-    try {
-      try {
-        if (Build.VERSION.SDK_INT >= 33) {
-          Activity act = getActivity();
-          if (act != null
-              && ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS)
-                  != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(
-                act, new String[] {Manifest.permission.POST_NOTIFICATIONS}, 4403);
-            try { Thread.sleep(600); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-          }
-        }
-      } catch (Exception permEx) {
-        Log.w(TAG, "notification permission request skipped", permEx);
-      }
-      boolean fgsReady = false;
-      for (int attempt = 1; attempt <= 3 && !fgsReady; attempt++) {
-        ScreenCaptureService.resetReady();
-        Intent svc = new Intent(getContext(), ScreenCaptureService.class);
-        try {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getContext().startForegroundService(svc);
-          } else {
-            getContext().startService(svc);
-          }
-        } catch (Exception se) {
-          Log.e(TAG, "startForegroundService attempt " + attempt, se);
-        }
-        boolean latched = false;
-        try {
-          latched = ScreenCaptureService.READY_LATCH.await(3, TimeUnit.SECONDS);
-        } catch (InterruptedException ie) {
-          Thread.currentThread().interrupt();
-        }
-        fgsReady = latched && ScreenCaptureService.FOREGROUND_READY.get();
-        Log.i(TAG, "FGS attempt " + attempt + " ready=" + fgsReady
-            + " latched=" + latched
-            + " FOREGROUND_READY=" + ScreenCaptureService.FOREGROUND_READY.get());
-        if (!fgsReady && attempt < 3) {
-          try { Thread.sleep(350); } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-          }
-        }
-      }
-      if (!fgsReady) {
-        Log.e(TAG, "typed MEDIA_PROJECTION FGS failed after retries");
-        call.reject(
-            "Could not start screen monitoring service. Allow notifications for D4EXAM and try again.");
-        return;
-      }
-
-      if (projectionManager == null) {
-        projectionManager =
-            (MediaProjectionManager)
-                getActivity().getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-      }
-      MediaProjection mp;
-      try {
-        mp = projectionManager.getMediaProjection(result.getResultCode(), result.getData());
-      } catch (SecurityException se) {
-        Log.e(TAG, "getMediaProjection SecurityException — FGS type missing", se);
-        call.reject(
-            "Media projections require a foreground service of type "
-                + "ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION");
-        return;
-      }
-      if (mp == null) {
-        call.reject("Could not create MediaProjection");
-        return;
-      }
-      sMediaProjection = mp;
-
-      mp.registerCallback(
-          new MediaProjection.Callback() {
-            @Override
-            public void onStop() {
-              Log.w(TAG, "MediaProjection.onStop — system stopped projection");
-              sCapturing.set(false);
-              releaseDisplayOnly();
-              sMediaProjection = null;
-              notifyStopped();
-            }
-          },
-          new Handler(Looper.getMainLooper()));
-
-      startCaptureInternalStatic();
-      if (!sCapturing.get()) {
-        call.reject("Failed to start screen capture pipeline");
-        return;
-      }
-      sKeepAlive.set(true);
-      ensureWatchdog();
-      Log.i(TAG, "SCREEN_CAPTURE_STARTED " + sScreenWidth + "x" + sScreenHeight);
-      JSObject ret = new JSObject();
-      ret.put("active", true);
-      call.resolve(ret);
-    } catch (Exception e) {
-      Log.e(TAG, "Failed to start screen share", e);
-      call.reject("Failed to start screen share: " + e.getMessage());
+    final Activity activity = getActivity();
+    final Context appCtx = getContext() != null ? getContext().getApplicationContext() : null;
+    if (activity == null || appCtx == null) {
+      call.reject("Activity not available");
+      return;
     }
+    try {
+      if (Build.VERSION.SDK_INT >= 33
+          && ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS)
+              != PackageManager.PERMISSION_GRANTED) {
+        ActivityCompat.requestPermissions(
+            activity, new String[] {Manifest.permission.POST_NOTIFICATIONS}, 4403);
+      }
+    } catch (Exception ignored) {
+    }
+    final Intent data = result.getData();
+    final int resultCode = result.getResultCode();
+    new Thread(
+            () -> {
+              try {
+                boolean fgsReady = false;
+                for (int attempt = 1; attempt <= 4 && !fgsReady; attempt++) {
+                  ScreenCaptureService.resetReady();
+                  Intent svc = new Intent(appCtx, ScreenCaptureService.class);
+                  try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      appCtx.startForegroundService(svc);
+                    } else {
+                      appCtx.startService(svc);
+                    }
+                  } catch (Exception se) {
+                    Log.e(TAG, "startForegroundService " + attempt, se);
+                  }
+                  boolean latched = false;
+                  try {
+                    latched = ScreenCaptureService.READY_LATCH.await(4, TimeUnit.SECONDS);
+                  } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                  }
+                  fgsReady = latched && ScreenCaptureService.FOREGROUND_READY.get();
+                  Log.i(TAG, "FGS attempt " + attempt + " ready=" + fgsReady);
+                  if (!fgsReady && attempt < 4) {
+                    try {
+                      Thread.sleep(400);
+                    } catch (InterruptedException ie) {
+                      Thread.currentThread().interrupt();
+                    }
+                  }
+                }
+                if (!fgsReady) {
+                  activity.runOnUiThread(
+                      () ->
+                          call.reject(
+                              "Could not start screen monitoring service. Allow notifications for D4EXAM and try again."));
+                  return;
+                }
+                activity.runOnUiThread(
+                    () -> {
+                      try {
+                        if (projectionManager == null) {
+                          projectionManager =
+                              (MediaProjectionManager)
+                                  activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+                        }
+                        MediaProjection mp;
+                        try {
+                          mp = projectionManager.getMediaProjection(resultCode, data);
+                        } catch (SecurityException se) {
+                          call.reject(
+                              "Media projections require a foreground service of type MEDIA_PROJECTION");
+                          return;
+                        }
+                        if (mp == null) {
+                          call.reject("Could not create MediaProjection");
+                          return;
+                        }
+                        sMediaProjection = mp;
+                        mp.registerCallback(
+                            new MediaProjection.Callback() {
+                              @Override
+                              public void onStop() {
+                                sCapturing.set(false);
+                                releaseDisplayOnly();
+                                sMediaProjection = null;
+                                notifyStopped();
+                              }
+                            },
+                            new Handler(Looper.getMainLooper()));
+                        ensureMetrics(activity);
+                        startCaptureInternalStatic();
+                        if (!sCapturing.get()) {
+                          call.reject("Failed to start screen capture pipeline");
+                          return;
+                        }
+                        sKeepAlive.set(true);
+                        ensureWatchdog();
+                        JSObject ret = new JSObject();
+                        ret.put("active", true);
+                        call.resolve(ret);
+                      } catch (Exception e) {
+                        call.reject("Failed to start screen share: " + e.getMessage());
+                      }
+                    });
+              } catch (Exception e) {
+                activity.runOnUiThread(
+                    () -> call.reject("Failed to start screen share: " + e.getMessage()));
+              }
+            },
+            "D4ScreenShare-FGS")
+        .start();
   }
 
   @PluginMethod
   public void stop(PluginCall call) {
     if (sKeepAlive.get()) {
-      Log.w(TAG, "stop ignored — keepAlive active");
       JSObject ret = new JSObject();
       ret.put("active", isReallyActive());
       ret.put("ignored", true);
       call.resolve(ret);
       return;
     }
-    Log.i(TAG, "stop: explicit stop requested");
     if (sWatchdogHandler != null) {
       sWatchdogHandler.removeCallbacks(sWatchdogRunnable);
     }
@@ -344,8 +336,7 @@ public class ScreenSharePlugin extends Plugin {
   @PluginMethod
   public void isActive(PluginCall call) {
     JSObject ret = new JSObject();
-    boolean active = isReallyActive();
-    ret.put("active", active);
+    ret.put("active", isReallyActive());
     ret.put("capturing", sCapturing.get());
     ret.put("hasProjection", sMediaProjection != null);
     ret.put("keepAlive", sKeepAlive.get());
@@ -359,8 +350,7 @@ public class ScreenSharePlugin extends Plugin {
     if (sKeepAlive.get() && sMediaProjection != null && !isReallyActive()) {
       try {
         startCaptureInternalStatic();
-      } catch (Exception e) {
-        Log.w(TAG, "getLatestFrame rebuild", e);
+      } catch (Exception ignored) {
       }
     }
     JSObject ret = new JSObject();
@@ -439,7 +429,6 @@ public class ScreenSharePlugin extends Plugin {
     sHandlerThread = new HandlerThread("D4ScreenShare");
     sHandlerThread.start();
     sHandler = new Handler(sHandlerThread.getLooper());
-
     sImageReader =
         ImageReader.newInstance(sScreenWidth, sScreenHeight, PixelFormat.RGBA_8888, 3);
     sImageReader.setOnImageAvailableListener(
@@ -483,7 +472,6 @@ public class ScreenSharePlugin extends Plugin {
           }
         },
         sHandler);
-
     sVirtualDisplay =
         sMediaProjection.createVirtualDisplay(
             "D4EXAM-Screen",
@@ -495,7 +483,6 @@ public class ScreenSharePlugin extends Plugin {
             null,
             sHandler);
     sCapturing.set(sVirtualDisplay != null);
-    Log.i(TAG, "startCaptureInternal capturing=" + sCapturing.get());
   }
 
   private static String imageToJpegBase64(Image image) {
@@ -558,7 +545,6 @@ public class ScreenSharePlugin extends Plugin {
   }
 
   private void stopCaptureInternal(boolean stopService) {
-    Log.i(TAG, "stopCaptureInternal stopService=" + stopService);
     sKeepAlive.set(false);
     sLatestJpeg = null;
     sLatestTs = 0;
@@ -584,12 +570,10 @@ public class ScreenSharePlugin extends Plugin {
   @Override
   protected void handleOnDestroy() {
     if (sKeepAlive.get()) {
-      Log.i(TAG, "handleOnDestroy — keepAlive, leaving projection running");
       sLivePlugin = null;
       super.handleOnDestroy();
       return;
     }
-    Log.i(TAG, "handleOnDestroy — stopping capture");
     if (sWatchdogHandler != null) {
       sWatchdogHandler.removeCallbacks(sWatchdogRunnable);
     }
