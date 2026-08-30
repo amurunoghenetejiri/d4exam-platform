@@ -1,0 +1,38 @@
+name: RESTORE-CBT-STUDENT-FIXES
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/RESTORE-CBT-STUDENT-FIXES.yml
+      - scripts/restore_cbt_student_fixes.py
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore fixed CBT + student files
+        run: python3 scripts/restore_cbt_student_fixes.py
+      - name: Verify markers
+        run: |
+          set -euo pipefail
+          grep -q isExamAttemptFinished src/routes/student.index.tsx
+          grep -q isExamAttemptFinished src/routes/student.examinations.tsx
+          grep -q holdExamScreenShare src/components/cbt/CbtExamSession.impl.tsx
+          grep -q priorAttemptQ src/components/cbt/CbtExamSession.impl.tsx
+          grep -q alreadyFinished src/components/cbt/CbtExamSession.impl.tsx
+          grep -q 'min-h-0 flex-1 overflow-y-auto' src/components/cbt/CbtExamSession.impl.tsx
+          echo markers ok
+      - name: Commit restored sources
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/routes/student.index.tsx src/routes/student.examinations.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "fix(cbt): retake guard, screen-share hold, student availability counts, exam scroll"
+            git push
+          fi
