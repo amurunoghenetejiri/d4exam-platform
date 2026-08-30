@@ -656,7 +656,7 @@ export function CbtExamPage() {
   const mm = String(Math.floor((seconds ?? 0) / 60)).padStart(2, "0");
   const ss = String((seconds ?? 0) % 60).padStart(2, "0");
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-slate-50 select-none">
+    <div className="min-h-dvh bg-slate-50 select-none">
       {previewMode && (
         <div className="bg-amber-500 px-3 py-1.5 text-center text-xs font-bold text-white">
           OFFICER PREVIEW — answers are not saved
@@ -674,7 +674,7 @@ export function CbtExamPage() {
           </div>
         </div>
       </header>
-      <div className="mx-auto grid w-full max-w-[1200px] min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden p-3 pt-[calc(4rem+0.75rem)] sm:p-6 sm:pt-[calc(4rem+1.5rem)] lg:grid-cols-[220px_1fr]">
+      <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-4 p-3 pt-[calc(4rem+0.75rem)] pb-6 sm:p-6 sm:pt-[calc(4rem+1.5rem)] lg:grid-cols-[220px_1fr]">
         <aside className="order-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:order-1">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Questions</p>
           <div className="mt-3 grid grid-cols-5 gap-2">
@@ -696,7 +696,7 @@ export function CbtExamPage() {
           </div>
           <p className="mt-4 text-xs text-slate-500">Answered <span className="font-bold text-slate-800">{answeredCount}</span> / {TOTAL}</p>
         </aside>
-        <section className="order-1 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:order-2">
+        <section className="order-1 flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:order-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-primary">Question <span className="text-primary">{index + 1}</span> of {TOTAL}</p>
             <button type="button" onClick={() => {
@@ -707,7 +707,6 @@ export function CbtExamPage() {
               <Flag className="h-3.5 w-3.5" />{q && flagged.has(q.id) ? "Marked" : "Mark for Review"}
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
           <h1 className="mt-4 text-lg font-bold leading-snug text-slate-900 sm:text-xl">{q?.question_text}</h1>
           <ul className="mt-6 space-y-3">
             {(q?.options ?? []).map((opt, oi) => {
@@ -727,8 +726,7 @@ export function CbtExamPage() {
               );
             })}
           </ul>
-          </div>
-          <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
             <Button variant="outline" className="rounded-lg font-semibold" disabled={index === 0} onClick={() => setIndex((i) => Math.max(0, i - 1))}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Previous
             </Button>
