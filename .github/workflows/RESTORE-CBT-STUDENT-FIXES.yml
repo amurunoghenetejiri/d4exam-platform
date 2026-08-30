@@ -4,9 +4,12 @@ on:
   push:
     paths:
       - .github/workflows/RESTORE-CBT-STUDENT-FIXES.yml
-      - scripts/restore_exam_gz.py
-      - scripts/restore_index_gz.py
-      - scripts/restore_cbt_gz.py
+      - scripts/exam_part*.b64
+      - scripts/index_part*.b64
+      - scripts/cbt_part*.b64
+      - scripts/exam_assemble.py
+      - scripts/index_assemble.py
+      - scripts/cbt_assemble.py
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -16,9 +19,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Restore fixed sources
         run: |
-          python3 scripts/restore_exam_gz.py
-          python3 scripts/restore_index_gz.py
-          python3 scripts/restore_cbt_gz.py
+          python3 scripts/exam_assemble.py
+          python3 scripts/index_assemble.py
+          python3 scripts/cbt_assemble.py
       - name: Verify markers
         run: |
           set -euo pipefail
