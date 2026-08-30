@@ -23,9 +23,10 @@ import { mapFaceSecurityEvent } from "@/lib/live-monitor";
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
 import { haptic } from "@/lib/haptic";
-import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream } from "@/lib/screen-share";
+import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, holdExamScreenShare } from "@/lib/screen-share";
 import { useLiveScreenPublish } from "@/lib/use-live-screen-publish";
 import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
+import { isExamAttemptFinished } from "@/lib/student";
 
 function isPreviewPath() {
   if (typeof window === "undefined") return false;
@@ -143,9 +144,39 @@ export function CbtExamPage() {
     },
   });
 
+  const priorAttemptQ = useQuery({
+    queryKey: ["cbt-prior-attempt", id, student?.studentId],
+    enabled: Boolean(id && student?.studentId && !previewMode),
+    queryFn: async () => {
+      const { data: attempt } = await supabase
+        .from("exam_attempts")
+        .select("id, status")
+        .eq("exam_id", id)
+        .eq("student_id", student!.studentId)
+        .maybeSingle();
+      const { data: result } = await supabase
+        .from("results")
+        .select("id")
+        .eq("exam_id", id)
+        .eq("student_id", student!.studentId)
+        .maybeSingle();
+      return {
+        attemptStatus: (attempt?.status as string | undefined) ?? null,
+        hasResult: Boolean(result?.id),
+        attemptId: (attempt?.id as string | undefined) ?? null,
+      };
+    },
+  });
+
+  const alreadyFinished = !previewMode && isExamAttemptFinished(
+    priorAttemptQ.data?.attemptStatus,
+    priorAttemptQ.data?.hasResult,
+  );
+
   const security = useMemo(() => fromExamSettingsRow(settingsQ.data, examQ.data?.description), [settingsQ.data, examQ.data?.description]);
 
   const shutdownMedia = useCallback(() => {
+    holdExamScreenShare(false);
     stopMediaStream(mediaStreamRef.current);
     mediaStreamRef.current = null;
     setLiveStream(null);
@@ -448,12 +479,14 @@ export function CbtExamPage() {
       }
       const needScreen = Boolean(security.requireScreenShare) && !_opts.skipScreenShare;
       if (needScreen) {
+        holdExamScreenShare(true);
         const share = await startScreenShareStream();
         if (!share.ok) {
+          holdExamScreenShare(false);
           toast.error(share.message || "Screen sharing is required for this examination.");
           return;
         }
-        try { stopScreenShareStream(screenStreamRef.current); } catch { /* ignore */ }
+        // reuse keeps MediaProjection alive across Gate → CBT navigation
         screenStreamRef.current = share.stream;
         setScreenStream(share.stream);
         onScreenShareEnded(share.stream, () => {
@@ -576,6 +609,25 @@ export function CbtExamPage() {
       </div>
     );
   }
+  if (alreadyFinished) {
+    return (
+      <div className="grid min-h-dvh place-items-center bg-slate-50 p-4">
+        <div className="w-full max-w-lg rounded-2xl border bg-white p-6 text-center shadow-sm">
+          <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? session?.schoolName} size="lg" className="mx-auto" />
+          <h1 className="mt-4 text-2xl font-extrabold">Examination already completed</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            You have already submitted or finished this examination. Retakes are not allowed.
+          </p>
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <Button className="font-semibold" onClick={() => void goToResult()}>View Results</Button>
+            <Button variant="outline" className="font-semibold" asChild>
+              <Link to="/student/examinations">Back to examinations</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!started) {
     return (
       <ExamSecurityGate
@@ -604,7 +656,7 @@ export function CbtExamPage() {
   const mm = String(Math.floor((seconds ?? 0) / 60)).padStart(2, "0");
   const ss = String((seconds ?? 0) % 60).padStart(2, "0");
   return (
-    <div className="flex min-h-dvh flex-col bg-slate-50 select-none">
+    <div className="flex h-dvh flex-col overflow-hidden bg-slate-50 select-none">
       {previewMode && (
         <div className="bg-amber-500 px-3 py-1.5 text-center text-xs font-bold text-white">
           OFFICER PREVIEW — answers are not saved
@@ -622,7 +674,7 @@ export function CbtExamPage() {
           </div>
         </div>
       </header>
-      <div className="mx-auto grid w-full max-w-[1200px] flex-1 grid-cols-1 gap-4 p-3 pt-[calc(4rem+0.75rem)] sm:p-6 sm:pt-[calc(4rem+1.5rem)] lg:grid-cols-[220px_1fr]">
+      <div className="mx-auto grid w-full max-w-[1200px] min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden p-3 pt-[calc(4rem+0.75rem)] sm:p-6 sm:pt-[calc(4rem+1.5rem)] lg:grid-cols-[220px_1fr]">
         <aside className="order-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:order-1">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Questions</p>
           <div className="mt-3 grid grid-cols-5 gap-2">
@@ -644,7 +696,7 @@ export function CbtExamPage() {
           </div>
           <p className="mt-4 text-xs text-slate-500">Answered <span className="font-bold text-slate-800">{answeredCount}</span> / {TOTAL}</p>
         </aside>
-        <section className="order-1 flex flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:order-2">
+        <section className="order-1 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6 lg:order-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-semibold text-primary">Question <span className="text-primary">{index + 1}</span> of {TOTAL}</p>
             <button type="button" onClick={() => {
@@ -655,6 +707,7 @@ export function CbtExamPage() {
               <Flag className="h-3.5 w-3.5" />{q && flagged.has(q.id) ? "Marked" : "Mark for Review"}
             </button>
           </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
           <h1 className="mt-4 text-lg font-bold leading-snug text-slate-900 sm:text-xl">{q?.question_text}</h1>
           <ul className="mt-6 space-y-3">
             {(q?.options ?? []).map((opt, oi) => {
@@ -674,6 +727,7 @@ export function CbtExamPage() {
               );
             })}
           </ul>
+          </div>
           <div className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
             <Button variant="outline" className="rounded-lg font-semibold" disabled={index === 0} onClick={() => setIndex((i) => Math.max(0, i - 1))}>
               <ChevronLeft className="mr-1 h-4 w-4" /> Previous

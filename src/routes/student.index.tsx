@@ -4,18 +4,24 @@ import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   ClipboardList,
-  Award,
+  Trophy,
   Bell,
   ChevronRight,
-  Loader2,
-  WifiOff,
+  CalendarDays,
+  History,
+  User,
+  Hash,
+  Building2,
+  GraduationCap,
 } from "lucide-react";
-import { AppShell } from "@/components/AppShell";
+import {
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+  EmptyState,
+  NavCard,
+} from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
-import { friendlyError } from "@/lib/errors";
 import {
   useStudentContext,
   STUDENT_VISIBLE_EXAM_STATUSES,
@@ -24,11 +30,516 @@ import {
 } from "@/lib/student";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
+import { useRealtimeInvalidate } from "@/lib/realtime";
+import { withOfflineCache } from "@/lib/offline-query";
+import { OfflineKeys } from "@/lib/offline-cache";
+import { cn } from "@/lib/utils";
 import { processDueExamReminders } from "@/lib/notify";
-import { toast } from "sonner";
 
 export const Route = createFileRoute("/student/")({
+  head: () => ({ meta: [{ title: "Student Dashboard — D4EXAM" }] }),
   component: Page,
 });
 
-// PLACEHOLDER_WILL_REPLACE_WITH_FULL - this is incomplete intentionally for size test
+type ExamRow = {
+  id: string;
+  title: string;
+  status: string;
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  duration_minutes: number | null;
+  courses: { code: string; name: string } | null;
+};
+
+type AttemptRow = { exam_id: string; status: string };
+
+type ResultRow = {
+  id: string;
+  exam_id: string;
+  percentage: number | null;
+  grade: string | null;
+  pass_fail: string | null;
+  status: string;
+  released_at: string | null;
+  created_at: string | null;
+  examinations: { title: string; courses: { code: string } | null } | null;
+};
+
+type Notif = { id: string; title: string; created_at: string; read_at: string | null };
+
+const DONE_ATTEMPT = ["submitted", "terminated", "flagged"];
+
+function Page() {
+  const { data: student, isLoading: sLoading } = useStudentContext();
+  const { data: user } = useSessionUser();
+
+  useEffect(() => {
+    const sid = student?.schoolId ?? user?.schoolId ?? null;
+    if (!sid) return;
+    const t = window.setTimeout(() => { void processDueExamReminders(sid); }, 2000);
+    return () => window.clearTimeout(t);
+  }, [student?.schoolId, user?.schoolId]);
+  const navigate = useNavigate();
+
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 15_000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  useRealtimeInvalidate(
+    `student-dash-${student?.studentId ?? "anon"}`,
+    [
+      { table: "examinations" },
+      { table: "exam_attempts", filter: student?.studentId ? `student_id=eq.${student.studentId}` : undefined },
+      { table: "results", filter: student?.studentId ? `student_id=eq.${student.studentId}` : undefined },
+      { table: "notifications", filter: user?.userId ? `recipient_user_id=eq.${user.userId}` : undefined },
+    ],
+    [
+      ["student-dashboard-exams"],
+      ["student-dashboard-attempts"],
+      ["student-dashboard-results"],
+      ["student-dashboard-notifs"],
+      ["student-exams"],
+      ["student-attempts"],
+      ["student-result-ids"],
+    ],
+    Boolean(student?.studentId),
+    1200,
+  );
+
+  const examsQ = useQuery({
+    queryKey: ["student-dashboard-exams", student?.schoolId, student?.courseIds?.join(",")],
+    enabled: Boolean(student?.schoolId),
+    staleTime: 1_500,
+    refetchInterval: 5_000,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      const uid = user?.userId ?? student?.profileId;
+      return withOfflineCache(
+        uid,
+        OfflineKeys.studentDashboardExams,
+        async () => {
+          let q = supabase
+            .from("examinations")
+            .select(
+              "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
+            )
+            .eq("school_id", student!.schoolId)
+            .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
+            .order("scheduled_start", { ascending: true })
+            .limit(80);
+          if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
+          const { data, error } = await q;
+          if (error) {
+            console.warn("[offline]", error);
+            return [] as ExamRow[];
+          }
+          return (data ?? []) as ExamRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as ExamRow[] },
+      );
+    },
+  });
+
+  const attemptsQ = useQuery({
+    queryKey: ["student-dashboard-attempts", student?.studentId],
+    enabled: Boolean(student?.studentId),
+    staleTime: 1_500,
+    refetchInterval: 5_000,
+    refetchOnMount: "always",
+    queryFn: async () => {
+      const uid = user?.userId ?? student?.profileId;
+      return withOfflineCache(
+        uid,
+        OfflineKeys.studentDashboardAttempts,
+        async () => {
+          const { data, error } = await supabase
+            .from("exam_attempts")
+            .select("exam_id, status")
+            .eq("student_id", student!.studentId);
+          if (error) {
+            console.warn("[offline]", error);
+            return [] as AttemptRow[];
+          }
+          return (data ?? []) as AttemptRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as AttemptRow[] },
+      );
+    },
+  });
+
+  const resultsQ = useQuery({
+    queryKey: ["student-dashboard-results", student?.studentId],
+    enabled: Boolean(student?.studentId),
+    staleTime: 2_000,
+    refetchInterval: 10_000,
+    refetchOnMount: "always",
+    queryFn: async () => {
+      const uid = user?.userId ?? student?.profileId;
+      return withOfflineCache(
+        uid,
+        OfflineKeys.studentDashboardResults,
+        async () => {
+          const { data, error } = await supabase
+            .from("results")
+            .select(
+              "id, exam_id, percentage, grade, pass_fail, status, released_at, created_at, examinations(title, courses(code))",
+            )
+            .eq("student_id", student!.studentId)
+            .order("created_at", { ascending: false })
+            .limit(40);
+          if (error) {
+            console.warn("[offline]", error);
+            return [] as ResultRow[];
+          }
+          return (data ?? []) as ResultRow[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as ResultRow[] },
+      );
+    },
+  });
+
+  const notifsQ = useQuery({
+    queryKey: ["student-dashboard-notifs", user?.userId],
+    enabled: Boolean(user?.userId),
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+    queryFn: async () => {
+      return withOfflineCache(
+        user!.userId,
+        OfflineKeys.studentDashboardNotifs,
+        async () => {
+          const { data, error } = await supabase
+            .from("notifications")
+            .select("id, title, created_at, read_at")
+            .eq("recipient_user_id", user!.userId)
+            .order("created_at", { ascending: false })
+            .limit(20);
+          if (error) {
+            console.warn("[offline]", error);
+            return [] as Notif[];
+          }
+          return (data ?? []) as Notif[];
+        },
+        { schoolId: student?.schoolId, fallback: [] as Notif[] },
+      );
+    },
+  });
+
+  const attemptsByExam = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of attemptsQ.data ?? []) m.set(a.exam_id, a.status);
+    return m;
+  }, [attemptsQ.data]);
+
+  const finishedByResult = useMemo(() => {
+    const s = new Set<string>();
+    for (const r of resultsQ.data ?? []) s.add(r.exam_id);
+    return s;
+  }, [resultsQ.data]);
+
+  const exams = examsQ.data ?? [];
+  const results = resultsQ.data ?? [];
+  const notifs = notifsQ.data ?? [];
+
+  function isStudentFinished(examId: string): boolean {
+    return isExamAttemptFinished(attemptsByExam.get(examId), finishedByResult.has(examId));
+  }
+
+  function isWriting(examId: string): boolean {
+    return String(attemptsByExam.get(examId) || "").toLowerCase() === "in_progress";
+  }
+
+  const written = useMemo(() => {
+    const ids = new Set<string>();
+    for (const a of attemptsQ.data ?? []) {
+      if (isExamAttemptFinished(a.status, finishedByResult.has(a.exam_id))) ids.add(a.exam_id);
+    }
+    for (const id of finishedByResult) ids.add(id);
+    return ids.size;
+  }, [attemptsQ.data, finishedByResult]);
+
+  const { availableNow, upcoming } = useMemo(() => {
+    void tick;
+    const live: ExamRow[] = [];
+    const up: ExamRow[] = [];
+    for (const e of exams) {
+      if (isStudentFinished(e.id)) continue;
+      if (["completed", "closed", "cancelled"].includes(String(e.status).toLowerCase())) continue;
+      const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
+      if (avail === "available") live.push(e);
+      else if (avail === "upcoming") up.push(e);
+    }
+    return { availableNow: live, upcoming: up };
+  }, [exams, attemptsByExam, finishedByResult, tick]);
+
+  const readyNow = availableNow;
+  const readyList = [...availableNow, ...upcoming];
+
+  const unreadNotifs = notifs.filter((n) => !n.read_at).length;
+  const courseCount = student?.courses?.length ?? 0;
+
+  if (sLoading) {
+    return <p className="text-sm text-slate-500">Loading dashboard…</p>;
+  }
+
+  if (!student) {
+    return (
+      <EmptyState
+        title="Student profile not found"
+        description="Contact School Admin to link your account to a student record."
+      />
+    );
+  }
+
+  const displayName = (student.fullName || "").trim();
+
+  return (
+    <>
+      <PageHeader
+        title={displayName ? `Welcome, ${displayName}` : "Student dashboard"}
+        description="Your examinations, results, courses and notifications."
+      />
+
+      <SectionCard title="Student information" className="mb-4 sm:mb-6">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <InfoCell icon={User} label="Full name" value={student.fullName || "—"} bold />
+          <InfoCell icon={Hash} label="Matric number" value={student.matric || "—"} />
+          <InfoCell icon={Building2} label="College / Faculty" value={student.facultyName || "—"} />
+          <InfoCell icon={Building2} label="Department" value={student.departmentName || "—"} />
+          <InfoCell icon={GraduationCap} label="Level" value={student.levelName || "—"} />
+          <InfoCell
+            icon={CalendarDays}
+            label="Semester"
+            value={
+              [student.semesterName, student.sessionName].filter(Boolean).join(" · ") || "—"
+            }
+          />
+        </div>
+      </SectionCard>
+
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:mb-6 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
+        <DashCard
+          to="/student/examinations"
+          label="Ready exams"
+          value={readyNow.length}
+          hint={upcoming.length > 0 ? `${upcoming.length} upcoming` : undefined}
+          icon={ClipboardList}
+          color="bg-blue-50 text-primary"
+        />
+        <DashCard
+          to="/student/results"
+          label="Results"
+          value={results.length}
+          icon={Trophy}
+          color="bg-amber-50 text-amber-600"
+        />
+        <DashCard
+          to="/student/history"
+          label="Exam history"
+          value={written}
+          icon={History}
+          color="bg-violet-50 text-violet-600"
+        />
+        <DashCard
+          to="/student/courses"
+          label="Courses"
+          value={courseCount}
+          icon={BookOpen}
+          color="bg-emerald-50 text-emerald-600"
+        />
+        <DashCard
+          to="/student/notifications"
+          label="Notifications"
+          value={unreadNotifs}
+          hint={unreadNotifs ? "unread" : undefined}
+          icon={Bell}
+          color="bg-rose-50 text-rose-600"
+          className="col-span-2 sm:col-span-1"
+        />
+      </div>
+
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
+        <SectionCard
+          title="Ready to start"
+          description="Exams you can write now or that are upcoming"
+          action={
+            <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
+              <Link to="/student/examinations">View All</Link>
+            </Button>
+          }
+        >
+          {readyList.length === 0 ? (
+            <EmptyState
+              title="No ready exams"
+              description="When officer-approved exams are in their time window and you have not written them, they appear here."
+            />
+          ) : (
+            <ul className="space-y-2">
+              {readyList.slice(0, 6).map((e) => {
+                const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
+                const canStart = avail === "available";
+                return (
+                  <li
+                    key={e.id}
+                    className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white px-2.5 py-2.5 sm:px-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-900">
+                        {e.courses?.code ? `${e.courses.code} · ` : ""}
+                        {e.title}
+                      </p>
+                      <p className="flex items-center gap-1 text-[11px] text-slate-500 sm:text-xs">
+                        <CalendarDays className="h-3 w-3 shrink-0" />
+                        <span className="truncate">
+                          {e.scheduled_start
+                            ? new Date(e.scheduled_start).toLocaleString()
+                            : "Schedule TBC"}
+                          {e.duration_minutes ? ` · ${e.duration_minutes} min` : ""}
+                        </span>
+                      </p>
+                    </div>
+                    {canStart ? (
+                      <Button
+                        size="sm"
+                        className="h-8 shrink-0 bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-primary/90 sm:text-sm"
+                        type="button"
+                        onClick={() => {
+                          void navigate({
+                            to: "/student/exam/$id",
+                            params: { id: e.id },
+                          });
+                        }}
+                      >
+                        Start
+                      </Button>
+                    ) : (
+                      <StatusBadge status="upcoming" className="shrink-0" />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </SectionCard>
+
+        <SectionCard
+          title="Recent results"
+          action={
+            <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
+              <Link to="/student/results">View All</Link>
+            </Button>
+          }
+        >
+          {results.length === 0 ? (
+            <EmptyState
+              title="No results yet"
+              description="After you submit an exam, results appear here (scores show when released)."
+            />
+          ) : (
+            <ul className="space-y-2">
+              {results.slice(0, 5).map((r) => {
+                const isPub =
+                  (r.status || "").toLowerCase() === "published" || Boolean(r.released_at);
+                return (
+                  <li key={r.id}>
+                    <NavCard
+                      to="/student/results/$id"
+                      params={{ id: r.id }}
+                      ariaLabel={`Results for ${r.examinations?.title ?? "exam"}`}
+                      className="flex items-center justify-between gap-2 rounded-xl border-slate-100 px-2.5 py-2 sm:px-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">
+                          {r.examinations?.courses?.code
+                            ? `${r.examinations.courses.code} · `
+                            : ""}
+                          {r.examinations?.title ?? "Exam"}
+                        </p>
+                        <p className="text-[11px] text-slate-500 sm:text-xs">
+                          {isPub
+                            ? `${r.percentage != null ? `${Math.round(Number(r.percentage))}%` : "—"}${r.grade ? ` · ${r.grade}` : ""}`
+                            : "Pending officer release"}
+                        </p>
+                      </div>
+                      <StatusBadge status={isPub ? "Released" : "Held"} />
+                    </NavCard>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </SectionCard>
+      </div>
+    </>
+  );
+}
+
+function InfoCell({
+  icon: Icon,
+  label,
+  value,
+  bold,
+}: {
+  icon: typeof User;
+  label: string;
+  value: string;
+  bold?: boolean;
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-slate-100 bg-slate-50/60 px-2 py-2 sm:rounded-xl sm:px-3 sm:py-2.5">
+      <p className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400 sm:text-[10px]">
+        <Icon className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+        {label}
+      </p>
+      <p className={cn("mt-0.5 break-words text-xs text-slate-900 sm:text-sm", bold && "font-bold")}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function DashCard({
+  to,
+  label,
+  value,
+  hint,
+  icon: Icon,
+  color,
+  className,
+}: {
+  to: string;
+  label: string;
+  value: number;
+  hint?: string;
+  icon: typeof Trophy;
+  color: string;
+  className?: string;
+}) {
+  return (
+    <NavCard to={to} ariaLabel={label} className={cn("h-full !rounded-xl !p-2.5 sm:!rounded-2xl sm:!p-4", className)}>
+      <div className="flex items-center gap-2 sm:gap-3">
+        <div
+          className={cn(
+            "grid h-8 w-8 shrink-0 place-items-center rounded-lg sm:h-10 sm:w-10 sm:rounded-xl",
+            color,
+          )}
+        >
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-lg font-extrabold tabular-nums leading-none text-slate-900 sm:text-2xl">
+            {value}
+          </p>
+          <p className="mt-0.5 text-[10px] font-semibold leading-tight text-slate-500 sm:text-xs">
+            {label}
+          </p>
+          {hint ? <p className="text-[9px] text-slate-400 sm:text-[10px]">{hint}</p> : null}
+        </div>
+        <ChevronRight className="hidden h-4 w-4 shrink-0 text-slate-300 sm:block" />
+      </div>
+    </NavCard>
+  );
+}
