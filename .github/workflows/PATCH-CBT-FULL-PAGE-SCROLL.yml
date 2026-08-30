@@ -1,0 +1,34 @@
+name: PATCH-CBT-FULL-PAGE-SCROLL
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/PATCH-CBT-FULL-PAGE-SCROLL.yml
+      - scripts/patch_cbt_full_page_scroll.py
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply full-page scroll layout
+        run: python3 scripts/patch_cbt_full_page_scroll.py
+      - name: Verify
+        run: |
+          set -euo pipefail
+          grep -q 'min-h-dvh bg-slate-50 select-none' src/components/cbt/CbtExamSession.impl.tsx
+          ! grep -q 'min-h-0 flex-1 overflow-y-auto' src/components/cbt/CbtExamSession.impl.tsx
+          echo OK
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(cbt): whole exam page scrolls under fixed header (not question-only)"
+            git push
+          fi
