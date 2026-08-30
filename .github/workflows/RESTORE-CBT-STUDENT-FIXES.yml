@@ -14,10 +14,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Restore fixed files
+      - name: Restore fixed sources
         run: |
-          python3 scripts/restore_index_gz.py
           python3 scripts/restore_exam_gz.py
+          python3 scripts/restore_index_gz.py
           python3 scripts/restore_cbt_gz.py
       - name: Verify markers
         run: |
