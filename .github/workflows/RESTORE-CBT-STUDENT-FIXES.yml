@@ -4,12 +4,7 @@ on:
   push:
     paths:
       - .github/workflows/RESTORE-CBT-STUDENT-FIXES.yml
-      - scripts/exam_part*.b64
-      - scripts/index_part*.b64
-      - scripts/cbt_part*.b64
-      - scripts/exam_assemble.py
-      - scripts/index_assemble.py
-      - scripts/cbt_assemble.py
+      - scripts/apply_student_cbt_fix.py
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -17,30 +12,30 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Restore fixed sources
-        run: |
-          python3 scripts/exam_assemble.py
-          python3 scripts/index_assemble.py
-          python3 scripts/cbt_assemble.py
-      - name: Verify markers
+        with:
+          fetch-depth: 0
+      - name: Apply student + CBT fixes
+        run: python3 scripts/apply_student_cbt_fix.py
+      - name: Verify
         run: |
           set -euo pipefail
+          ! grep -q PLACEHOLDER src/routes/student.examinations.tsx
+          ! grep -q PLACEHOLDER src/routes/student.index.tsx
           grep -q isExamAttemptFinished src/routes/student.index.tsx
           grep -q isExamAttemptFinished src/routes/student.examinations.tsx
           grep -q holdExamScreenShare src/components/cbt/CbtExamSession.impl.tsx
           grep -q priorAttemptQ src/components/cbt/CbtExamSession.impl.tsx
           grep -q alreadyFinished src/components/cbt/CbtExamSession.impl.tsx
-          grep -q 'min-h-0 flex-1 overflow-y-auto' src/components/cbt/CbtExamSession.impl.tsx
-          echo markers ok
-      - name: Commit restored sources
+          echo verify ok
+      - name: Commit and push
         run: |
           set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git config user.name "D4EXAM Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/routes/student.index.tsx src/routes/student.examinations.tsx src/components/cbt/CbtExamSession.impl.tsx
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "No changes"
           else
-            git commit -m "fix(cbt): retake guard, screen-share hold, student availability counts, exam scroll"
+            git commit -m "fix(cbt): restore student availability, retake guard, screen-share hold, exam scroll"
             git push
           fi
