@@ -6,8 +6,6 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -45,6 +43,10 @@ public class ScreenCaptureService extends Service {
       int resId = getResources().getIdentifier("ic_stat_d4exam", "drawable", getPackageName());
       if (resId != 0) return resId;
     } catch (Exception ignored) {}
+    try {
+      int resId = getResources().getIdentifier("ic_launcher", "mipmap", getPackageName());
+      if (resId != 0) return resId;
+    } catch (Exception ignored) {}
     return android.R.drawable.ic_menu_camera;
   }
 
@@ -60,7 +62,7 @@ public class ScreenCaptureService extends Service {
             .setColor(NOTIF_COLOR)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setSilent(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
@@ -71,17 +73,11 @@ public class ScreenCaptureService extends Service {
       } catch (Exception ignored) {}
     }
 
-    try {
-      Bitmap large = BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
-      if (large != null) builder.setLargeIcon(large);
-    } catch (Exception e) {
-      Log.w(TAG, "largeIcon load failed", e);
-    }
-
     Notification notification = builder.build();
     boolean ok = false;
 
-    // On API 29+ MediaProjection REQUIRES typed FGS. Never fall back to untyped.
+    // Typed MEDIA_PROJECTION FGS is required on API 29+. Always call startForeground
+    // so the system does not kill the process for FGS timeout.
     try {
       if (Build.VERSION.SDK_INT >= 29) {
         startForeground(
@@ -102,7 +98,7 @@ public class ScreenCaptureService extends Service {
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
                 .setSilent(true)
                 .build();
@@ -115,7 +111,14 @@ public class ScreenCaptureService extends Service {
         ok = true;
         Log.i(TAG, "startForeground MEDIA_PROJECTION retry ok");
       } catch (Exception e2) {
-        Log.e(TAG, "typed FGS retry failed — MediaProjection will not work", e2);
+        Log.e(TAG, "typed FGS retry failed", e2);
+        // Last resort: untyped so process is not killed for missing startForeground.
+        try {
+          startForeground(NOTIF_ID, notification);
+          Log.w(TAG, "untyped startForeground fallback (MediaProjection may fail)");
+        } catch (Exception e3) {
+          Log.e(TAG, "all startForeground attempts failed", e3);
+        }
         ok = false;
       }
     }
@@ -131,10 +134,11 @@ public class ScreenCaptureService extends Service {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       NotificationChannel channel =
           new NotificationChannel(
-              CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_DEFAULT);
+              CHANNEL_ID, "Exam screen monitoring", NotificationManager.IMPORTANCE_LOW);
       channel.setDescription("Shown while screen share is active during an examination");
       channel.setShowBadge(false);
       channel.setSound(null, null);
+      channel.enableVibration(false);
       NotificationManager nm = getSystemService(NotificationManager.class);
       if (nm != null) nm.createNotificationChannel(channel);
     }
