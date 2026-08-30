@@ -21,21 +21,6 @@ jobs:
           git show 477e5d8:src/routes/student.index.tsx > src/routes/student.index.tsx
           git show 477e5d8:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
           python3 scripts/apply_student_cbt_fix.py
-      - name: Disable noisy workflows (dispatch-only)
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          for path in Path(".github/workflows").glob("*.yml"):
-              if path.name in ("ci-status.yml", "RESTORE-AND-DEPLOY.yml"):
-                  continue
-              text = path.read_text()
-              m = re.search(r"(^on:\s*)(.*?)(^jobs:\s*)", text, re.M | re.S)
-              if m and ("push" in m.group(2) or "pull_request" in m.group(2) or "schedule" in m.group(2)):
-                  path.write_text(text[:m.start()] + "on:\n  workflow_dispatch:\n\n" + m.group(3) + text[m.end():])
-                  print("disabled", path.name)
-          PY
       - name: Verify
         run: |
           set -euo pipefail
@@ -47,15 +32,15 @@ jobs:
           grep -q priorAttemptQ src/components/cbt/CbtExamSession.impl.tsx
           grep -q alreadyFinished src/components/cbt/CbtExamSession.impl.tsx
           echo OK
-      - name: Commit and push
+      - name: Commit and push source fixes only
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/routes/student.index.tsx src/routes/student.examinations.tsx src/components/cbt/CbtExamSession.impl.tsx .github/workflows
+          git add src/routes/student.index.tsx src/routes/student.examinations.tsx src/components/cbt/CbtExamSession.impl.tsx
           if git diff --cached --quiet; then
             echo "No changes"
           else
-            git commit -m "fix: restore student CBT files, disable broken CI for clean GitHub+Vercel deploy"
+            git commit -m "fix: restore student CBT files (retake guard, availability, screen-share hold, scroll)"
             git push
           fi
