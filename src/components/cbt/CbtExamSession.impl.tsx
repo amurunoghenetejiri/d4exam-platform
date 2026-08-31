@@ -288,6 +288,55 @@ export function CbtExamPage() {
     getStream: () => screenStreamRef.current || screenStream,
   });
 
+  useEffect(() => {
+    if (!started || done || previewMode) return;
+    const studentId = student?.studentId;
+    if (!studentId) return;
+    const ch = supabase.channel(`student-exam-warn:${studentId}`);
+    ch.on("broadcast", { event: "officer_warning" }, ({ payload }) => {
+      const p = payload as { message?: string; examId?: string };
+      if (p?.examId && id && String(p.examId) !== String(id)) return;
+      if (doneRef.current) return;
+      const msg = p?.message || "Warning from examination officer";
+      setWarnBanner(msg);
+      try { haptic("officer_warning"); } catch { /* ignore */ }
+      window.setTimeout(() => setWarnBanner(null), 10000);
+    });
+    void ch.subscribe();
+    return () => {
+      void supabase.removeChannel(ch);
+    };
+  }, [started, done, previewMode, student?.studentId, id]);
+
+  useEffect(() => {
+    if (!started || done || previewMode) return;
+    const studentId = student?.studentId;
+    if (!studentId) return;
+    const ch = supabase.channel(`student-exam-cmd:${studentId}`);
+    ch.on("broadcast", { event: "officer_command" }, ({ payload }) => {
+      const p = payload as { command?: string; examId?: string; attemptId?: string };
+      if (!p?.command) return;
+      if (p.examId && id && String(p.examId) !== String(id)) return;
+      if (doneRef.current || finishingRef.current) return;
+      const cmd = String(p.command).toLowerCase();
+      if (cmd === "hold") {
+        beginTimedPause("Held by examination officer");
+        setWarnBanner("Your examination has been held by the officer");
+        window.setTimeout(() => setWarnBanner(null), 8000);
+      } else if (cmd === "terminate") {
+        setDoneTerminated(true);
+        void finishAttempt(true);
+      } else if (cmd === "submit") {
+        void finishAttempt(false);
+      }
+    });
+    void ch.subscribe();
+    return () => {
+      void supabase.removeChannel(ch);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done, previewMode, student?.studentId, id]);
+
   // Integrity: fullscreen exit + app background / tab switch
   useEffect(() => {
     if (!started || done || previewMode || paused) return;
