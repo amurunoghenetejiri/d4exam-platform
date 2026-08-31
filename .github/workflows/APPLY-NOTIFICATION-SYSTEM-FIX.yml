@@ -3,7 +3,7 @@ on:
   push:
     paths:
       - "scripts/apply_notification_system_fix.py"
-      - "scripts/blobs_notify/**"
+      - "scripts/fixed_parts/**"
       - ".github/workflows/APPLY-NOTIFICATION-SYSTEM-FIX.yml"
   workflow_dispatch:
 permissions:
