@@ -1,0 +1,31 @@
+name: APPLY-NOTIFICATION-SYSTEM-FIX
+on:
+  push:
+    paths:
+      - "scripts/apply_notification_system_fix.py"
+      - "scripts/blobs_notify/**"
+      - ".github/workflows/APPLY-NOTIFICATION-SYSTEM-FIX.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply notification system fix
+        run: python3 scripts/apply_notification_system_fix.py
+      - name: Commit
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/lib/notify.ts src/components/pages/NotificationsPage.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(notify): single template path, real names, full message + action labels"
+            git push
+          fi
