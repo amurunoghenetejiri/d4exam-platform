@@ -1,0 +1,30 @@
+name: APPLY-OFFICER-LIVE-MONITOR-FIX
+on:
+  push:
+    paths:
+      - "scripts/apply_officer_live_monitor_fix.py"
+      - ".github/workflows/APPLY-OFFICER-LIVE-MONITOR-FIX.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply officer live-monitor + student command listener
+        run: python3 scripts/apply_officer_live_monitor_fix.py
+      - name: Commit
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/routes/officer.live-monitor.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(monitor): independent cam/screen frames, last-frame retention, officer submit/hold/terminate"
+            git push
+          fi
