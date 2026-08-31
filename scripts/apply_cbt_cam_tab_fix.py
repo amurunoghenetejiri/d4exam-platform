@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import base64, gzip
 from pathlib import Path
-code = "".join(Path(f"scripts/_cam_tab_part{i}.py").read_text() for i in range(3))
+b64 = "".join(Path(f"scripts/blobs/camfix_{i}.txt").read_text().strip() for i in range(3))
+code = gzip.decompress(base64.b64decode(b64)).decode()
 if code.startswith("#!"):
-    code = code.split("\n", 1)[1]
-exec(compile(code, "apply_cbt_cam_tab_fix.py", "exec"))
+    code = code.split(chr(10), 1)[1]
+exec(compile(code, "apply", "exec"))
