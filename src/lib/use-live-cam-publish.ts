@@ -87,6 +87,6 @@ export function useLiveCamPublish(opts: {
     opts.studentId,
     opts.examId,
     opts.attemptId,
-    opts.stream,
+    // stream omitted on purpose: getStream() always reads the latest MediaStream after reconnect
   ]);
 }
