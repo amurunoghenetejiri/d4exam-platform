@@ -1,0 +1,42 @@
+name: Patch CBT face / tab / timer / live
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/patch_cbt_face_tab_timer_live.py"
+      - ".github/workflows/PATCH-CBT-FACE-TAB-TIMER.yml"
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 40
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore CBT sources from last known good if PLACEHOLDER
+        run: |
+          set -e
+          for f in src/components/cbt/ExamCameraPip.tsx src/components/cbt/CbtExamSession.impl.tsx; do
+            if [ ! -s "$f" ] || grep -qx "PLACEHOLDER" "$f"; then
+              echo "Restoring $f from 3885202"
+              git checkout 3885202 -- "$f" || git checkout 82f4527 -- "$f" || true
+            fi
+            wc -c "$f"
+            head -c 40 "$f"; echo
+          done
+      - name: Apply surgical patches
+        run: python3 scripts/patch_cbt_face_tab_timer_live.py
+      - name: Commit and push
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/ExamCameraPip.tsx src/components/cbt/CbtExamSession.impl.tsx scripts/patch_cbt_face_tab_timer_live.py
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git commit -m "fix(cbt): face detection continuous retry, tab badge bottom-right, timer+live during pause"
+          git push origin HEAD:main
