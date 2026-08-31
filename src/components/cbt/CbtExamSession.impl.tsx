@@ -656,13 +656,13 @@ export function CbtExamPage() {
   const mm = String(Math.floor((seconds ?? 0) / 60)).padStart(2, "0");
   const ss = String((seconds ?? 0) % 60).padStart(2, "0");
   return (
-    <div className="d4-cbt-exam relative h-dvh overflow-hidden bg-slate-50 select-none">
+    <div className="d4-cbt-exam relative flex h-dvh flex-col overflow-hidden bg-slate-50 select-none">
       {previewMode && (
-        <div className="fixed inset-x-0 top-0 z-50 bg-amber-500 px-3 py-1.5 text-center text-xs font-bold text-white">
+        <div className="shrink-0 bg-amber-500 px-3 py-1.5 text-center text-xs font-bold text-white">
           OFFICER PREVIEW — answers are not saved
         </div>
       )}
-      <header className="d4-cbt-header fixed inset-x-0 top-0 z-40 border-b border-slate-200 bg-[#0b1b3a] text-white">
+      <header className="d4-cbt-header z-40 shrink-0 border-b border-slate-200 bg-[#0b1b3a] text-white">
         <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-3 px-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? student?.schoolName ?? session?.schoolName} size="md" className="bg-transparent" />
@@ -674,7 +674,7 @@ export function CbtExamPage() {
           </div>
         </div>
       </header>
-      <main className="d4-cbt-scroll h-full overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] pt-16">
+            <main className="d4-cbt-scroll min-h-0 flex-1 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
       <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-4 p-3 pb-8 sm:p-6 lg:grid-cols-[220px_1fr]">
         <aside className="order-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:order-1">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Questions</p>

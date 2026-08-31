@@ -498,10 +498,25 @@ html.d4-exam-immersive,
 html.d4-exam-immersive body { overflow: hidden !important; }
 html.d4-exam-immersive .d4-cbt-exam { height: 100dvh !important; max-height: 100dvh !important; padding-bottom: 0 !important; margin-bottom: 0 !important; }
 
-
-/* CBT: only the main content pane scrolls; header stays fixed */
+/* CBT: header pinned (flex shrink-0); whole exam body scrolls in .d4-cbt-scroll */
+html.d4-exam-immersive .d4-cbt-exam {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+}
+html.d4-exam-immersive .d4-cbt-header {
+  position: relative !important;
+  flex-shrink: 0 !important;
+  top: auto !important;
+  inset: auto !important;
+}
 html.d4-exam-immersive .d4-cbt-scroll {
+  flex: 1 1 0% !important;
+  min-height: 0 !important;
   -webkit-overflow-scrolling: touch;
   overflow-y: auto !important;
   overscroll-behavior-y: contain;
 }
+
