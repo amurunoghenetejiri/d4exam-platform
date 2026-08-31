@@ -497,3 +497,11 @@ html.d4-exam-immersive [data-sonner-toaster] {
 html.d4-exam-immersive,
 html.d4-exam-immersive body { overflow: hidden !important; }
 html.d4-exam-immersive .d4-cbt-exam { height: 100dvh !important; max-height: 100dvh !important; padding-bottom: 0 !important; margin-bottom: 0 !important; }
+
+
+/* CBT: only the main content pane scrolls; header stays fixed */
+html.d4-exam-immersive .d4-cbt-scroll {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto !important;
+  overscroll-behavior-y: contain;
+}
