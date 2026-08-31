@@ -92,21 +92,28 @@ export function CbtExamPage() {
   const [paused, setPaused] = useState(false);
   const [pauseReason, setPauseReason] = useState<string>("");
   const [warnBanner, setWarnBanner] = useState<string | null>(null);
+  const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [pauseRemainingSec, setPauseRemainingSec] = useState<number | null>(null);
   const attemptIdRef = useRef<string | null>(null);
   const tabSwitchCountRef = useRef(0);
   const fullscreenExitCountRef = useRef(0);
   const lastViolationAtRef = useRef(0);
+  const lastTabHiddenAtRef = useRef(0);
   const orderedIdsRef = useRef<string[] | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
+  const cameraReconnectLockRef = useRef(false);
+  const pauseUntilRef = useRef<number | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const [liveAttemptId, setLiveAttemptId] = useState<string | null>(null);
   const finishingRef = useRef(false);
   const startedRef = useRef(false);
   const doneRef = useRef(false);
+  const pausedRef = useRef(false);
   const resultIdRef = useRef<string | null>(null);
   startedRef.current = started;
   doneRef.current = done;
+  pausedRef.current = paused;
   resultIdRef.current = resultId;
 
   const examQ = useQuery({
@@ -125,7 +132,7 @@ export function CbtExamPage() {
     enabled: Boolean(id),
     queryFn: async () => {
       const { data } = await supabase.from("exam_settings")
-        .select("exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, face_detection, max_face_warnings, require_screen_share, screen_share_mode, threshold_action, face_violation_action, total_marks, instructions, result_visibility, questions_to_answer")
+        .select("exam_id, fullscreen, tab_monitoring, max_tab_switches, block_copy_paste, randomize_questions, randomize_options, require_camera, require_microphone, face_detection, max_face_warnings, require_screen_share, screen_share_mode, threshold_action, face_violation_action, pause_duration_seconds, total_marks, instructions, result_visibility, questions_to_answer")
         .eq("exam_id", id).maybeSingle();
       return data as ExamSettingsRow | null;
     },
@@ -185,13 +192,61 @@ export function CbtExamPage() {
     setScreenStream(null);
   }, []);
 
+  const reconnectCamera = useCallback(async () => {
+    if (!security.requireCamera || cameraReconnectLockRef.current || doneRef.current || finishingRef.current) return;
+    const cur = mediaStreamRef.current;
+    const live = cur?.getVideoTracks().some((tr) => tr.readyState === "live" && tr.enabled !== false);
+    if (live) return;
+    cameraReconnectLockRef.current = true;
+    try {
+      const stream = await openCameraStream({ facingMode: "user", audio: Boolean(security.requireMicrophone) });
+      stopMediaStream(mediaStreamRef.current);
+      mediaStreamRef.current = stream;
+      setLiveStream(stream);
+    } catch (e) {
+      console.warn("[cbt] camera reconnect failed", e);
+    } finally {
+      cameraReconnectLockRef.current = false;
+    }
+  }, [security.requireCamera, security.requireMicrophone]);
+
+  const clearTimedPause = useCallback(() => {
+    pauseUntilRef.current = null;
+    setPauseRemainingSec(null);
+    setPaused(false);
+    setPauseReason("");
+    void reconnectCamera();
+  }, [reconnectCamera]);
+
+  const beginTimedPause = useCallback((reason: string) => {
+    const secs = Math.max(5, Number(security.pauseDurationSeconds) || 300);
+    pauseUntilRef.current = Date.now() + secs * 1000;
+    setPauseRemainingSec(secs);
+    setPauseReason(reason);
+    setPaused(true);
+  }, [security.pauseDurationSeconds]);
+
   useEffect(() => {
-    if (!started || done || seconds == null) return;
+    if (!paused || pauseUntilRef.current == null) return;
+    const tick = () => {
+      const until = pauseUntilRef.current;
+      if (until == null) return;
+      const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+      setPauseRemainingSec(left);
+      if (left <= 0) clearTimedPause();
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [paused, clearTimedPause]);
+
+  useEffect(() => {
+    if (!started || done || seconds == null || paused) return;
     if (seconds <= 0) { void finishAttempt(true); return; }
     const t = window.setInterval(() => setSeconds((s) => (s == null ? s : Math.max(0, s - 1))), 1000);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, done, seconds === 0]);
+  }, [started, done, paused, seconds === 0]);
 
   useEffect(() => {
     if (done) {
@@ -257,6 +312,8 @@ export function CbtExamPage() {
         setWarnBanner(description);
         try { haptic("tab_switch"); } catch { /* ignore */ }
         window.setTimeout(() => setWarnBanner(null), 6000);
+      } else if (action === "pause") {
+        beginTimedPause(description);
       } else if (action === "terminate") {
         setDoneTerminated(true);
         await finishAttempt(true);
@@ -284,8 +341,16 @@ export function CbtExamPage() {
 
     const onVis = () => {
       if (!security.tabMonitoring) return;
+      if (document.visibilityState === "visible") {
+        void reconnectCamera();
+        return;
+      }
       if (document.visibilityState !== "hidden") return;
+      const now = Date.now();
+      if (now - lastTabHiddenAtRef.current < 800) return;
+      lastTabHiddenAtRef.current = now;
       tabSwitchCountRef.current += 1;
+      setTabSwitchCount(tabSwitchCountRef.current);
       if (attemptIdRef.current) {
         void supabase.from("exam_attempts").update({
           tab_switch_count: tabSwitchCountRef.current,
@@ -372,8 +437,7 @@ export function CbtExamPage() {
       setWarnBanner(mapped.description || "Face integrity threshold reached");
       window.setTimeout(() => setWarnBanner(null), 6000);
     } else if (action === "pause") {
-      setPauseReason(mapped.description || "Face integrity violation");
-      setPaused(true);
+      beginTimedPause(mapped.description || "Face integrity violation");
     } else if (action === "terminate") {
       setDoneTerminated(true);
       void finishAttempt(true);
@@ -738,6 +802,13 @@ export function CbtExamPage() {
         </section>
       </div>
       </main>
+      {started && !done && security.tabMonitoring && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[120] flex justify-center px-3">
+          <div className="rounded-full border border-slate-200 bg-white/95 px-3 py-1 text-[11px] font-semibold text-slate-700 shadow-sm">
+            Tab violations: {tabSwitchCount}/{Math.max(1, Number(security.maxTabSwitches) || 5)}
+          </div>
+        </div>
+      )}
       {started && !done && security.requireCamera && (
         <ExamCameraPip
           enabled={started && !done}
@@ -763,9 +834,18 @@ export function CbtExamPage() {
               Your examination has been paused because an integrity violation was detected.
             </p>
             {pauseReason ? <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p> : null}
-            <Button className="mt-5 w-full font-semibold" onClick={() => void restoreFullscreenFromUser()}>
-              Resume examination
-            </Button>
+            {pauseRemainingSec != null && pauseRemainingSec > 0 ? (
+              <>
+                <p className="mt-4 font-mono text-3xl font-extrabold tabular-nums text-primary">
+                  {String(Math.floor(pauseRemainingSec / 60)).padStart(2, "0")}:{String(pauseRemainingSec % 60).padStart(2, "0")}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">Resumes automatically when the timer reaches zero</p>
+              </>
+            ) : (
+              <Button className="mt-5 w-full font-semibold" onClick={() => void clearTimedPause()}>
+                Resume examination
+              </Button>
+            )}
           </div>
         </div>
       )}
