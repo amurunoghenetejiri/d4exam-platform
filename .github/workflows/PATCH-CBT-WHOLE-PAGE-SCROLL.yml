@@ -17,11 +17,11 @@ jobs:
       - name: Verify
         run: |
           set -euo pipefail
-          grep -q 'd4-cbt-exam relative h-dvh overflow-hidden' src/components/cbt/CbtExamSession.impl.tsx
-          grep -q 'd4-cbt-scroll' src/components/cbt/CbtExamSession.impl.tsx
+          grep -q 'flex h-dvh flex-col' src/components/cbt/CbtExamSession.impl.tsx
+          grep -q 'd4-cbt-scroll min-h-0 flex-1' src/components/cbt/CbtExamSession.impl.tsx
+          grep -q 'd4-cbt-header z-40 shrink-0' src/components/cbt/CbtExamSession.impl.tsx
           grep -q '</main>' src/components/cbt/CbtExamSession.impl.tsx
-          ! grep -q 'min-h-0 flex-1 overflow-y-auto' src/components/cbt/CbtExamSession.impl.tsx
-          grep -q 'd4-cbt-scroll' src/styles.css
+          grep -q 'flex: 1 1 0%' src/styles.css
           echo OK
       - name: Commit
         run: |
@@ -30,6 +30,6 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add src/components/cbt/CbtExamSession.impl.tsx src/styles.css
           if git diff --cached --quiet; then echo No changes; else
-            git commit -m "fix(cbt): whole exam content scrolls under fixed header (not question-only)"
+            git commit -m "fix(cbt): whole exam body scrolls under pinned header (flex column, not question-only)"
             git push
           fi
