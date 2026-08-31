@@ -26,6 +26,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes"
           else
-            git commit -m "fix(notify): single template path, real names, full message + action labels"
+            git commit -m "fix(notify): Msg templates for in-app+push, real names, full message + actions"
             git push
           fi
