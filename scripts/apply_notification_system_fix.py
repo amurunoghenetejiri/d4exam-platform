@@ -18,5 +18,7 @@ for line in (PARTS/"manifest.txt").read_text().strip().splitlines():
     r = subprocess.run(["patch", "-p1", "--forward", "--reject-file=-", "-i", str(diff_path)], capture_output=True, text=True)
     print(name, "rc", r.returncode)
     print(r.stdout)
-    print(r.stderr)
+    if r.returncode not in (0, 1):
+        print(r.stderr)
+        raise SystemExit(r.returncode)
 print("OK")
