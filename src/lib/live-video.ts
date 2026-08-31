@@ -151,15 +151,27 @@ export function startLiveCamPublisher(opts: {
   let channel: RealtimeChannel | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let publishing = false;
+  let channelName = `${liveCamChannelName(opts.schoolId)}:${opts.attemptId}:${Math.random().toString(36).slice(2, 8)}`;
 
-  channel = supabase.channel(liveCamChannelName(opts.schoolId), {
-    config: { broadcast: { ack: false, self: false } },
-  });
+  const clearTimer = () => {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  const ensureTimer = () => {
+    if (stopped || timer) return;
+    void sendFrame();
+    timer = setInterval(() => void sendFrame(), intervalMs);
+  };
 
   const sendFrame = async () => {
     if (stopped || publishing) return;
     const stream = opts.getStream();
     if (!stream) return;
+    const live = stream.getVideoTracks().some((tr) => tr.readyState === "live" && tr.enabled !== false);
+    if (!live) return;
     publishing = true;
     try {
       const frame = await captureJpegFromStream(stream, { maxWidth: 360, quality: 0.52, mirror: true });
@@ -188,17 +200,38 @@ export function startLiveCamPublisher(opts: {
     }
   };
 
-  void channel.subscribe((status) => {
-    if (status === "SUBSCRIBED" && !stopped) {
-      void sendFrame();
-      timer = setInterval(() => void sendFrame(), intervalMs);
+  const attach = () => {
+    if (stopped) return;
+    if (channel) {
+      try { void supabase.removeChannel(channel); } catch { /* ignore */ }
+      channel = null;
     }
-  });
+    clearTimer();
+    channelName = `${liveCamChannelName(opts.schoolId)}:${opts.attemptId}:${Math.random().toString(36).slice(2, 8)}`;
+    channel = supabase.channel(channelName, {
+      config: { broadcast: { ack: false, self: false } },
+    });
+    void channel.subscribe((status) => {
+      if (stopped) return;
+      if (status === "SUBSCRIBED") {
+        ensureTimer();
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        clearTimer();
+        if (!stopped) {
+          window.setTimeout(() => {
+            if (!stopped) attach();
+          }, 2000);
+        }
+      }
+    });
+  };
+
+  attach();
 
   return {
     stop: () => {
       stopped = true;
-      if (timer) clearInterval(timer);
+      clearTimer();
       if (channel) {
         void supabase.removeChannel(channel);
         channel = null;
