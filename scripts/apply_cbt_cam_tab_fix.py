@@ -3,12 +3,21 @@
 import base64
 from pathlib import Path
 
+def load_b64(path: str) -> bytes:
+    p = Path(path)
+    if p.exists():
+        return base64.b64decode(p.read_text().strip())
+    parts = sorted(Path("scripts/blobs").glob(Path(path).name + ".part*"))
+    if not parts:
+        raise SystemExit(f"missing {path}")
+    return base64.b64decode("".join(x.read_text().strip() for x in parts))
+
 MAP = {
   "scripts/blobs/live-video.ts.b64": "src/lib/live-video.ts",
   "scripts/blobs/CbtExamSession.impl.tsx.b64": "src/components/cbt/CbtExamSession.impl.tsx",
 }
 for src, dest in MAP.items():
-    data = base64.b64decode(Path(src).read_text().strip())
+    data = load_b64(src)
     Path(dest).write_bytes(data)
     print("wrote", dest, len(data))
 
