@@ -6,6 +6,24 @@
  */
 import { isNativeShell } from "@/native/platform";
 
+async function withMediaTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} timed out. Allow camera permission in the system dialog or App Settings, then try again.`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+
 export type CameraStreamOptions = {
   facingMode?: "user" | "environment";
   audio?: boolean;
@@ -41,7 +59,7 @@ async function probeGetUserMedia(
     return { granted: false, error: "Media devices are not available on this device" };
   }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const stream = await withMediaTimeout(navigator.mediaDevices.getUserMedia(constraints), 15_000, "Camera/microphone request");
     stream.getTracks().forEach((t) => {
       try {
         t.stop();
@@ -75,9 +93,9 @@ export async function ensureCameraPermission(): Promise<PermissionResult> {
   if (isNativeShell()) {
     try {
       const { Camera } = await import("@capacitor/camera");
-      let status = await Camera.checkPermissions();
+      let status = await withMediaTimeout(Camera.checkPermissions(), 8_000, "Camera permission check");
       if (status.camera !== "granted") {
-        status = await Camera.requestPermissions({ permissions: ["camera"] });
+        status = await withMediaTimeout(Camera.requestPermissions({ permissions: ["camera"] }), 20_000, "Camera permission dialog");
       }
       if (status.camera !== "granted") {
         return {
@@ -89,6 +107,10 @@ export async function ensureCameraPermission(): Promise<PermissionResult> {
       }
     } catch (e) {
       console.warn("[D4EXAM] Camera permission plugin error", e);
+      const msg = (e as Error)?.message || "";
+      if (msg.toLowerCase().includes("timed out")) {
+        return { granted: false, error: msg };
+      }
     }
   }
   return probeGetUserMedia({ video: true, audio: false });
@@ -149,21 +171,29 @@ export async function openCameraStream(
     }
   }
   try {
-    return await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: options.facingMode || "user",
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-      },
-      audio: Boolean(options.audio),
-    });
+    return await withMediaTimeout(
+      navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: options.facingMode || "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
+        audio: Boolean(options.audio),
+      }),
+      15_000,
+      "Opening camera",
+    );
   } catch (e) {
     if (options.audio) {
       try {
-        return await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: options.facingMode || "user" },
-          audio: false,
-        });
+        return await withMediaTimeout(
+          navigator.mediaDevices.getUserMedia({
+            video: { facingMode: options.facingMode || "user" },
+            audio: false,
+          }),
+          12_000,
+          "Opening camera (video only)",
+        );
       } catch {
         /* fall through */
       }
