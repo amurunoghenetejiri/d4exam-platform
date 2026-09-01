@@ -1,0 +1,28 @@
+name: Apply hysteresis stable live frames
+on:
+  push:
+    paths:
+      - scripts/apply_hysteresis_stable.py
+      - .github/workflows/apply-hysteresis-stable.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply surgical patches
+        run: |
+          python3 scripts/apply_hysteresis_stable.py
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/lib/live-video.ts src/routes/officer.live-monitor.tsx
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(officer-live): stable hysteresis — keep frames through Realtime jitter; Pause/Release toggle"
+            git push
+          fi
