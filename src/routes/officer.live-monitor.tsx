@@ -90,7 +90,7 @@ type IntegrityEvent = {
 };
 
 type FilterKey = "all" | "normal" | "warning" | "violation" | "offline";
-type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null; studentName?: string; matricNumber?: string; courseCode?: string; examTitle?: string };
+type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null; studentName?: string; matricNumber?: string; courseCode?: string; examTitle?: string; studentId?: string; examId?: string };
 
 function isFaceOrCameraLogOnly(eventType: string): boolean {
   const t = String(eventType || "").toUpperCase();
@@ -255,6 +255,8 @@ function Page() {
           matricNumber: p.matricNumber ? String(p.matricNumber).trim() : undefined,
           courseCode: p.courseCode ? String(p.courseCode).trim() : undefined,
           examTitle: p.examTitle ? String(p.examTitle).trim() : undefined,
+          studentId: String(p.studentId || (p as { student_id?: string }).student_id || "").trim() || undefined,
+          examId: String(p.examId || "").trim() || undefined,
         };
         const sid = String(p.studentId || (p as { student_id?: string }).student_id || "");
         setFrames((prev) => {
@@ -494,8 +496,8 @@ function Page() {
     staleTime: 30_000,
     queryFn: async () => {
       const ids = studentIdsKey.split(",").filter(Boolean);
-      if (!ids.length) return {} as Record<string, string>;
-      const map: Record<string, string> = {};
+      if (!ids.length) return {} as Record<string, { name: string; matric: string }>;
+      const map: Record<string, { name: string; matric: string }> = {};
       const nameSelects = [
         "id, full_name, matric_number, student_id, profile_id, profiles(full_name, first_name, last_name)",
         "id, full_name, matric_number, student_id, profile_id, profiles(full_name)",
@@ -523,7 +525,7 @@ function Page() {
           pName = String(pr.full_name || [pr.first_name, pr.last_name].filter(Boolean).join(" ") || "").trim();
         }
         if (!name || name.toLowerCase() === matric.toLowerCase()) name = pName || name;
-        if (name && name.toLowerCase() !== matric.toLowerCase()) map[row.id] = name;
+        if (name || matric) map[row.id] = { name: name || "", matric };
         if (row.profile_id) profileIds.push(String(row.profile_id));
       }
       const missing = ids.filter((id) => !map[id]);
@@ -537,8 +539,11 @@ function Page() {
         }
         for (const s of studs) {
           const row = s as { id: string; profile_id?: string | null };
-          if (!map[row.id] && row.profile_id && byPid[String(row.profile_id)]) {
-            map[row.id] = byPid[String(row.profile_id)];
+          if (row.profile_id && byPid[String(row.profile_id)]) {
+            const existing = map[row.id];
+            if (!existing || !existing.name) {
+              map[row.id] = { name: byPid[String(row.profile_id)], matric: existing?.matric || "" };
+            }
           }
         }
       }
@@ -588,16 +593,30 @@ function Page() {
       if (now - entry.ts > 60_000) continue;
       frameOnly.push({
         id: key,
-        exam_id: "",
-        student_id: key,
+        exam_id: String(entry.examId || ""),
+        student_id: String(entry.studentId || key),
         status: "in_progress",
         started_at: new Date(entry.ts).toISOString(),
         updated_at: new Date(entry.ts).toISOString(),
         tab_switch_count: 0,
-        metadata: { lastSeenAt: new Date(entry.ts).toISOString() },
-        examinations: null,
-        students: null,
-      });
+        metadata: {
+          lastSeenAt: new Date(entry.ts).toISOString(),
+          studentName: entry.studentName || undefined,
+          matricNumber: entry.matricNumber || undefined,
+          courseCode: entry.courseCode || undefined,
+          examTitle: entry.examTitle || undefined,
+        },
+        examinations: entry.examTitle
+          ? { title: entry.examTitle, status: "ongoing", courses: entry.courseCode ? { code: entry.courseCode } : null }
+          : null,
+        students: (entry.studentName || entry.matricNumber)
+          ? {
+              full_name: entry.studentName || null,
+              matric_number: entry.matricNumber || null,
+              student_id: entry.matricNumber || null,
+            }
+          : null,
+      })
     }
     const merged = [...inProgress, ...recentDone, ...frameOnly];
     // One card per student: prefer in-progress + live frame + most recent activity
@@ -659,27 +678,56 @@ function Page() {
           else sev = "normal";
         }
         const resolved = studentNamesQ.data?.[String(a.student_id)];
-        const frameId = camFrame || frames[a.id] || frames[`student:${a.student_id}`];
+        const frameId = camFrame || frames[a.id] || frames[`student:${a.student_id}`] || null;
         const metaName = nameFromMetadata(a.metadata);
         const frameName = String(frameId?.studentName || "").trim();
-        const name = (resolved && String(resolved).trim()) || frameName || metaName || studentDisplayName(a);
+        const fromJoin = studentDisplayName(a);
+        const resolvedName = typeof resolved === "string"
+          ? resolved.trim()
+          : String((resolved as { name?: string } | undefined)?.name || "").trim();
+        const nameCandidates = [resolvedName, frameName, metaName, fromJoin].filter(
+          (n) => n && n !== "Student" && n.toLowerCase() !== "unknown",
+        );
+        const name = nameCandidates[0] || "Student";
         const metaMatric = (() => {
           const mm = a.metadata;
           if (!mm || typeof mm !== "object") return "";
-          return String((mm as Record<string, unknown>).matricNumber || (mm as Record<string, unknown>).matric_number || "").trim();
+          const r = mm as Record<string, unknown>;
+          return String(r.matricNumber || r.matric_number || r.matric || r.student_id || "").trim();
         })();
         const frameMatric = String(frameId?.matricNumber || "").trim();
-        const matric = String(a.students?.matric_number || a.students?.student_id || frameMatric || metaMatric || "").trim() || "—";
+        const resolvedMatric = typeof resolved === "object" && resolved
+          ? String((resolved as { matric?: string }).matric || "").trim()
+          : "";
+        const matric = String(
+          a.students?.matric_number || a.students?.student_id || resolvedMatric || frameMatric || metaMatric || "",
+        ).trim() || "—";
         const _c = a.examinations?.courses as unknown;
         const courseObj = Array.isArray(_c)
           ? (_c[0] as { code?: string; name?: string } | undefined)
           : (_c as { code?: string; name?: string } | null | undefined);
-        const courseCode = String(courseObj?.code || examEnrichQ.data?.[String(a.exam_id)]?.courseCode || frameId?.courseCode || "").trim();
+        const metaCourse = (() => {
+          const mm = a.metadata;
+          if (!mm || typeof mm !== "object") return "";
+          const r = mm as Record<string, unknown>;
+          return String(r.courseCode || r.course_code || "").trim();
+        })();
+        const metaTitle = (() => {
+          const mm = a.metadata;
+          if (!mm || typeof mm !== "object") return "";
+          const r = mm as Record<string, unknown>;
+          return String(r.examTitle || r.exam_title || "").trim();
+        })();
+        const courseCode = String(
+          courseObj?.code || examEnrichQ.data?.[String(a.exam_id)]?.courseCode || frameId?.courseCode || metaCourse || "",
+        ).trim();
         const courseName = String(courseObj?.name || examEnrichQ.data?.[String(a.exam_id)]?.courseName || "").trim();
         const course = courseCode && courseName && courseName.toLowerCase() !== courseCode.toLowerCase()
           ? `${courseCode} · ${courseName}`
           : (courseCode || courseName || "—");
-        const title = String(a.examinations?.title || examEnrichQ.data?.[String(a.exam_id)]?.title || frameId?.examTitle || "").trim() || "Exam";
+        const title = String(
+          a.examinations?.title || examEnrichQ.data?.[String(a.exam_id)]?.title || frameId?.examTitle || metaTitle || "",
+        ).trim() || "Exam";
         const bars = isDone ? 0 : signalBars(frame?.ts, presence.lastSeenAt, now);
         const activity = lastActivityMs(presence.lastSeenAt, a) ?? (frame?.ts ?? null);
         let videoStatus: "live" | "reconnecting" | "offline" | "done" = "offline";
