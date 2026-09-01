@@ -1,0 +1,31 @@
+name: Apply identity patch v3
+on:
+  push:
+    paths:
+      - .github/workflows/apply-identity-v3.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode and apply
+        run: |
+          python3 -c "
+          import base64, gzip
+          from pathlib import Path
+          b64 = open('.github/workflows/apply-identity-v3.yml').read().split('PATCH_B64_START')[1].split('PATCH_B64_END')[0].strip()
+          Path('/tmp/apply.py').write_bytes(gzip.decompress(base64.b64decode(b64)))
+          "
+          python3 /tmp/apply.py
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else git commit -m "fix(officer-live): real name/matric on live cards from frames+DB"; git push; fi
+# PATCH_B64_START
+# PLACEHOLDER
+# PATCH_B64_END
