@@ -1,0 +1,318 @@
+name: Apply identity fix
+on:
+  push:
+    paths:
+      - .github/workflows/apply-identity-fix.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch identity
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+
+          OM = Path("src/routes/officer.live-monitor.tsx")
+          CBT = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          LV = Path("src/lib/live-video.ts")
+          CAM = Path("src/lib/use-live-cam-publish.ts")
+
+          om = OM.read_text()
+
+          # FrameEntry + onFrame identity
+          om = om.replace(
+              "type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null };",
+              "type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null; studentName?: string; matricNumber?: string };",
+          )
+          old_entry = """        const entry = {
+          src: p.frame,
+          ts: p.ts || Date.now(),
+          faceStatus: p.faceStatus,
+          cameraActive: p.cameraActive !== false,
+          answeredCount: p.answeredCount,
+          totalQuestions: p.totalQuestions,
+          timeRemainingSec: p.timeRemainingSec,
+        };"""
+          new_entry = """        const entry = {
+          src: p.frame,
+          ts: p.ts || Date.now(),
+          faceStatus: p.faceStatus,
+          cameraActive: p.cameraActive !== false,
+          answeredCount: p.answeredCount,
+          totalQuestions: p.totalQuestions,
+          timeRemainingSec: p.timeRemainingSec,
+          studentName: p.studentName,
+          matricNumber: p.matricNumber,
+        };"""
+          if old_entry in om:
+              om = om.replace(old_entry, new_entry, 1)
+              print("frame entry")
+
+          # studentNamesQ return type change: always store name+matric
+          om = om.replace(
+              'if (!ids.length) return {} as Record<string, string>;\n      const map: Record<string, string> = {};',
+              'type IdInfo = { name: string; matric: string };\n      const map: Record<string, IdInfo> = {};\n      if (!ids.length) return map;',
+          )
+
+          # When storing name in map, store object with matric
+          om = om.replace(
+              'if (name && name.toLowerCase() !== matric.toLowerCase()) map[row.id] = name;',
+              'map[row.id] = { name: name || "", matric: matric || "" };\n        if (row.profile_id) {\n          const pid = String(row.profile_id);\n          if (!map[pid]?.name) map[pid] = map[row.id];\n        }',
+          )
+
+          # Profile fill path
+          om = om.replace(
+              '''if (!map[row.id] && row.profile_id && byPid[String(row.profile_id)]) {
+            map[row.id] = byPid[String(row.profile_id)];
+          }''',
+              '''const pid = row.profile_id ? String(row.profile_id) : "";
+          if (pid && byPid[pid]) {
+            const cur = map[row.id] || { name: "", matric: "" };
+            if (!cur.name) cur.name = byPid[pid];
+            map[row.id] = cur;
+            map[pid] = cur;
+          }''',
+          )
+
+          # Identity in cards useMemo
+          old_id = '''        const resolved = studentNamesQ.data?.[String(a.student_id)];
+        const metaName = nameFromMetadata(a.metadata);
+        const name = (resolved && String(resolved).trim()) || metaName || studentDisplayName(a);
+        const metaMatric = (() => {
+          const mm = a.metadata;
+          if (!mm || typeof mm !== "object") return "";
+          return String((mm as Record<string, unknown>).matricNumber || (mm as Record<string, unknown>).matric_number || "").trim();
+        })();
+        const matric = String(a.students?.matric_number || a.students?.student_id || metaMatric || "").trim() || "—";'''
+
+          new_id = '''        const resolvedRaw = studentNamesQ.data?.[String(a.student_id)] as
+          | string
+          | { name?: string; matric?: string }
+          | undefined;
+        const resolvedName =
+          typeof resolvedRaw === "string"
+            ? resolvedRaw.trim()
+            : String(resolvedRaw?.name || "").trim();
+        const resolvedMatric =
+          typeof resolvedRaw === "object" && resolvedRaw
+            ? String(resolvedRaw.matric || "").trim()
+            : "";
+        const metaName = nameFromMetadata(a.metadata);
+        const frameIdentityName = String(camFrame?.studentName || "").trim();
+        const frameIdentityMatric = String(camFrame?.matricNumber || "").trim();
+        const name =
+          (resolvedName && resolvedName.toLowerCase() !== "student" ? resolvedName : "") ||
+          frameIdentityName ||
+          metaName ||
+          studentDisplayName(a) ||
+          "Student";
+        const metaMatric = (() => {
+          const mm = a.metadata;
+          if (!mm || typeof mm !== "object") return "";
+          return String(
+            (mm as Record<string, unknown>).matricNumber ||
+              (mm as Record<string, unknown>).matric_number ||
+              (mm as Record<string, unknown>).matric ||
+              "",
+          ).trim();
+        })();
+        const matric =
+          String(
+            a.students?.matric_number ||
+              a.students?.student_id ||
+              resolvedMatric ||
+              frameIdentityMatric ||
+              metaMatric ||
+              "",
+          ).trim() || "—";'''
+
+          if old_id in om:
+              om = om.replace(old_id, new_id, 1)
+              print("cards identity")
+          else:
+              print("FAIL cards identity")
+
+          # Course/title from metadata fallback
+          om = om.replace(
+              'const courseCode = String(courseObj?.code || examEnrichQ.data?.[String(a.exam_id)]?.courseCode || "").trim();\n        const courseName = String(courseObj?.name || examEnrichQ.data?.[String(a.exam_id)]?.courseName || "").trim();\n        const course = courseCode && courseName && courseName.toLowerCase() !== courseCode.toLowerCase()\n          ? `${courseCode} · ${courseName}`\n          : (courseCode || courseName || "—");\n        const title = String(a.examinations?.title || examEnrichQ.data?.[String(a.exam_id)]?.title || "").trim() || "Exam";',
+              'const enrich = examEnrichQ.data?.[String(a.exam_id)];\n        const courseCode = String(courseObj?.code || enrich?.courseCode || "").trim();\n        const courseName = String(courseObj?.name || enrich?.courseName || "").trim();\n        const metaCourse = (() => { const mm = a.metadata; if (!mm || typeof mm !== "object") return ""; return String((mm as Record<string, unknown>).courseCode || (mm as Record<string, unknown>).course_code || "").trim(); })();\n        const course = courseCode && courseName && courseName.toLowerCase() !== courseCode.toLowerCase()\n          ? `${courseCode} · ${courseName}`\n          : (courseCode || courseName || metaCourse || "—");\n        const metaTitle = (() => { const mm = a.metadata; if (!mm || typeof mm !== "object") return ""; return String((mm as Record<string, unknown>).examTitle || (mm as Record<string, unknown>).exam_title || "").trim(); })();\n        const title = String(a.examinations?.title || enrich?.title || metaTitle || "").trim() || "Exam";',
+          )
+          print("course title meta")
+
+          OM.write_text(om)
+
+          # CBT metadata keep matric on update
+          cbt = CBT.read_text()
+          old_upd = '''          const studentNameUpd = String((student as { fullName?: string } | null)?.fullName || session?.fullName || "").trim() || undefined;
+          void supabase.from("exam_attempts").update({
+            question_order: orderIds,
+            status: "in_progress",
+            metadata: { studentName: studentNameUpd, lastSeenAt: new Date().toISOString() },
+          } as never).eq("id", attemptIdRef.current);'''
+          new_upd = '''          const studentNameUpd = String((student as { fullName?: string } | null)?.fullName || session?.fullName || "").trim() || undefined;
+          const matricUpd = String(
+            (student as { matricNumber?: string } | null)?.matricNumber ||
+              (student as { matric?: string } | null)?.matric ||
+              (student as { matric_number?: string } | null)?.matric_number ||
+              "",
+          ).trim() || undefined;
+          void supabase.from("exam_attempts").update({
+            question_order: orderIds,
+            status: "in_progress",
+            metadata: {
+              studentName: studentNameUpd,
+              matricNumber: matricUpd,
+              examTitle: String(examQ.data?.title || "").trim() || undefined,
+              lastSeenAt: new Date().toISOString(),
+            },
+          } as never).eq("id", attemptIdRef.current);'''
+          if old_upd in cbt:
+              cbt = cbt.replace(old_upd, new_upd, 1)
+              print("cbt update meta")
+
+          old_live = '''  useLiveCamPublish({
+    enabled: started && !done && !previewMode && Boolean(security.requireCamera),
+    schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,
+    studentId: student?.studentId,
+    examId: id,
+    attemptId: liveAttemptId || attemptIdRef.current,
+    stream: liveStream,
+    getStream: () => mediaStreamRef.current || liveStream,
+    getFaceStatus: () => faceStatusForLiveRef.current,
+    getAnsweredCount: () => Object.keys(answers).length,
+    getTotalQuestions: () => questions.length,
+    getTimeRemainingSec: () => seconds,
+  });'''
+          new_live = '''  useLiveCamPublish({
+    enabled: started && !done && !previewMode && Boolean(security.requireCamera),
+    schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,
+    studentId: student?.studentId,
+    examId: id,
+    attemptId: liveAttemptId || attemptIdRef.current,
+    stream: liveStream,
+    getStream: () => mediaStreamRef.current || liveStream,
+    getFaceStatus: () => faceStatusForLiveRef.current,
+    getAnsweredCount: () => Object.keys(answers).length,
+    getTotalQuestions: () => questions.length,
+    getTimeRemainingSec: () => seconds,
+    getStudentName: () =>
+      String((student as { fullName?: string } | null)?.fullName || session?.fullName || "").trim() || null,
+    getMatricNumber: () =>
+      String(
+        (student as { matricNumber?: string } | null)?.matricNumber ||
+          (student as { matric?: string } | null)?.matric ||
+          (student as { matric_number?: string } | null)?.matric_number ||
+          "",
+      ).trim() || null,
+  });'''
+          if old_live in cbt:
+              cbt = cbt.replace(old_live, new_live, 1)
+              print("cbt live cam identity")
+          CBT.write_text(cbt)
+
+          # live-video payload identity
+          lv = LV.read_text()
+          lv = lv.replace(
+              """export type LiveCamFramePayload = {
+  attemptId: string;
+  studentId: string;
+  examId: string;
+  frame: string;
+  ts: number;
+  faceStatus?: string;
+  cameraActive?: boolean;
+  answeredCount?: number;
+  totalQuestions?: number;
+  timeRemainingSec?: number | null;
+};""",
+              """export type LiveCamFramePayload = {
+  attemptId: string;
+  studentId: string;
+  examId: string;
+  frame: string;
+  ts: number;
+  faceStatus?: string;
+  cameraActive?: boolean;
+  answeredCount?: number;
+  totalQuestions?: number;
+  timeRemainingSec?: number | null;
+  studentName?: string;
+  matricNumber?: string;
+};""",
+          )
+          lv = lv.replace(
+              """  getFaceMeta?: () => {
+    faceStatus?: string;
+    cameraActive?: boolean;
+    answeredCount?: number;
+    totalQuestions?: number;
+    timeRemainingSec?: number | null;
+  };""",
+              """  getFaceMeta?: () => {
+    faceStatus?: string;
+    cameraActive?: boolean;
+    answeredCount?: number;
+    totalQuestions?: number;
+    timeRemainingSec?: number | null;
+    studentName?: string;
+    matricNumber?: string;
+  };""",
+          )
+          lv = lv.replace(
+              """          faceStatus: meta.faceStatus ?? "ok",
+          cameraActive: meta.cameraActive !== false,
+          answeredCount: meta.answeredCount,
+          totalQuestions: meta.totalQuestions,
+          timeRemainingSec: meta.timeRemainingSec,""",
+              """          faceStatus: meta.faceStatus ?? "ok",
+          cameraActive: meta.cameraActive !== false,
+          answeredCount: meta.answeredCount,
+          totalQuestions: meta.totalQuestions,
+          timeRemainingSec: meta.timeRemainingSec,
+          studentName: meta.studentName,
+          matricNumber: meta.matricNumber,""",
+          )
+          LV.write_text(lv)
+          print("live-video")
+
+          cam = CAM.read_text()
+          if "getStudentName" not in cam:
+              cam = cam.replace(
+                  """  getAnsweredCount?: () => number;
+  getTotalQuestions?: () => number;
+  getTimeRemainingSec?: () => number | null;
+}) {""",
+                  """  getAnsweredCount?: () => number;
+  getTotalQuestions?: () => number;
+  getTimeRemainingSec?: () => number | null;
+  getStudentName?: () => string | null | undefined;
+  getMatricNumber?: () => string | null | undefined;
+}) {""",
+              )
+              cam = cam.replace(
+                  """          answeredCount: o.getAnsweredCount?.(),
+          totalQuestions: o.getTotalQuestions?.(),
+          timeRemainingSec: o.getTimeRemainingSec?.() ?? null,
+        };""",
+                  """          answeredCount: o.getAnsweredCount?.(),
+          totalQuestions: o.getTotalQuestions?.(),
+          timeRemainingSec: o.getTimeRemainingSec?.() ?? null,
+          studentName: String(o.getStudentName?.() || "").trim() || undefined,
+          matricNumber: String(o.getMatricNumber?.() || "").trim() || undefined,
+        };""",
+              )
+              CAM.write_text(cam)
+              print("cam publish")
+
+          print("DONE")
+          PY
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else git commit -m "fix(officer-live): resolve real student name, matric, course on live cards"; git push; fi
