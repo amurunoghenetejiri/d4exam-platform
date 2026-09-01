@@ -328,6 +328,7 @@ function Page() {
     queryFn: async () => {
       if (!schoolId) return [] as AttemptRow[];
       const selects = [
+        `id, exam_id, student_id, status, started_at, updated_at, tab_switch_count, metadata`,
         `id, exam_id, student_id, status, started_at, updated_at, tab_switch_count, metadata,
            examinations(title, status, courses(code, name)),
            students(full_name, matric_number, student_id, profiles(full_name))`,
@@ -518,7 +519,27 @@ function Page() {
   const cards = useMemo(() => {
     const inProgress = attemptsQ.data ?? [];
     const recentDone = recentDoneQ.data ?? [];
-    const merged = [...inProgress, ...recentDone];
+    const knownIds = new Set([...inProgress, ...recentDone].map((a) => a.id));
+    const frameOnly: AttemptRow[] = [];
+    for (const [key, entry] of Object.entries(frames)) {
+      if (key.startsWith("student:")) continue;
+      if (knownIds.has(key)) continue;
+      if (!entry?.src || !entry.ts) continue;
+      if (now - entry.ts > 60_000) continue;
+      frameOnly.push({
+        id: key,
+        exam_id: "",
+        student_id: key,
+        status: "in_progress",
+        started_at: new Date(entry.ts).toISOString(),
+        updated_at: new Date(entry.ts).toISOString(),
+        tab_switch_count: 0,
+        metadata: { lastSeenAt: new Date(entry.ts).toISOString() },
+        examinations: null,
+        students: null,
+      });
+    }
+    const merged = [...inProgress, ...recentDone, ...frameOnly];
     // One card per student: prefer in-progress + live frame + most recent activity
     const byStudent = new Map<string, AttemptRow>();
     const attemptRank = (a: AttemptRow) => {
@@ -600,8 +621,8 @@ function Page() {
           return now - c.activity <= RECENT_SUBMIT_MS;
         }
         if (c.sev === "offline") {
-          if (c.activity == null) return false;
-          return now - c.activity <= OFFLINE_HIDE_MS;
+          if (c.activity == null) return true;
+          return now - c.activity <= Math.max(OFFLINE_HIDE_MS, 45 * 60 * 1000);
         }
         return true;
       });

@@ -26,6 +26,7 @@ import { haptic } from "@/lib/haptic";
 import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, holdExamScreenShare } from "@/lib/screen-share";
 import { useLiveScreenPublish } from "@/lib/use-live-screen-publish";
 import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
+import { useExamAttemptHeartbeat } from "@/lib/use-exam-attempt-heartbeat";
 import { isExamAttemptFinished } from "@/lib/student";
 
 function isPreviewPath() {
@@ -286,6 +287,11 @@ export function CbtExamPage() {
     attemptId: liveAttemptId || attemptIdRef.current,
     stream: screenStream,
     getStream: () => screenStreamRef.current || screenStream,
+  });
+
+  useExamAttemptHeartbeat({
+    enabled: started && !done && !previewMode,
+    attemptId: liveAttemptId || attemptIdRef.current,
   });
 
   useEffect(() => {
@@ -574,7 +580,10 @@ export function CbtExamPage() {
           toast.error("You have already completed this examination.");
           shutdownMedia(); setDone(true); return;
         }
-        if (existing?.id) attemptIdRef.current = existing.id as string;
+        if (existing?.id) {
+          attemptIdRef.current = existing.id as string;
+          setLiveAttemptId(existing.id as string);
+        }
       }
       const needCam = Boolean(security.requireCamera);
       const needMic = Boolean(security.requireMicrophone);
@@ -633,6 +642,7 @@ export function CbtExamPage() {
           .maybeSingle();
         if (existingFull?.id) {
           attemptIdRef.current = existingFull.id as string;
+          setLiveAttemptId(existingFull.id as string);
           tabSwitchCountRef.current = Number(existingFull.tab_switch_count ?? 0);
           fullscreenExitCountRef.current = Number(existingFull.fullscreen_exit_count ?? 0);
           const qo = existingFull.question_order;
