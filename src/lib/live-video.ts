@@ -2,6 +2,11 @@
  * Live camera + screen JPEG frame publish/subscribe over Supabase Realtime broadcast.
  * Camera frames are mirrored (selfie); screen frames are not.
  * Android native screen uses MediaProjection JPEGs directly when available.
+ *
+ * CRITICAL channel contract (must stay matched):
+ *   Camera:  live-cam:{schoolId}     event: cam-frame
+ *   Screen:  live-screen:{schoolId}  event: screen-frame
+ * Every frame payload includes attemptId so the officer can route to the right card.
  */
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
@@ -151,7 +156,8 @@ export function startLiveCamPublisher(opts: {
   let channel: RealtimeChannel | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   let publishing = false;
-  let channelName = `${liveCamChannelName(opts.schoolId)}:${opts.attemptId}:${Math.random().toString(36).slice(2, 8)}`;
+  // MUST match startLiveCamSubscriber — school-level only (no per-attempt suffix).
+  const channelName = liveCamChannelName(opts.schoolId);
 
   const clearTimer = () => {
     if (timer) {
@@ -203,11 +209,14 @@ export function startLiveCamPublisher(opts: {
   const attach = () => {
     if (stopped) return;
     if (channel) {
-      try { void supabase.removeChannel(channel); } catch { /* ignore */ }
+      try {
+        void supabase.removeChannel(channel);
+      } catch {
+        /* ignore */
+      }
       channel = null;
     }
     clearTimer();
-    channelName = `${liveCamChannelName(opts.schoolId)}:${opts.attemptId}:${Math.random().toString(36).slice(2, 8)}`;
     channel = supabase.channel(channelName, {
       config: { broadcast: { ack: false, self: false } },
     });
@@ -252,11 +261,15 @@ export function startLiveCamSubscriber(opts: {
   });
 
   channel.on("broadcast", { event: LIVE_CAM_EVENT }, ({ payload }) => {
-    const raw = payload as LiveCamFramePayload & { attempt_id?: string };
+    const raw = payload as LiveCamFramePayload & { attempt_id?: string; student_id?: string };
     if (!raw?.frame) return;
     const attemptId = raw.attemptId || raw.attempt_id || "";
     if (!attemptId) return;
-    const p: LiveCamFramePayload = { ...raw, attemptId };
+    const p: LiveCamFramePayload = {
+      ...raw,
+      attemptId,
+      studentId: raw.studentId || raw.student_id || "",
+    };
     const prev = lastTsByAttempt.get(attemptId) ?? 0;
     if (p.ts && p.ts < prev - 500) return;
     if (p.ts) lastTsByAttempt.set(attemptId, p.ts);
