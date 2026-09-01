@@ -1,10 +1,9 @@
 name: Apply hysteresis stable live frames
 on:
+  workflow_dispatch:
   push:
     paths:
-      - scripts/apply_hysteresis_stable.py
       - .github/workflows/apply-hysteresis-stable.yml
-  workflow_dispatch:
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -14,15 +13,109 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Apply surgical patches
+      - name: Patch live-video hysteresis
         run: |
-          python3 scripts/apply_hysteresis_stable.py
+          python3 << 'PY'
+          from pathlib import Path
+          lv = Path("src/lib/live-video.ts")
+          t = lv.read_text()
+          if "LIVE_CAM_DISPLAY_MS" not in t:
+              t = t.replace(
+                  "export const LIVE_CAM_STALE_MS = 8_000;",
+                  "export const LIVE_CAM_STALE_MS = 22_000;\nexport const LIVE_CAM_DISPLAY_MS = 90_000;",
+                  1,
+              )
+          if "isLiveCamFrameUsable" not in t:
+              t = t.replace(
+                  "return now - ts <= LIVE_CAM_STALE_MS;\n}",
+                  "return now - ts <= LIVE_CAM_STALE_MS;\n}\n\nexport function isLiveCamFrameUsable(ts: number | null | undefined, now = Date.now()): boolean {\n  if (ts == null) return false;\n  return now - ts <= LIVE_CAM_DISPLAY_MS;\n}",
+                  1,
+              )
+          if "LIVE_SCREEN_DISPLAY_MS" not in t:
+              t = t.replace(
+                  "export const LIVE_SCREEN_STALE_MS = 8_000;",
+                  "export const LIVE_SCREEN_STALE_MS = 22_000;\nexport const LIVE_SCREEN_DISPLAY_MS = 90_000;",
+                  1,
+              )
+          if "isLiveScreenFrameUsable" not in t:
+              idx = t.find("LIVE_SCREEN_STALE_MS")
+              rest = t[idx:]
+              if "isLiveScreenFrameUsable" not in rest:
+                  t = t[:idx] + rest.replace(
+                      "return now - ts <= LIVE_SCREEN_STALE_MS;\n}",
+                      "return now - ts <= LIVE_SCREEN_STALE_MS;\n}\n\nexport function isLiveScreenFrameUsable(ts: number | null | undefined, now = Date.now()): boolean {\n  if (ts == null) return false;\n  return now - ts <= LIVE_SCREEN_DISPLAY_MS;\n}",
+                      1,
+                  )
+          lv.write_text(t)
+          print("live-video patched", "22_000" in t, "isLiveCamFrameUsable" in t)
+          PY
+      - name: Patch officer monitor
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          om = Path("src/routes/officer.live-monitor.tsx")
+          t2 = om.read_text()
+          if "isLiveCamFrameUsable" not in t2:
+              t2 = t2.replace(
+                  "  isLiveCamFrameFresh,\n  startLiveCamSubscriber,",
+                  "  isLiveCamFrameFresh,\n  isLiveCamFrameUsable,\n  startLiveCamSubscriber,",
+                  1,
+              )
+              t2 = t2.replace(
+                  "  isLiveScreenFrameFresh,\n  type LiveScreenFramePayload,",
+                  "  isLiveScreenFrameFresh,\n  isLiveScreenFrameUsable,\n  type LiveScreenFramePayload,",
+                  1,
+              )
+          t2 = t2.replace(
+              "const showCamFrame = Boolean(camF?.src) && !selected.isDone;",
+              "const showCamFrame = Boolean(camF?.src && isLiveCamFrameUsable(camF.ts)) && !selected.isDone;",
+          )
+          t2 = t2.replace(
+              "const showScrFrame = Boolean(sf?.src) && !selected.isDone;",
+              "const showScrFrame = Boolean(sf?.src && isLiveScreenFrameUsable(sf.ts)) && !selected.isDone;",
+          )
+          t2 = t2.replace(
+              "if (hasLiveVideo && frame) {",
+              "if ((hasLiveVideo || (camFrame && isLiveCamFrameUsable(camFrame.ts, now)) || (scrFrame && isLiveScreenFrameUsable(scrFrame.ts, now))) && frame) {",
+              1,
+          )
+          t2 = t2.replace(
+              'if (!isDone && hasLiveVideo && sev === "offline") {',
+              'if (!isDone && (hasLiveVideo || (camFrame && isLiveCamFrameUsable(camFrame.ts, now))) && sev === "offline") {',
+              1,
+          )
+          if "Camera reconnecting" not in t2:
+              t2 = t2.replace(
+                  'selected.isDone ? doneStatusLabel(selected.a.status) : "Camera offline"',
+                  'selected.isDone ? doneStatusLabel(selected.a.status) : (camF && isLiveCamFrameUsable(camF.ts) ? "Camera reconnecting…" : "Camera offline")',
+                  1,
+              )
+          both = '''                <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("pause")}>
+                  Pause Exam
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("release")}>
+                  Release Exam
+                </Button>'''
+          toggled = '''                {["paused", "held"].includes(String(selected.a.status || "").toLowerCase()) ? (
+                  <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("release")}>
+                    Release Exam
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("pause")}>
+                    Pause Exam
+                  </Button>
+                )}'''
+          if '["paused", "held"]' not in t2 and both in t2:
+              t2 = t2.replace(both, toggled, 1)
+          om.write_text(t2)
+          print("officer patched", "isLiveCamFrameUsable" in t2, "Camera reconnecting" in t2)
+          PY
+      - name: Commit
+        run: |
           git config user.name "d4exam-bot"
           git config user.email "bot@d4exam.local"
           git add src/lib/live-video.ts src/routes/officer.live-monitor.tsx
-          if git diff --staged --quiet; then
-            echo "No changes"
-          else
-            git commit -m "fix(officer-live): stable hysteresis — keep frames through Realtime jitter; Pause/Release toggle"
+          if git diff --staged --quiet; then echo No changes; else
+            git commit -m "fix(officer-live): stable hysteresis for camera/screen; Pause/Release toggle"
             git push
           fi
