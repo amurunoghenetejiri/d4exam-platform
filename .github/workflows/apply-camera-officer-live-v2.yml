@@ -1,0 +1,29 @@
+name: APPLY-CAMERA-OFFICER-LIVE-V2
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/apply_all_camera_officer_v2.py
+      - scripts/apply_gate_gz.py
+      - scripts/apply_cbt_gz.py
+      - scripts/apply_officer_gz.py
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply fixes
+        run: python3 scripts/apply_all_camera_officer_v2.py
+      - name: Commit if changed
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/cbt/ExamSecurityGate.tsx src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx || true
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(cbt+officer): camera gesture start, real names, Pause/Release live"
+            git push
+          fi
