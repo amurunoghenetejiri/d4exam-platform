@@ -1,0 +1,26 @@
+name: APPLY-OFFICER-HYSTERESIS
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/apply_officer_hysteresis.py
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply surgical patch
+        run: python3 scripts/apply_officer_hysteresis.py
+      - name: Commit if changed
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/routes/officer.live-monitor.tsx || true
+          if git diff --staged --quiet; then
+            echo "No file changes"
+          else
+            git commit -m "fix(officer-live): hysteresis frame display + Pause/Release toggle"
+            git push
+          fi
