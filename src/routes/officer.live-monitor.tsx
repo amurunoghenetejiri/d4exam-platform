@@ -90,7 +90,7 @@ type IntegrityEvent = {
 };
 
 type FilterKey = "all" | "normal" | "warning" | "violation" | "offline";
-type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null };
+type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null; studentName?: string; matricNumber?: string; courseCode?: string; examTitle?: string };
 
 function isFaceOrCameraLogOnly(eventType: string): boolean {
   const t = String(eventType || "").toUpperCase();
@@ -251,6 +251,10 @@ function Page() {
           answeredCount: p.answeredCount,
           totalQuestions: p.totalQuestions,
           timeRemainingSec: p.timeRemainingSec,
+          studentName: p.studentName ? String(p.studentName).trim() : undefined,
+          matricNumber: p.matricNumber ? String(p.matricNumber).trim() : undefined,
+          courseCode: p.courseCode ? String(p.courseCode).trim() : undefined,
+          examTitle: p.examTitle ? String(p.examTitle).trim() : undefined,
         };
         const sid = String(p.studentId || (p as { student_id?: string }).student_id || "");
         setFrames((prev) => {
@@ -655,24 +659,27 @@ function Page() {
           else sev = "normal";
         }
         const resolved = studentNamesQ.data?.[String(a.student_id)];
+        const frameId = camFrame || frames[a.id] || frames[`student:${a.student_id}`];
         const metaName = nameFromMetadata(a.metadata);
-        const name = (resolved && String(resolved).trim()) || metaName || studentDisplayName(a);
+        const frameName = String(frameId?.studentName || "").trim();
+        const name = (resolved && String(resolved).trim()) || frameName || metaName || studentDisplayName(a);
         const metaMatric = (() => {
           const mm = a.metadata;
           if (!mm || typeof mm !== "object") return "";
           return String((mm as Record<string, unknown>).matricNumber || (mm as Record<string, unknown>).matric_number || "").trim();
         })();
-        const matric = String(a.students?.matric_number || a.students?.student_id || metaMatric || "").trim() || "—";
+        const frameMatric = String(frameId?.matricNumber || "").trim();
+        const matric = String(a.students?.matric_number || a.students?.student_id || frameMatric || metaMatric || "").trim() || "—";
         const _c = a.examinations?.courses as unknown;
         const courseObj = Array.isArray(_c)
           ? (_c[0] as { code?: string; name?: string } | undefined)
           : (_c as { code?: string; name?: string } | null | undefined);
-        const courseCode = String(courseObj?.code || examEnrichQ.data?.[String(a.exam_id)]?.courseCode || "").trim();
+        const courseCode = String(courseObj?.code || examEnrichQ.data?.[String(a.exam_id)]?.courseCode || frameId?.courseCode || "").trim();
         const courseName = String(courseObj?.name || examEnrichQ.data?.[String(a.exam_id)]?.courseName || "").trim();
         const course = courseCode && courseName && courseName.toLowerCase() !== courseCode.toLowerCase()
           ? `${courseCode} · ${courseName}`
           : (courseCode || courseName || "—");
-        const title = String(a.examinations?.title || examEnrichQ.data?.[String(a.exam_id)]?.title || "").trim() || "Exam";
+        const title = String(a.examinations?.title || examEnrichQ.data?.[String(a.exam_id)]?.title || frameId?.examTitle || "").trim() || "Exam";
         const bars = isDone ? 0 : signalBars(frame?.ts, presence.lastSeenAt, now);
         const activity = lastActivityMs(presence.lastSeenAt, a) ?? (frame?.ts ?? null);
         let videoStatus: "live" | "reconnecting" | "offline" | "done" = "offline";

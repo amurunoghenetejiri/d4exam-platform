@@ -19,6 +19,10 @@ export function useLiveCamPublish(opts: {
   getAnsweredCount?: () => number;
   getTotalQuestions?: () => number;
   getTimeRemainingSec?: () => number | null;
+  getStudentName?: () => string | null | undefined;
+  getMatricNumber?: () => string | null | undefined;
+  getCourseCode?: () => string | null | undefined;
+  getExamTitle?: () => string | null | undefined;
 }) {
   const pubRef = useRef<LiveCamPublisher | null>(null);
   const optsRef = useRef(opts);
@@ -69,6 +73,10 @@ export function useLiveCamPublish(opts: {
           answeredCount: o.getAnsweredCount?.(),
           totalQuestions: o.getTotalQuestions?.(),
           timeRemainingSec: o.getTimeRemainingSec?.() ?? null,
+          studentName: String(o.getStudentName?.() || "").trim() || undefined,
+          matricNumber: String(o.getMatricNumber?.() || "").trim() || undefined,
+          courseCode: String(o.getCourseCode?.() || "").trim() || undefined,
+          examTitle: String(o.getExamTitle?.() || "").trim() || undefined,
         };
       },
       intervalMs: 450,

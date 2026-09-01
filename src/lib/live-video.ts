@@ -131,6 +131,10 @@ export type LiveCamFramePayload = {
   answeredCount?: number;
   totalQuestions?: number;
   timeRemainingSec?: number | null;
+  studentName?: string;
+  matricNumber?: string;
+  courseCode?: string;
+  examTitle?: string;
 };
 
 export function liveCamChannelName(schoolId: string): string {
@@ -150,6 +154,10 @@ export function startLiveCamPublisher(opts: {
     answeredCount?: number;
     totalQuestions?: number;
     timeRemainingSec?: number | null;
+    studentName?: string;
+    matricNumber?: string;
+    courseCode?: string;
+    examTitle?: string;
   };
 }): LiveCamPublisher {
   const intervalMs = opts.intervalMs ?? LIVE_CAM_FRAME_INTERVAL_MS;
@@ -198,6 +206,10 @@ export function startLiveCamPublisher(opts: {
           answeredCount: meta.answeredCount,
           totalQuestions: meta.totalQuestions,
           timeRemainingSec: meta.timeRemainingSec,
+          studentName: meta.studentName,
+          matricNumber: meta.matricNumber,
+          courseCode: meta.courseCode,
+          examTitle: meta.examTitle,
         },
       });
     } catch (e) {

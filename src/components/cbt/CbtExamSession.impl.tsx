@@ -278,6 +278,14 @@ export function CbtExamPage() {
     getAnsweredCount: () => Object.keys(answers).length,
     getTotalQuestions: () => questions.length,
     getTimeRemainingSec: () => seconds,
+    getStudentName: () => String((student as { fullName?: string } | null)?.fullName || session?.fullName || "").trim() || null,
+    getMatricNumber: () => String((student as { matric?: string | null } | null)?.matric || "").trim() || null,
+    getCourseCode: () => {
+      const c = (examQ.data as { courses?: { code?: string } | { code?: string }[] } | null)?.courses;
+      if (Array.isArray(c)) return String(c[0]?.code || "").trim() || null;
+      return String((c as { code?: string } | undefined)?.code || "").trim() || null;
+    },
+    getExamTitle: () => String(examQ.data?.title || "").trim() || null,
   });
   useLiveScreenPublish({
     enabled: started && !done && !previewMode && Boolean(screenStream),
@@ -691,11 +699,18 @@ export function CbtExamPage() {
         } else {
           // Persist order if missing
           const studentNameUpd = String((student as { fullName?: string } | null)?.fullName || session?.fullName || "").trim() || undefined;
-          void supabase.from("exam_attempts").update({
-            question_order: orderIds,
-            status: "in_progress",
-            metadata: { studentName: studentNameUpd, lastSeenAt: new Date().toISOString() },
-          } as never).eq("id", attemptIdRef.current);
+          const matricUpd = String((student as { matric?: string | null } | null)?.matric || "").trim() || undefined;
+          void (async () => {
+            try {
+              const { data: prevRow } = await supabase.from("exam_attempts").select("metadata").eq("id", attemptIdRef.current!).maybeSingle();
+              const prevMeta = prevRow?.metadata && typeof prevRow.metadata === "object" && !Array.isArray(prevRow.metadata) ? (prevRow.metadata as Record<string, unknown>) : {};
+              await supabase.from("exam_attempts").update({
+                question_order: orderIds,
+                status: "in_progress",
+                metadata: { ...prevMeta, studentName: studentNameUpd || prevMeta.studentName, matricNumber: matricUpd || prevMeta.matricNumber, lastSeenAt: new Date().toISOString() },
+              } as never).eq("id", attemptIdRef.current!);
+            } catch (e) { console.warn("[cbt] metadata merge", e); }
+          })();
         }
       }
       setSeconds((examQ.data?.duration_minutes ?? 60) * 60);
