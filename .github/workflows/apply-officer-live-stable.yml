@@ -1,0 +1,29 @@
+name: Apply officer live stable
+on:
+  push:
+    paths:
+      - scripts/apply_officer_live_stable.py
+      - .github/workflows/apply-officer-live-stable.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply surgical patch
+        run: python3 scripts/apply_officer_live_stable.py
+      - name: Commit if changed
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/routes/officer.live-monitor.tsx
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(officer-live): course name, Pause/Release toggle, usable frames, confirm labels"
+            git push
+          fi
