@@ -628,9 +628,14 @@ function Page() {
         const name = (resolved && resolved.trim()) || studentDisplayName(a);
         const matric = String(a.students?.matric_number || a.students?.student_id || "—").trim() || "—";
         const _c = a.examinations?.courses as unknown;
-        const course = Array.isArray(_c)
-          ? ((_c[0] as { code?: string } | undefined)?.code || "—")
-          : ((_c as { code?: string } | null | undefined)?.code || "—");
+        const courseObj = Array.isArray(_c)
+          ? (_c[0] as { code?: string; name?: string } | undefined)
+          : (_c as { code?: string; name?: string } | null | undefined);
+        const courseCode = String(courseObj?.code || "").trim();
+        const courseName = String(courseObj?.name || "").trim();
+        const course = courseCode && courseName && courseName.toLowerCase() !== courseCode.toLowerCase()
+          ? `${courseCode} · ${courseName}`
+          : (courseCode || courseName || "—");
         const title = a.examinations?.title || "Exam";
         const bars = isDone ? 0 : signalBars(frame?.ts, presence.lastSeenAt, now);
         const activity = lastActivityMs(presence.lastSeenAt, a) ?? (frame?.ts ?? null);
@@ -774,8 +779,14 @@ function Page() {
 
   async function officerControl(cmd: "submit" | "hold" | "pause" | "release" | "terminate") {
     if (!selected || !schoolId || actionBusy || selected.isDone) return;
-    const labels = { submit: "force-submit", hold: "hold/pause", terminate: "terminate" } as const;
-    if (!window.confirm(`Are you sure you want to ${labels[cmd]} this student's examination?`)) return;
+    const labels: Record<string, string> = {
+      submit: "force-submit",
+      hold: "hold/pause",
+      pause: "pause",
+      release: "release",
+      terminate: "terminate",
+    };
+    if (!window.confirm(`Are you sure you want to ${labels[cmd] || cmd} this student's examination?`)) return;
     setActionBusy(true);
     try {
       const attemptId = selected.a.id;
@@ -1014,8 +1025,8 @@ function Page() {
                   course={c.course}
                   sev={c.sev}
                   presence={c.presence}
-                  frameSrc={c.camFrame?.src || c.frame?.src || c.scrFrame?.src}
-                  streamLive={c.hasLiveVideo || Boolean(c.camLive || c.scrLive)}
+                  frameSrc={c.camFrame?.src || c.scrFrame?.src || c.frame?.src}
+                  streamLive={c.hasLiveVideo || Boolean(c.camLive || c.scrLive) || Boolean(c.camFrame?.src || c.scrFrame?.src)}
                   bars={c.bars}
                   isDone={c.isDone}
                   statusLabel={c.isDone ? doneStatusLabel(c.a.status) : undefined}
@@ -1259,13 +1270,14 @@ function Page() {
                 }
               />
               <Info label="Connection" value={selected.hasLiveVideo || isOnline(selected.presence.lastSeenAt) ? "Online" : "Offline"} />
-              <Info label="Camera" value={selected.presence.cameraActive ? "Active" : "Off"} />
+              <Info label="Camera" value={selected.camLive ? "Active" : (selected.presence.cameraActive || (selected.camFrame?.src && isLiveCamFrameUsable(selected.camFrame.ts)) ? "Reconnecting" : "Off")} />
               <Info label="Face" value={selected.isDone ? "—" : faceLabel(selected.presence)} />
               <Info
                 label="Screen"
                 value={(() => {
                   const sf = screenFrames[selected.a.id] || screenFrames[`student:${selected.a.student_id}`];
                   if (sf && isLiveScreenFrameFresh(sf.ts)) return "Sharing live";
+                  if (sf && isLiveScreenFrameUsable(sf.ts)) return "Sharing (delayed)";
                   return "Not sharing";
                 })()}
               />
@@ -1291,12 +1303,15 @@ function Page() {
                   {actionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
                   Submit Exam
                 </Button>
-                <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("pause")}>
-                  Pause Exam
-                </Button>
-                <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("release")}>
-                  Release Exam
-                </Button>
+                {["paused", "held"].includes(String(selected.a.status || "").toLowerCase()) ? (
+                  <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("release")}>
+                    Release Exam
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("pause")}>
+                    Pause Exam
+                  </Button>
+                )}
                 <Button size="sm" variant="outline" className="h-8 border-red-300 bg-red-50 text-xs font-semibold text-red-700 hover:bg-red-100" disabled={actionBusy || warningBusy} onClick={() => void officerControl("terminate")}>
                   Terminate Exam
                 </Button>
