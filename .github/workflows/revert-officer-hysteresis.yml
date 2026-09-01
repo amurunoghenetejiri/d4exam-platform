@@ -1,0 +1,40 @@
+name: Revert officer hysteresis
+on:
+  push:
+    paths:
+      - scripts/revert_officer_hysteresis.sh
+      - .github/workflows/revert-officer-hysteresis.yml
+  workflow_dispatch:
+jobs:
+  revert:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore pre-hysteresis files
+        run: |
+          set -euo pipefail
+          REF=9ae6d57a36d94559d6dbe8ebf1e3fc2a8a2256ff
+          git show "$REF:src/lib/live-video.ts" > src/lib/live-video.ts
+          git show "$REF:src/routes/officer.live-monitor.tsx" > src/routes/officer.live-monitor.tsx
+          # Fix accidental PLACEHOLDER if present
+          if grep -q PLACEHOLDER_WILL_FAIL src/lib/live-video.ts 2>/dev/null; then
+            git show "$REF:src/lib/live-video.ts" > src/lib/live-video.ts
+          fi
+          echo "Restored from $REF"
+          wc -l src/lib/live-video.ts src/routes/officer.live-monitor.tsx
+      - name: Commit and push if changed
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/lib/live-video.ts src/routes/officer.live-monitor.tsx
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "revert: restore live-video + officer.live-monitor to pre-hysteresis (9ae6d57)"
+            git push
+          fi
