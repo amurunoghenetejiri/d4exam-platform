@@ -494,7 +494,8 @@ function Page() {
   const studentNamesQ = useQuery({
     queryKey: ["officer-live-student-names", schoolId, studentIdsKey],
     enabled: Boolean(schoolId && studentIdsKey),
-    staleTime: 30_000,
+    staleTime: 8_000,
+    refetchInterval: 12_000,
     queryFn: async () => {
       const ids = studentIdsKey.split(",").filter(Boolean);
       if (!ids.length) return {} as Record<string, { name: string; matric: string }>;
@@ -735,8 +736,14 @@ function Page() {
         const resolvedName = typeof resolved === "string"
           ? resolved.trim()
           : String((resolved as { name?: string } | undefined)?.name || "").trim();
-        const nameCandidates = [resolvedName, fromIdMap, fromMatricMap, frameName, metaName, fromJoin].filter(
-          (n) => n && n !== "Student" && n.toLowerCase() !== "unknown",
+        // Prefer frame/meta first while joins load — live identity from student device
+        const nameCandidates = [frameName, metaName, resolvedName, fromIdMap, fromMatricMap, fromJoin].filter(
+          (n) => {
+            const s = String(n || "").trim();
+            if (!s) return false;
+            if (s === "Student" || s.toLowerCase() === "unknown") return false;
+            return true;
+          },
         );
         const name = nameCandidates[0] || "Student";
         const metaMatric = (() => {
@@ -750,7 +757,7 @@ function Page() {
           ? String((resolved as { matric?: string }).matric || "").trim()
           : "";
         const matric = String(
-          a.students?.matric_number || a.students?.student_id || resolvedMatric || frameMatric || metaMatric || "",
+          a.students?.matric_number || a.students?.student_id || frameMatric || metaMatric || resolvedMatric || "",
         ).trim() || "—";
         const _c = a.examinations?.courses as unknown;
         const courseObj = Array.isArray(_c)
@@ -768,15 +775,25 @@ function Page() {
           const r = mm as Record<string, unknown>;
           return String(r.examTitle || r.exam_title || "").trim();
         })();
+        const examFromList = (examsQ.data ?? []).find((e) => String(e.id) === String(a.exam_id));
+        const listCourse = (() => {
+          if (!examFromList) return { code: "", name: "" };
+          const c = Array.isArray(examFromList.courses)
+            ? (examFromList.courses[0] as { code?: string; name?: string } | undefined)
+            : (examFromList.courses as { code?: string; name?: string } | null | undefined);
+          return { code: String(c?.code || "").trim(), name: String(c?.name || "").trim() };
+        })();
         const courseCode = String(
-          courseObj?.code || examEnrichQ.data?.[String(a.exam_id)]?.courseCode || frameId?.courseCode || metaCourse || "",
+          courseObj?.code || examEnrichQ.data?.[String(a.exam_id)]?.courseCode || listCourse.code || frameId?.courseCode || metaCourse || "",
         ).trim();
-        const courseName = String(courseObj?.name || examEnrichQ.data?.[String(a.exam_id)]?.courseName || "").trim();
+        const courseName = String(
+          courseObj?.name || examEnrichQ.data?.[String(a.exam_id)]?.courseName || listCourse.name || "",
+        ).trim();
         const course = courseCode && courseName && courseName.toLowerCase() !== courseCode.toLowerCase()
           ? `${courseCode} · ${courseName}`
           : (courseCode || courseName || "—");
         const title = String(
-          a.examinations?.title || examEnrichQ.data?.[String(a.exam_id)]?.title || frameId?.examTitle || metaTitle || "",
+          a.examinations?.title || examEnrichQ.data?.[String(a.exam_id)]?.title || (examFromList as { title?: string } | undefined)?.title || frameId?.examTitle || metaTitle || "",
         ).trim() || "Exam";
         const bars = isDone ? 0 : signalBars(frame?.ts, presence.lastSeenAt, now);
         const activity = lastActivityMs(presence.lastSeenAt, a) ?? (frame?.ts ?? null);
@@ -798,7 +815,7 @@ function Page() {
         }
         return true;
       });
-  }, [attemptsQ.data, recentDoneQ.data, now, frames, screenFrames, feedMode, studentNamesQ.data, examEnrichQ.data]);
+  }, [attemptsQ.data, recentDoneQ.data, now, frames, screenFrames, feedMode, studentNamesQ.data, nameByMatricQ.data, examEnrichQ.data, examsQ.data]);
 
   const stats = useMemo(() => {
     let online = 0,
