@@ -1,0 +1,33 @@
+name: Apply officer CBT surgical fixes
+on:
+  push:
+    paths:
+      - "scripts/scripts_apply_officer_surgical.py"
+      - "scripts/scripts_apply_cbt_surgical.py"
+      - "scripts/scripts_apply_officer_cbt_surgical_all.py"
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply surgical fixes
+        run: |
+          python3 scripts/scripts_apply_officer_surgical.py
+          python3 scripts/scripts_apply_cbt_surgical.py
+      - name: Commit if changed
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/routes/officer.live-monitor.tsx src/components/cbt/CbtExamSession.impl.tsx || true
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(officer/cbt): real names, pause/release, metadata.studentName"
+            git push
+          fi
