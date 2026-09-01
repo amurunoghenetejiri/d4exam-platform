@@ -138,7 +138,7 @@ function pickFeedFrame(
 }
 
 function studentDisplayName(a: AttemptRow): string {
-  const matric = String(a.students?.matric_number || a.students?.student_id || metaMatric || "").trim();
+  const matric = String(a.students?.matric_number || a.students?.student_id || "").trim();
   const fromMeta = nameFromMetadata(a.metadata);
   if (fromMeta && fromMeta.toLowerCase() !== matric.toLowerCase()) return fromMeta;
   const fromStudent = String(a.students?.full_name || "").trim();
@@ -661,7 +661,7 @@ function Page() {
           if (!mm || typeof mm !== "object") return "";
           return String((mm as Record<string, unknown>).matricNumber || (mm as Record<string, unknown>).matric_number || "").trim();
         })();
-        const matric = String(a.students?.matric_number || a.students?.student_id || "—").trim() || "—";
+        const matric = String(a.students?.matric_number || a.students?.student_id || metaMatric || "").trim() || "—";
         const _c = a.examinations?.courses as unknown;
         const courseObj = Array.isArray(_c)
           ? (_c[0] as { code?: string; name?: string } | undefined)
