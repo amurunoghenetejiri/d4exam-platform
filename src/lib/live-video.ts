@@ -342,14 +342,55 @@ export function startLiveScreenPublisher(opts: {
         const stream = opts.getStream();
         if (stream && stream.getVideoTracks().some((t) => t.readyState === "live")) {
           frame = await captureJpegFromStream(stream, {
-            maxWidth: 720,
-            quality: 0.55,
+            maxWidth: 520,
+            quality: 0.38,
             mirror: false,
           });
         }
       }
       if (stopped || !channel) return;
       if (!frame) {
+        return;
+      }
+      // Compress oversized native/web frames so Realtime does not silently drop them.
+      try {
+        if (typeof document !== "undefined" && frame.length > 40_000) {
+          const img = new Image();
+          const loaded = new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = () => reject(new Error("jpeg load"));
+          });
+          img.src = frame.startsWith("data:") ? frame : `data:image/jpeg;base64,${frame}`;
+          await loaded;
+          const maxW = 520;
+          const scale = Math.min(1, maxW / (img.naturalWidth || img.width || maxW));
+          const w = Math.max(8, Math.round((img.naturalWidth || img.width) * scale));
+          const h = Math.max(8, Math.round((img.naturalHeight || img.height) * scale));
+          const canvas = getSharedCanvas();
+          if (canvas) {
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d", { alpha: false });
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, w, h);
+              let q = 0.38;
+              let out = canvas.toDataURL("image/jpeg", q);
+              if (out.length > 180_000) {
+                q = 0.28;
+                canvas.width = Math.max(8, Math.round(w * 0.75));
+                canvas.height = Math.max(8, Math.round(h * 0.75));
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                out = canvas.toDataURL("image/jpeg", q);
+              }
+              if (out.length < frame.length) frame = out;
+            }
+          }
+        }
+      } catch (ce) {
+        console.warn("[live-screen] compress", ce);
+      }
+      if (frame.length > 220_000) {
+        console.warn("[live-screen] frame too large, skip", frame.length);
         return;
       }
       const basePayload = {
@@ -359,20 +400,19 @@ export function startLiveScreenPublisher(opts: {
         ts: Date.now(),
         screenActive: true as const,
       };
-      void channel.send({
+      // Prefer real attemptId only (no dual pending broadcast once known).
+      const attemptKey = String(opts.attemptId || "");
+      const status = await channel.send({
         type: "broadcast",
         event: LIVE_SCREEN_EVENT,
-        payload: { ...basePayload, attemptId: opts.attemptId },
+        payload: { ...basePayload, attemptId: attemptKey },
       });
-      if (opts.studentId && opts.examId && !String(opts.attemptId).startsWith("pending:")) {
-        void channel.send({
-          type: "broadcast",
-          event: LIVE_SCREEN_EVENT,
-          payload: {
-            ...basePayload,
-            attemptId: `pending:${opts.studentId}:${opts.examId}`,
-          },
-        });
+      if (status !== "ok") {
+        console.warn("[live-screen] broadcast status=", status, "size=", frame.length);
+      }
+      // Only dual-send pending key when attemptId itself is still pending.
+      if (attemptKey.startsWith("pending:") === false && opts.studentId && opts.examId && !attemptKey) {
+        /* no-op */
       }
     } catch (e) {
       console.warn("[live-screen]", e);

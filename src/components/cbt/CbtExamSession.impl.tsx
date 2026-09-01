@@ -685,7 +685,7 @@ export function CbtExamPage() {
             exam_id: id, student_id: student.studentId, school_id: examQ.data?.school_id,
             status: "in_progress", started_at: new Date().toISOString(), answers: {},
             question_order: orderIds,
-            metadata: { studentName, lastSeenAt: new Date().toISOString() },
+            metadata: { studentName, matricNumber: String((student as { matricNumber?: string } | null)?.matricNumber || (student as { matric?: string } | null)?.matric || "").trim() || undefined, lastSeenAt: new Date().toISOString() },
           } as never, { onConflict: "exam_id,student_id" }).select("id").maybeSingle();
           if (data?.id) { attemptIdRef.current = data.id as string; setLiveAttemptId(data.id as string); }
         } else {
