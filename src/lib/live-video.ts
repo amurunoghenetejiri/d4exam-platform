@@ -154,6 +154,7 @@ export function startLiveCamPublisher(opts: {
     answeredCount?: number;
     totalQuestions?: number;
     timeRemainingSec?: number | null;
+    tabSwitchCount?: number;
     studentName?: string;
     matricNumber?: string;
     courseCode?: string;
@@ -206,6 +207,7 @@ export function startLiveCamPublisher(opts: {
           answeredCount: meta.answeredCount,
           totalQuestions: meta.totalQuestions,
           timeRemainingSec: meta.timeRemainingSec,
+          tabSwitchCount: meta.tabSwitchCount,
           studentName: meta.studentName,
           matricNumber: meta.matricNumber,
           courseCode: meta.courseCode,

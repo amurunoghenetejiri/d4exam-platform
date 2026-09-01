@@ -23,6 +23,7 @@ export function useLiveCamPublish(opts: {
   getMatricNumber?: () => string | null | undefined;
   getCourseCode?: () => string | null | undefined;
   getExamTitle?: () => string | null | undefined;
+  getTabSwitchCount?: () => number;
 }) {
   const pubRef = useRef<LiveCamPublisher | null>(null);
   const optsRef = useRef(opts);
@@ -77,6 +78,7 @@ export function useLiveCamPublish(opts: {
           matricNumber: String(o.getMatricNumber?.() || "").trim() || undefined,
           courseCode: String(o.getCourseCode?.() || "").trim() || undefined,
           examTitle: String(o.getExamTitle?.() || "").trim() || undefined,
+          tabSwitchCount: o.getTabSwitchCount?.(),
         };
       },
       intervalMs: 450,

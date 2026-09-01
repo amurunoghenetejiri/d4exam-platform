@@ -90,7 +90,7 @@ type IntegrityEvent = {
 };
 
 type FilterKey = "all" | "normal" | "warning" | "violation" | "offline";
-type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null; studentName?: string; matricNumber?: string; courseCode?: string; examTitle?: string; studentId?: string; examId?: string };
+type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null; tabSwitchCount?: number; studentName?: string; matricNumber?: string; courseCode?: string; examTitle?: string; studentId?: string; examId?: string };
 
 function isFaceOrCameraLogOnly(eventType: string): boolean {
   const t = String(eventType || "").toUpperCase();
@@ -251,6 +251,7 @@ function Page() {
           answeredCount: p.answeredCount,
           totalQuestions: p.totalQuestions,
           timeRemainingSec: p.timeRemainingSec,
+          tabSwitchCount: typeof (p as { tabSwitchCount?: number }).tabSwitchCount === "number" ? (p as { tabSwitchCount?: number }).tabSwitchCount : undefined,
           studentName: p.studentName ? String(p.studentName).trim() : undefined,
           matricNumber: p.matricNumber ? String(p.matricNumber).trim() : undefined,
           courseCode: p.courseCode ? String(p.courseCode).trim() : undefined,
@@ -551,7 +552,48 @@ function Page() {
     },
   });
 
-  const examIdsKey = useMemo(() => {
+
+  const nameByMatricQ = useQuery({
+    queryKey: ["officer-live-name-by-matric", schoolId, studentIdsKey],
+    enabled: Boolean(schoolId && studentIdsKey),
+    staleTime: 30_000,
+    queryFn: async () => {
+      const map: Record<string, string> = {};
+      const { data } = await supabase
+        .from("students")
+        .select("id, full_name, matric_number, student_id, profiles(full_name, first_name, last_name)")
+        .eq("school_id", schoolId!)
+        .limit(500);
+      for (const s of data ?? []) {
+        const row = s as {
+          id: string;
+          full_name?: string | null;
+          matric_number?: string | null;
+          student_id?: string | null;
+          profiles?: { full_name?: string | null; first_name?: string | null; last_name?: string | null } | { full_name?: string | null }[] | null;
+        };
+        const matric = String(row.matric_number || row.student_id || "").trim().toLowerCase();
+        let name = String(row.full_name || "").trim();
+        const prof = row.profiles;
+        let pName = "";
+        if (Array.isArray(prof)) {
+          const pr = prof[0] as { full_name?: string | null; first_name?: string | null; last_name?: string | null } | undefined;
+          pName = String(pr?.full_name || [pr?.first_name, pr?.last_name].filter(Boolean).join(" ") || "").trim();
+        } else if (prof && typeof prof === "object") {
+          const pr = prof as { full_name?: string | null; first_name?: string | null; last_name?: string | null };
+          pName = String(pr.full_name || [pr.first_name, pr.last_name].filter(Boolean).join(" ") || "").trim();
+        }
+        if (!name || name.toLowerCase() === matric) name = pName || name;
+        if (name) {
+          map[row.id] = name;
+          if (matric) map[`matric:${matric}`] = name;
+        }
+      }
+      return map;
+    },
+  });
+
+    const examIdsKey = useMemo(() => {
     const ids = new Set<string>();
     for (const a of attemptsQ.data ?? []) { if (a.exam_id) ids.add(String(a.exam_id)); }
     for (const a of recentDoneQ.data ?? []) { if (a.exam_id) ids.add(String(a.exam_id)); }
@@ -653,20 +695,25 @@ function Page() {
         );
         // Prefer live Realtime frame — never show Offline while video frames are arriving
         const presence = { ...basePresence };
-        if ((hasLiveVideo || (camFrame && isLiveCamFrameUsable(camFrame.ts, now)) || (scrFrame && isLiveScreenFrameUsable(scrFrame.ts, now))) && frame) {
-          presence.lastSeenAt = new Date(frame.ts).toISOString();
+        const statsFrame = camFrame || frame;
+        if ((hasLiveVideo || (camFrame && isLiveCamFrameUsable(camFrame.ts, now)) || (scrFrame && isLiveScreenFrameUsable(scrFrame.ts, now))) && (statsFrame || frame)) {
+          const tsSrc = frame || statsFrame;
+          if (tsSrc?.ts) presence.lastSeenAt = new Date(tsSrc.ts).toISOString();
           presence.cameraActive = true;
-          if (frame.faceStatus) {
-            const fs = String(frame.faceStatus).toLowerCase();
+          if (statsFrame?.faceStatus) {
+            const fs = String(statsFrame.faceStatus).toLowerCase();
             if (fs === "ok" || fs === "none" || fs === "multi" || fs === "unclear" || fs === "unavailable") {
               presence.faceStatus = fs as typeof presence.faceStatus;
             }
           } else if (!presence.faceStatus || presence.faceStatus === "unknown" || presence.faceStatus === "unavailable") {
             presence.faceStatus = "ok";
           }
-          if (typeof frame.answeredCount === "number") presence.answeredCount = frame.answeredCount;
-          if (typeof frame.totalQuestions === "number") presence.totalQuestions = frame.totalQuestions;
-          if (typeof frame.timeRemainingSec === "number") presence.timeRemainingSec = frame.timeRemainingSec;
+          if (typeof statsFrame?.answeredCount === "number") presence.answeredCount = statsFrame.answeredCount;
+          if (typeof statsFrame?.totalQuestions === "number") presence.totalQuestions = statsFrame.totalQuestions;
+          if (typeof statsFrame?.timeRemainingSec === "number") presence.timeRemainingSec = statsFrame.timeRemainingSec;
+          if (typeof statsFrame?.tabSwitchCount === "number") {
+            (presence as { tabSwitchCount?: number }).tabSwitchCount = statsFrame.tabSwitchCount;
+          }
         } else if (frame?.ts && !presence.lastSeenAt) {
           presence.lastSeenAt = new Date(frame.ts).toISOString();
         }
@@ -678,6 +725,9 @@ function Page() {
           else sev = "normal";
         }
         const resolved = studentNamesQ.data?.[String(a.student_id)];
+        const byMatricKey = String(a.students?.matric_number || a.students?.student_id || (a.metadata as Record<string, unknown> | null)?.matricNumber || "").trim().toLowerCase();
+        const fromMatricMap = byMatricKey ? nameByMatricQ.data?.[`matric:${byMatricKey}`] : undefined;
+        const fromIdMap = nameByMatricQ.data?.[String(a.student_id)];
         const frameId = camFrame || frames[a.id] || frames[`student:${a.student_id}`] || null;
         const metaName = nameFromMetadata(a.metadata);
         const frameName = String(frameId?.studentName || "").trim();
@@ -685,7 +735,7 @@ function Page() {
         const resolvedName = typeof resolved === "string"
           ? resolved.trim()
           : String((resolved as { name?: string } | undefined)?.name || "").trim();
-        const nameCandidates = [resolvedName, frameName, metaName, fromJoin].filter(
+        const nameCandidates = [resolvedName, fromIdMap, fromMatricMap, frameName, metaName, fromJoin].filter(
           (n) => n && n !== "Student" && n.toLowerCase() !== "unknown",
         );
         const name = nameCandidates[0] || "Student";
@@ -839,11 +889,27 @@ function Page() {
       .slice(0, 20);
   }, [events, selected]);
 
-  const primaryExamLabel = liveExams[0]
-    ? `${(Array.isArray(liveExams[0].courses) ? (liveExams[0].courses[0] as { code?: string } | undefined)?.code : (liveExams[0].courses as { code?: string } | null)?.code) ?? ""} · ${liveExams[0].title}`
-    : cards[0]
-      ? `${cards[0].course} · ${cards[0].title}`
-      : "No live exam";
+  const primaryExamLabel = (() => {
+    if (liveExams[0]) {
+      const c = Array.isArray(liveExams[0].courses)
+        ? (liveExams[0].courses[0] as { code?: string } | undefined)?.code
+        : (liveExams[0].courses as { code?: string } | null)?.code;
+      const code = String(c || "").trim();
+      const title = String(liveExams[0].title || "").trim();
+      if (code && title) return `${code} · ${title}`;
+      if (title) return title;
+      if (code) return code;
+    }
+    const c0 = cards.find((c) => c.course && c.course !== "—" && c.title && c.title !== "Exam") || cards[0];
+    if (c0) {
+      const course = c0.course && c0.course !== "—" ? c0.course : "";
+      const title = c0.title && c0.title !== "Exam" ? c0.title : "";
+      if (course && title) return `${course} · ${title}`;
+      if (title) return title;
+      if (course) return course;
+    }
+    return "No live exam";
+  })();
 
   async function broadcastOfficerCommand(cmd: "submit" | "hold" | "pause" | "release" | "terminate", attemptId: string, studentId: string, examId: string) {
     try {
@@ -1381,7 +1447,10 @@ function Page() {
                   return "Not sharing";
                 })()}
               />
-              <Info label="Tab switches" value={String(selected.a.tab_switch_count ?? 0)} />
+              <Info label="Tab switches" value={String(Math.max(
+                Number(selected.a.tab_switch_count ?? 0),
+                Number((selected.presence as { tabSwitchCount?: number }).tabSwitchCount ?? 0),
+              ))} />
             </div>
             {!selected.isDone && (
               <div className="flex flex-wrap gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-4 sm:py-3">

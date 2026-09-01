@@ -131,7 +131,21 @@ function Page() {
         const eid = (a as { exam_id: string | null }).exam_id;
         if (eid) examIds.add(eid);
       }
-      return { liveExams: examIds.size, writers: active.length };
+      let ongoingCount = 0;
+      try {
+        const { count } = await supabase
+          .from("examinations")
+          .select("id", { count: "exact", head: true })
+          .eq("school_id", schoolId)
+          .eq("status", "ongoing");
+        ongoingCount = count ?? 0;
+      } catch {
+        /* ignore */
+      }
+      let liveExams = examIds.size;
+      if (liveExams === 0 && active.length > 0) liveExams = Math.max(1, ongoingCount);
+      else if (ongoingCount > liveExams && active.length > 0) liveExams = Math.max(liveExams, ongoingCount);
+      return { liveExams, writers: active.length };
     },
   });
 
