@@ -1,0 +1,143 @@
+name: Apply live identity v2
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/apply-live-identity-v2.yml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch identity pipeline
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          LV = Path("src/lib/live-video.ts")
+          CAM = Path("src/lib/use-live-cam-publish.ts")
+          CBT = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          OM = Path("src/routes/officer.live-monitor.tsx")
+
+          lv = LV.read_text()
+          if "matricNumber?: string" not in lv:
+              lv = lv.replace(
+                  "  timeRemainingSec?: number | null;\n};",
+                  "  timeRemainingSec?: number | null;\n  studentName?: string;\n  matricNumber?: string;\n  courseCode?: string;\n  examTitle?: string;\n};",
+                  1,
+              )
+              lv = lv.replace(
+                  "    timeRemainingSec?: number | null;\n  };",
+                  "    timeRemainingSec?: number | null;\n    studentName?: string;\n    matricNumber?: string;\n    courseCode?: string;\n    examTitle?: string;\n  };",
+                  1,
+              )
+              lv = lv.replace(
+                  "          timeRemainingSec: meta.timeRemainingSec,\n        },\n      });",
+                  "          timeRemainingSec: meta.timeRemainingSec,\n          studentName: meta.studentName,\n          matricNumber: meta.matricNumber,\n          courseCode: meta.courseCode,\n          examTitle: meta.examTitle,\n        },\n      });",
+                  1,
+              )
+              LV.write_text(lv)
+              print("live-video")
+
+          cam = CAM.read_text()
+          if "getStudentName" not in cam:
+              cam = cam.replace(
+                  "  getTimeRemainingSec?: () => number | null;\n}) {",
+                  "  getTimeRemainingSec?: () => number | null;\n  getStudentName?: () => string | null | undefined;\n  getMatricNumber?: () => string | null | undefined;\n  getCourseCode?: () => string | null | undefined;\n  getExamTitle?: () => string | null | undefined;\n}) {",
+              )
+              cam = cam.replace(
+                  "          timeRemainingSec: o.getTimeRemainingSec?.() ?? null,\n        };",
+                  "          timeRemainingSec: o.getTimeRemainingSec?.() ?? null,\n          studentName: String(o.getStudentName?.() || \"\").trim() || undefined,\n          matricNumber: String(o.getMatricNumber?.() || \"\").trim() || undefined,\n          courseCode: String(o.getCourseCode?.() || \"\").trim() || undefined,\n          examTitle: String(o.getExamTitle?.() || \"\").trim() || undefined,\n        };",
+              )
+              CAM.write_text(cam)
+              print("cam-publish")
+
+          cbt = CBT.read_text()
+          if "getStudentName:" not in cbt:
+              needle = "    getTimeRemainingSec: () => seconds,\n  });"
+              repl = """    getTimeRemainingSec: () => seconds,
+    getStudentName: () => String((student as { fullName?: string } | null)?.fullName || session?.fullName || \"\").trim() || null,
+    getMatricNumber: () => String((student as { matric?: string | null } | null)?.matric || \"\").trim() || null,
+    getCourseCode: () => {
+      const c = (examQ.data as { courses?: { code?: string } | { code?: string }[] } | null)?.courses;
+      if (Array.isArray(c)) return String(c[0]?.code || \"\").trim() || null;
+      return String((c as { code?: string } | undefined)?.code || \"\").trim() || null;
+    },
+    getExamTitle: () => String(examQ.data?.title || \"\").trim() || null,
+  });"""
+              if needle in cbt:
+                  cbt = cbt.replace(needle, repl, 1)
+                  print("cbt-wire")
+              else:
+                  print("cbt-wire FAIL")
+
+          old_upd = """          const studentNameUpd = String((student as { fullName?: string } | null)?.fullName || session?.fullName || \"\").trim() || undefined;
+          void supabase.from(\"exam_attempts\").update({
+            question_order: orderIds,
+            status: \"in_progress\",
+            metadata: { studentName: studentNameUpd, lastSeenAt: new Date().toISOString() },
+          } as never).eq(\"id\", attemptIdRef.current);"""
+          new_upd = """          const studentNameUpd = String((student as { fullName?: string } | null)?.fullName || session?.fullName || \"\").trim() || undefined;
+          const matricUpd = String((student as { matric?: string | null } | null)?.matric || \"\").trim() || undefined;
+          void (async () => {
+            try {
+              const { data: prevRow } = await supabase.from(\"exam_attempts\").select(\"metadata\").eq(\"id\", attemptIdRef.current!).maybeSingle();
+              const prevMeta = prevRow?.metadata && typeof prevRow.metadata === \"object\" && !Array.isArray(prevRow.metadata) ? (prevRow.metadata as Record<string, unknown>) : {};
+              await supabase.from(\"exam_attempts\").update({
+                question_order: orderIds,
+                status: \"in_progress\",
+                metadata: { ...prevMeta, studentName: studentNameUpd || prevMeta.studentName, matricNumber: matricUpd || prevMeta.matricNumber, lastSeenAt: new Date().toISOString() },
+              } as never).eq(\"id\", attemptIdRef.current!);
+            } catch (e) { console.warn(\"[cbt] metadata merge\", e); }
+          })();"""
+          if old_upd in cbt:
+              cbt = cbt.replace(old_upd, new_upd, 1)
+              print("cbt-meta")
+          CBT.write_text(cbt)
+
+          om = OM.read_text()
+          om = om.replace(
+              "type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null };",
+              "type FrameEntry = { src: string; ts: number; faceStatus?: string; cameraActive?: boolean; answeredCount?: number; totalQuestions?: number; timeRemainingSec?: number | null; studentName?: string; matricNumber?: string; courseCode?: string; examTitle?: string };",
+              1,
+          )
+          if "studentName: p.studentName" not in om:
+              om = om.replace(
+                  "          timeRemainingSec: p.timeRemainingSec,\n        };",
+                  "          timeRemainingSec: p.timeRemainingSec,\n          studentName: p.studentName ? String(p.studentName).trim() : undefined,\n          matricNumber: p.matricNumber ? String(p.matricNumber).trim() : undefined,\n          courseCode: p.courseCode ? String(p.courseCode).trim() : undefined,\n          examTitle: p.examTitle ? String(p.examTitle).trim() : undefined,\n        };",
+                  1,
+              )
+          if "frameName" not in om:
+              om = om.replace(
+                  "        const metaName = nameFromMetadata(a.metadata);\n        const name = (resolved && String(resolved).trim()) || metaName || studentDisplayName(a);",
+                  "        const frameId = camFrame || frames[a.id] || frames[`student:${a.student_id}`];\n        const metaName = nameFromMetadata(a.metadata);\n        const frameName = String(frameId?.studentName || \"\").trim();\n        const name = (resolved && String(resolved).trim()) || frameName || metaName || studentDisplayName(a);",
+                  1,
+              )
+              om = om.replace(
+                  'const matric = String(a.students?.matric_number || a.students?.student_id || metaMatric || \"\").trim() || \"—\";',
+                  'const frameMatric = String(frameId?.matricNumber || \"\").trim();\n        const matric = String(a.students?.matric_number || a.students?.student_id || frameMatric || metaMatric || \"\").trim() || \"—\";',
+                  1,
+              )
+          if "frameId?.courseCode" not in om:
+              om = om.replace(
+                  'const courseCode = String(courseObj?.code || examEnrichQ.data?.[String(a.exam_id)]?.courseCode || \"\").trim();',
+                  'const courseCode = String(courseObj?.code || examEnrichQ.data?.[String(a.exam_id)]?.courseCode || frameId?.courseCode || \"\").trim();',
+                  1,
+              )
+              om = om.replace(
+                  'const title = String(a.examinations?.title || examEnrichQ.data?.[String(a.exam_id)]?.title || \"\").trim() || \"Exam\";',
+                  'const title = String(a.examinations?.title || examEnrichQ.data?.[String(a.exam_id)]?.title || frameId?.examTitle || \"\").trim() || \"Exam\";',
+                  1,
+              )
+          OM.write_text(om)
+          print("officer")
+          print("DONE")
+          PY
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else git commit -m "fix(officer-live): real student name/matric/course/exam from live frames"; git push; fi
