@@ -434,9 +434,28 @@ export function CbtExamPage() {
       tabSwitchCountRef.current += 1;
       setTabSwitchCount(tabSwitchCountRef.current);
       if (attemptIdRef.current) {
-        void supabase.from("exam_attempts").update({
-          tab_switch_count: tabSwitchCountRef.current,
-        } as never).eq("id", attemptIdRef.current);
+        void (async () => {
+          try {
+            const aid = attemptIdRef.current!;
+            const { data: prevRow } = await supabase.from("exam_attempts").select("metadata").eq("id", aid).maybeSingle();
+            const prevMeta = prevRow?.metadata && typeof prevRow.metadata === "object" && !Array.isArray(prevRow.metadata)
+              ? (prevRow.metadata as Record<string, unknown>)
+              : {};
+            await supabase.from("exam_attempts").update({
+              tab_switch_count: tabSwitchCountRef.current,
+              metadata: {
+                ...prevMeta,
+                tabSwitchCount: tabSwitchCountRef.current,
+                lastSeenAt: new Date().toISOString(),
+                studentName: String((student as { fullName?: string } | null)?.fullName || session?.fullName || prevMeta.studentName || "").trim() || prevMeta.studentName,
+                matricNumber: String((student as { matric?: string | null } | null)?.matric || session?.identifier || prevMeta.matricNumber || "").trim() || prevMeta.matricNumber,
+              },
+              updated_at: new Date().toISOString(),
+            } as never).eq("id", aid);
+          } catch (e) {
+            console.warn("[cbt] tab_switch persist", e);
+          }
+        })();
       }
       const max = security.maxTabSwitches ?? 5;
       if (tabSwitchCountRef.current >= max) {

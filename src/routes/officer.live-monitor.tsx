@@ -333,7 +333,7 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["officer-live-attempts", schoolId],
     enabled: Boolean(schoolId),
-    refetchInterval: 6_000,
+    refetchInterval: 3_000,
     queryFn: async () => {
       if (!schoolId) return [] as AttemptRow[];
       const selects = [
@@ -714,6 +714,17 @@ function Page() {
           if (typeof statsFrame?.timeRemainingSec === "number") presence.timeRemainingSec = statsFrame.timeRemainingSec;
           if (typeof statsFrame?.tabSwitchCount === "number") {
             (presence as { tabSwitchCount?: number }).tabSwitchCount = statsFrame.tabSwitchCount;
+          }
+          {
+            const dbTab = Number(a.tab_switch_count ?? 0);
+            const metaTab = (() => {
+              const mm = a.metadata;
+              if (!mm || typeof mm !== "object") return 0;
+              return Number((mm as Record<string, unknown>).tabSwitchCount ?? 0);
+            })();
+            const liveTab = Number((presence as { tabSwitchCount?: number }).tabSwitchCount ?? 0);
+            const bestTab = Math.max(dbTab, metaTab, liveTab);
+            if (bestTab > 0) (presence as { tabSwitchCount?: number }).tabSwitchCount = bestTab;
           }
         } else if (frame?.ts && !presence.lastSeenAt) {
           presence.lastSeenAt = new Date(frame.ts).toISOString();

@@ -81,7 +81,7 @@ export function useLiveCamPublish(opts: {
           tabSwitchCount: o.getTabSwitchCount?.(),
         };
       },
-      intervalMs: 450,
+      intervalMs: 350,
     });
 
     // Heartbeat so officer dashboard / monitor keep this attempt as LIVE

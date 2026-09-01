@@ -116,7 +116,7 @@ export async function captureJpegFromStream(
 export type LiveCamPublisher = { stop: () => void };
 
 export const LIVE_CAM_EVENT = "cam-frame";
-export const LIVE_CAM_FRAME_INTERVAL_MS = 450;
+export const LIVE_CAM_FRAME_INTERVAL_MS = 350;
 export const LIVE_CAM_STALE_MS = 4_500;
 export const LIVE_CAM_DISPLAY_MS = 90_000;
 
@@ -190,7 +190,7 @@ export function startLiveCamPublisher(opts: {
     if (!live) return;
     publishing = true;
     try {
-      const frame = await captureJpegFromStream(stream, { maxWidth: 280, quality: 0.42, mirror: true });
+      const frame = await captureJpegFromStream(stream, { maxWidth: 320, quality: 0.55, mirror: true });
       if (stopped || !frame || !channel) return;
       const meta = opts.getFaceMeta?.() || {};
       void channel.send({
@@ -312,7 +312,7 @@ export function isLiveCamFrameUsable(ts: number | null | undefined, now = Date.n
 }
 
 export const LIVE_SCREEN_EVENT = "screen-frame";
-export const LIVE_SCREEN_FRAME_INTERVAL_MS = 500;
+export const LIVE_SCREEN_FRAME_INTERVAL_MS = 400;
 export type LiveScreenFramePayload = {
   attemptId: string;
   studentId: string;
@@ -356,8 +356,8 @@ export function startLiveScreenPublisher(opts: {
         const stream = opts.getStream();
         if (stream && stream.getVideoTracks().some((t) => t.readyState === "live")) {
           frame = await captureJpegFromStream(stream, {
-            maxWidth: 400,
-            quality: 0.32,
+            maxWidth: 480,
+            quality: 0.42,
             mirror: false,
           });
         }
@@ -376,7 +376,7 @@ export function startLiveScreenPublisher(opts: {
           });
           img.src = frame.startsWith("data:") ? frame : `data:image/jpeg;base64,${frame}`;
           await loaded;
-          const maxW = 400;
+          const maxW = 480;
           const scale = Math.min(1, maxW / (img.naturalWidth || img.width || maxW));
           const w = Math.max(8, Math.round((img.naturalWidth || img.width) * scale));
           const h = Math.max(8, Math.round((img.naturalHeight || img.height) * scale));
@@ -387,7 +387,7 @@ export function startLiveScreenPublisher(opts: {
             const ctx = canvas.getContext("2d", { alpha: false });
             if (ctx) {
               ctx.drawImage(img, 0, 0, w, h);
-              let q = 0.32;
+              let q = 0.42;
               let out = canvas.toDataURL("image/jpeg", q);
               if (out.length > 180_000) {
                 q = 0.28;
@@ -403,7 +403,7 @@ export function startLiveScreenPublisher(opts: {
       } catch (ce) {
         console.warn("[live-screen] compress", ce);
       }
-      if (frame.length > 220_000) {
+      if (frame.length > 280_000) {
         console.warn("[live-screen] frame too large, skip", frame.length);
         return;
       }
