@@ -71,7 +71,7 @@ export function useLiveCamPublish(opts: {
           timeRemainingSec: o.getTimeRemainingSec?.() ?? null,
         };
       },
-      intervalMs: 600,
+      intervalMs: 450,
     });
 
     // Heartbeat so officer dashboard / monitor keep this attempt as LIVE

@@ -78,7 +78,7 @@ export function useLiveScreenPublish(opts: {
       studentId,
       examId,
       getStream: () => optsRef.current.getStream?.() || optsRef.current.stream,
-      intervalMs: 700,
+      intervalMs: 500,
     });
 
     const realAttemptId = String(optsRef.current.attemptId || "");

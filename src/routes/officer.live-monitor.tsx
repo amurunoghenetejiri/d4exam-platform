@@ -161,10 +161,10 @@ function signalBars(
   const frameAge = frameTs != null ? now - frameTs : Infinity;
   const seenAge = lastSeenAt ? now - new Date(lastSeenAt).getTime() : Infinity;
   if (Number.isNaN(seenAge)) return 0;
-  if (frameAge <= 2_500) return 4;
-  if (frameAge <= 5_000) return 3;
-  if (frameAge <= LIVE_CAM_STALE_MS || seenAge <= 15_000) return 2;
-  if (seenAge <= 45_000) return 1;
+  if (frameAge <= 1_200) return 4;
+  if (frameAge <= 2_500) return 3;
+  if (frameAge <= LIVE_CAM_STALE_MS || seenAge <= 8_000) return 2;
+  if (seenAge <= 25_000) return 1;
   return 0;
 }
 
@@ -655,7 +655,8 @@ function Page() {
           else sev = "normal";
         }
         const resolved = studentNamesQ.data?.[String(a.student_id)];
-        const name = (resolved && resolved.trim()) || studentDisplayName(a);
+        const metaName = nameFromMetadata(a.metadata);
+        const name = (resolved && String(resolved).trim()) || metaName || studentDisplayName(a);
         const metaMatric = (() => {
           const mm = a.metadata;
           if (!mm || typeof mm !== "object") return "";
@@ -1060,7 +1061,16 @@ function Page() {
                   course={c.course}
                   sev={c.sev}
                   presence={c.presence}
-                  frameSrc={c.camFrame?.src || c.scrFrame?.src || c.frame?.src}
+                  frameSrc={
+                    feedMode === "screen"
+                      ? (c.scrFrame?.src || c.frame?.src)
+                      : feedMode === "camera"
+                        ? (c.camFrame?.src || c.frame?.src)
+                        : (c.camFrame?.src || c.scrFrame?.src || c.frame?.src)
+                  }
+                  camSrc={c.camFrame?.src}
+                  scrSrc={c.scrFrame?.src}
+                  feedMode={feedMode}
                   streamLive={c.hasLiveVideo || Boolean(c.camLive || c.scrLive) || Boolean(c.camFrame?.src || c.scrFrame?.src)}
                   bars={c.bars}
                   isDone={c.isDone}
@@ -1233,11 +1243,11 @@ function Page() {
                 <div
                   className={cn(
                     "shrink-0 gap-1.5 bg-slate-100 p-1.5 sm:gap-2 sm:p-2",
-                    dual ? "grid grid-cols-1 sm:grid-cols-[1.35fr_1fr]" : "grid grid-cols-1",
+                    dual ? "grid grid-cols-2" : "grid grid-cols-1",
                   )}
                 >
                   {showCam && (
-                    <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10">
+                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">
                       {showCamFrame ? (
                         <img src={camF!.src} alt={`${selected.name} camera`} className="h-full w-full object-cover" />
                       ) : (
@@ -1268,7 +1278,7 @@ function Page() {
                     </div>
                   )}
                   {showScr && (
-                    <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10">
+                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">
                       {showScrFrame ? (
                         <img src={sf!.src} alt={`${selected.name} screen`} className="h-full w-full object-contain bg-black" />
                       ) : (
@@ -1462,6 +1472,9 @@ function StudentCard({
   sev,
   presence,
   frameSrc,
+  camSrc,
+  scrSrc,
+  feedMode = "camera",
   streamLive,
   bars,
   isDone,
@@ -1474,6 +1487,9 @@ function StudentCard({
   sev: MonitorSeverity;
   presence: ReturnType<typeof parsePresence>;
   frameSrc?: string;
+  camSrc?: string;
+  scrSrc?: string;
+  feedMode?: "camera" | "screen" | "both";
   streamLive?: boolean;
   bars: number;
   isDone?: boolean;
@@ -1504,6 +1520,27 @@ function StudentCard({
               {statusLabel || "Submitted"}
             </p>
             <p className="text-[9px] font-semibold text-sky-100/90">Result pending release</p>
+          </div>
+        ) : feedMode === "both" && (camSrc || scrSrc) ? (
+          <div className="flex h-full w-full">
+            <div className="relative h-full w-1/2 overflow-hidden border-r border-white/10">
+              {camSrc ? (
+                <img src={camSrc} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="grid h-full place-items-center bg-slate-900">
+                  <UserRound className="h-5 w-5 text-white/25" />
+                </div>
+              )}
+            </div>
+            <div className="relative h-full w-1/2 overflow-hidden">
+              {scrSrc ? (
+                <img src={scrSrc} alt="" className="h-full w-full object-contain bg-black" />
+              ) : (
+                <div className="grid h-full place-items-center bg-slate-950">
+                  <Monitor className="h-5 w-5 text-white/25" />
+                </div>
+              )}
+            </div>
           </div>
         ) : frameSrc ? (
           <img src={frameSrc} alt="" className="h-full w-full object-cover" />

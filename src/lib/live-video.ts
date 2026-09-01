@@ -68,7 +68,7 @@ export async function captureJpegFromStream(
   }
 
   const t0 = video.currentTime;
-  await new Promise((r) => window.setTimeout(r, 40));
+  await new Promise((r) => window.setTimeout(r, 16));
   if (video.readyState >= 2 && video.currentTime === t0 && !video.paused) {
     try {
       video.srcObject = stream;
@@ -116,8 +116,8 @@ export async function captureJpegFromStream(
 export type LiveCamPublisher = { stop: () => void };
 
 export const LIVE_CAM_EVENT = "cam-frame";
-export const LIVE_CAM_FRAME_INTERVAL_MS = 900;
-export const LIVE_CAM_STALE_MS = 22_000;
+export const LIVE_CAM_FRAME_INTERVAL_MS = 450;
+export const LIVE_CAM_STALE_MS = 4_500;
 export const LIVE_CAM_DISPLAY_MS = 90_000;
 
 export type LiveCamFramePayload = {
@@ -181,7 +181,7 @@ export function startLiveCamPublisher(opts: {
     if (!live) return;
     publishing = true;
     try {
-      const frame = await captureJpegFromStream(stream, { maxWidth: 360, quality: 0.52, mirror: true });
+      const frame = await captureJpegFromStream(stream, { maxWidth: 280, quality: 0.42, mirror: true });
       if (stopped || !frame || !channel) return;
       const meta = opts.getFaceMeta?.() || {};
       void channel.send({
@@ -298,7 +298,7 @@ export function isLiveCamFrameUsable(ts: number | null | undefined, now = Date.n
 }
 
 export const LIVE_SCREEN_EVENT = "screen-frame";
-export const LIVE_SCREEN_FRAME_INTERVAL_MS = 700;
+export const LIVE_SCREEN_FRAME_INTERVAL_MS = 500;
 export type LiveScreenFramePayload = {
   attemptId: string;
   studentId: string;
@@ -334,16 +334,16 @@ export function startLiveScreenPublisher(opts: {
     if (stopped || publishing) return;
     publishing = true;
     try {
-      let frame = await awaitLatestNativeScreenJpeg();
+      let frame = getLatestNativeScreenJpeg();
       if (!frame) {
-        frame = getLatestNativeScreenJpeg();
+        frame = await awaitLatestNativeScreenJpeg();
       }
       if (!frame) {
         const stream = opts.getStream();
         if (stream && stream.getVideoTracks().some((t) => t.readyState === "live")) {
           frame = await captureJpegFromStream(stream, {
-            maxWidth: 520,
-            quality: 0.38,
+            maxWidth: 400,
+            quality: 0.32,
             mirror: false,
           });
         }
@@ -354,7 +354,7 @@ export function startLiveScreenPublisher(opts: {
       }
       // Compress oversized native/web frames so Realtime does not silently drop them.
       try {
-        if (typeof document !== "undefined" && frame.length > 40_000) {
+        if (typeof document !== "undefined" && frame.length > 90_000) {
           const img = new Image();
           const loaded = new Promise<void>((resolve, reject) => {
             img.onload = () => resolve();
@@ -362,7 +362,7 @@ export function startLiveScreenPublisher(opts: {
           });
           img.src = frame.startsWith("data:") ? frame : `data:image/jpeg;base64,${frame}`;
           await loaded;
-          const maxW = 520;
+          const maxW = 400;
           const scale = Math.min(1, maxW / (img.naturalWidth || img.width || maxW));
           const w = Math.max(8, Math.round((img.naturalWidth || img.width) * scale));
           const h = Math.max(8, Math.round((img.naturalHeight || img.height) * scale));
@@ -373,7 +373,7 @@ export function startLiveScreenPublisher(opts: {
             const ctx = canvas.getContext("2d", { alpha: false });
             if (ctx) {
               ctx.drawImage(img, 0, 0, w, h);
-              let q = 0.38;
+              let q = 0.32;
               let out = canvas.toDataURL("image/jpeg", q);
               if (out.length > 180_000) {
                 q = 0.28;
@@ -440,7 +440,7 @@ export function startLiveScreenPublisher(opts: {
   };
 }
 
-export const LIVE_SCREEN_STALE_MS = 22_000;
+export const LIVE_SCREEN_STALE_MS = 4_500;
 export const LIVE_SCREEN_DISPLAY_MS = 90_000;
 
 export function isLiveScreenFrameFresh(ts: number | null | undefined, now = Date.now()): boolean {
