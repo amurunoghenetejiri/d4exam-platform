@@ -1,0 +1,21 @@
+name: Apply identity live fix
+on:
+  push:
+    paths:
+      - scripts/apply_identity_live_fix.py
+      - .github/workflows/apply-identity-live-fix.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/apply_identity_live_fix.py
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else git commit -m "fix(officer-live): show real student name matric course on live cards"; git push; fi
