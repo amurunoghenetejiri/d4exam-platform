@@ -3,6 +3,9 @@
  * Web: getUserMedia.
  * Android Capacitor: request OS runtime permissions first (so Camera/Mic appear in App Settings),
  * then getUserMedia in the WebView.
+ *
+ * Important: getUserMedia must be triggered from a user gesture on many mobile WebViews.
+ * Do not auto-start camera on mount — always call from a button click.
  */
 import { isNativeShell } from "@/native/platform";
 
@@ -13,7 +16,12 @@ async function withMediaTimeout<T>(promise: Promise<T>, ms: number, label: strin
       promise,
       new Promise<T>((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error(`${label} timed out. Allow camera permission in the system dialog or App Settings, then try again.`)),
+          () =>
+            reject(
+              new Error(
+                `${label} timed out. Allow camera permission in the system dialog or App Settings, then try again.`,
+              ),
+            ),
           ms,
         );
       }),
@@ -23,10 +31,11 @@ async function withMediaTimeout<T>(promise: Promise<T>, ms: number, label: strin
   }
 }
 
-
 export type CameraStreamOptions = {
   facingMode?: "user" | "environment";
   audio?: boolean;
+  /** Skip Capacitor native check (when already granted). */
+  skipPermissionProbe?: boolean;
 };
 
 export type PermissionResult = {
@@ -52,14 +61,49 @@ export async function openAppPermissionSettings(): Promise<void> {
   }
 }
 
-async function probeGetUserMedia(
-  constraints: MediaStreamConstraints,
-): Promise<PermissionResult> {
+/**
+ * Native Android CAMERA permission only (no getUserMedia).
+ */
+export async function ensureNativeCameraPermission(): Promise<PermissionResult> {
+  if (!isNativeShell()) return { granted: true };
+  try {
+    const { Camera } = await import("@capacitor/camera");
+    let status = await withMediaTimeout(Camera.checkPermissions(), 6_000, "Camera permission check");
+    if (status.camera !== "granted") {
+      status = await withMediaTimeout(
+        Camera.requestPermissions({ permissions: ["camera"] }),
+        25_000,
+        "Camera permission dialog",
+      );
+    }
+    if (status.camera !== "granted") {
+      return {
+        granted: false,
+        deniedPermanently: status.camera === "denied",
+        error: "Camera permission is required. Tap Open App Settings → enable Camera, then try again.",
+      };
+    }
+    return { granted: true };
+  } catch (e) {
+    console.warn("[D4EXAM] Camera permission plugin error", e);
+    const msg = (e as Error)?.message || "";
+    if (msg.toLowerCase().includes("timed out")) {
+      return { granted: false, error: msg };
+    }
+    return { granted: true };
+  }
+}
+
+async function probeGetUserMedia(constraints: MediaStreamConstraints): Promise<PermissionResult> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
     return { granted: false, error: "Media devices are not available on this device" };
   }
   try {
-    const stream = await withMediaTimeout(navigator.mediaDevices.getUserMedia(constraints), 15_000, "Camera/microphone request");
+    const stream = await withMediaTimeout(
+      navigator.mediaDevices.getUserMedia(constraints),
+      12_000,
+      "Camera/microphone request",
+    );
     stream.getTracks().forEach((t) => {
       try {
         t.stop();
@@ -74,8 +118,7 @@ async function probeGetUserMedia(
       return {
         granted: false,
         deniedPermanently: true,
-        error:
-          "Permission denied. Tap Open App Settings → Permissions → enable Camera and Microphone.",
+        error: "Permission denied. Tap Open App Settings → Permissions → enable Camera and Microphone.",
       };
     }
     if (name === "NotFoundError" || name === "DevicesNotFoundError") {
@@ -85,44 +128,19 @@ async function probeGetUserMedia(
   }
 }
 
-/**
- * Request native Android CAMERA permission (shows system dialog and lists Camera in App Settings).
- * Then probe WebView getUserMedia so the in-app preview works.
- */
 export async function ensureCameraPermission(): Promise<PermissionResult> {
-  if (isNativeShell()) {
-    try {
-      const { Camera } = await import("@capacitor/camera");
-      let status = await withMediaTimeout(Camera.checkPermissions(), 8_000, "Camera permission check");
-      if (status.camera !== "granted") {
-        status = await withMediaTimeout(Camera.requestPermissions({ permissions: ["camera"] }), 20_000, "Camera permission dialog");
-      }
-      if (status.camera !== "granted") {
-        return {
-          granted: false,
-          deniedPermanently: status.camera === "denied",
-          error:
-            "Camera permission is required. Tap Open App Settings → enable Camera, then try again.",
-        };
-      }
-    } catch (e) {
-      console.warn("[D4EXAM] Camera permission plugin error", e);
-      const msg = (e as Error)?.message || "";
-      if (msg.toLowerCase().includes("timed out")) {
-        return { granted: false, error: msg };
-      }
-    }
-  }
-  return probeGetUserMedia({ video: true, audio: false });
+  const native = await ensureNativeCameraPermission();
+  if (!native.granted) return native;
+  return { granted: true };
 }
 
-/** Request microphone via getUserMedia (WebView shows system mic dialog on Android). */
 export async function ensureMicrophonePermission(): Promise<PermissionResult> {
   return probeGetUserMedia({ audio: true, video: false });
 }
 
 /**
- * Request camera + microphone together so OS dialogs appear when starting an exam.
+ * Request camera + microphone so OS dialogs appear when the student taps Allow.
+ * Single combined getUserMedia probe to avoid locking the camera on Android.
  */
 export async function requestExamMediaPermissions(opts: {
   camera?: boolean;
@@ -135,73 +153,80 @@ export async function requestExamMediaPermissions(opts: {
   let microphone: PermissionResult = { granted: !needMic };
 
   if (needCam) {
-    camera = await ensureCameraPermission();
+    const native = await ensureNativeCameraPermission();
+    if (!native.granted) {
+      return { camera: native, microphone };
+    }
   }
-  if (needMic) {
-    if (needCam && camera.granted) {
-      const both = await probeGetUserMedia({ video: true, audio: true });
-      if (both.granted) {
+
+  if (needCam || needMic) {
+    const constraints: MediaStreamConstraints = {
+      video: needCam ? { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } } : false,
+      audio: needMic,
+    };
+    const probe = await probeGetUserMedia(constraints);
+    if (needCam) {
+      camera = probe.granted
+        ? { granted: true }
+        : { granted: false, deniedPermanently: probe.deniedPermanently, error: probe.error };
+    }
+    if (needMic) {
+      if (probe.granted) {
         microphone = { granted: true };
-      } else {
+      } else if (needCam) {
         microphone = await ensureMicrophonePermission();
+      } else {
+        microphone = probe;
       }
-    } else {
-      microphone = await ensureMicrophonePermission();
     }
   }
 
   return { camera, microphone };
 }
 
-export async function openCameraStream(
-  options: CameraStreamOptions = {},
-): Promise<MediaStream> {
+export async function openCameraStream(options: CameraStreamOptions = {}): Promise<MediaStream> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
     throw new Error("Camera is not available on this device");
   }
-  const cam = await ensureCameraPermission();
-  if (!cam.granted) {
-    throw new Error(cam.error || "Camera permission required");
-  }
-  if (options.audio) {
-    try {
-      await ensureMicrophonePermission();
-    } catch {
-      /* soft */
+
+  if (!options.skipPermissionProbe) {
+    const native = await ensureNativeCameraPermission();
+    if (!native.granted) {
+      throw new Error(native.error || "Camera permission required");
     }
   }
-  try {
-    return await withMediaTimeout(
+
+  const tryOpen = (audio: boolean) =>
+    withMediaTimeout(
       navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: options.facingMode || "user",
           width: { ideal: 640 },
           height: { ideal: 480 },
         },
-        audio: Boolean(options.audio),
+        audio,
       }),
       15_000,
-      "Opening camera",
+      audio ? "Opening camera with microphone" : "Opening camera",
     );
+
+  try {
+    return await tryOpen(Boolean(options.audio));
   } catch (e) {
     if (options.audio) {
       try {
-        return await withMediaTimeout(
-          navigator.mediaDevices.getUserMedia({
-            video: { facingMode: options.facingMode || "user" },
-            audio: false,
-          }),
-          12_000,
-          "Opening camera (video only)",
-        );
+        return await tryOpen(false);
       } catch {
         /* fall through */
       }
     }
     const name = (e as DOMException)?.name || "";
     if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+      throw new Error("Camera permission is required. Open App Settings → Permissions → enable Camera.");
+    }
+    if (name === "NotReadableError" || name === "AbortError") {
       throw new Error(
-        "Camera permission is required. Open App Settings → Permissions → enable Camera.",
+        "Camera is in use by another app or still starting. Close other camera apps, wait a moment, then try again.",
       );
     }
     throw e instanceof Error ? e : new Error("Could not open camera");
