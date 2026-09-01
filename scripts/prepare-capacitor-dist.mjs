@@ -186,14 +186,27 @@ for (const name of fs.readdirSync(distCap)) {
   }
 }
 
+// Copy public/ recursively so bundled offline assets (MediaPipe wasm + model,
+// icons, offline.html, service worker) ship inside the native app.
 const publicDir = path.join(root, "public");
-if (fs.existsSync(publicDir)) {
-  for (const name of fs.readdirSync(publicDir)) {
-    const s = path.join(publicDir, name);
-    if (fs.statSync(s).isFile()) {
-      fs.copyFileSync(s, path.join(dist, name));
-    }
+function copyDir(from, to) {
+  fs.mkdirSync(to, { recursive: true });
+  for (const name of fs.readdirSync(from)) {
+    const s = path.join(from, name);
+    const d = path.join(to, name);
+    if (fs.statSync(s).isDirectory()) copyDir(s, d);
+    else fs.copyFileSync(s, d);
   }
+}
+if (fs.existsSync(publicDir)) copyDir(publicDir, dist);
+
+const mpModel = path.join(dist, "mediapipe", "models", "blaze_face_short_range.tflite");
+const mpWasm = path.join(dist, "mediapipe", "wasm", "vision_wasm_internal.wasm");
+if (!fs.existsSync(mpModel) || !fs.existsSync(mpWasm)) {
+  console.error(
+    "FATAL: bundled MediaPipe face-detection assets missing under public/mediapipe — offline face monitoring would break.",
+  );
+  process.exit(1);
 }
 
 const cssFile = fs.readdirSync(path.join(dist, "assets")).find((f) => f.endsWith(".css"));

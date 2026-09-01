@@ -3,7 +3,6 @@
   "appName": "D4EXAM",
   "webDir": "dist",
   "server": {
-    "url": "https://d4exam-platform.vercel.app",
     "androidScheme": "https",
     "errorPath": "offline.html"
   },
@@ -27,7 +26,11 @@
       "overlaysWebView": false
     },
     "PushNotifications": {
-      "presentationOptions": ["badge", "sound", "alert"]
+      "presentationOptions": [
+        "badge",
+        "sound",
+        "alert"
+      ]
     },
     "LocalNotifications": {
       "smallIcon": "ic_stat_d4exam",

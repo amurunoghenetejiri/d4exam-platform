@@ -281,7 +281,7 @@ export function CbtExamPage() {
     getStudentName: () => String((student as { fullName?: string } | null)?.fullName || session?.fullName || session?.identifier || "").trim() || null,
     getMatricNumber: () => String((student as { matric?: string | null; matricNumber?: string | null } | null)?.matric || (student as { matricNumber?: string | null } | null)?.matricNumber || session?.identifier || "").trim() || null,
     getCourseCode: () => {
-      const c = (examQ.data as { courses?: { code?: string } | { code?: string }[] } | null)?.courses;
+      const c = (examQ.data as unknown as { courses?: { code?: string } | { code?: string }[] } | null)?.courses;
       if (Array.isArray(c)) return String(c[0]?.code || "").trim() || null;
       return String((c as { code?: string } | undefined)?.code || "").trim() || null;
     },
@@ -713,7 +713,7 @@ export function CbtExamPage() {
             exam_id: id, student_id: student.studentId, school_id: examQ.data?.school_id,
             status: "in_progress", started_at: new Date().toISOString(), answers: {},
             question_order: orderIds,
-            metadata: { studentName: studentName || session?.fullName || undefined, matricNumber: String((student as { matricNumber?: string } | null)?.matricNumber || (student as { matric?: string } | null)?.matric || session?.identifier || "").trim() || undefined, courseCode: (Array.isArray((examQ.data as { courses?: { code?: string }[] } | null)?.courses) ? String((examQ.data as { courses: { code?: string }[] }).courses[0]?.code || "").trim() : String((examQ.data as { courses?: { code?: string } } | null)?.courses?.code || "").trim()) || undefined, examTitle: String(examQ.data?.title || "").trim() || undefined, lastSeenAt: new Date().toISOString() },
+            metadata: { studentName: studentName || session?.fullName || undefined, matricNumber: String((student as { matricNumber?: string } | null)?.matricNumber || (student as { matric?: string } | null)?.matric || session?.identifier || "").trim() || undefined, courseCode: (Array.isArray((examQ.data as unknown as { courses?: { code?: string }[] } | null)?.courses) ? String((examQ.data as unknown as { courses: { code?: string }[] }).courses[0]?.code || "").trim() : String((examQ.data as unknown as { courses?: { code?: string } } | null)?.courses?.code || "").trim()) || undefined, examTitle: String(examQ.data?.title || "").trim() || undefined, lastSeenAt: new Date().toISOString() },
           } as never, { onConflict: "exam_id,student_id" }).select("id").maybeSingle();
           if (data?.id) { attemptIdRef.current = data.id as string; setLiveAttemptId(data.id as string); }
         } else {
@@ -727,7 +727,7 @@ export function CbtExamPage() {
               await supabase.from("exam_attempts").update({
                 question_order: orderIds,
                 status: "in_progress",
-                metadata: { ...prevMeta, studentName: studentNameUpd || prevMeta.studentName, matricNumber: matricUpd || prevMeta.matricNumber, courseCode: (Array.isArray((examQ.data as { courses?: { code?: string }[] } | null)?.courses) ? String((examQ.data as { courses: { code?: string }[] }).courses[0]?.code || prevMeta.courseCode || "").trim() : String((examQ.data as { courses?: { code?: string } } | null)?.courses?.code || prevMeta.courseCode || "").trim()) || prevMeta.courseCode, examTitle: String(examQ.data?.title || prevMeta.examTitle || "").trim() || prevMeta.examTitle, lastSeenAt: new Date().toISOString() },
+                metadata: { ...prevMeta, studentName: studentNameUpd || prevMeta.studentName, matricNumber: matricUpd || prevMeta.matricNumber, courseCode: (Array.isArray((examQ.data as unknown as { courses?: { code?: string }[] } | null)?.courses) ? String((examQ.data as unknown as { courses: { code?: string }[] }).courses[0]?.code || prevMeta.courseCode || "").trim() : String((examQ.data as unknown as { courses?: { code?: string } } | null)?.courses?.code || prevMeta.courseCode || "").trim()) || prevMeta.courseCode, examTitle: String(examQ.data?.title || prevMeta.examTitle || "").trim() || prevMeta.examTitle, lastSeenAt: new Date().toISOString() },
               } as never).eq("id", attemptIdRef.current!);
             } catch (e) { console.warn("[cbt] metadata merge", e); }
           })();

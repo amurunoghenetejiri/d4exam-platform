@@ -152,9 +152,7 @@ function showLocalNotification(title: string, body: string, link?: string | null
 async function ensureAndroidChannel(): Promise<void> {
   try {
     const { PushNotifications } = await import("@capacitor/push-notifications");
-    // @ts-expect-error createChannel exists on Android
     if (typeof PushNotifications.createChannel === "function") {
-      // @ts-expect-error Android only
       await PushNotifications.createChannel({
         id: "d4exam_default",
         name: "D4EXAM",

@@ -383,7 +383,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       for (const email of candidateEmails) {
         const attempt = await client.auth.signInWithPassword({ email, password });
         if (attempt.data?.session && attempt.data.user) {
-          signIn = attempt.data as never;
+          signIn = { session: attempt.data.session, user: attempt.data.user };
           lastError = null;
           break;
         }

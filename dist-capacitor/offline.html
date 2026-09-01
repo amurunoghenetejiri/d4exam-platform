@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1b3a" />
+    <title>D4EXAM — Offline</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100dvh; display: grid; place-items: center;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: #0b1b3a; color: #e2e8f0; text-align: center;
+        padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem max(1.25rem, env(safe-area-inset-bottom));
+      }
+      .mark {
+        width: 72px; height: 72px; margin: 0 auto 1rem; border-radius: 18px;
+        background: #1e3a5f; display: grid; place-items: center;
+        font-weight: 800; font-size: 1.25rem; color: #93c5fd;
+      }
+      h1 { font-size: 1.15rem; margin: 0 0 0.45rem; font-weight: 700; }
+      p { margin: 0 auto; font-size: 0.9rem; color: #94a3b8; max-width: 22rem; line-height: 1.45; }
+      button {
+        margin-top: 1.25rem; border: 0; border-radius: 0.75rem;
+        background: #2563eb; color: #fff; font-weight: 600;
+        padding: 0.75rem 1.35rem; font-size: 0.9rem; cursor: pointer;
+      }
+      .hint { margin-top: 1rem; font-size: 0.75rem; color: #64748b; max-width: 22rem; }
+    </style>
+  </head>
+  <body>
+    <div>
+      <div class="mark">D4</div>
+      <h1>You're offline</h1>
+      <p>Connect to the Internet and tap Retry to open D4EXAM. After you use the app online once, previously opened pages load from saved data when the connection drops.</p>
+      <button type="button" id="retry">Retry</button>
+      <p class="hint">Content not available offline yet will appear as a friendly message inside the app — not a browser error page.</p>
+    </div>
+    <script>
+      (function () {
+        var LIVE = "https://d4exam-platform.vercel.app/";
+        function go() {
+          try {
+            window.location.replace(LIVE + "?offline_retry=" + Date.now());
+          } catch (e) {
+            window.location.href = LIVE;
+          }
+        }
+        document.getElementById("retry").addEventListener("click", go);
+        window.addEventListener("online", function () {
+          setTimeout(go, 400);
+        });
+      })();
+    </script>
+  </body>
+</html>

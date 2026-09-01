@@ -160,7 +160,7 @@ export async function imagesToPdfBlob(files: File[], title = "Notes"): Promise<B
   xref += `startxref\n${xrefStart}\n%%EOF\n`;
 
   chunks.push(str(xref));
-  return new Blob([concat(chunks)], { type: "application/pdf" });
+  return new Blob([concat(chunks) as unknown as BlobPart], { type: "application/pdf" });
 }
 
 export function isImageFile(file: File): boolean {

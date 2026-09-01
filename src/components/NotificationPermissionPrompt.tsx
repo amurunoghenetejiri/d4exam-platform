@@ -52,8 +52,10 @@ export function NotificationPermissionPrompt() {
     if (!session?.userId || !session.role) return;
     if (fired.current) return;
 
+    const role = session.role ?? "";
+
     const run = async () => {
-      if (alreadyPrompted(session.userId, session.role)) return;
+      if (alreadyPrompted(session.userId, role)) return;
 
       let state = getPushPermissionState();
       if (isNativeShell()) {
@@ -62,7 +64,7 @@ export function NotificationPermissionPrompt() {
 
       // Already granted / denied / unsupported → NEVER show Allow prompt again
       if (state === "granted" || state === "denied" || state === "unsupported") {
-        markPrompted(session.userId, session.role);
+        markPrompted(session.userId, role);
         try {
           if (state === "granted") {
             localStorage.setItem(`d4_notif_enabled_once:${session.userId}`, "1");
@@ -77,7 +79,7 @@ export function NotificationPermissionPrompt() {
       await new Promise((r) => setTimeout(r, 1800));
       if (fired.current) return;
       fired.current = true;
-      markPrompted(session.userId, session.role);
+      markPrompted(session.userId, role);
 
       toast.message("Stay updated with D4EXAM 🔔", {
         description:

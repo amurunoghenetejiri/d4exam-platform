@@ -307,7 +307,7 @@ export const createSchoolUser = createServerFn({ method: "POST" })
     if (!canManage) throw new Error("Forbidden");
 
     const { createPerson } = await import("@/lib/users.server");
-    const result = await createPerson(schoolId, data, { db: context.supabase as never });
+    const result = await createPerson(schoolId, data as never, { db: context.supabase as never });
 
     try {
       await context.supabase.from("audit_logs").insert({
@@ -461,11 +461,13 @@ export const listSchoolApplications = createServerFn({ method: "POST" })
     const colsNoDocs =
       "id, school_name, school_type, country, state, city, address, official_email, official_phone, applicant_name, applicant_email, applicant_phone, tracking_code, status, created_at, review_notes";
 
-    let { data, error } = await supabaseAdmin
+    const first = await supabaseAdmin
       .from("school_applications")
       .select(colsWithDocs)
       .order("created_at", { ascending: false })
       .limit(200);
+    let data = first.data as Array<Record<string, unknown>> | null;
+    let error = first.error as { message?: string } | null;
 
     if (error) {
       console.warn("[listSchoolApplications] with documents failed:", error.message);
@@ -474,13 +476,13 @@ export const listSchoolApplications = createServerFn({ method: "POST" })
         .select(colsNoDocs)
         .order("created_at", { ascending: false })
         .limit(200);
-      data = retry.data;
-      error = retry.error;
+      data = retry.data as Array<Record<string, unknown>> | null;
+      error = retry.error as { message?: string } | null;
     }
 
     if (error) {
       console.error("[listSchoolApplications]", error);
       throw new Error(error.message || "Could not load applications");
     }
-    return (data ?? []) as Array<Record<string, unknown>>;
+    return (data ?? []) as never;
   });

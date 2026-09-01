@@ -3,6 +3,7 @@
  * Priority: RPC → exam_questions → course bank.
  * Always merges real option texts from questions.options, explanation, and question_options.
  */
+import { sbLoose } from "@/lib/supabase-loose";
 import { supabase } from "@/integrations/supabase/client";
 import { parseQuestionOptions } from "@/lib/question-options";
 import { resolveCorrectOptionText } from "@/lib/cbt-security";
@@ -99,7 +100,11 @@ async function fetchOptionsFromQuestionOptionsTable(
     "question_id, option_text, is_correct",
     "question_id, option_text",
   ]) {
-    const { data, error } = await supabase.from("question_options").select(cols).in("question_id", ids).limit(2000);
+    const { data, error } = (await sbLoose
+      .from("question_options")
+      .select(cols)
+      .in("question_id", ids)
+      .limit(2000)) as { data: Record<string, unknown>[] | null; error: { message: string } | null };
     if (error) {
       console.warn("[cbt] question_options", error.message);
       continue;
@@ -156,7 +161,7 @@ async function enrichMissingOptions(rows: RawQ[]): Promise<RawQ[]> {
 
 async function loadViaRpc(examId: string, courseId: string | null, schoolId: string | null): Promise<RawQ[]> {
   try {
-    const { data, error } = await supabase.rpc("get_cbt_exam_questions", {
+    const { data, error } = await sbLoose.rpc("get_cbt_exam_questions", {
       p_exam_id: examId,
       p_course_id: courseId || null,
       p_school_id: schoolId || null,
@@ -316,13 +321,13 @@ export async function ensureExamQuestionsLinked(opts: {
     if (statuses) q = q.in("status", statuses);
     const res = await q;
     if (!res.error && res.data?.length) {
-      qs = res.data as never;
+      qs = res.data as { id: string; marks: number | null }[];
       break;
     }
   }
   if (!qs?.length) {
     const res = await supabase.from("questions").select("id, marks").eq("course_id", courseId).limit(300);
-    if (!res.error && res.data?.length) qs = res.data as never;
+    if (!res.error && res.data?.length) qs = res.data as { id: string; marks: number | null }[];
   }
   if (!qs?.length) return 0;
   const limit = opts.maxQuestions && opts.maxQuestions > 0 ? opts.maxQuestions : qs.length;

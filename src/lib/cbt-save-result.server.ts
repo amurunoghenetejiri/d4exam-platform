@@ -28,7 +28,7 @@ export type SaveCbtResultServerInput = {
 export const saveCbtResultServer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ data, context }): Promise<{ resultId: string | null; error: string | null }> => {
-    const input = data as SaveCbtResultServerInput;
+    const input = data as unknown as SaveCbtResultServerInput;
     if (!input?.examId || !input?.studentId || !input?.schoolId) {
       return { resultId: null, error: "Missing exam, student, or school id." };
     }
@@ -174,7 +174,7 @@ export const saveCbtResultServer = createServerFn({ method: "POST" })
 export const getMyCbtResultServer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ data, context }): Promise<{ result: Record<string, unknown> | null; error: string | null }> => {
-    const input = data as { id: string; studentId?: string };
+    const input = data as unknown as { id: string; studentId?: string };
     if (!input?.id) return { result: null, error: "Missing id" };
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

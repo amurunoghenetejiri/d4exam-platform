@@ -49,12 +49,13 @@ export function courseLabel(code?: string | null, title?: string | null): string
 
 export function studentExamScheduled(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   start?: string | null;
   end?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const date = fmtDate(opts.start);
   const startT = fmtTime(opts.start);
   const endT = fmtTime(opts.end);
@@ -68,13 +69,14 @@ export function studentExamScheduled(opts: {
 
 export function studentExamCountdown(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   remainingMs: number;
   start?: string | null;
   end?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const cd = formatCountdown(opts.remainingMs);
   const date = fmtDate(opts.start);
   const startT = fmtTime(opts.start);
@@ -91,10 +93,11 @@ export function studentExamCountdown(opts: {
 
 export function studentExamStartingNow(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   return {
     title: `🚀 ${name}`,
     message: `🚀 ${name}\nYour ${exam} examination is starting now.\n\nYou can enter the examination.`,
@@ -103,10 +106,11 @@ export function studentExamStartingNow(opts: {
 
 export function studentExamEnded(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   return {
     title: `🏁 ${name}`,
     message: `🏁 ${name}\nYour ${exam} examination has ended.\n\nThank you for completing your examination.`,
@@ -115,11 +119,12 @@ export function studentExamEnded(opts: {
 
 export function studentResultReady(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   officerName?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const by = opts.officerName?.trim() ? ` by ${opts.officerName.trim()}` : "";
   return {
     title: `🎉 ${name}`,
@@ -129,11 +134,12 @@ export function studentResultReady(opts: {
 
 export function studentExamCancelled(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   reason?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const reason = (opts.reason || "No reason provided.").trim();
   return {
     title: `❌ ${name}`,
@@ -143,12 +149,13 @@ export function studentExamCancelled(opts: {
 
 export function studentExamRescheduled(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   start?: string | null;
   end?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const date = fmtDate(opts.start);
   const startT = fmtTime(opts.start);
   const endT = fmtTime(opts.end);
@@ -160,11 +167,12 @@ export function studentExamRescheduled(opts: {
 
 export function studentExamTerminated(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   reason?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const reason = (opts.reason || "A configured examination security rule was triggered.").trim();
   return {
     title: `🚨 ${name}`,
@@ -174,11 +182,12 @@ export function studentExamTerminated(opts: {
 
 export function studentExamPaused(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   remainingLabel?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const rem = opts.remainingLabel?.trim();
   let message = `⏸️ ${name}\nYour ${exam} examination has been paused.`;
   if (rem) message += `\n\nTime remaining:\n${rem}`;
@@ -199,11 +208,12 @@ export function studentExamWarning(opts: {
 
 export function studentAutoSubmitted(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   reason?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const reason = (opts.reason || "Maximum allowed tab violations were reached.").trim();
   return {
     title: `📤 ${name}`,
@@ -215,13 +225,14 @@ export function studentAutoSubmitted(opts: {
 
 export function teacherExamApproved(opts: {
   teacherName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   officerName?: string | null;
   start?: string | null;
   end?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const by = opts.officerName?.trim() ? ` by ${opts.officerName.trim()}` : "";
   const date = fmtDate(opts.start);
   const startT = fmtTime(opts.start);
@@ -234,11 +245,12 @@ export function teacherExamApproved(opts: {
 
 export function teacherExamRejected(opts: {
   teacherName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   reason?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const reason = (opts.reason || "No reason provided.").trim();
   return {
     title: `❌ ${name}`,
@@ -248,11 +260,12 @@ export function teacherExamRejected(opts: {
 
 export function teacherExamRevisionRequested(opts: {
   teacherName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   note?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const note = opts.note?.trim() ? `\n\n${opts.note.trim()}` : "";
   return {
     title: `📝 ${name}`,
@@ -262,12 +275,13 @@ export function teacherExamRevisionRequested(opts: {
 
 export function teacherExamScheduled(opts: {
   teacherName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   start?: string | null;
   end?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   const date = fmtDate(opts.start);
   const startT = fmtTime(opts.start);
   const endT = fmtTime(opts.end);
@@ -279,10 +293,11 @@ export function teacherExamScheduled(opts: {
 
 export function teacherResultsReady(opts: {
   teacherName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   return {
     title: `📊 ${name}`,
     message: `📊 ${name}\n${exam} examination results are ready for review.`,
@@ -294,11 +309,12 @@ export function teacherResultsReady(opts: {
 export function officerExamSubmittedForReview(opts: {
   officerName?: string | null;
   teacherName: string;
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
 }): { title: string; message: string } {
   const officer = (opts.officerName || "Officer").trim();
   const teacher = (opts.teacherName || "A teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   return {
     title: `📝 ${officer}`,
     message: `📝 ${officer}\n${teacher} has submitted ${exam} for approval.\n\nThe examination is ready for review.`,
@@ -306,13 +322,14 @@ export function officerExamSubmittedForReview(opts: {
 }
 
 export function officerMonitoringAggregate(opts: {
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   entered: number;
   active: number;
   offline: number;
   attention: number;
 }): { title: string; message: string } {
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   return {
     title: "📊 Examination Activity",
     message: `📊 Examination Activity\n${opts.entered} students have entered the ${exam} examination.\n\n🟢 ${opts.active} currently active\n⚪ ${opts.offline} offline\n⚠️ ${opts.attention} require attention\n\nTap to open live monitoring.`,
@@ -320,12 +337,13 @@ export function officerMonitoringAggregate(opts: {
 }
 
 export function officerViolationAggregate(opts: {
-  courseCode: string;
+  courseCode?: string | null;
+  examTitle?: string | null;
   withViolations: number;
   active: number;
   critical: number;
 }): { title: string; message: string } {
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.courseCode || opts.examTitle || "Examination";
   return {
     title: `⚠️ ${exam} Monitoring Alert`,
     message: `⚠️ ${exam} Monitoring Alert\n\n${opts.withViolations} students currently have examination violations requiring attention.\n\n🟢 ${opts.active} active\n⚠️ ${opts.withViolations} with violations\n🔴 ${opts.critical} critical alerts\n\nTap to review.`,

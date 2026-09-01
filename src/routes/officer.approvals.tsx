@@ -127,18 +127,18 @@ function Page() {
         .order("created_at", { ascending: false })
         .limit(100);
       if (res.error) {
-        res = await supabase
+        res = (await supabase
           .from("examinations")
           .select(basic)
           .eq("school_id", schoolId)
           .order("created_at", { ascending: false })
-          .limit(100);
+          .limit(100)) as typeof res;
       }
       if (res.error) {
         console.warn("[officer-approvals] list", res.error);
         return [] as ExamRow[];
       }
-      return (Array.isArray(res.data) ? res.data : []) as ExamRow[];
+      return (Array.isArray(res.data) ? res.data : []) as unknown as ExamRow[];
     },
   });
 

@@ -7,6 +7,7 @@
  * - Missing examTitle/studentName is resolved from DB when possible.
  * - Every successful insert fires dispatchPushToUser.
  */
+import { sbLoose } from "@/lib/supabase-loose";
 import { supabase } from "@/integrations/supabase/client";
 
 export type NotifyType =
@@ -331,11 +332,11 @@ async function courseStudentAuthIds(courseId: string | null | undefined, schoolI
         if (id) sids.push(id);
       }
       if (!sids.length) {
-        const { data: enroll } = await supabase
+        const { data: enroll } = (await sbLoose
           .from("course_enrollments")
           .select("student_id")
           .eq("course_id", courseId)
-          .limit(3000);
+          .limit(3000)) as { data: Record<string, unknown>[] | null };
         for (const r of enroll ?? []) {
           const id = (r as { student_id?: string }).student_id;
           if (id) sids.push(id);

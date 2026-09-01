@@ -1,0 +1,2 @@
+const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["./cap-web-Dpwvr2lC.js","./capacitor-app.js","./cap-rolldown-runtime-DAXXjFlN.js"])))=>i.map(i=>d[i]);
+import{i as e,t}from"./capacitor-app.js";var n=e(`SplashScreen`,{web:()=>t(()=>import(`./cap-web-Dpwvr2lC.js`).then(e=>new e.SplashScreenWeb),__vite__mapDeps([0,1,2]),import.meta.url)});export{n as SplashScreen};

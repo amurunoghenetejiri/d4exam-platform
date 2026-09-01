@@ -1,0 +1,1 @@
+import{i as e}from"./capacitor-app.js";var t=e(`PushNotifications`,{});export{t as PushNotifications};

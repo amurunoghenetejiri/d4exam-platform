@@ -3,6 +3,7 @@
  * Idempotent via outbox id / client_mutation_id.
  * Does NOT push exam answers, results, or integrity events (Step 4).
  */
+import { sbLoose } from "@/lib/supabase-loose";
 import { supabase } from "@/integrations/supabase/client";
 import { listPendingOutbox, markOutboxStatus } from "@/lib/local-db/repositories/outboxRepo";
 import type { OutboxRow } from "@/lib/local-db/types";
@@ -67,11 +68,11 @@ async function processOne(row: OutboxRow): Promise<"ok" | "fail" | "skip"> {
         .eq("recipient_user_id", userId)
         .is("read_at", null);
       if (error && /column|recipient/i.test(error.message)) {
-        const { error: e2 } = await supabase
+        const { error: e2 } = (await sbLoose
           .from("notifications")
           .update({ read_at: new Date().toISOString() })
           .eq("user_id", userId)
-          .is("read_at", null);
+          .is("read_at", null)) as { error: { message: string } | null };
         if (e2) throw new Error(e2.message);
       } else if (error) {
         throw new Error(error.message);
