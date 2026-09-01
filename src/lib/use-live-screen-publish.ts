@@ -18,6 +18,7 @@ import {
   isNativeScreenShareActive,
   refreshNativeScreenShareState,
 } from "@/lib/screen-share";
+import { pulseExamAttempt } from "@/lib/cbt-attempt-heartbeat";
 
 export function useLiveScreenPublish(opts: {
   enabled: boolean;
@@ -80,8 +81,15 @@ export function useLiveScreenPublish(opts: {
       intervalMs: 700,
     });
 
+    const realAttemptId = String(optsRef.current.attemptId || "");
+    if (realAttemptId && !realAttemptId.startsWith("pending:")) {
+      void pulseExamAttempt(realAttemptId);
+    }
+
     const sync = window.setInterval(() => {
       void refreshNativeScreenShareState();
+      const aid = String(optsRef.current.attemptId || "");
+      if (aid && !aid.startsWith("pending:")) void pulseExamAttempt(aid);
     }, 2000);
 
     return () => {
