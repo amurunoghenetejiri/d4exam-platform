@@ -325,10 +325,22 @@ export function CbtExamPage() {
       if (p.examId && id && String(p.examId) !== String(id)) return;
       if (doneRef.current || finishingRef.current) return;
       const cmd = String(p.command).toLowerCase();
-      if (cmd === "hold") {
-        beginTimedPause("Held by examination officer");
-        setWarnBanner("Your examination has been held by the officer");
-        window.setTimeout(() => setWarnBanner(null), 8000);
+      if (cmd === "hold" || cmd === "pause") {
+        // Officer pause: indefinite until release (not timed integrity pause)
+        pauseUntilRef.current = null;
+        setPauseRemainingSec(null);
+        setPauseReason("Paused by examination officer");
+        setPaused(true);
+        setWarnBanner("Your examination has been paused by the officer");
+        window.setTimeout(() => setWarnBanner(null), 10000);
+      } else if (cmd === "release" || cmd === "resume") {
+        pauseUntilRef.current = null;
+        setPauseRemainingSec(null);
+        setPaused(false);
+        setPauseReason("");
+        setWarnBanner("Your examination has been released by the officer");
+        window.setTimeout(() => setWarnBanner(null), 6000);
+        void reconnectCamera();
       } else if (cmd === "terminate") {
         setDoneTerminated(true);
         void finishAttempt(true);
@@ -668,17 +680,21 @@ export function CbtExamPage() {
         orderedIdsRef.current = orderIds;
 
         if (!attemptIdRef.current) {
+          const studentName = String((student as { fullName?: string } | null)?.fullName || session?.fullName || "").trim() || undefined;
           const { data } = await supabase.from("exam_attempts").upsert({
             exam_id: id, student_id: student.studentId, school_id: examQ.data?.school_id,
             status: "in_progress", started_at: new Date().toISOString(), answers: {},
             question_order: orderIds,
+            metadata: { studentName, lastSeenAt: new Date().toISOString() },
           } as never, { onConflict: "exam_id,student_id" }).select("id").maybeSingle();
           if (data?.id) { attemptIdRef.current = data.id as string; setLiveAttemptId(data.id as string); }
         } else {
           // Persist order if missing
+          const studentNameUpd = String((student as { fullName?: string } | null)?.fullName || session?.fullName || "").trim() || undefined;
           void supabase.from("exam_attempts").update({
             question_order: orderIds,
             status: "in_progress",
+            metadata: { studentName: studentNameUpd, lastSeenAt: new Date().toISOString() },
           } as never).eq("id", attemptIdRef.current);
         }
       }

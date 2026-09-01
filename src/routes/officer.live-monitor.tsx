@@ -328,7 +328,6 @@ function Page() {
     queryFn: async () => {
       if (!schoolId) return [] as AttemptRow[];
       const selects = [
-        `id, exam_id, student_id, status, started_at, updated_at, tab_switch_count, metadata`,
         `id, exam_id, student_id, status, started_at, updated_at, tab_switch_count, metadata,
            examinations(title, status, courses(code, name)),
            students(full_name, matric_number, student_id, profiles(full_name))`,
@@ -491,26 +490,51 @@ function Page() {
       const ids = studentIdsKey.split(",").filter(Boolean);
       if (!ids.length) return {} as Record<string, string>;
       const map: Record<string, string> = {};
-      const { data: studs } = await supabase
-        .from("students")
-        .select("id, full_name, matric_number, profiles(full_name)")
-        .eq("school_id", schoolId!)
-        .in("id", ids);
-      for (const s of studs ?? []) {
-        const row = s as {
-          id: string;
-          full_name?: string | null;
-          matric_number?: string | null;
-          profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
-        };
-        const matric = String(row.matric_number || "").trim();
+      const nameSelects = [
+        "id, full_name, matric_number, student_id, profile_id, profiles(full_name, first_name, last_name)",
+        "id, full_name, matric_number, student_id, profile_id, profiles(full_name)",
+        "id, full_name, matric_number, student_id, profile_id",
+        "id, matric_number, student_id, profile_id, profiles(full_name)",
+        "id, matric_number, student_id, profile_id",
+      ];
+      let studs: unknown[] = [];
+      for (const sel of nameSelects) {
+        const { data, error } = await supabase.from("students").select(sel).eq("school_id", schoolId!).in("id", ids);
+        if (!error) { studs = data ?? []; break; }
+      }
+      const profileIds: string[] = [];
+      for (const s of studs) {
+        const row = s as { id: string; full_name?: string | null; matric_number?: string | null; student_id?: string | null; profile_id?: string | null; profiles?: unknown };
+        const matric = String(row.matric_number || row.student_id || "").trim();
         let name = String(row.full_name || "").trim();
-        const prof = row.profiles;
-        const pName = Array.isArray(prof)
-          ? String(prof[0]?.full_name || "").trim()
-          : String((prof as { full_name?: string | null } | null)?.full_name || "").trim();
+        const prof = row.profiles as { full_name?: string | null; first_name?: string | null; last_name?: string | null } | { full_name?: string | null }[] | null;
+        let pName = "";
+        if (Array.isArray(prof)) {
+          const pr = prof[0] as { full_name?: string | null; first_name?: string | null; last_name?: string | null } | undefined;
+          pName = String(pr?.full_name || [pr?.first_name, pr?.last_name].filter(Boolean).join(" ") || "").trim();
+        } else if (prof && typeof prof === "object") {
+          const pr = prof as { full_name?: string | null; first_name?: string | null; last_name?: string | null };
+          pName = String(pr.full_name || [pr.first_name, pr.last_name].filter(Boolean).join(" ") || "").trim();
+        }
         if (!name || name.toLowerCase() === matric.toLowerCase()) name = pName || name;
         if (name && name.toLowerCase() !== matric.toLowerCase()) map[row.id] = name;
+        if (row.profile_id) profileIds.push(String(row.profile_id));
+      }
+      const missing = ids.filter((id) => !map[id]);
+      if (missing.length && profileIds.length) {
+        const { data: profs } = await supabase.from("profiles").select("id, full_name, first_name, last_name").in("id", profileIds);
+        const byPid: Record<string, string> = {};
+        for (const pr of profs ?? []) {
+          const r = pr as { id: string; full_name?: string | null; first_name?: string | null; last_name?: string | null };
+          const n = String(r.full_name || [r.first_name, r.last_name].filter(Boolean).join(" ") || "").trim();
+          if (n) byPid[r.id] = n;
+        }
+        for (const s of studs) {
+          const row = s as { id: string; profile_id?: string | null };
+          if (!map[row.id] && row.profile_id && byPid[String(row.profile_id)]) {
+            map[row.id] = byPid[String(row.profile_id)];
+          }
+        }
       }
       return map;
     },
@@ -723,7 +747,7 @@ function Page() {
       ? `${cards[0].course} · ${cards[0].title}`
       : "No live exam";
 
-  async function broadcastOfficerCommand(cmd: "submit" | "hold" | "terminate", attemptId: string, studentId: string, examId: string) {
+  async function broadcastOfficerCommand(cmd: "submit" | "hold" | "pause" | "release" | "terminate", attemptId: string, studentId: string, examId: string) {
     try {
       const ch = supabase.channel(`student-exam-cmd:${studentId}`);
       await new Promise<void>((resolve) => {
@@ -746,7 +770,7 @@ function Page() {
     }
   }
 
-  async function officerControl(cmd: "submit" | "hold" | "terminate") {
+  async function officerControl(cmd: "submit" | "hold" | "pause" | "release" | "terminate") {
     if (!selected || !schoolId || actionBusy || selected.isDone) return;
     const labels = { submit: "force-submit", hold: "hold/pause", terminate: "terminate" } as const;
     if (!window.confirm(`Are you sure you want to ${labels[cmd]} this student's examination?`)) return;
@@ -756,13 +780,21 @@ function Page() {
       const studentId = selected.a.student_id;
       const examId = selected.a.exam_id;
       const nowIso = new Date().toISOString();
-      if (cmd === "hold") {
-        const meta = { ...(selected.a.metadata || {}), officer_hold: true, officer_hold_at: nowIso };
-        const { error } = await supabase.from("exam_attempts").update({ metadata: meta, updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
+      if (cmd === "hold" || cmd === "pause") {
+        const meta = { ...(selected.a.metadata || {}), officer_hold: true, officer_pause: true, officer_hold_at: nowIso };
+        const { error } = await supabase.from("exam_attempts").update({ metadata: meta, status: "paused", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
         if (error) throw error;
-        await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_HOLD", severity: "medium", description: "Examination held by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
-        await broadcastOfficerCommand("hold", attemptId, studentId, examId);
-        toast.success(`Hold sent to ${selected.name}`);
+        await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_PAUSE", severity: "medium", description: "Examination paused by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
+        await broadcastOfficerCommand("pause", attemptId, studentId, examId);
+        toast.success(`Pause sent to ${selected.name}`);
+      } else if (cmd === "release") {
+        const prev = { ...(selected.a.metadata || {}) } as Record<string, unknown>;
+        delete prev.officer_hold; delete prev.officer_pause; delete prev.officer_hold_at;
+        const { error } = await supabase.from("exam_attempts").update({ metadata: prev, status: "in_progress", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
+        if (error) throw error;
+        await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_RELEASE", severity: "low", description: "Examination released by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
+        await broadcastOfficerCommand("release", attemptId, studentId, examId);
+        toast.success(`Release sent to ${selected.name}`);
       } else if (cmd === "terminate") {
         const { error } = await supabase.from("exam_attempts").update({ status: "terminated", terminated_at: nowIso, submitted_at: nowIso, security_review_status: "terminated", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
         if (error) throw error;
@@ -1257,8 +1289,11 @@ function Page() {
                   {actionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
                   Submit Exam
                 </Button>
-                <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("hold")}>
-                  Hold Exam
+                <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("pause")}>
+                  Pause Exam
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("release")}>
+                  Release Exam
                 </Button>
                 <Button size="sm" variant="outline" className="h-8 border-red-300 bg-red-50 text-xs font-semibold text-red-700 hover:bg-red-100" disabled={actionBusy || warningBusy} onClick={() => void officerControl("terminate")}>
                   Terminate Exam
