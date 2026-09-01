@@ -1,0 +1,31 @@
+name: Apply officer CBT live fixes
+on:
+  push:
+    paths:
+      - "scripts/apply_officer_live_push.py"
+      - "scripts/apply_cbt_live_push.py"
+      - "scripts/apply_officer_cbt_live_all.py"
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply fixes
+        run: python3 scripts/apply_officer_cbt_live_all.py
+      - name: Commit if changed
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/routes/officer.live-monitor.tsx src/components/cbt/CbtExamSession.impl.tsx || true
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(officer/cbt): real student names, pause/release, metadata.studentName"
+            git push
+          fi
