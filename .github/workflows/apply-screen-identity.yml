@@ -1,0 +1,22 @@
+name: Apply screen identity fix
+on:
+  push:
+    paths:
+      - scripts/apply_screen_identity.py
+      - .github/workflows/apply-screen-identity.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply
+        run: python3 scripts/apply_screen_identity.py
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else git commit -m "fix(live-screen): compress frames + log broadcast status; stop oversized silent drops"; git push; fi
