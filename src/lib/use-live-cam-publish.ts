@@ -1,9 +1,11 @@
 /**
  * Publishes student exam camera JPEG frames to officer live-monitor
  * via Supabase Realtime (startLiveCamPublisher).
+ * Also heartbeats exam_attempts so officers discover active writers.
  */
 import { useEffect, useRef } from "react";
 import { startLiveCamPublisher, type LiveCamPublisher } from "@/lib/live-video";
+import { pulseExamAttempt } from "@/lib/cbt-attempt-heartbeat";
 
 export function useLiveCamPublish(opts: {
   enabled: boolean;
@@ -72,7 +74,14 @@ export function useLiveCamPublish(opts: {
       intervalMs: 600,
     });
 
+    // Heartbeat so officer dashboard / monitor keep this attempt as LIVE
+    void pulseExamAttempt(attemptId);
+    const hb = window.setInterval(() => {
+      void pulseExamAttempt(optsRef.current.attemptId || attemptId);
+    }, 20_000);
+
     return () => {
+      window.clearInterval(hb);
       try {
         pubRef.current?.stop();
       } catch {
