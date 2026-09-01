@@ -1,3 +1,1 @@
-import { Link, useParams, useNavigate } from "@tanstack/react-router";
-// SEE FULL FILE - INCOMPLETE PLACEHOLDER TO BE FIXED
-export { };
+FILE_CONTENT_FROM_/tmp/cbt_content.txt
