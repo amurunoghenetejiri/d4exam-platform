@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Fix live name/matric/tab + modest video quality. Do not break camera/screen."""
+"""Fix live name/matric/tab + modest video quality. Do not break camera/screen. v2"""
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 OM = ROOT / "src/routes/officer.live-monitor.tsx"
@@ -11,70 +12,52 @@ CBT = ROOT / "src/components/cbt/CbtExamSession.impl.tsx"
 
 lv = LV.read_text()
 lo = lv
-lv = lv.replace(
-    "const frame = await captureJpegFromStream(stream, { maxWidth: 280, quality: 0.42, mirror: true });",
-    "const frame = await captureJpegFromStream(stream, { maxWidth: 320, quality: 0.55, mirror: true });",
-)
-lv = lv.replace(
-    "export const LIVE_CAM_FRAME_INTERVAL_MS = 450;",
-    "export const LIVE_CAM_FRAME_INTERVAL_MS = 350;",
-)
-lv = lv.replace(
-    "export const LIVE_SCREEN_FRAME_INTERVAL_MS = 500;",
-    "export const LIVE_SCREEN_FRAME_INTERVAL_MS = 400;",
-)
-lv = lv.replace(
-    "maxWidth: 400,\n            quality: 0.32,",
-    "maxWidth: 480,\n            quality: 0.42,",
-)
-lv = lv.replace("          const maxW = 400;", "          const maxW = 480;")
-lv = lv.replace("              let q = 0.32;", "              let q = 0.42;")
-lv = lv.replace(
-    "if (frame.length > 220_000) {",
-    "if (frame.length > 280_000) {",
-)
+for a, b in [
+    ("export const LIVE_CAM_FRAME_INTERVAL_MS = 450;", "export const LIVE_CAM_FRAME_INTERVAL_MS = 350;"),
+    ("export const LIVE_CAM_FRAME_INTERVAL_MS = 900;", "export const LIVE_CAM_FRAME_INTERVAL_MS = 350;"),
+    ("export const LIVE_SCREEN_FRAME_INTERVAL_MS = 500;", "export const LIVE_SCREEN_FRAME_INTERVAL_MS = 400;"),
+    ("export const LIVE_SCREEN_FRAME_INTERVAL_MS = 700;", "export const LIVE_SCREEN_FRAME_INTERVAL_MS = 400;"),
+    (
+        "const frame = await captureJpegFromStream(stream, { maxWidth: 280, quality: 0.42, mirror: true });",
+        "const frame = await captureJpegFromStream(stream, { maxWidth: 320, quality: 0.55, mirror: true });",
+    ),
+    (
+        "const frame = await captureJpegFromStream(stream, { maxWidth: 360, quality: 0.52, mirror: true });",
+        "const frame = await captureJpegFromStream(stream, { maxWidth: 320, quality: 0.55, mirror: true });",
+    ),
+    ("maxWidth: 400,\n            quality: 0.32,", "maxWidth: 480,\n            quality: 0.42,"),
+    ("maxWidth: 520,\n            quality: 0.38,", "maxWidth: 480,\n            quality: 0.42,"),
+    ("          const maxW = 400;", "          const maxW = 480;"),
+    ("          const maxW = 520;", "          const maxW = 480;"),
+    ("              let q = 0.32;", "              let q = 0.42;"),
+    ("              let q = 0.38;", "              let q = 0.42;"),
+    ("if (frame.length > 220_000) {", "if (frame.length > 280_000) {"),
+]:
+    if a in lv:
+        lv = lv.replace(a, b)
+        print("lv:", a[:40])
 if lv != lo:
     LV.write_text(lv)
-    print("WRITTEN live-video quality")
+    print("WRITTEN live-video")
 
-cam = CAM.read_text()
-if "intervalMs: 450," in cam:
-    CAM.write_text(cam.replace("intervalMs: 450,", "intervalMs: 350,"))
-    print("OK: cam 350ms")
-scr = SCR.read_text()
-if "intervalMs: 500," in scr:
-    SCR.write_text(scr.replace("intervalMs: 500,", "intervalMs: 400,"))
-    print("OK: screen 400ms")
+for path, olds, new in [
+    (CAM, ["intervalMs: 450,", "intervalMs: 600,"], "intervalMs: 350,"),
+    (SCR, ["intervalMs: 500,", "intervalMs: 700,"], "intervalMs: 400,"),
+]:
+    t = path.read_text()
+    for o in olds:
+        if o in t:
+            path.write_text(t.replace(o, new))
+            print("OK", path.name, new)
+            break
 
 cbt = CBT.read_text()
 co = cbt
-
-old_get_name = (
-    'getStudentName: () => String((student as { fullName?: string } | null)?.fullName || session?.fullName || session?.identifier || "").trim() || null,'
+pat = re.compile(
+    r"if \(attemptIdRef\.current\) \{\s*void supabase\.from\(\"exam_attempts\"\)\.update\(\{\s*tab_switch_count: tabSwitchCountRef\.current,\s*\} as never\)\.eq\(\"id\", attemptIdRef\.current\);\s*\}",
+    re.M,
 )
-new_get_name = (
-    'getStudentName: () => {\n'
-    '      const n = String(\n'
-    '        (student as { fullName?: string } | null)?.fullName\n'
-    '        || session?.fullName\n'
-    '        || (student as { name?: string } | null)?.name\n'
-    '        || ""\n'
-    '      ).trim();\n'
-    '      const mat = String((student as { matric?: string | null } | null)?.matric || session?.identifier || "").trim();\n'
-    '      if (n && (!mat || n.toLowerCase() !== mat.toLowerCase())) return n;\n'
-    '      return n || null;\n'
-    '    },'
-)
-if old_get_name in cbt:
-    cbt = cbt.replace(old_get_name, new_get_name, 1)
-    print("OK: stronger getStudentName")
-
-old_tab_upd = """      if (attemptIdRef.current) {
-        void supabase.from("exam_attempts").update({
-          tab_switch_count: tabSwitchCountRef.current,
-        } as never).eq("id", attemptIdRef.current);
-      }"""
-new_tab_upd = """      if (attemptIdRef.current) {
+repl = '''if (attemptIdRef.current) {
         void (async () => {
           try {
             const aid = attemptIdRef.current!;
@@ -97,12 +80,12 @@ new_tab_upd = """      if (attemptIdRef.current) {
             console.warn("[cbt] tab_switch persist", e);
           }
         })();
-      }"""
-if old_tab_upd in cbt:
-    cbt = cbt.replace(old_tab_upd, new_tab_upd, 1)
-    print("OK: tab persist with identity")
+      }'''
+if pat.search(cbt):
+    cbt = pat.sub(repl, cbt, count=1)
+    print("OK: tab persist")
 else:
-    print("FAIL: tab upd block")
+    print("FAIL: tab block regex")
 
 if cbt != co:
     CBT.write_text(cbt)
@@ -110,43 +93,42 @@ if cbt != co:
 
 om = OM.read_text()
 oo = om
-
-om = om.replace(
-    """  const attemptsQ = useQuery({
-    queryKey: ["officer-live-attempts", schoolId],
-    enabled: Boolean(schoolId),
-    refetchInterval: 6_000,""",
-    """  const attemptsQ = useQuery({
-    queryKey: ["officer-live-attempts", schoolId],
-    enabled: Boolean(schoolId),
-    refetchInterval: 3_000,""",
+om2 = re.sub(
+    r'(queryKey: \["officer-live-attempts", schoolId\],[^\]]*?refetchInterval: )\d+_000',
+    r'\g<1>3_000',
+    om,
+    count=1,
+    flags=re.S,
 )
-print("OK: attempts refetch 3s")
+if om2 != om:
+    om = om2
+    print("OK: attempts 3s")
 
-old_tab_presence = """          if (typeof statsFrame?.tabSwitchCount === "number") {
+if "const bestTab = Math.max" not in om:
+    needle = '''          if (typeof statsFrame?.tabSwitchCount === "number") {
             (presence as { tabSwitchCount?: number }).tabSwitchCount = statsFrame.tabSwitchCount;
-          }"""
-new_tab_presence = """          if (typeof statsFrame?.tabSwitchCount === "number") {
+          }'''
+    add = '''          if (typeof statsFrame?.tabSwitchCount === "number") {
             (presence as { tabSwitchCount?: number }).tabSwitchCount = statsFrame.tabSwitchCount;
           }
-          const dbTab = Number(a.tab_switch_count ?? 0);
-          const metaTab = (() => {
-            const mm = a.metadata;
-            if (!mm || typeof mm !== "object") return 0;
-            return Number((mm as Record<string, unknown>).tabSwitchCount ?? 0);
-          })();
-          const liveTab = Number((presence as { tabSwitchCount?: number }).tabSwitchCount ?? 0);
-          const bestTab = Math.max(dbTab, metaTab, liveTab);
-          if (bestTab > 0) (presence as { tabSwitchCount?: number }).tabSwitchCount = bestTab;"""
-if old_tab_presence in om:
-    om = om.replace(old_tab_presence, new_tab_presence, 1)
-    print("OK: live tab merge")
-else:
-    print("FAIL: tab presence")
+          {
+            const dbTab = Number(a.tab_switch_count ?? 0);
+            const metaTab = (() => {
+              const mm = a.metadata;
+              if (!mm || typeof mm !== "object") return 0;
+              return Number((mm as Record<string, unknown>).tabSwitchCount ?? 0);
+            })();
+            const liveTab = Number((presence as { tabSwitchCount?: number }).tabSwitchCount ?? 0);
+            const bestTab = Math.max(dbTab, metaTab, liveTab);
+            if (bestTab > 0) (presence as { tabSwitchCount?: number }).tabSwitchCount = bestTab;
+          }'''
+    if needle in om:
+        om = om.replace(needle, add, 1)
+        print("OK: bestTab")
+    else:
+        print("FAIL: tab presence needle")
 
 if om != oo:
     OM.write_text(om)
     print("WRITTEN officer")
-else:
-    print("NO officer change")
 print("ALL DONE")
