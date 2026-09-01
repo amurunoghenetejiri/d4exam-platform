@@ -1,0 +1,25 @@
+name: APPLY-CAMERA-OFFICER-LIVE-FIX
+on:
+  push:
+    paths:
+      - "scripts/apply_camera_officer_live_fix.py"
+      - ".github/workflows/APPLY-CAMERA-OFFICER-LIVE-FIX.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply camera + officer live fixes
+        run: python3 scripts/apply_camera_officer_live_fix.py
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/native/cameraService.ts src/components/cbt/ExamSecurityGate.tsx src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx || true
+          git diff --staged --quiet || git commit -m "apply: camera timeouts + officer names + Pause/Release controls"
+          git push || true
