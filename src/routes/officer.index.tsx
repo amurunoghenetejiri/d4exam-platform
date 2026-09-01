@@ -30,7 +30,8 @@ type Audit = {
   created_at: string;
 };
 
-const ACTIVE_WRITER_MS = 3 * 60 * 1000;
+/** Keep writers visible for the full exam window; heartbeat refreshes updated_at. */
+const ACTIVE_WRITER_MS = 4 * 60 * 60 * 1000;
 
 function isAttemptActiveNow(
   row: {
@@ -51,7 +52,11 @@ function isAttemptActiveNow(
     const t = new Date(row.updated_at).getTime();
     if (!Number.isNaN(t)) candidates.push(t);
   }
-  if (!candidates.length) return false;
+  if (row.started_at) {
+    const t = new Date(row.started_at).getTime();
+    if (!Number.isNaN(t)) candidates.push(t);
+  }
+  if (!candidates.length) return true; // status is already in_progress
   return now - Math.max(...candidates) <= ACTIVE_WRITER_MS;
 }
 
@@ -103,9 +108,12 @@ function Page() {
         .from("exam_attempts")
         .select("id, exam_id, updated_at, started_at, metadata")
         .eq("school_id", schoolId)
-        .eq("status", "in_progress")
+        .in("status", ["in_progress", "paused", "held", "active"])
         .limit(1000);
-      if (error) return { liveExams: 0, writers: 0 };
+      if (error) {
+        console.warn("[officer-dash] live attempts", error);
+        return { liveExams: 0, writers: 0 };
+      }
 
       const now = Date.now();
       const active = (attempts ?? []).filter((a) =>
