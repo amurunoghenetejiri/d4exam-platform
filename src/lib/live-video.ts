@@ -117,7 +117,8 @@ export type LiveCamPublisher = { stop: () => void };
 
 export const LIVE_CAM_EVENT = "cam-frame";
 export const LIVE_CAM_FRAME_INTERVAL_MS = 900;
-export const LIVE_CAM_STALE_MS = 8_000;
+export const LIVE_CAM_STALE_MS = 22_000;
+export const LIVE_CAM_DISPLAY_MS = 90_000;
 
 export type LiveCamFramePayload = {
   attemptId: string;
@@ -291,6 +292,11 @@ export function isLiveCamFrameFresh(ts: number | null | undefined, now = Date.no
   return now - ts <= LIVE_CAM_STALE_MS;
 }
 
+export function isLiveCamFrameUsable(ts: number | null | undefined, now = Date.now()): boolean {
+  if (ts == null) return false;
+  return now - ts <= LIVE_CAM_DISPLAY_MS;
+}
+
 export const LIVE_SCREEN_EVENT = "screen-frame";
 export const LIVE_SCREEN_FRAME_INTERVAL_MS = 700;
 export type LiveScreenFramePayload = {
@@ -394,11 +400,17 @@ export function startLiveScreenPublisher(opts: {
   };
 }
 
-export const LIVE_SCREEN_STALE_MS = 8_000;
+export const LIVE_SCREEN_STALE_MS = 22_000;
+export const LIVE_SCREEN_DISPLAY_MS = 90_000;
 
 export function isLiveScreenFrameFresh(ts: number | null | undefined, now = Date.now()): boolean {
   if (ts == null) return false;
   return now - ts <= LIVE_SCREEN_STALE_MS;
+}
+
+export function isLiveScreenFrameUsable(ts: number | null | undefined, now = Date.now()): boolean {
+  if (ts == null) return false;
+  return now - ts <= LIVE_SCREEN_DISPLAY_MS;
 }
 
 export type LiveScreenSubscriber = { stop: () => void };

@@ -43,11 +43,13 @@ import {
 } from "@/lib/live-monitor";
 import {
   isLiveCamFrameFresh,
+  isLiveCamFrameUsable,
   startLiveCamSubscriber,
   LIVE_CAM_STALE_MS,
   type LiveCamFramePayload,
   startLiveScreenSubscriber,
   isLiveScreenFrameFresh,
+  isLiveScreenFrameUsable,
   type LiveScreenFramePayload,
 } from "@/lib/live-video";
 
@@ -598,7 +600,7 @@ function Page() {
         );
         // Prefer live Realtime frame — never show Offline while video frames are arriving
         const presence = { ...basePresence };
-        if (hasLiveVideo && frame) {
+        if ((hasLiveVideo || (camFrame && isLiveCamFrameUsable(camFrame.ts, now)) || (scrFrame && isLiveScreenFrameUsable(scrFrame.ts, now))) && frame) {
           presence.lastSeenAt = new Date(frame.ts).toISOString();
           presence.cameraActive = true;
           if (frame.faceStatus) {
@@ -616,7 +618,7 @@ function Page() {
           presence.lastSeenAt = new Date(frame.ts).toISOString();
         }
         let sev: MonitorSeverity = isDone ? "completed" : severityFromPresence(a.status, presence, now);
-        if (!isDone && hasLiveVideo && sev === "offline") {
+        if (!isDone && (hasLiveVideo || (camFrame && isLiveCamFrameUsable(camFrame.ts, now))) && sev === "offline") {
           const fs = presence.faceStatus;
           if (fs === "multi") sev = "violation";
           else if (fs === "none" || fs === "unclear") sev = "warning";
@@ -1176,8 +1178,8 @@ function Page() {
               const sf = selected.scrFrame || screenFrames[selected.a.id] || screenFrames[`student:${selected.a.student_id}`] || null;
               const camLive = Boolean(camF && isLiveCamFrameFresh(camF.ts));
               const scrLive = Boolean(sf && isLiveScreenFrameFresh(sf.ts));
-              const showCamFrame = Boolean(camF?.src) && !selected.isDone;
-              const showScrFrame = Boolean(sf?.src) && !selected.isDone;
+              const showCamFrame = Boolean(camF?.src && isLiveCamFrameUsable(camF.ts)) && !selected.isDone;
+              const showScrFrame = Boolean(sf?.src && isLiveScreenFrameUsable(sf.ts)) && !selected.isDone;
               const showCam = feedMode === "camera" || feedMode === "both";
               const showScr = feedMode === "screen" || feedMode === "both";
               const dual = showCam && showScr;
@@ -1200,7 +1202,7 @@ function Page() {
                             <CameraOff className="h-10 w-10 opacity-40" />
                           )}
                           <p className="text-xs font-semibold text-white/90">
-                            {selected.isDone ? doneStatusLabel(selected.a.status) : "Camera offline"}
+                            {selected.isDone ? doneStatusLabel(selected.a.status) : (camF && isLiveCamFrameUsable(camF.ts) ? "Camera reconnecting…" : "Camera offline")}
                           </p>
                         </div>
                       )}
