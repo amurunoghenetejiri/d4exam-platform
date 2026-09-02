@@ -1,0 +1,268 @@
+name: Apply integrity pause/timer/focus minimal fixes
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-integrity-pause-timer-focus
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply minimal surgical fixes
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          # ---------- CBT session: pause end + absolute timer + messaging ----------
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+
+          # 1) Timed pause: do NOT auto-resume at 0 — leave paused with remaining=0
+          old_tick = '''  useEffect(() => {
+    if (!paused || pauseUntilRef.current == null) return;
+    const tick = () => {
+      const until = pauseUntilRef.current;
+      if (until == null) return;
+      const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+      setPauseRemainingSec(left);
+      if (left <= 0) clearTimedPause();
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [paused, clearTimedPause]);'''
+
+          new_tick = '''  useEffect(() => {
+    if (!paused || pauseUntilRef.current == null) return;
+    const tick = () => {
+      const until = pauseUntilRef.current;
+      if (until == null) return;
+      const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+      setPauseRemainingSec(left);
+      // When countdown reaches 0: keep paused; student must press Resume.
+      // Do NOT call clearTimedPause() automatically.
+      if (left <= 0) {
+        pauseUntilRef.current = null;
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [paused]);'''
+
+          if old_tick not in t:
+            raise SystemExit("pause tick effect not found")
+          t = t.replace(old_tick, new_tick, 1)
+
+          # 2) Absolute exam end-time (never extends on pause / background)
+          # Replace relative decrement with end-time based remaining.
+          if "examEndsAtRef" not in t:
+            t = t.replace(
+              "  const pauseUntilRef = useRef<number | null>(null);",
+              "  const pauseUntilRef = useRef<number | null>(null);\n  const examEndsAtRef = useRef<number | null>(null);",
+              1,
+            )
+
+          old_timer = '''  useEffect(() => {
+    // Timer keeps running during integrity pause — time loss is the consequence
+    if (!started || done || seconds == null) return;
+    if (seconds <= 0) { void finishAttempt(true); return; }
+    const t = window.setInterval(() => setSeconds((s) => (s == null ? s : Math.max(0, s - 1))), 1000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done, seconds === 0]);'''
+
+          new_timer = '''  useEffect(() => {
+    // Absolute end-time: continues through pause, tab hide, background, reconnect.
+    // Pauses NEVER extend the examination clock.
+    if (!started || done) return;
+    const tick = () => {
+      const ends = examEndsAtRef.current;
+      if (ends == null) return;
+      const left = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
+      setSeconds(left);
+      if (left <= 0 && !finishingRef.current && !doneRef.current) {
+        void finishAttempt(true);
+      }
+    };
+    tick();
+    const t = window.setInterval(tick, 1000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done]);'''
+
+          if old_timer not in t:
+            raise SystemExit("timer effect not found")
+          t = t.replace(old_timer, new_timer, 1)
+
+          # Set absolute end when exam starts (replace setSeconds duration line)
+          old_start_sec = "      setSeconds((examQ.data?.duration_minutes ?? 60) * 60);"
+          new_start_sec = '''      {
+        const durationSec = Math.max(60, (examQ.data?.duration_minutes ?? 60) * 60);
+        const endsAt = Date.now() + durationSec * 1000;
+        examEndsAtRef.current = endsAt;
+        setSeconds(durationSec);
+      }'''
+          if old_start_sec not in t:
+            raise SystemExit("setSeconds start not found")
+          t = t.replace(old_start_sec, new_start_sec, 1)
+
+          # 3) Pause overlay: distinguish officer vs timed, and show "period completed" + Resume
+          old_pause_ui = '''      {paused && started && !done && (
+        <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-white p-6 text-center shadow-2xl">
+            <h2 className="text-lg font-extrabold text-slate-900">EXAM PAUSED</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Your examination has been paused because an integrity violation was detected.
+            </p>
+            {pauseReason ? <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p> : null}
+            {pauseRemainingSec != null && pauseRemainingSec > 0 ? (
+              <>
+                <p className="mt-4 font-mono text-3xl font-extrabold tabular-nums text-primary">
+                  {String(Math.floor(pauseRemainingSec / 60)).padStart(2, "0")}:{String(pauseRemainingSec % 60).padStart(2, "0")}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">Resumes automatically when the timer reaches zero</p>
+              </>
+            ) : (
+              <Button className="mt-5 w-full font-semibold" onClick={() => void clearTimedPause()}>
+                Resume examination
+              </Button>
+            )}
+          </div>
+        </div>
+      )}'''
+
+          new_pause_ui = '''      {paused && started && !done && (
+        <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-white p-6 text-center shadow-2xl">
+            {pauseRemainingSec != null && pauseRemainingSec > 0 ? (
+              <>
+                <h2 className="text-lg font-extrabold text-slate-900">EXAM PAUSED</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  Your examination has been paused because the allowed tab-switch limit was reached.
+                </p>
+                {pauseReason ? <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p> : null}
+                <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Pause time remaining</p>
+                <p className="mt-1 font-mono text-3xl font-extrabold tabular-nums text-primary">
+                  {String(Math.floor(pauseRemainingSec / 60)).padStart(2, "0")}:{String(pauseRemainingSec % 60).padStart(2, "0")}
+                </p>
+                <p className="mt-2 text-xs text-slate-500">Please wait until the pause period is completed.</p>
+              </>
+            ) : pauseRemainingSec === 0 ? (
+              <>
+                <h2 className="text-lg font-extrabold text-slate-900">PAUSE PERIOD COMPLETED</h2>
+                <p className="mt-2 text-sm text-slate-600">You may now resume your examination.</p>
+                {pauseReason ? <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p> : null}
+                <Button className="mt-5 w-full font-semibold" onClick={() => void clearTimedPause()}>
+                  Resume Exam
+                </Button>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-extrabold text-slate-900">EXAM PAUSED</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  This examination has been paused by the examination officer.
+                </p>
+                {pauseReason ? <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p> : null}
+                <p className="mt-4 text-xs text-slate-500">Waiting for the examination officer to resume your examination.</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}'''
+
+          if old_pause_ui not in t:
+            raise SystemExit("pause UI block not found")
+          t = t.replace(old_pause_ui, new_pause_ui, 1)
+
+          # 4) Clearer done messaging for officer terminate
+          t = t.replace(
+            '{previewMode ? "Officer preview finished." : doneTerminated ? "Your attempt was closed." : "Your answers were submitted successfully."}',
+            '{previewMode ? "Officer preview finished." : doneTerminated ? "Your examination has been terminated by the examination officer. This examination can no longer be continued." : "Your answers were submitted successfully."}',
+            1,
+          )
+
+          p.write_text(t)
+          print("CbtExamSession.impl.tsx patched")
+
+          # ---------- Officer live-monitor: focus layout / screen visibility ----------
+          op = Path("src/routes/officer.live-monitor.tsx")
+          ot = op.read_text()
+
+          # Single-feed: expand height; screen: object-contain + internal scroll
+          old_dual_grid = '''                <div
+                  className={cn(
+                    "shrink-0 gap-1.5 bg-slate-100 p-1.5 sm:gap-2 sm:p-2",
+                    dual ? "grid grid-cols-2" : "grid grid-cols-1",
+                  )}
+                >'''
+
+          new_dual_grid = '''                <div
+                  className={cn(
+                    "shrink-0 gap-1.5 bg-slate-100 p-1.5 sm:gap-2 sm:p-2",
+                    dual ? "grid grid-cols-2" : "grid grid-cols-1",
+                  )}
+                >'''
+
+          # Camera panel: when alone, allow more height
+          old_cam_box = '''                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">'''
+          new_cam_box = '''                    <div className={cn(
+                      "relative overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10",
+                      dual ? "aspect-[4/3] max-h-[28vh] sm:max-h-[32vh]" : "aspect-[4/3] max-h-[52vh] sm:max-h-[58vh]",
+                    )}>'''
+
+          if old_cam_box not in ot:
+            raise SystemExit("camera box class not found")
+          ot = ot.replace(old_cam_box, new_cam_box, 1)
+
+          old_scr_box = '''                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">
+                      {showScrFrame ? (
+                        <img src={sf!.src} alt={`${selected.name} screen`} className="h-full w-full object-contain bg-black" />
+                      ) : ('''
+
+          new_scr_box = '''                    <div className={cn(
+                      "relative overflow-hidden rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10",
+                      dual ? "aspect-[4/3] max-h-[28vh] sm:max-h-[32vh]" : "max-h-[58vh] min-h-[40vh]",
+                    )}>
+                      {showScrFrame ? (
+                        <div className="h-full w-full overflow-auto overscroll-contain bg-black">
+                          <img
+                            src={sf!.src}
+                            alt={`${selected.name} screen`}
+                            className="mx-auto block w-full max-w-none object-contain"
+                            style={{ minHeight: dual ? "100%" : "min(100%, 58vh)" }}
+                          />
+                        </div>
+                      ) : ('''
+
+          if old_scr_box not in ot:
+            raise SystemExit("screen box block not found")
+          ot = ot.replace(old_scr_box, new_scr_box, 1)
+
+          op.write_text(ot)
+          print("officer.live-monitor.tsx patched")
+          print("OK")
+          PY
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git commit -m "fix(integrity): timed pause requires student resume; absolute exam timer; focus layout"
+          git push origin HEAD:main
