@@ -236,11 +236,36 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     } catch {}
   }
 
+  // Recover school + roles if profile lag / RLS left gaps
+  if (!profile?.id || !schoolId) {
+    try {
+      const { data: roleRows } = await supabase
+        .from("user_roles")
+        .select("role, school_id, user_id")
+        .eq("user_id", user.id);
+      if (roleRows?.length) {
+        roles = [
+          ...new Set([
+            ...roles,
+            ...roleRows.map((r) => r.role as AppRole).filter(Boolean),
+          ]),
+        ];
+        if (!schoolId) {
+          schoolId = roleRows.map((r) => r.school_id).find(Boolean) || schoolId;
+        }
+      }
+    } catch {}
+  }
+
   let schoolName: string | null = null;
   let schoolCode: string | null = null;
   let schoolLogoUrl: string | null = null;
   let identifier: string | null = rpcCtx?.officer_id || rpcCtx?.staff_id || rpcCtx?.matric || null;
   let identifierLabel = identifier ? "ID" : "Email";
+
+  // Prefer real profiles.id (not auth uid) for downstream teacher/officer/student joins
+  let resolvedProfileId: string | null =
+    (rpcCtx?.profile_id as string | undefined) || profile?.id || null;
 
   if (profile?.id && !identifier) {
     try {
@@ -254,6 +279,33 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
       if (eo?.officer_id) identifierLabel = "Officer ID";
       else if (teacher?.staff_id) identifierLabel = "Staff ID";
       else if (student?.matric_number || student?.student_id) identifierLabel = "Matric";
+    } catch {}
+  }
+
+  // Last-chance: profiles by auth_user_id → staff tables
+  if (!schoolId || !resolvedProfileId) {
+    try {
+      const { data: profByAuth } = await supabase
+        .from("profiles")
+        .select("id, school_id, full_name, email, status")
+        .eq("auth_user_id", user.id)
+        .maybeSingle();
+      if (profByAuth?.id) {
+        resolvedProfileId = resolvedProfileId || profByAuth.id;
+        if (!schoolId && profByAuth.school_id) schoolId = profByAuth.school_id as string;
+        const [{ data: eo }, { data: teacher }, { data: student }] = await Promise.all([
+          supabase.from("examination_officers").select("officer_id, school_id").eq("profile_id", profByAuth.id).maybeSingle(),
+          supabase.from("teachers").select("staff_id, school_id").eq("profile_id", profByAuth.id).maybeSingle(),
+          supabase.from("students").select("matric_number, student_id, school_id").eq("profile_id", profByAuth.id).maybeSingle(),
+        ]);
+        if (!schoolId) schoolId = (eo?.school_id || teacher?.school_id || student?.school_id || null) as string | null;
+        if (!identifier) {
+          identifier = (eo?.officer_id || teacher?.staff_id || student?.matric_number || student?.student_id || null) as string | null;
+          if (eo?.officer_id) identifierLabel = "Officer ID";
+          else if (teacher?.staff_id) identifierLabel = "Staff ID";
+          else if (student?.matric_number || student?.student_id) identifierLabel = "Matric";
+        }
+      }
     } catch {}
   }
 
@@ -292,7 +344,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
 
   return {
     userId: user.id,
-    profileId: (rpcCtx?.profile_id as string | undefined) || profile?.id || user.id,
+    profileId: resolvedProfileId || (rpcCtx?.profile_id as string | undefined) || profile?.id || user.id,
     email: profile?.email ?? rpcCtx?.email ?? user.email ?? "",
     fullName,
     status,
