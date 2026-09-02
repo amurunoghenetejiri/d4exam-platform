@@ -4,17 +4,15 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "dev": "node scripts/restore-session.mjs && vite dev",
-    "build": "node scripts/restore-session.mjs && vite build",
-    "build:dev": "node scripts/restore-session.mjs && vite build --mode development",
+    "dev": "vite dev",
+    "build": "vite build",
+    "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "cap:build": "node scripts/prepare-capacitor-dist.mjs && npx cap sync android",
-    "cap:sync": "node scripts/prepare-capacitor-dist.mjs && npx cap sync android",
+    "cap:sync": "npm run build && npx cap sync android",
     "cap:open": "npx cap open android",
-    "cap:copy": "npx cap copy android",
-    "restore:session": "node scripts/restore-session.mjs"
+    "cap:copy": "npx cap copy android"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
