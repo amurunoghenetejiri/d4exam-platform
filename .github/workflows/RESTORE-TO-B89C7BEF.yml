@@ -1,0 +1,57 @@
+name: Restore app exactly to b89c7bef
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: restore-app-b89c7bef
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: Restore source tree from b89c7bef
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Overlay b89c7bef tree (except .github/workflows)
+        run: |
+          set -euo pipefail
+          TARGET=b89c7befc4b74605459d5607308b47dda7c1dee1
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "$TARGET" || git fetch --depth=1 origin "$TARGET"
+
+          # Snapshot current workflows so we do not rewrite workflow files (GITHUB_TOKEN restriction)
+          rm -rf /tmp/keep-workflows
+          mkdir -p /tmp/keep-workflows
+          if [ -d .github/workflows ]; then
+            cp -a .github/workflows/. /tmp/keep-workflows/
+          fi
+
+          # Make working tree match TARGET exactly
+          git checkout "$TARGET" -- .
+
+          # Restore workflows from current main tip (avoid workflows permission error)
+          mkdir -p .github/workflows
+          rm -rf .github/workflows/*
+          cp -a /tmp/keep-workflows/. .github/workflows/ || true
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Already matches target tree (plus workflows)"
+            exit 0
+          fi
+
+          git commit -m "restore: exact app state from b89c7befc4b74605459d5607308b47dda7c1dee1"
+          git push origin HEAD:main
+          echo "Pushed restore commit. App source matches b89c7bef."
+          git log -1 --oneline
