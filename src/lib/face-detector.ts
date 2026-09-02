@@ -74,7 +74,9 @@ function extractBoxes(faces: unknown[]): Box[] {
     };
     const score =
       any?.categories?.[0]?.score ?? (typeof any.score === "number" ? any.score : 0.55);
-    const bb = any.boundingBox ?? any.box;
+    const bb = (any.boundingBox ?? any.box) as
+      | { x?: number; y?: number; width?: number; height?: number; xMin?: number; yMin?: number }
+      | undefined;
     if (!bb) {
       if (score >= STRONG_SCORE) out.push({ x: 0, y: 0, w: 1, h: 1, score });
       continue;
@@ -137,9 +139,8 @@ function createNative(): FaceEngine | null {
 
 async function createMediapipe(): Promise<FaceEngine | null> {
   try {
-    const vision = await import(
-      /* @vite-ignore */ "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm"
-    );
+    const cdnUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
+    const vision = await import(/* @vite-ignore */ cdnUrl);
     const { FaceDetector, FilesetResolver } = vision as {
       FaceDetector: {
         createFromOptions: (
