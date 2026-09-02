@@ -31,6 +31,7 @@ type StudentRow = {
   faculty_id: string | null;
   department_id: string | null;
   level_id: string | null;
+  profile_id?: string | null;
   profiles: { full_name: string; email?: string } | null;
   faculties: { name: string; code: string | null } | null;
   departments: { name: string; code: string | null } | null;
@@ -40,7 +41,6 @@ type StudentRow = {
 function displayName(s: StudentRow) {
   const fromStudent = (s.full_name || "").trim();
   const fromProfile = (s.profiles?.full_name || "").trim();
-  // Production has no students.full_name — prefer profiles.full_name
   const name = fromProfile || fromStudent;
   if (name && name.toLowerCase() !== "student" && name.toLowerCase() !== "student student") {
     return name;
@@ -69,15 +69,17 @@ function Page() {
     staleTime: 60_000,
     queryFn: async () => {
       const pageSize = 1000;
-      const selectFull = `id, student_id, matric_number, status,
+      const selectFull = `id, student_id, matric_number, status, profile_id,
            faculty_id, department_id, level_id,
            profiles(full_name, email),
            faculties(name, code),
            departments(name, code),
            levels(name, code)`;
-      const selectBasic = `id, student_id, matric_number, status,
+      const selectBasic = `id, student_id, matric_number, status, profile_id,
            faculty_id, department_id, level_id,
            profiles(full_name, email)`;
+      const selectPlain = `id, student_id, matric_number, status, profile_id,
+           faculty_id, department_id, level_id`;
 
       async function loadAll(select: string) {
         const all: StudentRow[] = [];
@@ -87,7 +89,7 @@ function Page() {
             .from("students")
             .select(select)
             .eq("school_id", schoolId!)
-            .order("matric_number", { ascending: true })
+            .order("matric_number", { ascending: true, nullsFirst: false })
             .range(from, from + pageSize - 1);
           if (error) throw error;
           const chunk = (data ?? []) as StudentRow[];
@@ -99,19 +101,41 @@ function Page() {
         return all;
       }
 
+      async function hydrateProfiles(rows: StudentRow[]): Promise<StudentRow[]> {
+        const missing = rows.filter((r) => !r.profiles?.full_name && r.profile_id);
+        if (!missing.length) return rows;
+        const ids = [...new Set(missing.map((r) => r.profile_id!).filter(Boolean))];
+        if (!ids.length) return rows;
+        const { data: prows } = await supabase
+          .from("profiles")
+          .select("id, full_name, email")
+          .in("id", ids);
+        const map = new Map((prows ?? []).map((p) => [p.id, p]));
+        return rows.map((r) => {
+          if (r.profiles?.full_name || !r.profile_id) return r;
+          const p = map.get(r.profile_id);
+          if (!p) return r;
+          return { ...r, profiles: { full_name: p.full_name, email: p.email } };
+        });
+      }
+
       try {
-        return await loadAll(selectFull);
+        return await hydrateProfiles(await loadAll(selectFull));
       } catch {
         try {
-          return await loadAll(selectBasic);
+          return await hydrateProfiles(await loadAll(selectBasic));
         } catch {
-          const { data, error } = await supabase
-            .from("students")
-            .select("id, student_id, matric_number, status, profiles(full_name, email)")
-            .eq("school_id", schoolId!)
-            .limit(5000);
-          if (error) throw error;
-          return (data ?? []) as StudentRow[];
+          try {
+            return await hydrateProfiles(await loadAll(selectPlain));
+          } catch {
+            const { data, error } = await supabase
+              .from("students")
+              .select("id, student_id, matric_number, status, profile_id")
+              .eq("school_id", schoolId!)
+              .limit(5000);
+            if (error) throw error;
+            return await hydrateProfiles((data ?? []) as StudentRow[]);
+          }
         }
       }
     },
