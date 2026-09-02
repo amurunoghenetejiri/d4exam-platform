@@ -114,7 +114,7 @@ async function createNativeExecutor(): Promise<LocalDbExecutor | null> {
         }
       }
     }
-    await (db as unknown as { run: (sql: string, params?: unknown[]) => Promise<unknown> }).run(
+    await db.execute(
       `INSERT OR REPLACE INTO local_meta (key, value, updated_at) VALUES (?,?,datetime('now'))`,
       ["schema_version", String(LOCAL_DB_VERSION)],
     );

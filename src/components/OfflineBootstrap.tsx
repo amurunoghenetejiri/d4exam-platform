@@ -13,9 +13,7 @@ export function OfflineBootstrap() {
 
   useEffect(() => {
     return bootstrapOfflineSync(() => ({
-      queryClient: queryClient as unknown as {
-        invalidateQueries: (opts?: unknown) => Promise<unknown>;
-      },
+      queryClient,
       ctx: session
         ? {
             userId: session.userId,

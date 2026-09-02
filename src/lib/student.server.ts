@@ -114,7 +114,7 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
         const { data: sem } = await db
           .from("semesters")
           .select("id, name")
-          .eq("academic_session_id", activeSession.id)
+          .eq("session_id", activeSession.id)
           .eq("status", "active")
           .maybeSingle();
         semesterName = (sem?.name as string | null) ?? null;

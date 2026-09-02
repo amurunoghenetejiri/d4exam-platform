@@ -57,7 +57,7 @@ function Page() {
   const students = { isLoading: countsQ.isLoading, data: countsQ.data?.students };
   const teachers = { isLoading: countsQ.isLoading, data: countsQ.data?.teachers };
   const courses = { isLoading: countsQ.isLoading, data: countsQ.data?.courses };
-  const exams = { isLoading: countsQ.isLoading, data: (countsQ.data as { examinations?: number } | undefined)?.examinations };
+  const exams = { isLoading: countsQ.isLoading, data: countsQ.data?.examinations };
 
   const todayExams = useRows<Exam>({
     table: "examinations",

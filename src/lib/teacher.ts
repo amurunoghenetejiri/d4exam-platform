@@ -50,7 +50,7 @@ export function useTeacherContext() {
           const { data: teacher, error: tErr } = await supabase
             .from("teachers")
             .select("id, staff_id, school_id, profile_id")
-            .eq("profile_id", session.profileId ?? "")
+            .eq("profile_id", session.profileId)
             .eq("school_id", session.schoolId)
             .maybeSingle();
 

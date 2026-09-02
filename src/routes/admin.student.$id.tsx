@@ -190,14 +190,9 @@ function Page() {
     "Student";
   const matric = (s?.matric_number as string | null) || (s?.student_id as string | null) || "—";
   const email = (s?.profiles as { email?: string } | null)?.email ?? "—";
-  const sRel = s as unknown as {
-    departments?: { name?: string } | null;
-    faculties?: { name?: string } | null;
-    levels?: { name?: string } | null;
-  } | null;
-  const department = sRel?.departments?.name || "—";
-  const faculty = sRel?.faculties?.name || "—";
-  const level = sRel?.levels?.name || "—";
+  const department = (s?.departments as { name?: string } | null)?.name || "—";
+  const faculty = (s?.faculties as { name?: string } | null)?.name || "—";
+  const level = (s?.levels as { name?: string } | null)?.name || "—";
 
   const enrolled = enrolledQ.data ?? [];
   const eligible = eligibleQ.data ?? [];

@@ -94,7 +94,7 @@ export async function withOfflineCache<T>(
         const data = await fetcher();
         if (userId) {
           void offlineSet(userId, key, data, { schoolId: opts?.schoolId });
-          void mirrorByOfflineKey(userId, key, data as never, { schoolId: opts?.schoolId });
+          void mirrorByOfflineKey(userId, key, data as never, opts?.schoolId);
         }
       } catch (err) {
         console.warn("[offline-query] background refresh failed", key, err);
@@ -107,7 +107,7 @@ export async function withOfflineCache<T>(
     const data = await fetcher();
     if (userId) {
       void offlineSet(userId, key, data, { schoolId: opts?.schoolId });
-      void mirrorByOfflineKey(userId, key, data as never, { schoolId: opts?.schoolId });
+      void mirrorByOfflineKey(userId, key, data as never, opts?.schoolId);
     }
     return data;
   } catch (err) {

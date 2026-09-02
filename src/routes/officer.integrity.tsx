@@ -67,16 +67,16 @@ function Page() {
         .order("submitted_at", { ascending: false, nullsFirst: false })
         .limit(80);
       if (res.error) {
-        res = (await supabase
+        res = await supabase
           .from("exam_attempts")
           .select(basic)
           .eq("school_id", schoolId)
           .in("status", ["submitted", "terminated", "flagged"])
           .order("submitted_at", { ascending: false, nullsFirst: false })
-          .limit(80)) as typeof res;
+          .limit(80);
       }
       if (res.error) throw res.error;
-      return (res.data ?? []) as unknown as AttemptRow[];
+      return (res.data ?? []) as AttemptRow[];
     },
   });
 

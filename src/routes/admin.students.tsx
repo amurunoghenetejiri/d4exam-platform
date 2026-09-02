@@ -90,7 +90,7 @@ function Page() {
             .order("matric_number", { ascending: true })
             .range(from, from + pageSize - 1);
           if (error) throw error;
-          const chunk = (data ?? []) as unknown as StudentRow[];
+          const chunk = (data ?? []) as StudentRow[];
           all.push(...chunk);
           if (chunk.length < pageSize) break;
           from += pageSize;
@@ -111,7 +111,7 @@ function Page() {
             .eq("school_id", schoolId!)
             .limit(5000);
           if (error) throw error;
-          return (data ?? []) as unknown as StudentRow[];
+          return (data ?? []) as StudentRow[];
         }
       }
     },

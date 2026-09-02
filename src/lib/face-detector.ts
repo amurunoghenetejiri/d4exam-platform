@@ -6,12 +6,8 @@
  * Confidence filtering + IoU NMS to reduce false multi-face.
  */
 
-// Bundled offline-first assets (copied into public/mediapipe by the build).
-// Remote URLs are only a last-resort fallback for the web build.
-const LOCAL_WASM_BASE = "/mediapipe/wasm";
-const LOCAL_MODEL_URL = "/mediapipe/models/blaze_face_short_range.tflite";
-const REMOTE_WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const REMOTE_MODEL_URL =
+const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
 const MEDIAPIPE_LOAD_TIMEOUT_MS = 22_000;
@@ -78,7 +74,7 @@ function extractBoxes(faces: unknown[]): Box[] {
     };
     const score =
       any?.categories?.[0]?.score ?? (typeof any.score === "number" ? any.score : 0.55);
-    const bb = (any.boundingBox ?? any.box) as Record<string, number | undefined> | undefined;
+    const bb = any.boundingBox ?? any.box;
     if (!bb) {
       if (score >= STRONG_SCORE) out.push({ x: 0, y: 0, w: 1, h: 1, score });
       continue;
@@ -139,49 +135,27 @@ function createNative(): FaceEngine | null {
   }
 }
 
-type VisionModule = {
-  FaceDetector: {
-    createFromOptions: (
-      fileset: unknown,
-      opts: unknown,
-    ) => Promise<{
-      detect?: (input: HTMLCanvasElement | HTMLVideoElement) => { detections?: unknown[] };
-      detectForVideo?: (video: HTMLVideoElement, ts: number) => { detections?: unknown[] };
-      close?: () => void;
-    }>;
-  };
-  FilesetResolver: {
-    forVisionTasks: (base: string) => Promise<unknown>;
-  };
-};
-
-/** Bundled package first (works fully offline); CDN only if the bundle is unavailable. */
-async function loadVision(): Promise<VisionModule | null> {
+async function createMediapipe(): Promise<FaceEngine | null> {
   try {
-    return (await import("@mediapipe/tasks-vision")) as unknown as VisionModule;
-  } catch {
-    /* fall through */
-  }
-  try {
-    const cdn = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
-    return (await import(/* @vite-ignore */ cdn)) as unknown as VisionModule;
-  } catch {
-    return null;
-  }
-}
-
-async function createMediapipe(
-  assets: { wasmBase: string; modelUrl: string } = {
-    wasmBase: LOCAL_WASM_BASE,
-    modelUrl: LOCAL_MODEL_URL,
-  },
-): Promise<FaceEngine | null> {
-  try {
-    const vision = await loadVision();
-    if (!vision) return null;
-    const { FaceDetector, FilesetResolver } = vision;
-    const MODEL_URL = assets.modelUrl;
-    const fileset = await FilesetResolver.forVisionTasks(assets.wasmBase);
+    const vision = await import(
+      /* @vite-ignore */ "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm"
+    );
+    const { FaceDetector, FilesetResolver } = vision as {
+      FaceDetector: {
+        createFromOptions: (
+          fileset: unknown,
+          opts: unknown,
+        ) => Promise<{
+          detect?: (input: HTMLCanvasElement | HTMLVideoElement) => { detections?: unknown[] };
+          detectForVideo?: (video: HTMLVideoElement, ts: number) => { detections?: unknown[] };
+          close?: () => void;
+        }>;
+      };
+      FilesetResolver: {
+        forVisionTasks: (base: string) => Promise<unknown>;
+      };
+    };
+    const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
     let mode: "IMAGE" | "VIDEO" = "IMAGE";
     let detector: {
       detect?: (input: HTMLCanvasElement | HTMLVideoElement) => { detections?: unknown[] };
@@ -304,21 +278,10 @@ function preferNativeFirst(): boolean {
 export async function createFaceEngine(): Promise<FaceEngine | null> {
   const tryNative = () => createNative();
   const tryMp = async () => {
-    // Local bundled assets first — required for offline face monitoring.
     for (let attempt = 0; attempt < 3; attempt++) {
-      const engine = await withTimeout(
-        createMediapipe({ wasmBase: LOCAL_WASM_BASE, modelUrl: LOCAL_MODEL_URL }),
-        MEDIAPIPE_LOAD_TIMEOUT_MS,
-      );
+      const engine = await withTimeout(createMediapipe(), MEDIAPIPE_LOAD_TIMEOUT_MS);
       if (engine) return engine;
       await new Promise((r) => window.setTimeout(r, 500 * (attempt + 1)));
-    }
-    // Remote fallback (web only / assets missing).
-    if (typeof navigator === "undefined" || navigator.onLine) {
-      return withTimeout(
-        createMediapipe({ wasmBase: REMOTE_WASM_BASE, modelUrl: REMOTE_MODEL_URL }),
-        MEDIAPIPE_LOAD_TIMEOUT_MS,
-      );
     }
     return null;
   };

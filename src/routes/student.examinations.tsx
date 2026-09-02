@@ -13,8 +13,7 @@ import {
 } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
 import { processDueExamReminders } from "@/lib/notify";
-import { assertExamOnline } from "@/lib/offline-guard";
-import { toast } from "sonner";
+import { assertOnline } from "@/lib/require-online";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 
@@ -78,26 +77,19 @@ function useCountdown(targetIso: string | null | undefined) {
 
 function StartExamButton({ examId }: { examId: string }) {
   const navigate = useNavigate();
-  const [checking, setChecking] = useState(false);
   return (
     <Button
       type="button"
       size="sm"
-      disabled={checking}
       className="h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        setChecking(true);
-        void (async () => {
-          const offlineMsg = await assertExamOnline();
-          setChecking(false);
-          if (offlineMsg) {
-            toast.error(offlineMsg);
-            return;
-          }
-          void navigate({ to: "/student/exam/$id", params: { id: examId } });
-        })();
+        if (typeof navigator !== "undefined" && navigator.onLine === false) {
+          window.alert("Connect to the internet to write this exam.");
+          return;
+        }
+        void navigate({ to: "/student/exam/$id", params: { id: examId } });
       }}
     >
       Start exam
@@ -239,7 +231,7 @@ function Page() {
       return map;
     },
   });
-  const resultIdByExam = (resultsQ.data ?? {}) as Record<string, string>;
+  const resultIdByExam = resultsQ.data ?? {};
 
   const attemptByExam = useMemo(() => {
     const map = new Map<string, AttemptRow>();

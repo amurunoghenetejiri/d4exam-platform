@@ -58,9 +58,9 @@ import { Route as OfficerResultsRouteImport } from './routes/officer.results'
 import { Route as OfficerSettingsRouteImport } from './routes/officer.settings'
 import { Route as StudentIndexRouteImport } from './routes/student.index'
 import { Route as StudentCoursesRouteImport } from './routes/student.courses'
+import { Route as StudentMaterialsRouteImport } from './routes/student.materials'
 import { Route as StudentExaminationsRouteImport } from './routes/student.examinations'
 import { Route as StudentHistoryRouteImport } from './routes/student.history'
-import { Route as StudentMaterialsRouteImport } from './routes/student.materials'
 import { Route as StudentNotificationsRouteImport } from './routes/student.notifications'
 import { Route as StudentProfileRouteImport } from './routes/student.profile'
 import { Route as StudentResultsRouteImport } from './routes/student.results'
@@ -78,12 +78,12 @@ import { Route as SuperAdminSubscriptionsRouteImport } from './routes/super-admi
 import { Route as SuperAdminUsersRouteImport } from './routes/super-admin.users'
 import { Route as TeacherIndexRouteImport } from './routes/teacher.index'
 import { Route as TeacherCoursesRouteImport } from './routes/teacher.courses'
+import { Route as TeacherMaterialsRouteImport } from './routes/teacher.materials'
 import { Route as TeacherExamSecurityRouteImport } from './routes/teacher.exam-security'
 import { Route as TeacherExaminationsRouteImport } from './routes/teacher.examinations'
 import { Route as TeacherIntegrityRouteImport } from './routes/teacher.integrity'
 import { Route as TeacherLiveExamsRouteImport } from './routes/teacher.live-exams'
 import { Route as TeacherMarkingRouteImport } from './routes/teacher.marking'
-import { Route as TeacherMaterialsRouteImport } from './routes/teacher.materials'
 import { Route as TeacherNotificationsRouteImport } from './routes/teacher.notifications'
 import { Route as TeacherProfileRouteImport } from './routes/teacher.profile'
 import { Route as TeacherQuestionBankRouteImport } from './routes/teacher.question-bank'
@@ -343,6 +343,11 @@ const StudentCoursesRoute = StudentCoursesRouteImport.update({
   path: '/courses',
   getParentRoute: () => StudentRoute,
 } as any)
+const StudentMaterialsRoute = StudentMaterialsRouteImport.update({
+  id: '/materials',
+  path: '/materials',
+  getParentRoute: () => StudentRoute,
+} as any)
 const StudentExaminationsRoute = StudentExaminationsRouteImport.update({
   id: '/examinations',
   path: '/examinations',
@@ -351,11 +356,6 @@ const StudentExaminationsRoute = StudentExaminationsRouteImport.update({
 const StudentHistoryRoute = StudentHistoryRouteImport.update({
   id: '/history',
   path: '/history',
-  getParentRoute: () => StudentRoute,
-} as any)
-const StudentMaterialsRoute = StudentMaterialsRouteImport.update({
-  id: '/materials',
-  path: '/materials',
   getParentRoute: () => StudentRoute,
 } as any)
 const StudentNotificationsRoute = StudentNotificationsRouteImport.update({
@@ -443,6 +443,11 @@ const TeacherCoursesRoute = TeacherCoursesRouteImport.update({
   path: '/courses',
   getParentRoute: () => TeacherRoute,
 } as any)
+const TeacherMaterialsRoute = TeacherMaterialsRouteImport.update({
+  id: '/materials',
+  path: '/materials',
+  getParentRoute: () => TeacherRoute,
+} as any)
 const TeacherExamSecurityRoute = TeacherExamSecurityRouteImport.update({
   id: '/exam-security',
   path: '/exam-security',
@@ -466,11 +471,6 @@ const TeacherLiveExamsRoute = TeacherLiveExamsRouteImport.update({
 const TeacherMarkingRoute = TeacherMarkingRouteImport.update({
   id: '/marking',
   path: '/marking',
-  getParentRoute: () => TeacherRoute,
-} as any)
-const TeacherMaterialsRoute = TeacherMaterialsRouteImport.update({
-  id: '/materials',
-  path: '/materials',
   getParentRoute: () => TeacherRoute,
 } as any)
 const TeacherNotificationsRoute = TeacherNotificationsRouteImport.update({
@@ -588,7 +588,6 @@ export interface FileRoutesByFullPath {
   '/student/courses': typeof StudentCoursesRoute
   '/student/examinations': typeof StudentExaminationsRoute
   '/student/history': typeof StudentHistoryRoute
-  '/student/materials': typeof StudentMaterialsRoute
   '/student/notifications': typeof StudentNotificationsRoute
   '/student/profile': typeof StudentProfileRoute
   '/student/results': typeof StudentResultsRouteWithChildren
@@ -609,7 +608,6 @@ export interface FileRoutesByFullPath {
   '/teacher/integrity': typeof TeacherIntegrityRoute
   '/teacher/live-exams': typeof TeacherLiveExamsRoute
   '/teacher/marking': typeof TeacherMarkingRoute
-  '/teacher/materials': typeof TeacherMaterialsRoute
   '/teacher/notifications': typeof TeacherNotificationsRoute
   '/teacher/profile': typeof TeacherProfileRoute
   '/teacher/question-bank': typeof TeacherQuestionBankRoute
@@ -673,7 +671,6 @@ export interface FileRoutesByTo {
   '/student/courses': typeof StudentCoursesRoute
   '/student/examinations': typeof StudentExaminationsRoute
   '/student/history': typeof StudentHistoryRoute
-  '/student/materials': typeof StudentMaterialsRoute
   '/student/notifications': typeof StudentNotificationsRoute
   '/student/profile': typeof StudentProfileRoute
   '/student/results': typeof StudentResultsRouteWithChildren
@@ -693,7 +690,6 @@ export interface FileRoutesByTo {
   '/teacher/integrity': typeof TeacherIntegrityRoute
   '/teacher/live-exams': typeof TeacherLiveExamsRoute
   '/teacher/marking': typeof TeacherMarkingRoute
-  '/teacher/materials': typeof TeacherMaterialsRoute
   '/teacher/notifications': typeof TeacherNotificationsRoute
   '/teacher/profile': typeof TeacherProfileRoute
   '/teacher/question-bank': typeof TeacherQuestionBankRoute
@@ -763,7 +759,6 @@ export interface FileRoutesById {
   '/student/courses': typeof StudentCoursesRoute
   '/student/examinations': typeof StudentExaminationsRoute
   '/student/history': typeof StudentHistoryRoute
-  '/student/materials': typeof StudentMaterialsRoute
   '/student/notifications': typeof StudentNotificationsRoute
   '/student/profile': typeof StudentProfileRoute
   '/student/results': typeof StudentResultsRouteWithChildren
@@ -784,7 +779,6 @@ export interface FileRoutesById {
   '/teacher/integrity': typeof TeacherIntegrityRoute
   '/teacher/live-exams': typeof TeacherLiveExamsRoute
   '/teacher/marking': typeof TeacherMarkingRoute
-  '/teacher/materials': typeof TeacherMaterialsRoute
   '/teacher/notifications': typeof TeacherNotificationsRoute
   '/teacher/profile': typeof TeacherProfileRoute
   '/teacher/question-bank': typeof TeacherQuestionBankRoute
@@ -855,7 +849,6 @@ export interface FileRouteTypes {
     | '/student/courses'
     | '/student/examinations'
     | '/student/history'
-    | '/student/materials'
     | '/student/notifications'
     | '/student/profile'
     | '/student/results'
@@ -876,7 +869,6 @@ export interface FileRouteTypes {
     | '/teacher/integrity'
     | '/teacher/live-exams'
     | '/teacher/marking'
-    | '/teacher/materials'
     | '/teacher/notifications'
     | '/teacher/profile'
     | '/teacher/question-bank'
@@ -940,7 +932,6 @@ export interface FileRouteTypes {
     | '/student/courses'
     | '/student/examinations'
     | '/student/history'
-    | '/student/materials'
     | '/student/notifications'
     | '/student/profile'
     | '/student/results'
@@ -960,7 +951,6 @@ export interface FileRouteTypes {
     | '/teacher/integrity'
     | '/teacher/live-exams'
     | '/teacher/marking'
-    | '/teacher/materials'
     | '/teacher/notifications'
     | '/teacher/profile'
     | '/teacher/question-bank'
@@ -1029,7 +1019,6 @@ export interface FileRouteTypes {
     | '/student/courses'
     | '/student/examinations'
     | '/student/history'
-    | '/student/materials'
     | '/student/notifications'
     | '/student/profile'
     | '/student/results'
@@ -1050,7 +1039,6 @@ export interface FileRouteTypes {
     | '/teacher/integrity'
     | '/teacher/live-exams'
     | '/teacher/marking'
-    | '/teacher/materials'
     | '/teacher/notifications'
     | '/teacher/profile'
     | '/teacher/question-bank'
@@ -1451,13 +1439,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StudentHistoryRouteImport
       parentRoute: typeof StudentRoute
     }
-    '/student/materials': {
-      id: '/student/materials'
-      path: '/materials'
-      fullPath: '/student/materials'
-      preLoaderRoute: typeof StudentMaterialsRouteImport
-      parentRoute: typeof StudentRoute
-    }
     '/student/notifications': {
       id: '/student/notifications'
       path: '/notifications'
@@ -1610,13 +1591,6 @@ declare module '@tanstack/react-router' {
       path: '/marking'
       fullPath: '/teacher/marking'
       preLoaderRoute: typeof TeacherMarkingRouteImport
-      parentRoute: typeof TeacherRoute
-    }
-    '/teacher/materials': {
-      id: '/teacher/materials'
-      path: '/materials'
-      fullPath: '/teacher/materials'
-      preLoaderRoute: typeof TeacherMaterialsRouteImport
       parentRoute: typeof TeacherRoute
     }
     '/teacher/notifications': {
@@ -1806,9 +1780,9 @@ const StudentResultsRouteWithChildren = StudentResultsRoute._addFileChildren(
 
 interface StudentRouteChildren {
   StudentCoursesRoute: typeof StudentCoursesRoute
+  StudentMaterialsRoute: typeof StudentMaterialsRoute
   StudentExaminationsRoute: typeof StudentExaminationsRoute
   StudentHistoryRoute: typeof StudentHistoryRoute
-  StudentMaterialsRoute: typeof StudentMaterialsRoute
   StudentNotificationsRoute: typeof StudentNotificationsRoute
   StudentProfileRoute: typeof StudentProfileRoute
   StudentResultsRoute: typeof StudentResultsRouteWithChildren
@@ -1819,9 +1793,9 @@ interface StudentRouteChildren {
 
 const StudentRouteChildren: StudentRouteChildren = {
   StudentCoursesRoute: StudentCoursesRoute,
+  StudentMaterialsRoute: StudentMaterialsRoute,
   StudentExaminationsRoute: StudentExaminationsRoute,
   StudentHistoryRoute: StudentHistoryRoute,
-  StudentMaterialsRoute: StudentMaterialsRoute,
   StudentNotificationsRoute: StudentNotificationsRoute,
   StudentProfileRoute: StudentProfileRoute,
   StudentResultsRoute: StudentResultsRouteWithChildren,
@@ -1880,12 +1854,12 @@ const SuperAdminRouteWithChildren = SuperAdminRoute._addFileChildren(
 
 interface TeacherRouteChildren {
   TeacherCoursesRoute: typeof TeacherCoursesRoute
+  TeacherMaterialsRoute: typeof TeacherMaterialsRoute
   TeacherExamSecurityRoute: typeof TeacherExamSecurityRoute
   TeacherExaminationsRoute: typeof TeacherExaminationsRoute
   TeacherIntegrityRoute: typeof TeacherIntegrityRoute
   TeacherLiveExamsRoute: typeof TeacherLiveExamsRoute
   TeacherMarkingRoute: typeof TeacherMarkingRoute
-  TeacherMaterialsRoute: typeof TeacherMaterialsRoute
   TeacherNotificationsRoute: typeof TeacherNotificationsRoute
   TeacherProfileRoute: typeof TeacherProfileRoute
   TeacherQuestionBankRoute: typeof TeacherQuestionBankRoute
@@ -1898,12 +1872,12 @@ interface TeacherRouteChildren {
 
 const TeacherRouteChildren: TeacherRouteChildren = {
   TeacherCoursesRoute: TeacherCoursesRoute,
+  TeacherMaterialsRoute: TeacherMaterialsRoute,
   TeacherExamSecurityRoute: TeacherExamSecurityRoute,
   TeacherExaminationsRoute: TeacherExaminationsRoute,
   TeacherIntegrityRoute: TeacherIntegrityRoute,
   TeacherLiveExamsRoute: TeacherLiveExamsRoute,
   TeacherMarkingRoute: TeacherMarkingRoute,
-  TeacherMaterialsRoute: TeacherMaterialsRoute,
   TeacherNotificationsRoute: TeacherNotificationsRoute,
   TeacherProfileRoute: TeacherProfileRoute,
   TeacherQuestionBankRoute: TeacherQuestionBankRoute,
