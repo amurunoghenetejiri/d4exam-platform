@@ -115,11 +115,12 @@ export function studentExamEnded(opts: {
 
 export function studentResultReady(opts: {
   studentName: string;
-  courseCode: string;
+  courseCode?: string;
+  examTitle?: string | null;
   officerName?: string | null;
 }): { title: string; message: string } {
   const name = (opts.studentName || "Student").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.examTitle || opts.courseCode || "Examination";
   const by = opts.officerName?.trim() ? ` by ${opts.officerName.trim()}` : "";
   return {
     title: `🎉 ${name}`,
@@ -215,13 +216,14 @@ export function studentAutoSubmitted(opts: {
 
 export function teacherExamApproved(opts: {
   teacherName: string;
-  courseCode: string;
+  courseCode?: string;
+  examTitle?: string | null;
   officerName?: string | null;
   start?: string | null;
   end?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.examTitle || opts.courseCode || "Examination";
   const by = opts.officerName?.trim() ? ` by ${opts.officerName.trim()}` : "";
   const date = fmtDate(opts.start);
   const startT = fmtTime(opts.start);
@@ -234,11 +236,12 @@ export function teacherExamApproved(opts: {
 
 export function teacherExamRejected(opts: {
   teacherName: string;
-  courseCode: string;
+  courseCode?: string;
+  examTitle?: string | null;
   reason?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.examTitle || opts.courseCode || "Examination";
   const reason = (opts.reason || "No reason provided.").trim();
   return {
     title: `❌ ${name}`,
@@ -248,11 +251,12 @@ export function teacherExamRejected(opts: {
 
 export function teacherExamRevisionRequested(opts: {
   teacherName: string;
-  courseCode: string;
+  courseCode?: string;
+  examTitle?: string | null;
   note?: string | null;
 }): { title: string; message: string } {
   const name = (opts.teacherName || "Teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.examTitle || opts.courseCode || "Examination";
   const note = opts.note?.trim() ? `\n\n${opts.note.trim()}` : "";
   return {
     title: `📝 ${name}`,

@@ -307,7 +307,7 @@ export const createSchoolUser = createServerFn({ method: "POST" })
     if (!canManage) throw new Error("Forbidden");
 
     const { createPerson } = await import("@/lib/users.server");
-    const result = await createPerson(schoolId, data, { db: context.supabase as never });
+    const result = await createPerson(schoolId, data as unknown as Parameters<typeof createPerson>[1], { db: context.supabase as never });
 
     try {
       await context.supabase.from("audit_logs").insert({
