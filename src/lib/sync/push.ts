@@ -4,6 +4,7 @@
  * Does NOT push exam answers, results, or integrity events (Step 4).
  */
 import { supabase } from "@/integrations/supabase/client";
+import { sbLoose } from "@/lib/supabase-loose";
 import { listPendingOutbox, markOutboxStatus } from "@/lib/local-db/repositories/outboxRepo";
 import type { OutboxRow } from "@/lib/local-db/types";
 import { isPermanentError, shouldRetryOutbox } from "./retry";
@@ -67,7 +68,7 @@ async function processOne(row: OutboxRow): Promise<"ok" | "fail" | "skip"> {
         .eq("recipient_user_id", userId)
         .is("read_at", null);
       if (error && /column|recipient/i.test(error.message)) {
-        const { error: e2 } = await supabase
+        const { error: e2 } = await sbLoose
           .from("notifications")
           .update({ read_at: new Date().toISOString() })
           .eq("user_id", userId)

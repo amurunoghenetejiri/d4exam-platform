@@ -474,7 +474,7 @@ export const listSchoolApplications = createServerFn({ method: "POST" })
         .select(colsNoDocs)
         .order("created_at", { ascending: false })
         .limit(200);
-      data = retry.data;
+      data = retry.data as typeof data;
       error = retry.error;
     }
 
