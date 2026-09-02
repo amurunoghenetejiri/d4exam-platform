@@ -1,1 +1,1 @@
-FILE_CONTENT_FROM_/tmp/cbt_content.txt
+FILE_CONTENT_FROM_/tmp/revert_cbt.tsx
