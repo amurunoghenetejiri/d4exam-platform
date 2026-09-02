@@ -298,14 +298,20 @@ export function teacherResultsReady(opts: {
 export function officerExamSubmittedForReview(opts: {
   officerName?: string | null;
   teacherName: string;
-  courseCode: string;
+  courseCode?: string;
+  examTitle?: string | null;
+  courseLabel?: string | null;
+  schoolName?: string | null;
+  schoolCode?: string | null;
 }): { title: string; message: string } {
   const officer = (opts.officerName || "Officer").trim();
   const teacher = (opts.teacherName || "A teacher").trim();
-  const exam = opts.courseCode || "Examination";
+  const exam = opts.examTitle || opts.courseLabel || opts.courseCode || "Examination";
+  const school = (opts.schoolName || opts.schoolCode || "").trim();
+  const schoolNote = school ? ` (${school})` : "";
   return {
     title: `📝 ${officer}`,
-    message: `📝 ${officer}\n${teacher} has submitted ${exam} for approval.\n\nThe examination is ready for review.`,
+    message: `📝 ${officer}\n${teacher} has submitted ${exam}${schoolNote} for approval.\n\nThe examination is ready for review.`,
   };
 }
 

@@ -450,7 +450,7 @@ export const importStudentsBulk = createServerFn({ method: "POST" })
 /** Superadmin: list all school applications (bypasses RLS via service role). */
 export const listSchoolApplications = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .handler((async ({ context }: { context: any }) => {
     const { data: isSuper } = await context.supabase.rpc("is_super_admin");
     if (!isSuper) throw new Error("Forbidden");
 
@@ -483,4 +483,4 @@ export const listSchoolApplications = createServerFn({ method: "POST" })
       throw new Error(error.message || "Could not load applications");
     }
     return (data ?? []) as Array<Record<string, unknown>>;
-  });
+  }) as never);
