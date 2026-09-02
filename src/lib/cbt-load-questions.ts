@@ -4,6 +4,7 @@
  * Always merges real option texts from questions.options, explanation, and question_options.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { sbLoose } from "@/lib/supabase-loose";
 import { parseQuestionOptions } from "@/lib/question-options";
 import { resolveCorrectOptionText } from "@/lib/cbt-security";
 import { pickExamQuestions, seededShuffle } from "@/lib/exam-meta";
@@ -99,14 +100,14 @@ async function fetchOptionsFromQuestionOptionsTable(
     "question_id, option_text, is_correct",
     "question_id, option_text",
   ]) {
-    const { data, error } = await supabase.from("question_options").select(cols).in("question_id", ids).limit(2000);
+    const { data, error } = (await sbLoose.from("question_options").select(cols).in("question_id", ids).limit(2000)) as { data: Record<string, unknown>[] | null; error: { message: string } | null };
     if (error) {
       console.warn("[cbt] question_options", error.message);
       continue;
     }
     if (!data?.length) continue;
     for (const row of data) {
-      const r = row as Record<string, unknown>;
+      const r = row;
       const qid = String(r.question_id ?? "");
       const text = String(r.option_text ?? "").trim();
       if (!qid || !text) continue;
@@ -156,7 +157,7 @@ async function enrichMissingOptions(rows: RawQ[]): Promise<RawQ[]> {
 
 async function loadViaRpc(examId: string, courseId: string | null, schoolId: string | null): Promise<RawQ[]> {
   try {
-    const { data, error } = await supabase.rpc("get_cbt_exam_questions", {
+    const { data, error } = await sbLoose.rpc("get_cbt_exam_questions", {
       p_exam_id: examId,
       p_course_id: courseId || null,
       p_school_id: schoolId || null,
@@ -306,7 +307,7 @@ export async function ensureExamQuestionsLinked(opts: {
   if (!existing.error && (existing.data?.length ?? 0) > 0) return 0;
   let qs: { id: string; marks: number | null }[] | null = null;
   for (const statuses of [["active", "approved"], ["active", "approved", "pending"], null] as (string[] | null)[]) {
-    let q = supabase
+    let q = sbLoose
       .from("questions")
       .select("id, marks")
       .eq("course_id", courseId)
@@ -314,15 +315,15 @@ export async function ensureExamQuestionsLinked(opts: {
       .order("created_at", { ascending: true })
       .limit(300);
     if (statuses) q = q.in("status", statuses);
-    const res = await q;
+    const res = (await q) as { data: { id: string; marks: number | null }[] | null; error: { message: string } | null };
     if (!res.error && res.data?.length) {
-      qs = res.data as never;
+      qs = res.data;
       break;
     }
   }
   if (!qs?.length) {
-    const res = await supabase.from("questions").select("id, marks").eq("course_id", courseId).limit(300);
-    if (!res.error && res.data?.length) qs = res.data as never;
+    const res = (await sbLoose.from("questions").select("id, marks").eq("course_id", courseId).limit(300)) as { data: { id: string; marks: number | null }[] | null; error: { message: string } | null };
+    if (!res.error && res.data?.length) qs = res.data;
   }
   if (!qs?.length) return 0;
   const limit = opts.maxQuestions && opts.maxQuestions > 0 ? opts.maxQuestions : qs.length;
@@ -333,7 +334,7 @@ export async function ensureExamQuestionsLinked(opts: {
     marks: q.marks ?? 1,
     question_order: i + 1,
   }));
-  const { error } = await supabase.from("exam_questions").insert(rows as never);
+  const { error } = await sbLoose.from("exam_questions").insert(rows);
   if (error) {
     console.warn("[cbt] ensureExamQuestionsLinked", error.message);
     return 0;
