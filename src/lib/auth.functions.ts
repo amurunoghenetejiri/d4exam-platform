@@ -374,16 +374,17 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
         };
       }
 
-      let signIn: {
+      type SignInResult = {
         session: { access_token: string; refresh_token: string } | null;
         user: { id: string } | null;
-      } | null = null;
+      };
+      let signIn: SignInResult | null = null;
       let lastError: string | null = null;
 
       for (const email of candidateEmails) {
         const attempt = await client.auth.signInWithPassword({ email, password });
         if (attempt.data?.session && attempt.data.user) {
-          signIn = attempt.data as never;
+          signIn = attempt.data as SignInResult;
           lastError = null;
           break;
         }
@@ -404,7 +405,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
               password: provisioned.password,
             });
             if (retry.data?.session) {
-              signIn = retry.data as never;
+              signIn = retry.data as SignInResult;
               lastError = null;
               resolvedKind = "student";
             } else {

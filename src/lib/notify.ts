@@ -8,6 +8,7 @@
  * - Every successful insert fires dispatchPushToUser.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { sbLoose } from "@/lib/supabase-loose";
 
 export type NotifyType =
   | "info"
@@ -331,7 +332,7 @@ async function courseStudentAuthIds(courseId: string | null | undefined, schoolI
         if (id) sids.push(id);
       }
       if (!sids.length) {
-        const { data: enroll } = await supabase
+        const { data: enroll } = await sbLoose
           .from("course_enrollments")
           .select("student_id")
           .eq("course_id", courseId)

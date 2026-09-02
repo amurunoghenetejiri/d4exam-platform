@@ -49,11 +49,13 @@ export function NotificationPermissionPrompt() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!session?.userId || !session.role) return;
+    const uid: string | null | undefined = session?.userId;
+    const role: string | null | undefined = session?.role;
+    if (!uid || !role) return;
     if (fired.current) return;
 
     const run = async () => {
-      if (alreadyPrompted(session.userId, session.role)) return;
+      if (alreadyPrompted(uid, role)) return;
 
       let state = getPushPermissionState();
       if (isNativeShell()) {
@@ -62,11 +64,11 @@ export function NotificationPermissionPrompt() {
 
       // Already granted / denied / unsupported → NEVER show Allow prompt again
       if (state === "granted" || state === "denied" || state === "unsupported") {
-        markPrompted(session.userId, session.role);
+        markPrompted(uid, role);
         try {
           if (state === "granted") {
-            localStorage.setItem(`d4_notif_enabled_once:${session.userId}`, "1");
-            localStorage.setItem(`d4_push_prompted:${session.userId}`, "1");
+            localStorage.setItem(`d4_notif_enabled_once:${uid}`, "1");
+            localStorage.setItem(`d4_push_prompted:${uid}`, "1");
           }
         } catch {
           /* ignore */
@@ -77,7 +79,7 @@ export function NotificationPermissionPrompt() {
       await new Promise((r) => setTimeout(r, 1800));
       if (fired.current) return;
       fired.current = true;
-      markPrompted(session.userId, session.role);
+      markPrompted(uid, role);
 
       toast.message("Stay updated with D4EXAM 🔔", {
         description:
@@ -88,13 +90,13 @@ export function NotificationPermissionPrompt() {
           onClick: () => {
             if (busy) return;
             setBusy(true);
-            void enablePushNotifications(session.userId, session.role)
+            void enablePushNotifications(uid, role)
               .then(async (r) => {
                 if (r.ok) {
                   toast.success("Notifications enabled");
                   // One-time confirmation notification (native D4EXAM, not Chrome)
                   try {
-                    const key = `d4_notif_enabled_once:${session.userId}`;
+                    const key = `d4_notif_enabled_once:${uid}`;
                     if (localStorage.getItem(key) !== "1") {
                       localStorage.setItem(key, "1");
                       const copy = notificationsEnabledConfirm();
@@ -102,7 +104,7 @@ export function NotificationPermissionPrompt() {
                         await showD4ExamNativeNotification(
                           copy.title,
                           copy.message,
-                          settingsLinkForRole(session.role),
+                          settingsLinkForRole(role),
                         );
                       }
                     }

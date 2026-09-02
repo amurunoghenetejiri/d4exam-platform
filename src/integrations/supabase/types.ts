@@ -192,6 +192,81 @@ export type Database = {
           },
         ]
       }
+      course_materials: {
+        Row: {
+          course_id: string
+          created_at: string
+          description: string | null
+          download_count: number
+          file_mime: string | null
+          file_name: string | null
+          file_size: number | null
+          file_url: string | null
+          id: string
+          material_type: string
+          school_id: string
+          tags: string | null
+          title: string
+          updated_at: string
+          uploaded_by: string
+          uploader_name: string | null
+          uploader_role: string
+        }
+        Insert: {
+          course_id: string
+          created_at?: string
+          description?: string | null
+          download_count?: number
+          file_mime?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          file_url?: string | null
+          id?: string
+          material_type?: string
+          school_id: string
+          tags?: string | null
+          title: string
+          updated_at?: string
+          uploaded_by: string
+          uploader_name?: string | null
+          uploader_role?: string
+        }
+        Update: {
+          course_id?: string
+          created_at?: string
+          description?: string | null
+          download_count?: number
+          file_mime?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          file_url?: string | null
+          id?: string
+          material_type?: string
+          school_id?: string
+          tags?: string | null
+          title?: string
+          updated_at?: string
+          uploaded_by?: string
+          uploader_name?: string | null
+          uploader_role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "course_materials_course_id_fkey"
+            columns: ["course_id"]
+            isOneToOne: false
+            referencedRelation: "courses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "course_materials_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       course_offerings: {
         Row: {
           course_id: string
@@ -972,6 +1047,56 @@ export type Database = {
           },
         ]
       }
+      push_devices: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          last_seen_at: string
+          platform: string | null
+          role: string | null
+          school_id: string | null
+          token: string
+          updated_at: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          last_seen_at?: string
+          platform?: string | null
+          role?: string | null
+          school_id?: string | null
+          token: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          last_seen_at?: string
+          platform?: string | null
+          role?: string | null
+          school_id?: string | null
+          token?: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_devices_school_id_fkey"
+            columns: ["school_id"]
+            isOneToOne: false
+            referencedRelation: "schools"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       questions: {
         Row: {
           correct_answer: string | null
@@ -1744,6 +1869,7 @@ export type Database = {
         Returns: boolean
       }
       in_school: { Args: { _school: string }; Returns: boolean }
+      increment_material_downloads: { Args: { _id: string }; Returns: number }
       insert_notification: {
         Args: {
           _entity_id?: string

@@ -307,7 +307,7 @@ export const createSchoolUser = createServerFn({ method: "POST" })
     if (!canManage) throw new Error("Forbidden");
 
     const { createPerson } = await import("@/lib/users.server");
-    const result = await createPerson(schoolId, data, { db: context.supabase as never });
+    const result = await createPerson(schoolId, data as unknown as Parameters<typeof createPerson>[1], { db: context.supabase as never });
 
     try {
       await context.supabase.from("audit_logs").insert({
@@ -450,7 +450,7 @@ export const importStudentsBulk = createServerFn({ method: "POST" })
 /** Superadmin: list all school applications (bypasses RLS via service role). */
 export const listSchoolApplications = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .handler((async ({ context }: { context: any }) => {
     const { data: isSuper } = await context.supabase.rpc("is_super_admin");
     if (!isSuper) throw new Error("Forbidden");
 
@@ -474,7 +474,7 @@ export const listSchoolApplications = createServerFn({ method: "POST" })
         .select(colsNoDocs)
         .order("created_at", { ascending: false })
         .limit(200);
-      data = retry.data;
+      data = retry.data as typeof data;
       error = retry.error;
     }
 
@@ -483,4 +483,4 @@ export const listSchoolApplications = createServerFn({ method: "POST" })
       throw new Error(error.message || "Could not load applications");
     }
     return (data ?? []) as Array<Record<string, unknown>>;
-  });
+  }) as never);

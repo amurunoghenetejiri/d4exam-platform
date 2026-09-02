@@ -42,6 +42,8 @@ export function useTeacherContext() {
     queryFn: async (): Promise<TeacherContext | null> => {
       if (!session?.profileId || !session.schoolId) return null;
       const uid = session.userId;
+      const profileId: string = session.profileId;
+      const schoolId: string = session.schoolId;
 
       return withOfflineCache(
         uid,
@@ -50,8 +52,8 @@ export function useTeacherContext() {
           const { data: teacher, error: tErr } = await supabase
             .from("teachers")
             .select("id, staff_id, school_id, profile_id")
-            .eq("profile_id", session.profileId)
-            .eq("school_id", session.schoolId)
+            .eq("profile_id", profileId)
+            .eq("school_id", schoolId)
             .maybeSingle();
 
           if (tErr) throw tErr;
@@ -61,7 +63,7 @@ export function useTeacherContext() {
             .from("teacher_courses")
             .select("course_id, courses(id, code, name, credit_units, status)")
             .eq("teacher_id", teacher.id)
-            .eq("school_id", session.schoolId);
+            .eq("school_id", schoolId);
 
           if (lErr) throw lErr;
 
