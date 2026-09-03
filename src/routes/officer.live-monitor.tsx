@@ -356,7 +356,7 @@ function Page() {
           .from("exam_attempts")
           .select(sel)
           .eq("school_id", schoolId)
-          .in("status", ["in_progress", "paused", "held", "active"])
+          .in("status", ["in_progress", "held", "active"])
           .order("started_at", { ascending: false })
           .limit(120);
         if (!error) return (data ?? []) as unknown as AttemptRow[];
@@ -913,7 +913,7 @@ function Page() {
   const selectedTimeline = useMemo(() => {
     if (!selected) return [];
     return events
-      .filter((e) => e.student_id === selected.a.student_id && (!e.exam_id || e.exam_id === selected.a.exam_id))
+      .filter((e) => e.student_id === selected.a.student_id && e.exam_id && String(e.exam_id) === String(selected.a.exam_id))
       .slice(0, 20);
   }, [events, selected]);
 
@@ -980,7 +980,7 @@ function Page() {
       const nowIso = new Date().toISOString();
       if (cmd === "hold" || cmd === "pause") {
         const meta = { ...(selected.a.metadata || {}), officer_hold: true, officer_pause: true, officer_hold_at: nowIso };
-        const { error } = await supabase.from("exam_attempts").update({ metadata: meta, status: "paused", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
+        const { error } = await supabase.from("exam_attempts").update({ metadata: meta, updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
         if (error) throw error;
         await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_PAUSE", severity: "medium", description: "Examination paused by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
         await broadcastOfficerCommand("pause", attemptId, studentId, examId);
@@ -1396,7 +1396,7 @@ function Page() {
                   )}
                 >
                   {showCam && (
-                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">
+                    <div className={dual ? "relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]" : "relative aspect-video max-h-[48vh] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10"}>
                       {showCamFrame ? (
                         <img src={camF!.src} alt={`${selected.name} camera`} className="h-full w-full object-cover" />
                       ) : (
@@ -1427,9 +1427,9 @@ function Page() {
                     </div>
                   )}
                   {showScr && (
-                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">
+                    <div className={dual ? "relative aspect-[4/3] max-h-[28vh] overflow-auto rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]" : "relative max-h-[56vh] min-h-[28vh] overflow-auto rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10"}>
                       {showScrFrame ? (
-                        <img src={sf!.src} alt={`${selected.name} screen`} className="h-full w-full object-contain bg-black" />
+                        <img src={sf!.src} alt={`${selected.name} screen`} className="mx-auto block h-auto w-full object-contain bg-black" />
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-1.5 px-4 text-center text-white/60">
                           <Monitor className="h-10 w-10 opacity-30" />
@@ -1500,9 +1500,9 @@ function Page() {
                   {actionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
                   Submit Exam
                 </Button>
-                {["paused", "held"].includes(String(selected.a.status || "").toLowerCase()) ? (
+                {(["paused", "held"].includes(String(selected.a.status || "").toLowerCase()) || Boolean((selected.a.metadata as any)?.officer_pause) || Boolean((selected.a.metadata as any)?.officer_hold)) ? (
                   <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("release")}>
-                    Release Exam
+                    Resume Exam
                   </Button>
                 ) : (
                   <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("pause")}>
@@ -1686,7 +1686,7 @@ function StudentCard({
             </div>
             <div className="relative h-full w-1/2 overflow-hidden">
               {scrSrc ? (
-                <img src={scrSrc} alt="" className="h-full w-full object-contain bg-black" />
+                <img src={scrSrc} alt="" className="mx-auto block h-auto w-full object-contain bg-black" />
               ) : (
                 <div className="grid h-full place-items-center bg-slate-950">
                   <Monitor className="h-5 w-5 text-white/25" />

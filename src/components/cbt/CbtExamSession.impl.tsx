@@ -104,6 +104,8 @@ export function CbtExamPage() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const cameraReconnectLockRef = useRef(false);
   const pauseUntilRef = useRef<number | null>(null);
+  const endsAtMsRef = useRef<number | null>(null);
+  const officerPauseRef = useRef(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const [liveAttemptId, setLiveAttemptId] = useState<string | null>(null);
@@ -235,7 +237,7 @@ export function CbtExamPage() {
       if (until == null) return;
       const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
       setPauseRemainingSec(left);
-      if (left <= 0) clearTimedPause();
+      if (left <= 0) { setPauseRemainingSec(0); /* wait for student Resume — do not auto-resume */ }
     };
     tick();
     const id = window.setInterval(tick, 250);
@@ -246,10 +248,18 @@ export function CbtExamPage() {
     // Timer keeps running during integrity pause — time loss is the consequence
     if (!started || done || seconds == null) return;
     if (seconds <= 0) { void finishAttempt(true); return; }
-    const t = window.setInterval(() => setSeconds((s) => (s == null ? s : Math.max(0, s - 1))), 1000);
+    const t = window.setInterval(() => {
+      if (endsAtMsRef.current != null) {
+        const left = Math.max(0, Math.ceil((endsAtMsRef.current - Date.now()) / 1000));
+        setSeconds(left);
+        if (left <= 0 && !finishingRef.current && !doneRef.current) void finishAttempt(true);
+      } else {
+        setSeconds((s) => (s == null ? s : Math.max(0, s - 1)));
+      }
+    }, 1000);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, done, seconds === 0]);
+  }, [started, done]);
 
   useEffect(() => {
     if (done) {
@@ -335,16 +345,17 @@ export function CbtExamPage() {
       if (doneRef.current || finishingRef.current) return;
       const cmd = String(p.command).toLowerCase();
       if (cmd === "hold" || cmd === "pause") {
-        // Officer pause: indefinite until release (not timed integrity pause)
         pauseUntilRef.current = null;
         setPauseRemainingSec(null);
-        setPauseReason("Paused by examination officer");
+        officerPauseRef.current = true;
+        setPauseReason("This examination has been paused by the examination officer.");
         setPaused(true);
         setWarnBanner("Your examination has been paused by the officer");
         window.setTimeout(() => setWarnBanner(null), 10000);
       } else if (cmd === "release" || cmd === "resume") {
         pauseUntilRef.current = null;
         setPauseRemainingSec(null);
+        officerPauseRef.current = false;
         setPaused(false);
         setPauseReason("");
         setWarnBanner("Your examination has been released by the officer");
@@ -733,7 +744,11 @@ export function CbtExamPage() {
           })();
         }
       }
-      setSeconds((examQ.data?.duration_minutes ?? 60) * 60);
+      {
+        const dur = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
+        endsAtMsRef.current = Date.now() + dur * 1000;
+        setSeconds(dur);
+      }
       setStarted(true);
       setIndex(0);
     } finally { setMediaBusy(false); }
@@ -956,11 +971,13 @@ export function CbtExamPage() {
                 <p className="mt-4 font-mono text-3xl font-extrabold tabular-nums text-primary">
                   {String(Math.floor(pauseRemainingSec / 60)).padStart(2, "0")}:{String(pauseRemainingSec % 60).padStart(2, "0")}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">Resumes automatically when the timer reaches zero</p>
+                <p className="mt-1 text-xs text-slate-500">Please wait until the pause period is completed</p>
               </>
+            ) : officerPauseRef.current ? (
+              <p className="mt-4 text-xs font-semibold text-slate-500">Waiting for the examination officer to resume your examination.</p>
             ) : (
               <Button className="mt-5 w-full font-semibold" onClick={() => void clearTimedPause()}>
-                Resume examination
+                Resume Exam
               </Button>
             )}
           </div>
