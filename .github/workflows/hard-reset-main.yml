@@ -1,0 +1,23 @@
+name: Hard reset main to 0a46d7bc
+on:
+  push:
+    paths:
+      - .github/workflows/hard-reset-main.yml
+  workflow_dispatch:
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Force reset main to 0a46d7bc
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git fetch origin 0a46d7bc275a23d4144cdad870160fa15f3c74eb
+          git reset --hard 0a46d7bc275a23d4144cdad870160fa15f3c74eb
+          git push --force origin HEAD:main
