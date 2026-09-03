@@ -1,0 +1,21 @@
+name: Apply min pause fixes
+on:
+  push:
+    paths:
+      - scripts/apply_min_pause.py
+      - .github/workflows/apply-min-pause.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/apply_min_pause.py
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else git commit -m "fix(cbt/officer): pause integrity, absolute timer, focus layout, per-exam logs"; git push; fi
