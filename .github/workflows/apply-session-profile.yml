@@ -1,0 +1,21 @@
+name: Apply session profile fix
+on:
+  push:
+    paths:
+      - scripts/apply_session_profile_fix.py
+      - .github/workflows/apply-session-profile.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/apply_session_profile_fix.py
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else git commit -m "fix: resolve schoolId and fullName from session RPC so dashboards load data"; git push; fi
