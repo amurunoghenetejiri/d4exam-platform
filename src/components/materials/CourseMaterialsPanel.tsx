@@ -83,7 +83,7 @@ export function CourseMaterialsPanel({
           .order("created_at", { ascending: false })
           .limit(400);
         if (retry.error) throw retry.error;
-        data = retry.data;
+        data = retry.data as unknown as typeof data;
       }
       return (data ?? []) as unknown as MaterialRow[];
     },
