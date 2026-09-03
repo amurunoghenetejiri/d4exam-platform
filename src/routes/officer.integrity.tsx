@@ -76,7 +76,7 @@ function Page() {
           .limit(80);
       }
       if (res.error) throw res.error;
-      return (res.data ?? []) as AttemptRow[];
+      return (res.data ?? []) as unknown as AttemptRow[];
     },
   });
 

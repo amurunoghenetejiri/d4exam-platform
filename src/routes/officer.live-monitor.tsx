@@ -613,7 +613,7 @@ function Page() {
         const { data, error } = await supabase.from("examinations").select(sel).eq("school_id", schoolId!).in("id", ids);
         if (!error) {
           for (const r of data ?? []) {
-            const row = r as { id: string; title?: string | null; courses?: { code?: string; name?: string } | { code?: string; name?: string }[] | null };
+            const row = r as unknown as { id: string; title?: string | null; courses?: { code?: string; name?: string } | { code?: string; name?: string }[] | null };
             const c = Array.isArray(row.courses) ? row.courses[0] : row.courses;
             map[row.id] = { title: String(row.title || "").trim(), courseCode: String(c?.code || "").trim(), courseName: String(c?.name || "").trim() };
           }

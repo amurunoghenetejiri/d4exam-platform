@@ -138,7 +138,7 @@ function Page() {
         console.warn("[officer-approvals] list", res.error);
         return [] as ExamRow[];
       }
-      return (Array.isArray(res.data) ? res.data : []) as ExamRow[];
+      return (Array.isArray(res.data) ? res.data : []) as unknown as ExamRow[];
     },
   });
 
