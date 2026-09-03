@@ -14,6 +14,9 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { processDueExamReminders } from "@/lib/notify";
 import { assertOnline } from "@/lib/require-online";
+import { assertExamOnline } from "@/lib/offline-guard";
+import { toast } from "sonner";
+
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 
@@ -77,25 +80,33 @@ function useCountdown(targetIso: string | null | undefined) {
 
 function StartExamButton({ examId }: { examId: string }) {
   const navigate = useNavigate();
+  const [checking, setChecking] = useState(false);
   return (
     <Button
       type="button"
       size="sm"
+      disabled={checking}
       className="h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (typeof navigator !== "undefined" && navigator.onLine === false) {
-          window.alert("Connect to the internet to write this exam.");
-          return;
-        }
-        void navigate({ to: "/student/exam/$id", params: { id: examId } });
+        setChecking(true);
+        void assertOnline()
+          .then((msg) => {
+            if (msg) {
+              toast.error(msg);
+              return;
+            }
+            void navigate({ to: "/student/exam/$id", params: { id: examId } });
+          })
+          .finally(() => setChecking(false));
       }}
     >
-      Start exam
+      {checking ? "Checking…" : "Start exam"}
     </Button>
   );
 }
+
 
 function StartOrCountdownButton({
   examId,
@@ -189,7 +200,7 @@ function Page() {
       }
 
       const { data, error } = await q;
-      if (error) { console.warn("[offline]", error); return []; }
+      if (error) { console.warn("[offline]", error); return {} as Record<string, string>; }
       return (data ?? []) as ExamRow[];
     },
   });
@@ -205,7 +216,7 @@ function Page() {
         .from("exam_attempts")
         .select("exam_id, status, submitted_at")
         .eq("student_id", student.studentId);
-      if (error) { console.warn("[offline]", error); return []; }
+      if (error) { console.warn("[offline]", error); return [] as AttemptRow[]; }
       return (data ?? []) as AttemptRow[];
     },
   });
@@ -223,7 +234,7 @@ function Page() {
         .eq("student_id", student.studentId);
       if (student.schoolId) q = q.eq("school_id", student.schoolId);
       const { data, error } = await q;
-      if (error) { console.warn("[offline]", error); return []; }
+      if (error) { console.warn("[offline]", error); return {} as Record<string, string>; }
       const map: Record<string, string> = {};
       for (const r of data ?? []) {
         map[(r as { exam_id: string }).exam_id] = (r as { id: string }).id;

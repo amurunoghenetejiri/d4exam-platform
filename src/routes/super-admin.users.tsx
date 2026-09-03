@@ -38,7 +38,7 @@ function Page() {
           .select(sel)
           .order("created_at", { ascending: false })
           .limit(3000);
-        if (!error) return (data ?? []) as UserRow[];
+        if (!error) return (data ?? []) as unknown as UserRow[];
       }
       const { data, error } = await supabase
         .from("profiles")
