@@ -1,0 +1,27 @@
+name: Hard reset main to bda4483
+on:
+  push:
+    paths:
+      - .github/workflows/hard-reset-bda4483.yml
+  workflow_dispatch:
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Hard reset to bda4483
+        run: |
+          set -euo pipefail
+          TARGET=bda4483c3842c723f635adea8e0b016494a8d647
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git fetch origin "$TARGET" || git fetch origin
+          git checkout -B main "$TARGET"
+          git reset --hard "$TARGET"
+          git push origin main --force
+          echo "main is now at $(git rev-parse HEAD)"
