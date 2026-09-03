@@ -493,19 +493,21 @@ export function ExamSecurityGate({
             onClick={() => {
               primeHaptics();
               stopPreview();
-              {
-                const offlineMsg = assertOnlineActionSync();
+              void (async () => {
+                const offlineMsg = await assertExamOnline();
                 if (offlineMsg) {
                   toast.error(offlineMsg);
                   return;
                 }
-              }
-              void onStart({
-                skipScreenShare: !willRequestScreen || (shareMode === "optional" && !screenSupported),
-                caps,
-              });
+                void onStart({
+                  skipScreenShare:
+                    !willRequestScreen || (shareMode === "optional" && !screenSupported),
+                  caps,
+                });
+              })();
             }}
           >
+
             {busy ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Preparing…

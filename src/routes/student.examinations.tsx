@@ -91,7 +91,7 @@ function StartExamButton({ examId }: { examId: string }) {
         e.preventDefault();
         e.stopPropagation();
         setChecking(true);
-        void assertExamOnline()
+        void assertOnline()
           .then((msg) => {
             if (msg) {
               toast.error(msg);
