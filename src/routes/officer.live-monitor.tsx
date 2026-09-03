@@ -356,7 +356,7 @@ function Page() {
           .from("exam_attempts")
           .select(sel)
           .eq("school_id", schoolId)
-          .in("status", ["in_progress", "paused", "held", "active"])
+          .in("status", ["in_progress"])
           .order("started_at", { ascending: false })
           .limit(120);
         if (!error) return (data ?? []) as unknown as AttemptRow[];

@@ -153,44 +153,44 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   }
   if (!user) return null;
 
+  // FAST: RPC + profiles/roles in parallel (~2.5s max)
   let rpcCtx: SessionContextRpc | null = null;
-  try {
-    const data = await withTimeout(
-      supabase.rpc("get_my_session_context" as never).then((r) => r.data),
-      6_000,
-      "get_my_session_context",
-    );
-    if (data && typeof data === "object") rpcCtx = data as SessionContextRpc;
-  } catch {
-    /* RPC may not exist yet or timed out */
-  }
-
   let profileByAuth: { data: Record<string, unknown> | null } = { data: null };
   let profileById: { data: Record<string, unknown> | null } = { data: null };
   let roleRes: { data: { role: string; school_id: string | null; user_id: string }[] | null } = { data: null };
   try {
-    const triple = await withTimeout(
-      Promise.all([
-        supabase
-          .from("profiles")
-          .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
-          .eq("auth_user_id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("profiles")
-          .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
-          .eq("id", user.id)
-          .maybeSingle(),
-        supabase.from("user_roles").select("role, school_id, user_id").eq("user_id", user.id),
-      ]),
-      6_000,
-      "profiles+roles",
-    );
-    profileByAuth = triple[0] as typeof profileByAuth;
-    profileById = triple[1] as typeof profileById;
-    roleRes = triple[2] as typeof roleRes;
+    const [rpcData, triple] = await Promise.all([
+      withTimeout(
+        supabase.rpc("get_my_session_context" as never).then((r) => r.data),
+        2500,
+        "get_my_session_context",
+      ).catch(() => null),
+      withTimeout(
+        Promise.all([
+          supabase
+            .from("profiles")
+            .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
+            .eq("auth_user_id", user.id)
+            .maybeSingle(),
+          supabase
+            .from("profiles")
+            .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
+            .eq("id", user.id)
+            .maybeSingle(),
+          supabase.from("user_roles").select("role, school_id, user_id").eq("user_id", user.id),
+        ]),
+        2500,
+        "profiles+roles",
+      ).catch(() => null),
+    ]);
+    if (rpcData && typeof rpcData === "object") rpcCtx = rpcData as SessionContextRpc;
+    if (triple) {
+      profileByAuth = triple[0] as typeof profileByAuth;
+      profileById = triple[1] as typeof profileById;
+      roleRes = triple[2] as typeof roleRes;
+    }
   } catch (e) {
-    console.warn("[session] profiles/roles timed out or failed", e);
+    console.warn("[session] parallel resolve failed", e);
   }
 
   if (rpcCtx?.profile_id && !(profileByAuth.data || profileById.data)) {
@@ -425,7 +425,7 @@ export function useSessionUser() {
         last,
         OfflineKeys.sessionUser,
         async () => {
-          const u = await withTimeout(fetchSessionUser(), 12_000, "session");
+          const u = await withTimeout(fetchSessionUser(), 5000, "session");
           if (u?.userId) {
             rememberLastUserId(u.userId);
             const needsSchool = u.role && u.role !== "super_admin";

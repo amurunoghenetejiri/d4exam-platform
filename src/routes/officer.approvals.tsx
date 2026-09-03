@@ -112,8 +112,8 @@ function Page() {
   const listQ = useQuery({
     queryKey: ["officer-approvals", schoolId],
     enabled: Boolean(schoolId),
-    staleTime: 10_000,
-    refetchInterval: 30_000,
+    staleTime: 3_000,
+    refetchInterval: 8_000,
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
       const full =

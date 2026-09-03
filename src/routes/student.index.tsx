@@ -216,7 +216,7 @@ function Page() {
             .select("id, title, created_at, read_at")
             .eq("recipient_user_id", user!.userId)
             .order("created_at", { ascending: false })
-            .limit(20);
+            .limit(100);
           if (error) {
             console.warn("[offline]", error);
             return [] as Notif[];

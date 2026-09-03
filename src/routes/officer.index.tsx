@@ -108,7 +108,7 @@ function Page() {
         .from("exam_attempts")
         .select("id, exam_id, updated_at, started_at, metadata")
         .eq("school_id", schoolId)
-        .in("status", ["in_progress", "paused", "held", "active"])
+        .in("status", ["in_progress"])
         .limit(1000);
       if (error) {
         console.warn("[officer-dash] live attempts", error);
