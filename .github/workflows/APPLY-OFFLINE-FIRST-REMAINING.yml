@@ -24,7 +24,6 @@ jobs:
           python3 << 'PY'
           from pathlib import Path
 
-          # --- login.tsx ---
           p = Path("src/routes/login.tsx")
           t = p.read_text()
           if "isDeviceOffline" not in t:
@@ -57,44 +56,50 @@ jobs:
           p.write_text(t)
           print("login OK", p.stat().st_size)
 
-          # --- build-android.yml ---
           w = Path(".github/workflows/build-android.yml")
           wt = w.read_text()
           wt2 = wt
-          if "Verify capacitor uses Vercel shell URL" in wt2:
-              import re
-              wt2 = re.sub(
-                  r"      - name: Verify capacitor uses Vercel shell URL\n(?:        .*\n)+",
-                  "      - name: Verify capacitor is offline-first (local webDir, no remote url)\n"
-                  "        run: |\n"
-                  "          set -euo pipefail\n"
-                  "          test -f dist/index.html\n"
-                  "          test -f capacitor.config.ts\n"
-                  "          if [ -f capacitor.config.json ] && grep -E '\"url\"\\s*:' capacitor.config.json; then\n"
-                  "            echo \"ERROR: capacitor.config.json has server.url\"\n"
-                  "            exit 1\n"
-                  "          fi\n"
-                  "          echo \"OK: Capacitor offline-first local SPA\"\n",
-                  wt2,
-                  count=1,
-              )
-          if "shell is Vercel URL" in wt2:
-              wt2 = wt2.replace(
-                  "Prepare Capacitor dist (fallback assets; shell is Vercel URL)",
-                  "Prepare Capacitor offline-first SPA dist",
-              )
-              wt2 = wt2.replace(
-                  "node scripts/prepare-capacitor-dist.mjs || true",
-                  "node scripts/prepare-capacitor-dist.mjs",
-              )
-              wt2 = wt2.replace(
-                  'echo "dist ready (runtime shell = https://d4exam-platform.vercel.app)"',
-                  'test -f dist/index.html\n          test -d dist/assets\n          echo "dist ready (offline-first local SPA shell)"',
-              )
+          old_verify = '''      - name: Verify capacitor uses Vercel shell URL
+        run: |
+          set -euo pipefail
+          CFG="capacitor.config.ts"
+          grep -q 'd4exam-platform.vercel.app' "$CFG"
+          echo "OK: Capacitor server.url points at Vercel production"'''
+          new_verify = '''      - name: Verify capacitor is offline-first (local webDir, no remote url)
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+          test -f capacitor.config.ts
+          if [ -f capacitor.config.json ] && grep -E '"url"[[:space:]]*:' capacitor.config.json; then
+            echo "ERROR: capacitor.config.json has server.url"
+            exit 1
+          fi
+          echo "OK: Capacitor offline-first local SPA"'''
+          if old_verify in wt2:
+              wt2 = wt2.replace(old_verify, new_verify, 1)
+              print("verify step replaced")
+          else:
+              print("verify block not exact; trying soft replace")
+              wt2 = wt2.replace("Verify capacitor uses Vercel shell URL", "Verify capacitor is offline-first (local webDir, no remote url)")
+              wt2 = wt2.replace("grep -q 'd4exam-platform.vercel.app' \"$CFG\"", "test -f dist/index.html")
+              wt2 = wt2.replace("OK: Capacitor server.url points at Vercel production", "OK: Capacitor offline-first local SPA")
+
+          wt2 = wt2.replace(
+              "Prepare Capacitor dist (fallback assets; shell is Vercel URL)",
+              "Prepare Capacitor offline-first SPA dist",
+          )
+          wt2 = wt2.replace(
+              "node scripts/prepare-capacitor-dist.mjs || true",
+              "node scripts/prepare-capacitor-dist.mjs",
+          )
+          wt2 = wt2.replace(
+              'echo "dist ready (runtime shell = https://d4exam-platform.vercel.app)"',
+              'test -f dist/index.html\n          test -d dist/assets\n          echo "dist ready (offline-first local SPA shell)"',
+          )
           w.write_text(wt2)
           print("workflow OK", w.stat().st_size)
-          if "Verify capacitor uses Vercel shell URL" in wt2:
-              raise SystemExit("vercel verify step still present")
+          if "points at Vercel production" in wt2:
+              raise SystemExit("vercel verify still present")
           print("ALL_OK")
           PY
 
