@@ -85,7 +85,7 @@ export function CourseMaterialsPanel({
         if (retry.error) throw retry.error;
         data = retry.data;
       }
-      return (data ?? []) as MaterialRow[];
+      return (data ?? []) as unknown as MaterialRow[];
     },
   });
 
