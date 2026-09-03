@@ -21,10 +21,22 @@ export function OfflineBootstrap() {
             userId: session.userId,
             schoolId: session.schoolId,
             role: session.role,
+            profileId: session.profileId,
+            studentId:
+              session.role === "student"
+                ? session.identifier || session.profileId
+                : null,
           }
         : null,
     }));
-  }, [queryClient, session?.userId, session?.schoolId, session?.role]);
+  }, [
+    queryClient,
+    session?.userId,
+    session?.schoolId,
+    session?.role,
+    session?.profileId,
+    session?.identifier,
+  ]);
 
   return null;
 }

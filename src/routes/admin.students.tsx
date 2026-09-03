@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/select";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
+import { withOfflineCache } from "@/lib/offline-query";
+import { OfflineKeys } from "@/lib/offline-cache";
 
 export const Route = createFileRoute("/admin/students")({
   head: () => ({
@@ -67,7 +69,12 @@ function Page() {
     queryKey: ["admin-all-students", schoolId],
     enabled: Boolean(schoolId),
     staleTime: 60_000,
+    networkMode: "offlineFirst",
     queryFn: async () => {
+      return withOfflineCache(
+        user?.userId,
+        OfflineKeys.adminStudents,
+        async () => {
       const pageSize = 1000;
       const selectFull = `id, student_id, matric_number, status, profile_id,
            faculty_id, department_id, level_id,
@@ -138,20 +145,31 @@ function Page() {
           }
         }
       }
+        },
+        { schoolId, fallback: [] as StudentRow[] },
+      );
     },
   });
 
   const facultiesQ = useQuery({
     queryKey: ["admin-filter-faculties", schoolId],
     enabled: Boolean(schoolId),
+    networkMode: "offlineFirst",
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("faculties")
-        .select("id, name")
-        .eq("school_id", schoolId!)
-        .order("name");
-      if (error) throw error;
-      return data ?? [];
+      return withOfflineCache(
+        user?.userId,
+        OfflineKeys.adminFaculties,
+        async () => {
+          const { data, error } = await supabase
+            .from("faculties")
+            .select("id, name")
+            .eq("school_id", schoolId!)
+            .order("name");
+          if (error) throw error;
+          return data ?? [];
+        },
+        { schoolId, fallback: [] as { id: string; name: string }[] },
+      );
     },
   });
 
@@ -170,14 +188,22 @@ function Page() {
   const levelsQ = useQuery({
     queryKey: ["admin-filter-levels", schoolId],
     enabled: Boolean(schoolId),
+    networkMode: "offlineFirst",
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("levels")
-        .select("id, name")
-        .eq("school_id", schoolId!)
-        .order("name");
-      if (error) throw error;
-      return data ?? [];
+      return withOfflineCache(
+        user?.userId,
+        OfflineKeys.adminLevels,
+        async () => {
+          const { data, error } = await supabase
+            .from("levels")
+            .select("id, name")
+            .eq("school_id", schoolId!)
+            .order("name");
+          if (error) throw error;
+          return data ?? [];
+        },
+        { schoolId, fallback: [] as { id: string; name: string }[] },
+      );
     },
   });
 

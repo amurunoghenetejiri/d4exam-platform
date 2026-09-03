@@ -148,6 +148,10 @@ export const OfflineKeys = {
   adminDashboard: "admin.dashboard",
   unreadNotifications: "notifications.unread",
   schoolIdentity: "school.identity",
+  adminStudents: "admin.students",
+  adminFaculties: "admin.faculties",
+  adminDepartments: "admin.departments",
+  adminLevels: "admin.levels",
   rowsPrefix: "rows.",
 } as const;
 
