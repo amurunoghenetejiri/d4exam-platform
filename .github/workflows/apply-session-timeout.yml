@@ -1,0 +1,21 @@
+name: Apply session timeout fix
+on:
+  push:
+    paths:
+      - scripts/apply_session_timeout_fix.py
+      - .github/workflows/apply-session-timeout.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/apply_session_timeout_fix.py
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else git commit -m "fix: session timeouts so home/login never hang on profiles RLS"; git push; fi
