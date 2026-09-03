@@ -120,7 +120,7 @@ function Page() {
         "id, title, status, duration_minutes, scheduled_start, scheduled_end, description, course_id, created_by, created_at, courses(code, name)";
       const basic =
         "id, title, status, duration_minutes, scheduled_start, scheduled_end, description, course_id, created_by, created_at";
-      let res = await supabase
+      let res: { data: unknown; error: unknown } = await supabase
         .from("examinations")
         .select(full)
         .eq("school_id", schoolId)
