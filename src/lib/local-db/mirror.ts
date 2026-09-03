@@ -225,6 +225,67 @@ export async function mirrorResults(
   }
 }
 
+type CourseRowLike = {
+  id?: string;
+  school_id?: string | null;
+  code?: string | null;
+  name?: string | null;
+  title?: string | null;
+};
+
+export async function mirrorCourses(
+  userId: string,
+  schoolId: string | null | undefined,
+  rows: CourseRowLike[] | null | undefined,
+): Promise<void> {
+  await mirrorOfflineBlob(userId, OfflineKeys.courses, rows ?? []);
+  if (!rows?.length) return;
+  try {
+    for (const row of rows) {
+      if (!row?.id) continue;
+      await upsertLocalEntity(
+        "local_courses",
+        row.id,
+        {
+          school_id: schoolId ?? row.school_id ?? null,
+          code: row.code ?? null,
+          name: row.name ?? row.title ?? null,
+          payload: row,
+        },
+        { syncStatus: "synced" },
+      );
+    }
+  } catch (e) {
+    console.warn("[local-db] mirrorCourses failed", e);
+  }
+}
+
+export async function mirrorSchoolIdentity(
+  userId: string,
+  school: Record<string, unknown> | null | undefined,
+): Promise<void> {
+  if (!userId || !school) return;
+  try {
+    await mirrorOfflineBlob(userId, OfflineKeys.schoolIdentity, school);
+    await mirrorOfflineBlob(userId, OfflineKeys.school, school);
+    const id = String(school.id || "");
+    if (id) {
+      await upsertLocalEntity(
+        "local_schools",
+        id,
+        {
+          name: (school.name as string) ?? null,
+          code: (school.school_code as string) ?? (school.code as string) ?? null,
+          payload: school,
+        },
+        { syncStatus: "synced" },
+      );
+    }
+  } catch (e) {
+    console.warn("[local-db] mirrorSchoolIdentity failed", e);
+  }
+}
+
 /**
  * Key-aware mirror after a successful network fetch.
  * Safe no-op for unknown keys (still stores blob).
@@ -259,6 +320,18 @@ export async function mirrorByOfflineKey(
       Array.isArray(data)
     ) {
       await mirrorResults(userId, opts?.studentId, data as ResultLike[]);
+      return;
+    }
+    if (key === OfflineKeys.courses && Array.isArray(data)) {
+      await mirrorCourses(userId, opts?.schoolId, data as CourseRowLike[]);
+      return;
+    }
+    if (
+      (key === OfflineKeys.school || key === OfflineKeys.schoolIdentity) &&
+      data &&
+      typeof data === "object"
+    ) {
+      await mirrorSchoolIdentity(userId, data as Record<string, unknown>);
       return;
     }
   } catch (e) {

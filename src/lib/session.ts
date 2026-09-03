@@ -387,14 +387,19 @@ export function useSessionUser() {
           }
           return u;
         },
-        { fallback: null },
+        { fallback: null, localFirst: true },
       );
     },
+    networkMode: "offlineFirst",
     staleTime: 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
     refetchOnMount: "always",
-    retry: 2,
+    retry: (count, err) => {
+      const m = String((err as Error)?.message ?? err ?? "").toLowerCase();
+      if (m.includes("offline") || m.includes("failed to fetch") || m.includes("network")) return false;
+      return count < 1;
+    },
     retryDelay: 800,
   });
 }

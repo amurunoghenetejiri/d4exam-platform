@@ -9,7 +9,10 @@ import {
   mirrorNotifications,
   mirrorExaminations,
   mirrorResults,
+  mirrorCourses,
+  mirrorSchoolIdentity,
 } from "@/lib/local-db/mirror";
+import { offlineSet, OfflineKeys } from "@/lib/offline-cache";
 import type { SyncScope } from "./types";
 
 export type PullCtx = {
@@ -78,7 +81,9 @@ async function pullExamsMeta(ctx: PullCtx): Promise<number> {
     .order("updated_at", { ascending: true })
     .limit(80);
 
-  if (cursor?.cursor) q = q.gt("updated_at", cursor.cursor);
+  if (cursor?.cursor) {
+    q = q.gt("updated_at", cursor.cursor);
+  }
 
   const { data, error } = await q;
   if (error) throw new Error(error.message);
@@ -124,6 +129,59 @@ async function pullResults(ctx: PullCtx): Promise<number> {
   return data?.length ?? 0;
 }
 
+
+async function pullCourses(ctx: PullCtx): Promise<number> {
+  if (!ctx.schoolId) return 0;
+  const cursor = await getSyncCursor("courses", ctx.userId);
+  let q = supabase
+    .from("courses")
+    .select("id, school_id, code, name, title, updated_at")
+    .eq("school_id", ctx.schoolId)
+    .order("updated_at", { ascending: true })
+    .limit(120);
+
+  if (cursor?.cursor) {
+    q = q.gt("updated_at", cursor.cursor);
+  }
+
+  const { data, error } = await q;
+  if (error) {
+    // Some schemas use course_name instead of name/title
+    const { data: d2, error: e2 } = await supabase
+      .from("courses")
+      .select("*")
+      .eq("school_id", ctx.schoolId)
+      .limit(120);
+    if (e2) throw new Error(e2.message);
+    await mirrorCourses(ctx.userId, ctx.schoolId, d2 as never[]);
+    await offlineSet(ctx.userId, OfflineKeys.courses, d2 ?? [], { schoolId: ctx.schoolId });
+    return d2?.length ?? 0;
+  }
+
+  await mirrorCourses(ctx.userId, ctx.schoolId, data as never[]);
+  await offlineSet(ctx.userId, OfflineKeys.courses, data ?? [], { schoolId: ctx.schoolId });
+  const last = data?.length
+    ? String((data[data.length - 1] as { updated_at?: string }).updated_at || "")
+    : null;
+  if (last) await setSyncCursor("courses", ctx.userId, last);
+  return data?.length ?? 0;
+}
+
+async function pullSchoolIdentity(ctx: PullCtx): Promise<number> {
+  if (!ctx.schoolId) return 0;
+  const { data, error } = await supabase
+    .from("schools")
+    .select("id, name, school_code, logo_url, address, phone, email")
+    .eq("id", ctx.schoolId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return 0;
+  await mirrorSchoolIdentity(ctx.userId, data as never);
+  await offlineSet(ctx.userId, OfflineKeys.schoolIdentity, data, { schoolId: ctx.schoolId });
+  await offlineSet(ctx.userId, OfflineKeys.school, data, { schoolId: ctx.schoolId });
+  return 1;
+}
+
 export async function pullScopedData(ctx: PullCtx): Promise<PullSummary> {
   const summary: PullSummary = { pulled: 0, scopes: {}, errors: [] };
 
@@ -155,6 +213,24 @@ export async function pullScopedData(ctx: PullCtx): Promise<PullSummary> {
     summary.pulled += n;
   } catch (e) {
     summary.scopes.RESULTS = "fail";
+    summary.errors.push(e instanceof Error ? e.message : String(e));
+  }
+
+  try {
+    const n = await pullCourses(ctx);
+    summary.scopes.STUDENT_CONTEXT = "ok";
+    summary.pulled += n;
+  } catch (e) {
+    summary.scopes.STUDENT_CONTEXT = "fail";
+    summary.errors.push(e instanceof Error ? e.message : String(e));
+  }
+
+  try {
+    const n = await pullSchoolIdentity(ctx);
+    summary.scopes.USER_PROFILE = "ok";
+    summary.pulled += n;
+  } catch (e) {
+    summary.scopes.USER_PROFILE = "fail";
     summary.errors.push(e instanceof Error ? e.message : String(e));
   }
 

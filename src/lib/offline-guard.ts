@@ -27,17 +27,22 @@ export function assertOnlineActionSync(): string | null {
   return null;
 }
 
-/** Features available offline (cached). Documentation helper. */
+/** Features available offline after at least one successful online session. */
 export const OFFLINE_SUPPORTED = [
+  "app_shell_boot",
+  "session_restore",
   "dashboard_lists",
   "exam_metadata",
+  "courses_list",
+  "school_identity",
   "notifications_read",
   "results_view",
   "materials_cached",
   "profile_display",
+  "navigation_menus",
 ] as const;
 
-/** Features that always need internet. */
+/** Features that always need internet (integrity / auth). */
 export const ONLINE_REQUIRED = [
   "exam_start",
   "exam_submit",
@@ -46,4 +51,5 @@ export const ONLINE_REQUIRED = [
   "admin_mutations",
   "push_delivery",
   "auth_login",
+  "first_time_sync",
 ] as const;
