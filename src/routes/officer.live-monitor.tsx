@@ -333,7 +333,7 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["officer-live-attempts", schoolId],
     enabled: Boolean(schoolId),
-    refetchInterval: 3_000,
+    refetchInterval: 5_000,
     queryFn: async () => {
       if (!schoolId) return [] as AttemptRow[];
       const selects = [
@@ -356,7 +356,7 @@ function Page() {
           .from("exam_attempts")
           .select(sel)
           .eq("school_id", schoolId)
-          .in("status", ["in_progress", "held", "active"])
+          .in("status", ["in_progress"])
           .order("started_at", { ascending: false })
           .limit(120);
         if (!error) return (data ?? []) as unknown as AttemptRow[];
@@ -1500,7 +1500,7 @@ function Page() {
                   {actionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
                   Submit Exam
                 </Button>
-                {(["paused", "held"].includes(String(selected.a.status || "").toLowerCase()) || Boolean((selected.a.metadata as any)?.officer_pause) || Boolean((selected.a.metadata as any)?.officer_hold)) ? (
+                {(["paused", "held"].includes(String(selected.a.status || "").toLowerCase()) || Boolean((selected.a.metadata as Record<string, unknown> | null)?.officer_pause) || Boolean((selected.a.metadata as Record<string, unknown> | null)?.officer_hold)) ? (
                   <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("release")}>
                     Resume Exam
                   </Button>

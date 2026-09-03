@@ -215,6 +215,7 @@ export function CbtExamPage() {
   }, [security.requireCamera, security.requireMicrophone]);
 
   const clearTimedPause = useCallback(() => {
+    if (officerPauseRef.current) return;
     pauseUntilRef.current = null;
     setPauseRemainingSec(null);
     setPaused(false);
@@ -232,17 +233,22 @@ export function CbtExamPage() {
 
   useEffect(() => {
     if (!paused || pauseUntilRef.current == null) return;
+    let finished = false;
     const tick = () => {
+      if (finished) return;
       const until = pauseUntilRef.current;
       if (until == null) return;
       const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
-      setPauseRemainingSec(left);
-      if (left <= 0) { setPauseRemainingSec(0); /* wait for student Resume — do not auto-resume */ }
+      setPauseRemainingSec((prev) => (prev === left ? prev : left));
+      if (left <= 0) {
+        finished = true;
+        pauseUntilRef.current = null;
+      }
     };
     tick();
-    const id = window.setInterval(tick, 250);
+    const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
-  }, [paused, clearTimedPause]);
+  }, [paused]);
 
   useEffect(() => {
     // Timer keeps running during integrity pause — time loss is the consequence
