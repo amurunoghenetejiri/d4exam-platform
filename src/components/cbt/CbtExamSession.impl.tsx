@@ -215,7 +215,6 @@ export function CbtExamPage() {
   }, [security.requireCamera, security.requireMicrophone]);
 
   const clearTimedPause = useCallback(() => {
-    if (officerPauseRef.current) return;
     pauseUntilRef.current = null;
     setPauseRemainingSec(null);
     setPaused(false);
@@ -233,22 +232,17 @@ export function CbtExamPage() {
 
   useEffect(() => {
     if (!paused || pauseUntilRef.current == null) return;
-    let finished = false;
     const tick = () => {
-      if (finished) return;
       const until = pauseUntilRef.current;
       if (until == null) return;
       const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
-      setPauseRemainingSec((prev) => (prev === left ? prev : left));
-      if (left <= 0) {
-        finished = true;
-        pauseUntilRef.current = null;
-      }
+      setPauseRemainingSec(left);
+      if (left <= 0) { setPauseRemainingSec(0); pauseUntilRef.current = null; }
     };
     tick();
-    const id = window.setInterval(tick, 500);
+    const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);
-  }, [paused]);
+  }, [paused, clearTimedPause]);
 
   useEffect(() => {
     // Timer keeps running during integrity pause — time loss is the consequence
@@ -982,7 +976,7 @@ export function CbtExamPage() {
             ) : officerPauseRef.current ? (
               <p className="mt-4 text-xs font-semibold text-slate-500">Waiting for the examination officer to resume your examination.</p>
             ) : (
-              <Button className="mt-5 w-full font-semibold" onClick={() => void clearTimedPause()}>
+              <Button className="mt-5 w-full font-semibold" onClick={() => { if (officerPauseRef.current) return; void clearTimedPause(); }}>
                 Resume Exam
               </Button>
             )}

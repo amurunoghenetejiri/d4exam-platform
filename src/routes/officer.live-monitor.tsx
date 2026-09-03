@@ -333,7 +333,7 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["officer-live-attempts", schoolId],
     enabled: Boolean(schoolId),
-    refetchInterval: 5_000,
+    refetchInterval: 3_000,
     queryFn: async () => {
       if (!schoolId) return [] as AttemptRow[];
       const selects = [
@@ -1396,7 +1396,7 @@ function Page() {
                   )}
                 >
                   {showCam && (
-                    <div className={dual ? "relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]" : "relative aspect-video max-h-[48vh] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10"}>
+                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">
                       {showCamFrame ? (
                         <img src={camF!.src} alt={`${selected.name} camera`} className="h-full w-full object-cover" />
                       ) : (
@@ -1427,9 +1427,9 @@ function Page() {
                     </div>
                   )}
                   {showScr && (
-                    <div className={dual ? "relative aspect-[4/3] max-h-[28vh] overflow-auto rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]" : "relative max-h-[56vh] min-h-[28vh] overflow-auto rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10"}>
+                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">
                       {showScrFrame ? (
-                        <img src={sf!.src} alt={`${selected.name} screen`} className="mx-auto block h-auto w-full object-contain bg-black" />
+                        <img src={sf!.src} alt={`${selected.name} screen`} className="h-full w-full object-contain bg-black" />
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-1.5 px-4 text-center text-white/60">
                           <Monitor className="h-10 w-10 opacity-30" />
@@ -1686,7 +1686,7 @@ function StudentCard({
             </div>
             <div className="relative h-full w-1/2 overflow-hidden">
               {scrSrc ? (
-                <img src={scrSrc} alt="" className="mx-auto block h-auto w-full object-contain bg-black" />
+                <img src={scrSrc} alt="" className="h-full w-full object-contain bg-black" />
               ) : (
                 <div className="grid h-full place-items-center bg-slate-950">
                   <Monitor className="h-5 w-5 text-white/25" />
