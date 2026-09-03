@@ -1,0 +1,49 @@
+name: RESET-TO-BDA4483
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/RESET-TO-BDA4483.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reset-to-bda4483
+  cancel-in-progress: true
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Hard reset main to bda4483
+        run: |
+          set -euo pipefail
+          TARGET=bda4483c3842c723f635adea8e0b016494a8d647
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git cat-file -t "$TARGET" >/dev/null 2>&1; then
+            echo "Target commit not found"
+            exit 1
+          fi
+
+          echo "Current HEAD: $(git rev-parse HEAD)"
+          echo "Resetting to: $TARGET"
+          git reset --hard "$TARGET"
+
+          test -f supabase/migrations/20260902180000_fix_profiles_rls_recursion.sql
+          test -f src/lib/sync/pull.ts
+          grep -q 'can_read_school_profiles' supabase/migrations/20260902180000_fix_profiles_rls_recursion.sql
+          grep -q 'get_my_roles' supabase/migrations/20260902180000_fix_profiles_rls_recursion.sql
+          grep -q 'message, type' src/lib/sync/pull.ts || grep -q 'title, message' src/lib/sync/pull.ts
+
+          echo "VERIFY_OK $(git rev-parse HEAD)"
+          git push --force origin HEAD:main
+          echo "FORCE_PUSHED $(git rev-parse HEAD)"
