@@ -1,4 +1,4 @@
-# D4EXAM Capacitor Android
+# D4EXAM Capacitor Android (offline-first)
 
 ## Identity
 
@@ -6,43 +6,49 @@
 |--------|--------|
 | App name | D4EXAM |
 | App ID | `com.d4exam.app` |
-| Version | 1.2.0 (versionCode 3) |
 | Capacitor | 8.x |
-| Server URL | `https://d4exam-platform.vercel.app` |
+| Web assets | Bundled SPA in `dist/` (built by `prepare-capacitor-dist.mjs`) |
+| Remote shell | **Disabled by default** (no `server.url`) |
 
-## Native features
+## Offline-first model
 
-- **Launcher icon** — generated from `public/icon-512.png` / `public/logo.png` in CI
-- **Push** — `@capacitor/push-notifications` on Android; web FCM on browser/PWA
-- **Camera** — native permission via `@capacitor/camera`, then WebView `getUserMedia` for CBT
-- **Microphone** — `RECORD_AUDIO` + runtime `getUserMedia({ audio: true })`
-- **Files** — system file picker only (no broad storage permission)
+1. **APK loads local UI** from packaged `dist/` (not Vercel).
+2. **Auth / first login** still needs internet (Supabase).
+3. **After login online once**, React Query offline cache + local DB can serve lists when the network drops.
+4. **Exam start / submit / live monitor / approvals** still require internet (integrity).
 
-## Build APK (phone)
+Optional remote debug (developers only):
 
-1. https://github.com/amurunoghenetejiri/d4exam-platform/actions/workflows/build-android.yml
-2. **Run workflow** → `main`
-3. Download artifact **D4EXAM-Android-APK**
-4. Install `D4EXAM-debug.apk` (allow unknown sources)
+```bash
+CAP_REMOTE_URL=1 npx cap sync android
+# or
+CAP_SERVER_URL=https://d4exam-platform.vercel.app npx cap sync android
+```
 
-## Required for full native FCM
+Production APKs must **not** set `CAP_REMOTE_URL`.
 
-1. Firebase Console → Project **d4exam-6506a** → Add Android app `com.d4exam.app`
-2. Download `google-services.json`
-3. GitHub → Settings → Secrets → Actions → New secret:
-   - Name: `FIREBASE_GOOGLE_SERVICES_JSON`
-   - Value: full JSON file contents
-4. Re-run the Android workflow
+## Build APK
 
-Without this secret the APK still builds; native push token registration may be limited until the secret is added.
+1. GitHub Actions → `build-android.yml` → Run on `main`
+2. Download **D4EXAM-Android-APK**
+3. Install (allow unknown sources)
+
+Local:
+
+```bash
+npm run build:cap
+npx cap sync android
+npx cap open android
+```
 
 ## Website vs APK
 
-| | Website / PWA | Android APK |
-|--|---------------|-------------|
-| UI | Unchanged | Same UI in WebView |
-| Push | Browser FCM | Capacitor + FCM |
-| Camera | Browser permission | Native + WebView |
-| Icon | Favicon / PWA | D4EXAM logo mipmaps |
+| | Website (Vercel) | Android APK |
+|--|------------------|-------------|
+| UI source | SSR / Vercel | Bundled SPA in the APK |
+| Offline boot | Browser cache only | Local `dist/` always boots |
+| Login | Online | Online required |
+| Cached screens | Partial | Partial (after online use) |
+| Push / camera | Browser | Capacitor plugins |
 
-Web changes must be deployed on Vercel for the APK WebView to pick them up (APK loads the live site).
+Website deploys still go through Vercel for the browser. The APK no longer depends on Vercel to open the app shell.

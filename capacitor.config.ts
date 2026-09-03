@@ -1,23 +1,30 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
- * D4EXAM Capacitor config
+ * D4EXAM Capacitor config — offline-first native shell
  *
- * Live server.url is REQUIRED: TanStack Start is SSR. Loading only local assets
- * causes a blank navy/blue screen after splash. The working product loads the
- * production Vercel app inside the native shell (push, camera, status bar still work).
+ * Default: load the bundled SPA from webDir (`dist/`), built by
+ * `node scripts/prepare-capacitor-dist.mjs` (client-only, no SSR).
+ * That works offline for previously cached screens and always boots without Vercel.
  *
- * Splash: launchAutoHide=false so native solid theme stays until AnimatedSplash
- * paints the branded 9s experience — no navy blank gap between system splash and WebView.
+ * Optional remote debug shell (not for production APKs):
+ *   CAP_REMOTE_URL=1  or  CAP_SERVER_URL=https://...
  */
+const remoteUrl =
+  process.env["CAP_SERVER_URL"]?.trim() ||
+  (process.env["CAP_REMOTE_URL"] === "1" || process.env["CAP_REMOTE_URL"] === "true"
+    ? "https://d4exam-platform.vercel.app"
+    : "");
+
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
   appName: "D4EXAM",
   webDir: "dist",
   server: {
-    url: "https://d4exam-platform.vercel.app",
     androidScheme: "https",
     errorPath: "offline.html",
+    // Only attach remote url when explicitly requested for debugging.
+    ...(remoteUrl ? { url: remoteUrl } : {}),
     allowNavigation: [
       "d4exam-platform.vercel.app",
       "*.vercel.app",
@@ -36,8 +43,6 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      // Hold native splash until AnimatedSplash explicitly hides it.
-      // Prevents the navy blank gap while the remote WebView boots.
       launchShowDuration: 0,
       launchAutoHide: false,
       backgroundColor: "#0b1b3a",
