@@ -155,27 +155,57 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
 
   let rpcCtx: SessionContextRpc | null = null;
   try {
-    const { data } = await supabase.rpc("get_my_session_context" as never);
+    const data = await withTimeout(
+      supabase.rpc("get_my_session_context" as never).then((r) => r.data),
+      3_000,
+      "get_my_session_context",
+    );
     if (data && typeof data === "object") rpcCtx = data as SessionContextRpc;
   } catch {
-    /* RPC may not exist yet */
+    /* RPC may not exist yet or timed out */
   }
 
-  const [profileByAuth, profileById, roleRes] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
-      .eq("auth_user_id", user.id)
-      .maybeSingle(),
-    supabase
-      .from("profiles")
-      .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
-      .eq("id", user.id)
-      .maybeSingle(),
-    supabase.from("user_roles").select("role, school_id, user_id").eq("user_id", user.id),
-  ]);
+  let profileByAuth: { data: Record<string, unknown> | null } = { data: null };
+  let profileById: { data: Record<string, unknown> | null } = { data: null };
+  let roleRes: { data: { role: string; school_id: string | null; user_id: string }[] | null } = { data: null };
+  try {
+    const triple = await withTimeout(
+      Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
+          .eq("auth_user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
+          .eq("id", user.id)
+          .maybeSingle(),
+        supabase.from("user_roles").select("role, school_id, user_id").eq("user_id", user.id),
+      ]),
+      4_000,
+      "profiles+roles",
+    );
+    profileByAuth = triple[0] as typeof profileByAuth;
+    profileById = triple[1] as typeof profileById;
+    roleRes = triple[2] as typeof roleRes;
+  } catch (e) {
+    console.warn("[session] profiles/roles timed out or failed", e);
+  }
 
-  const profile = profileByAuth.data ?? profileById.data ?? null;
+  let profile = profileByAuth.data ?? profileById.data ?? null;
+  if (!profile && rpcCtx?.profile_id) {
+    profile = {
+      id: rpcCtx.profile_id,
+      full_name: rpcCtx.full_name ?? null,
+      first_name: null,
+      last_name: null,
+      email: rpcCtx.email ?? user.email ?? null,
+      status: rpcCtx.status ?? "active",
+      school_id: rpcCtx.school_id ?? null,
+      auth_user_id: user.id,
+    } as never;
+  }
   let roles = (roleRes.data ?? []).map((r) => r.role as AppRole).filter(Boolean);
   if (Array.isArray(rpcCtx?.roles) && rpcCtx.roles.length) {
     roles = [...new Set([...roles, ...(rpcCtx.roles as AppRole[])])];
@@ -379,7 +409,7 @@ export function useSessionUser() {
         last,
         OfflineKeys.sessionUser,
         async () => {
-          const u = await withTimeout(fetchSessionUser(), 6_000, "session");
+          const u = await withTimeout(fetchSessionUser(), 5_000, "session");
           if (u?.userId) {
             rememberLastUserId(u.userId);
             await offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
@@ -394,8 +424,8 @@ export function useSessionUser() {
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
     refetchOnMount: "always",
-    retry: 2,
-    retryDelay: 800,
+    retry: 1,
+    retryDelay: 400,
   });
 }
 

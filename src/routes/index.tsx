@@ -32,7 +32,16 @@ export const Route = createFileRoute("/")({
     ],
   }),
   beforeLoad: async () => {
-    const user = await fetchSessionUser();
+    // Hard timeout so a stuck profiles/RLS query cannot freeze the whole site
+    let user: Awaited<ReturnType<typeof fetchSessionUser>> = null;
+    try {
+      user = await Promise.race([
+        fetchSessionUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_500)),
+      ]);
+    } catch {
+      user = null;
+    }
     if (user?.role) {
       throw redirect({ to: roleHome[user.role] as never });
     }
