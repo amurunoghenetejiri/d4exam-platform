@@ -213,7 +213,7 @@ function Page() {
         .from("exam_attempts")
         .select("exam_id, status, submitted_at")
         .eq("student_id", student.studentId);
-      if (error) { console.warn("[offline]", error); return {} as Record<string, string>; }
+      if (error) { console.warn("[offline]", error); return [] as AttemptRow[]; }
       return (data ?? []) as AttemptRow[];
     },
   });
