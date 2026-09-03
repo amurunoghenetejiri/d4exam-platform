@@ -157,7 +157,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   try {
     const data = await withTimeout(
       supabase.rpc("get_my_session_context" as never).then((r) => r.data),
-      3_000,
+      6_000,
       "get_my_session_context",
     );
     if (data && typeof data === "object") rpcCtx = data as SessionContextRpc;
@@ -183,7 +183,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
           .maybeSingle(),
         supabase.from("user_roles").select("role, school_id, user_id").eq("user_id", user.id),
       ]),
-      4_000,
+      6_000,
       "profiles+roles",
     );
     profileByAuth = triple[0] as typeof profileByAuth;
@@ -191,6 +191,21 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     roleRes = triple[2] as typeof roleRes;
   } catch (e) {
     console.warn("[session] profiles/roles timed out or failed", e);
+  }
+
+  if (rpcCtx?.profile_id && !(profileByAuth.data || profileById.data)) {
+    profileByAuth = {
+      data: {
+        id: rpcCtx.profile_id,
+        full_name: rpcCtx.full_name ?? null,
+        first_name: null,
+        last_name: null,
+        email: rpcCtx.email ?? user.email ?? null,
+        status: rpcCtx.status ?? "active",
+        school_id: rpcCtx.school_id ?? null,
+        auth_user_id: user.id,
+      },
+    };
   }
 
   let profile = profileByAuth.data ?? profileById.data ?? null;
@@ -237,8 +252,8 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   }
 
   let schoolId: string | null =
-    (rpcCtx?.school_id as string | null) ||
-    (profile?.school_id as string | null) ||
+    (rpcCtx?.school_id ? String(rpcCtx.school_id) : null) ||
+    (profile?.school_id ? String(profile.school_id as string) : null) ||
     (roleRes.data ?? []).map((r) => (r as { school_id?: string | null }).school_id).find(Boolean) ||
     null;
 
@@ -367,8 +382,9 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   }
 
   const fullName =
-    displayNameFromProfile(profile) ||
+    displayNameFromProfile(profile as { full_name?: string | null; first_name?: string | null; last_name?: string | null } | null) ||
     (rpcCtx?.full_name || "").trim() ||
+    (typeof profile?.full_name === "string" ? profile.full_name.trim() : "") ||
     user.email ||
     "";
 
@@ -409,23 +425,26 @@ export function useSessionUser() {
         last,
         OfflineKeys.sessionUser,
         async () => {
-          const u = await withTimeout(fetchSessionUser(), 5_000, "session");
+          const u = await withTimeout(fetchSessionUser(), 12_000, "session");
           if (u?.userId) {
             rememberLastUserId(u.userId);
-            await offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
-            void mirrorSessionUser(u);
+            const needsSchool = u.role && u.role !== "super_admin";
+            if (!needsSchool || u.schoolId) {
+              await offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
+              void mirrorSessionUser(u);
+            }
           }
           return u;
         },
         { fallback: null },
       );
     },
-    staleTime: 60_000,
+    staleTime: 15_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: true,
     refetchOnMount: "always",
-    retry: 1,
-    retryDelay: 400,
+    retry: 2,
+    retryDelay: 600,
   });
 }
 
