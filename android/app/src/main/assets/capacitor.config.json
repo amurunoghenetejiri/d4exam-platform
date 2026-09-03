@@ -3,10 +3,10 @@
   "appName": "D4EXAM",
   "webDir": "dist",
   "server": {
+    "url": "https://d4exam-platform.vercel.app",
     "androidScheme": "https",
     "errorPath": "offline.html"
   },
-
   "android": {
     "backgroundColor": "#0b1b3a"
   },

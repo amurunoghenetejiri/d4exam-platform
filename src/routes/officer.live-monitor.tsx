@@ -613,7 +613,7 @@ function Page() {
         const { data, error } = await supabase.from("examinations").select(sel).eq("school_id", schoolId!).in("id", ids);
         if (!error) {
           for (const r of data ?? []) {
-            const row = r as unknown as { id: string; title?: string | null; courses?: { code?: string; name?: string } | { code?: string; name?: string }[] | null };
+            const row = r as { id: string; title?: string | null; courses?: { code?: string; name?: string } | { code?: string; name?: string }[] | null };
             const c = Array.isArray(row.courses) ? row.courses[0] : row.courses;
             map[row.id] = { title: String(row.title || "").trim(), courseCode: String(c?.code || "").trim(), courseName: String(c?.name || "").trim() };
           }
@@ -745,7 +745,7 @@ function Page() {
         const frameName = String(frameId?.studentName || "").trim();
         const fromJoin = studentDisplayName(a);
         const resolvedName = typeof resolved === "string"
-          ? (resolved as string).trim()
+          ? resolved.trim()
           : String((resolved as { name?: string } | undefined)?.name || "").trim();
         // Prefer frame/meta first while joins load — live identity from student device
         const nameCandidates = [frameName, metaName, resolvedName, fromIdMap, fromMatricMap, fromJoin].filter(

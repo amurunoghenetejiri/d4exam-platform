@@ -26,16 +26,9 @@ export type SaveCbtResultServerInput = {
 };
 
 export const saveCbtResultServer = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown): SaveCbtResultServerInput => {
-    const raw =
-      data && typeof data === "object" && "data" in (data as object)
-        ? (data as { data: unknown }).data
-        : data;
-    return raw as SaveCbtResultServerInput;
-  })
   .middleware([requireSupabaseAuth])
   .handler(async ({ data, context }): Promise<{ resultId: string | null; error: string | null }> => {
-    const input = data;
+    const input = data as SaveCbtResultServerInput;
     if (!input?.examId || !input?.studentId || !input?.schoolId) {
       return { resultId: null, error: "Missing exam, student, or school id." };
     }
@@ -179,16 +172,9 @@ export const saveCbtResultServer = createServerFn({ method: "POST" })
 
 /** Fetch a student's own result by result id or exam id (service role). */
 export const getMyCbtResultServer = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown): { id: string; studentId?: string } => {
-    const raw =
-      data && typeof data === "object" && "data" in (data as object)
-        ? (data as { data: unknown }).data
-        : data;
-    return raw as { id: string; studentId?: string };
-  })
   .middleware([requireSupabaseAuth])
   .handler(async ({ data, context }): Promise<{ result: Record<string, unknown> | null; error: string | null }> => {
-    const input = data;
+    const input = data as { id: string; studentId?: string };
     if (!input?.id) return { result: null, error: "Missing id" };
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");

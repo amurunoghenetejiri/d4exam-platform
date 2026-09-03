@@ -120,7 +120,7 @@ function Page() {
         "id, title, status, duration_minutes, scheduled_start, scheduled_end, description, course_id, created_by, created_at, courses(code, name)";
       const basic =
         "id, title, status, duration_minutes, scheduled_start, scheduled_end, description, course_id, created_by, created_at";
-      let res: { data: unknown; error: unknown } = await supabase
+      let res = await supabase
         .from("examinations")
         .select(full)
         .eq("school_id", schoolId)
@@ -138,7 +138,7 @@ function Page() {
         console.warn("[officer-approvals] list", res.error);
         return [] as ExamRow[];
       }
-      return (Array.isArray(res.data) ? res.data : []) as unknown as ExamRow[];
+      return (Array.isArray(res.data) ? res.data : []) as ExamRow[];
     },
   });
 

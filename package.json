@@ -10,12 +10,9 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "cap:prepare": "node scripts/prepare-capacitor-dist.mjs",
-    "cap:build": "node scripts/prepare-capacitor-dist.mjs && npx cap sync android",
-    "cap:sync": "node scripts/prepare-capacitor-dist.mjs && npx cap sync android",
+    "cap:sync": "npm run build && npx cap sync android",
     "cap:open": "npx cap open android",
     "cap:copy": "npx cap copy android"
-
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

@@ -6,8 +6,6 @@
  * Confidence filtering + IoU NMS to reduce false multi-face.
  */
 
-const LOCAL_WASM_BASE = "/mediapipe/wasm";
-const LOCAL_MODEL_URL = "/mediapipe/models/blaze_face_short_range.tflite";
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
@@ -139,73 +137,47 @@ function createNative(): FaceEngine | null {
   }
 }
 
-type VisionModule = {
-  FaceDetector: {
-    createFromOptions: (
-      fileset: unknown,
-      opts: unknown,
-    ) => Promise<{
-      detect?: (input: HTMLCanvasElement | HTMLVideoElement) => { detections?: unknown[] };
-      detectForVideo?: (video: HTMLVideoElement, ts: number) => { detections?: unknown[] };
-      close?: () => void;
-    }>;
-  };
-  FilesetResolver: {
-    forVisionTasks: (base: string) => Promise<unknown>;
-  };
-};
-
-async function loadVision(): Promise<VisionModule> {
-  // Local (bundled with the app → works offline / in the native shell).
-  try {
-    return (await import("@mediapipe/tasks-vision")) as unknown as VisionModule;
-  } catch {
-    /* fall through to CDN */
-  }
-  const cdnUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
-  return (await import(/* @vite-ignore */ cdnUrl)) as VisionModule;
-}
-
 async function createMediapipe(): Promise<FaceEngine | null> {
   try {
-    const { FaceDetector, FilesetResolver } = await loadVision();
-
-    // Prefer the assets bundled in public/mediapipe; only fall back to CDN.
-    let fileset: unknown;
-    let modelUrl = LOCAL_MODEL_URL;
-    try {
-      fileset = await FilesetResolver.forVisionTasks(LOCAL_WASM_BASE);
-    } catch {
-      fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-      modelUrl = MODEL_URL;
-    }
-
+    const cdnUrl = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
+    const vision = await import(/* @vite-ignore */ cdnUrl);
+    const { FaceDetector, FilesetResolver } = vision as {
+      FaceDetector: {
+        createFromOptions: (
+          fileset: unknown,
+          opts: unknown,
+        ) => Promise<{
+          detect?: (input: HTMLCanvasElement | HTMLVideoElement) => { detections?: unknown[] };
+          detectForVideo?: (video: HTMLVideoElement, ts: number) => { detections?: unknown[] };
+          close?: () => void;
+        }>;
+      };
+      FilesetResolver: {
+        forVisionTasks: (base: string) => Promise<unknown>;
+      };
+    };
+    const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
     let mode: "IMAGE" | "VIDEO" = "IMAGE";
     let detector: {
       detect?: (input: HTMLCanvasElement | HTMLVideoElement) => { detections?: unknown[] };
       detectForVideo?: (video: HTMLVideoElement, ts: number) => { detections?: unknown[] };
       close?: () => void;
     };
-    const build = async (runningMode: "IMAGE" | "VIDEO", model: string) =>
-      FaceDetector.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: model, delegate: "CPU" },
-        runningMode,
+    try {
+      detector = await FaceDetector.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
+        runningMode: "IMAGE",
         minDetectionConfidence: WEAK_SCORE,
       });
-    try {
-      detector = await build("IMAGE", modelUrl);
       mode = "IMAGE";
     } catch {
-      try {
-        detector = await build("VIDEO", modelUrl);
-        mode = "VIDEO";
-      } catch {
-        // Local model missing → last-resort remote model.
-        detector = await build("IMAGE", MODEL_URL);
-        mode = "IMAGE";
-      }
+      detector = await FaceDetector.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
+        runningMode: "VIDEO",
+        minDetectionConfidence: WEAK_SCORE,
+      });
+      mode = "VIDEO";
     }
-
     const canvas =
       typeof document !== "undefined" ? document.createElement("canvas") : null;
     const ctx = canvas?.getContext("2d", { willReadFrequently: true }) ?? null;

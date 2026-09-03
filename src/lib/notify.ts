@@ -337,7 +337,7 @@ async function courseStudentAuthIds(courseId: string | null | undefined, schoolI
           .select("student_id")
           .eq("course_id", courseId)
           .limit(3000);
-        for (const r of (enroll ?? []) as unknown[]) {
+        for (const r of enroll ?? []) {
           const id = (r as { student_id?: string }).student_id;
           if (id) sids.push(id);
         }

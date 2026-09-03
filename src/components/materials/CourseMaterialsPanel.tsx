@@ -83,9 +83,9 @@ export function CourseMaterialsPanel({
           .order("created_at", { ascending: false })
           .limit(400);
         if (retry.error) throw retry.error;
-        data = retry.data as unknown as typeof data;
+        data = retry.data;
       }
-      return (data ?? []) as unknown as MaterialRow[];
+      return (data ?? []) as MaterialRow[];
     },
   });
 
@@ -141,10 +141,10 @@ export function CourseMaterialsPanel({
   }
 
   async function submitUpload() {
-    if (!session?.userId || !schoolId) { toast.error("Sign in required."); return; }
-    if (!courseId) { toast.error("Select a subject/course."); return; }
+    if (!session?.userId || !schoolId) return toast.error("Sign in required.");
+    if (!courseId) return toast.error("Select a subject/course.");
     const baseTitle = title.trim();
-    if (!baseTitle && !files.length && !description.trim()) { toast.error("Add a title or file."); return; }
+    if (!baseTitle && !files.length && !description.trim()) return toast.error("Add a title or file.");
     setBusy(true); setProgress(8);
     try {
       const rows: Record<string, unknown>[] = [];
@@ -206,7 +206,7 @@ export function CourseMaterialsPanel({
       title: title.trim() || editItem.title, description: description.trim() || null,
       material_type: materialType, tags: tags.trim() || null, course_id: courseId || editItem.course_id,
     } as never).eq("id", editItem.id).eq("uploaded_by", session.userId);
-    if (error) { toast.error(error.message); return; }
+    if (error) return toast.error(error.message);
     toast.success("Material updated.");
     setEditItem(null); setUploadOpen(false);
     await qc.invalidateQueries({ queryKey: ["course-materials"] });
@@ -215,7 +215,7 @@ export function CourseMaterialsPanel({
   async function remove(id: string) {
     if (!window.confirm("Delete this material?")) return;
     const { error } = await supabase.from("course_materials").delete().eq("id", id);
-    if (error) { toast.error(error.message); return; }
+    if (error) return toast.error(error.message);
     toast.success("Deleted");
     if (viewer?.id === id) setViewer(null);
     setMenuId(null);

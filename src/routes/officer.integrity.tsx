@@ -59,7 +59,7 @@ function Page() {
         "id, exam_id, student_id, status, tab_switch_count, fullscreen_exit_count, total_score, security_review_status, submitted_at, examinations(title), students(matric_number, profiles(full_name))";
       const basic =
         "id, exam_id, student_id, status, tab_switch_count, fullscreen_exit_count, total_score, security_review_status, submitted_at, examinations(title), students(matric_number)";
-      let res: { data: unknown; error: unknown } = await supabase
+      let res = await supabase
         .from("exam_attempts")
         .select(full)
         .eq("school_id", schoolId)
@@ -76,7 +76,7 @@ function Page() {
           .limit(80);
       }
       if (res.error) throw res.error;
-      return (res.data ?? []) as unknown as AttemptRow[];
+      return (res.data ?? []) as AttemptRow[];
     },
   });
 

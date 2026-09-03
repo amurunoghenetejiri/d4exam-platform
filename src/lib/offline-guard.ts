@@ -27,26 +27,6 @@ export function assertOnlineActionSync(): string | null {
   return null;
 }
 
-/** Exact copy required for CBT examinations (start / write). */
-export const EXAM_ONLINE_MESSAGE =
-  "Internet connection is required to start and take an examination.";
-
-/**
- * Real reachability probe for CBT entry. Returns null when online,
- * otherwise the exam-specific message.
- */
-export async function assertExamOnline(): Promise<string | null> {
-  if (!isOnlineNow()) return EXAM_ONLINE_MESSAGE;
-  try {
-    const { internet } = await resolveConnectivity();
-    if (!internet) return EXAM_ONLINE_MESSAGE;
-  } catch {
-    return EXAM_ONLINE_MESSAGE;
-  }
-  return null;
-}
-
-
 /** Features available offline (cached). Documentation helper. */
 export const OFFLINE_SUPPORTED = [
   "dashboard_lists",
