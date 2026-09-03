@@ -333,7 +333,7 @@ function Page() {
   const attemptsQ = useQuery({
     queryKey: ["officer-live-attempts", schoolId],
     enabled: Boolean(schoolId),
-    refetchInterval: 3_000,
+    refetchInterval: 5_000,
     queryFn: async () => {
       if (!schoolId) return [] as AttemptRow[];
       const selects = [

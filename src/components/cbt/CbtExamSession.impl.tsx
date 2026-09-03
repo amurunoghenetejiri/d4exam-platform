@@ -215,6 +215,7 @@ export function CbtExamPage() {
   }, [security.requireCamera, security.requireMicrophone]);
 
   const clearTimedPause = useCallback(() => {
+    if (officerPauseRef.current) return;
     pauseUntilRef.current = null;
     setPauseRemainingSec(null);
     setPaused(false);
