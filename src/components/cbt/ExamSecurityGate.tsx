@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { assertOnlineActionSync } from "@/lib/offline-guard";
+import { assertExamOnline } from "@/lib/offline-guard";
 import { toast } from "sonner";
 import {
   Camera,

@@ -14,6 +14,9 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { processDueExamReminders } from "@/lib/notify";
 import { assertOnline } from "@/lib/require-online";
+import { assertExamOnline } from "@/lib/offline-guard";
+import { toast } from "sonner";
+
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 

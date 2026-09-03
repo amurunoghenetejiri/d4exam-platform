@@ -111,7 +111,7 @@ export async function namedTeacherExamDecision(opts: {
   let copy = Msg.teacherExamApproved({ teacherName, examTitle: opts.examTitle });
   if (d.includes("reject")) {
     type = "exam_rejected";
-    copy = Msg.teacherExamRejected({ teacherName, examTitle: opts.examTitle, note });
+    copy = Msg.teacherExamRejected({ teacherName, examTitle: opts.examTitle, reason: note });
   } else if (d.includes("revision") || d.includes("change")) {
     type = "exam_revision_requested";
     copy = Msg.teacherExamRevisionRequested({ teacherName, examTitle: opts.examTitle, note });
