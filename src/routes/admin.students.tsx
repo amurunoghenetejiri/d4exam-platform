@@ -92,7 +92,7 @@ function Page() {
             .order("matric_number", { ascending: true, nullsFirst: false })
             .range(from, from + pageSize - 1);
           if (error) throw error;
-          const chunk = (data ?? []) as StudentRow[];
+          const chunk = (data ?? []) as unknown as StudentRow[];
           all.push(...chunk);
           if (chunk.length < pageSize) break;
           from += pageSize;
