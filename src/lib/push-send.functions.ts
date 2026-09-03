@@ -343,7 +343,7 @@ export const sendTestNotificationToSelf = createServerFn({ method: "POST" })
       role: String(o.role || ""),
     };
   })
-  .handler(async ({ data }: { data: { userId: string; role: string } }) => {
+  .handler(async ({ data }) => {
     if (!data.userId) return { ok: false as const, error: "userId required" };
 
     const link =

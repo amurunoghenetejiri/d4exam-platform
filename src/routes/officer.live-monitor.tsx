@@ -745,7 +745,7 @@ function Page() {
         const frameName = String(frameId?.studentName || "").trim();
         const fromJoin = studentDisplayName(a);
         const resolvedName = typeof resolved === "string"
-          ? resolved.trim()
+          ? (resolved as string).trim()
           : String((resolved as { name?: string } | undefined)?.name || "").trim();
         // Prefer frame/meta first while joins load — live identity from student device
         const nameCandidates = [frameName, metaName, resolvedName, fromIdMap, fromMatricMap, fromJoin].filter(

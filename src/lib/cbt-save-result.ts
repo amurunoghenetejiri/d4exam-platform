@@ -69,11 +69,11 @@ export async function saveCbtResult(input: {
       const { data: bankRows, error } = await supabase.from("questions").select(cols).in("id", qIds);
       if (error) { console.warn("[cbt-save] questions bank select", error.message); continue; }
       for (const row of bankRows ?? []) {
-        bankById.set(String((row as { id: string }).id), {
-          correct_answer: (row as { correct_answer: string | null }).correct_answer,
-          options: (row as { options?: unknown }).options,
-          explanation: (row as { explanation?: string | null }).explanation ?? null,
-          marks: (row as { marks: number | null }).marks,
+        bankById.set(String((row as unknown as { id: string }).id), {
+          correct_answer: (row as unknown as { correct_answer: string | null }).correct_answer,
+          options: (row as unknown as { options?: unknown }).options,
+          explanation: (row as unknown as { explanation?: string | null }).explanation ?? null,
+          marks: (row as unknown as { marks: number | null }).marks,
         });
       }
       if (bankById.size) break;
