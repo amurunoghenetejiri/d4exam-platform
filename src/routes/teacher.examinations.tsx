@@ -40,6 +40,8 @@ import {
   securitySummaryLines,
   stripInternalMarkers,
   toExamSettingsRow,
+  META_MARKER,
+  SECURITY_MARKER,
 } from "@/lib/exam-security";
 import { embedExamMeta, parseExamMeta, assessmentKindLabel, type AssessmentKind } from "@/lib/exam-meta";
 import { namedOfficersExamSubmitted as notifyOfficersExamSubmitted } from "@/lib/notify-named";
