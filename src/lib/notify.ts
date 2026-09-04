@@ -8,7 +8,11 @@
  * - Every successful insert fires dispatchPushToUser.
  */
 import { supabase } from "@/integrations/supabase/client";
-import { sbLoose } from "@/lib/supabase-loose";
+import * as Msg from "@/lib/notify-messages";
+
+function templateLink(copy: Msg.NotificationTemplate, fallback: string): string {
+  return (copy.action?.link || fallback || "").trim() || fallback;
+}
 
 export type NotifyType =
   | "info"
@@ -292,6 +296,21 @@ async function studentDisplayName(studentId: string | null | undefined): Promise
   }
 }
 
+async function studentDisplayNameFromAuth(authUserId: string): Promise<string> {
+  if (!authUserId) return "";
+  try {
+    const { data } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("auth_user_id", authUserId)
+      .maybeSingle();
+    return String((data as { full_name?: string } | null)?.full_name || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+
 async function authUserDisplayNames(authIds: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   const uniq = [...new Set(authIds.filter(Boolean))];
@@ -332,7 +351,7 @@ async function courseStudentAuthIds(courseId: string | null | undefined, schoolI
         if (id) sids.push(id);
       }
       if (!sids.length) {
-        const { data: enroll } = await sbLoose
+        const { data: enroll } = await supabase
           .from("course_enrollments")
           .select("student_id")
           .eq("course_id", courseId)
@@ -372,48 +391,37 @@ async function courseStudentAuthIds(courseId: string | null | undefined, schoolI
 
 export async function notifyOfficersStudentResultPending(opts: {
   schoolId: string;
-  examId: string;
-  examTitle?: string;
-  studentName?: string;
+  examId?: string | null;
+  examTitle: string;
+  studentName: string;
   studentId?: string | null;
-  resultId?: string | null;
-  published?: boolean;
+  courseCode?: string | null;
+  courseTitle?: string | null;
 }): Promise<void> {
   try {
-    if (opts.published) return;
     const officers = await listOfficerUserIds(opts.schoolId);
-    const admins = await listAdminUserIds(opts.schoolId);
-    const title = opts.examTitle || (await examTitleById(opts.examId));
-    const name = opts.studentName || (await studentDisplayName(opts.studentId));
+    if (!officers.length) return;
+    const link = "/officer/results";
+    const copy = Msg.officerResultAwaitingReview({
+      studentName: opts.studentName,
+      examTitle: opts.examTitle,
+      courseCode: opts.courseCode,
+      courseTitle: opts.courseTitle,
+      link,
+    });
     await notifyMany(
-      [...new Set([...officers, ...admins])].map((uid) => ({
+      officers.map((uid) => ({
         recipientUserId: uid,
         schoolId: opts.schoolId,
-        title: "📊 Result Awaiting Review",
-        message: `${name} submitted “${title}”. Review and release when ready.`,
+        title: copy.title,
+        message: copy.message,
         type: "result_pending_release",
-        link: officers.includes(uid) ? "/officer/results" : "/admin/results",
+        link: templateLink(copy, link),
         entityType: "examination",
-        entityId: opts.examId,
-        dedupeMinutes: 30,
+        entityId: opts.examId || opts.examTitle,
+        dedupeMinutes: 15,
       })),
     );
-    if (opts.studentId) {
-      const authIds = await studentIdsToAuthUserIds([opts.studentId]);
-      for (const uid of authIds) {
-        await notifyUser({
-          recipientUserId: uid,
-          schoolId: opts.schoolId,
-          title: "🎓 Examination Submitted",
-          message: `Your “${title}” has been successfully submitted.`,
-          type: "exam_submitted",
-          link: "/student/results",
-          entityType: "examination",
-          entityId: opts.examId,
-          dedupeMinutes: 60,
-        });
-      }
-    }
   } catch (e) {
     console.warn("[notify] notifyOfficersStudentResultPending failed", e);
   }
@@ -424,15 +432,34 @@ export async function notifyStudentResultPublished(opts: {
   schoolId?: string | null;
   examId: string;
   examTitle: string;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  studentName?: string | null;
+  username?: string | null;
+  officerName?: string | null;
 }): Promise<void> {
   try {
+    const link = "/student/results";
+    const name =
+      (opts.studentName || "").trim() ||
+      (await studentDisplayNameFromAuth(opts.studentUserId)) ||
+      "Student";
+    const copy = Msg.studentResultReady({
+      studentName: name,
+      username: opts.username,
+      examTitle: opts.examTitle,
+      courseCode: opts.courseCode,
+      courseTitle: opts.courseTitle,
+      officerName: opts.officerName,
+      link,
+    });
     await notifyUser({
       recipientUserId: opts.studentUserId,
       schoolId: opts.schoolId,
-      title: "🎉 Result Released",
-      message: `Your result for “${opts.examTitle}” is now available.`,
+      title: copy.title,
+      message: copy.message,
       type: "result_published",
-      link: "/student/results",
+      link: templateLink(copy, link),
       entityType: "examination",
       entityId: opts.examId,
     });
@@ -445,24 +472,40 @@ export async function notifyStudentsResultsReleased(opts: {
   schoolId: string;
   examId?: string;
   examTitle: string;
+  courseCode?: string | null;
+  courseTitle?: string | null;
   studentAuthUserIds?: string[];
   studentIds?: string[];
 }): Promise<void> {
   try {
     const authIds = await resolveStudentAuthIds(opts);
     const examId = opts.examId || "released";
+    const link = "/student/results";
+    const names = await Promise.all(
+      authIds.map(async (uid) => [uid, await studentDisplayNameFromAuth(uid)] as const),
+    );
+    const nameMap = new Map(names);
     await notifyMany(
-      authIds.map((uid) => ({
-        recipientUserId: uid,
-        schoolId: opts.schoolId,
-        title: "🎉 Result Released",
-        message: `Student, your ${opts.examTitle} result has been released. Tap below to view your result.`,
-        type: "result_published",
-        link: "/student/results",
-        entityType: "examination",
-        entityId: examId,
-        dedupeMinutes: 30,
-      })),
+      authIds.map((uid) => {
+        const copy = Msg.studentResultReady({
+          studentName: nameMap.get(uid) || "Student",
+          examTitle: opts.examTitle,
+          courseCode: opts.courseCode,
+          courseTitle: opts.courseTitle,
+          link,
+        });
+        return {
+          recipientUserId: uid,
+          schoolId: opts.schoolId,
+          title: copy.title,
+          message: copy.message,
+          type: "result_published",
+          link: templateLink(copy, link),
+          entityType: "examination",
+          entityId: examId,
+          dedupeMinutes: 30,
+        };
+      }),
     );
   } catch (e) {
     console.warn("[notify] notifyStudentsResultsReleased failed", e);
@@ -474,15 +517,32 @@ export async function notifyStudentExamSubmitted(opts: {
   schoolId?: string | null;
   examId: string;
   examTitle: string;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  studentName?: string | null;
+  username?: string | null;
 }): Promise<void> {
   try {
+    const link = "/student/examinations";
+    const name =
+      (opts.studentName || "").trim() ||
+      (await studentDisplayNameFromAuth(opts.studentUserId)) ||
+      "Student";
+    const copy = Msg.studentExamSubmitted({
+      studentName: name,
+      username: opts.username,
+      examTitle: opts.examTitle,
+      courseCode: opts.courseCode,
+      courseTitle: opts.courseTitle,
+      link,
+    });
     await notifyUser({
       recipientUserId: opts.studentUserId,
       schoolId: opts.schoolId,
-      title: "🎓 Examination Submitted",
-      message: `Student, your ${opts.examTitle} examination has been submitted successfully.`,
+      title: copy.title,
+      message: copy.message,
       type: "exam_submitted",
-      link: "/student/results",
+      link: templateLink(copy, link),
       entityType: "examination",
       entityId: opts.examId,
     });
@@ -496,8 +556,10 @@ export async function notifyStudentOfficerWarning(opts: {
   studentId?: string | null;
   schoolId?: string | null;
   examId?: string | null;
-  examTitle?: string | null;
-  message?: string | null;
+  message: string;
+  violationCount?: number | null;
+  studentName?: string | null;
+  username?: string | null;
 }): Promise<void> {
   try {
     let uid = (opts.studentUserId || "").trim();
@@ -505,19 +567,29 @@ export async function notifyStudentOfficerWarning(opts: {
       const ids = await studentIdsToAuthUserIds([opts.studentId]);
       uid = ids[0] || "";
     }
-    if (!uid) {
-      console.warn("[notify] notifyStudentOfficerWarning: no auth user", opts.studentId);
-      return;
-    }
+    if (!uid) return;
+    const link = opts.examId ? `/student/exam/${opts.examId}` : "/student/examinations";
+    const name =
+      (opts.studentName || "").trim() ||
+      (await studentDisplayNameFromAuth(uid)) ||
+      "Student";
+    const copy = Msg.studentExamWarning({
+      studentName: name,
+      username: opts.username,
+      message: opts.message,
+      violationCount: opts.violationCount,
+      link,
+    });
     await notifyUser({
       recipientUserId: uid,
       schoolId: opts.schoolId,
-      title: "⚠️ Officer Warning",
-      message: opts.message?.trim() || "An examination officer sent you a warning during your exam. Stay focused.",
+      title: copy.title,
+      message: copy.message,
       type: "officer_warning",
-      link: "/student/examinations",
-      entityType: opts.examId ? "examination" : null,
-      entityId: opts.examId ?? null,
+      link: templateLink(copy, link),
+      entityType: "examination",
+      entityId: opts.examId || undefined,
+      dedupeMinutes: 2,
     });
   } catch (e) {
     console.warn("[notify] notifyStudentOfficerWarning failed", e);
@@ -534,52 +606,87 @@ export async function notifyStudentsResultsHeld(opts: {
 }): Promise<void> {
   try {
     const authIds = await resolveStudentAuthIds(opts);
-    const reason = opts.reason?.trim() ? ` Reason: ${opts.reason.trim()}` : "";
+    const link = "/student/results";
+    const reasonBody = (opts.reason || "").trim();
     await notifyMany(
-      authIds.map((uid) => ({
-        recipientUserId: uid,
-        schoolId: opts.schoolId,
-        title: "🔒 Result Held",
-        message: `Your result for “${opts.examTitle}” has been held by the Officer.${reason}`,
-        type: "result_pending_release",
-        link: "/student/results",
-        entityType: "examination",
-        entityId: opts.examId || "held",
-        dedupeMinutes: 30,
-      })),
+      authIds.map((uid) => {
+        let body =
+          "Your examination result has been held by the Departmental Officer.\n\n" +
+          `📝 Examination: ${opts.examTitle}`;
+        if (reasonBody) body += `\n\nReason:\n${reasonBody}`;
+        body += "\n\nPlease check D4EXAM for further instructions.";
+        const copy = Msg.roleNotification({
+          name: "Student",
+          role: "Student",
+          title: "Result Held",
+          message: body,
+          link,
+          actionLabel: "VIEW RESULT",
+        });
+        return {
+          recipientUserId: uid,
+          schoolId: opts.schoolId,
+          title: copy.title,
+          message: copy.message,
+          type: "result_pending_release",
+          link: templateLink(copy, link),
+          entityType: "examination",
+          entityId: opts.examId || "held",
+          dedupeMinutes: 30,
+        };
+      }),
     );
   } catch (e) {
     console.warn("[notify] notifyStudentsResultsHeld failed", e);
   }
 }
 
+
 export async function notifyStudentsExamRescheduled(opts: {
   schoolId: string;
-  examId?: string;
+  studentIds: string[];
   examTitle: string;
-  studentAuthUserIds?: string[];
-  studentIds?: string[];
-  whenLabel?: string | null;
-  windowLabel?: string | null;
   reason?: string | null;
+  windowLabel?: string | null;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  start?: string | null;
+  end?: string | null;
 }): Promise<void> {
   try {
-    const authIds = await resolveStudentAuthIds(opts);
-    const when = opts.whenLabel || opts.windowLabel;
-    const whenTxt = when ? ` New time: ${when}.` : "";
-    const reason = opts.reason?.trim() ? ` ${opts.reason.trim()}` : "";
+    const authIds = await studentIdsToAuthUserIds(opts.studentIds);
+    if (!authIds.length) return;
+    const link = "/student/examinations";
     await notifyMany(
-      authIds.map((uid) => ({
-        recipientUserId: uid,
-        schoolId: opts.schoolId,
-        title: "📅 Examination Rescheduled",
-        message: `“${opts.examTitle}” was rescheduled.${whenTxt}${reason}`,
-        type: "exam_scheduled",
-        link: "/student/examinations",
-        entityType: "examination",
-        entityId: opts.examId || "rescheduled",
-        dedupeMinutes: 30,
-      })),
+      authIds.map((uid) => {
+        const copy = Msg.studentExamRescheduled({
+          studentName: "Student",
+          examTitle: opts.examTitle,
+          courseCode: opts.courseCode,
+          courseTitle: opts.courseTitle,
+          start: opts.start,
+          end: opts.end,
+          link,
+        });
+        let message = copy.message;
+        if (opts.windowLabel) message += `
+
+New window: ${opts.windowLabel}`;
+        if (opts.reason) message += `
+
+Note: ${opts.reason}`;
+        return {
+          recipientUserId: uid,
+          schoolId: opts.schoolId,
+          title: copy.title,
+          message,
+          type: "exam_scheduled",
+          link: templateLink(copy, link),
+          entityType: "examination",
+          entityId: opts.examTitle,
+          dedupeMinutes: 20,
+        };
+      }),
     );
   } catch (e) {
     console.warn("[notify] notifyStudentsExamRescheduled failed", e);
@@ -590,25 +697,49 @@ export async function notifyStudentsRewriteAllowed(opts: {
   schoolId: string;
   examId?: string;
   examTitle: string;
+  courseCode?: string | null;
+  courseTitle?: string | null;
   studentAuthUserIds?: string[];
   studentIds?: string[];
   reason?: string | null;
 }): Promise<void> {
   try {
     const authIds = await resolveStudentAuthIds(opts);
-    const reason = opts.reason?.trim() ? ` Reason: ${opts.reason.trim()}` : "";
+    const link = "/student/examinations";
+    const reason = (opts.reason || "").trim();
     await notifyMany(
-      authIds.map((uid) => ({
-        recipientUserId: uid,
-        schoolId: opts.schoolId,
-        title: "📝 Rewrite Required",
-        message: `You are required to rewrite “${opts.examTitle}”.${reason}`,
-        type: "exam_available",
-        link: "/student/examinations",
-        entityType: "examination",
-        entityId: opts.examId || "rewrite",
-        dedupeMinutes: 30,
-      })),
+      authIds.map((uid) => {
+        const copy = Msg.roleNotification({
+          name: "Student",
+          role: "Student",
+          title: "Rewrite Required",
+          message:
+            `You are required to rewrite your examination.
+
+` +
+            `📝 Examination: ${opts.examTitle}` +
+            (reason ? `
+
+Reason:
+${reason}` : "") +
+            `
+
+Please open D4EXAM to start when ready.`,
+          link,
+          actionLabel: "VIEW EXAM",
+        });
+        return {
+          recipientUserId: uid,
+          schoolId: opts.schoolId,
+          title: copy.title,
+          message: copy.message,
+          type: "exam_available",
+          link: templateLink(copy, link),
+          entityType: "examination",
+          entityId: opts.examId || "rewrite",
+          dedupeMinutes: 30,
+        };
+      }),
     );
   } catch (e) {
     console.warn("[notify] notifyStudentsRewriteAllowed failed", e);
@@ -621,6 +752,10 @@ export async function notifyStudentResultTerminated(opts: {
   schoolId?: string | null;
   examId?: string;
   examTitle: string;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  studentName?: string | null;
+  username?: string | null;
   reason?: string | null;
 }): Promise<void> {
   try {
@@ -630,14 +765,27 @@ export async function notifyStudentResultTerminated(opts: {
       uid = ids[0];
     }
     if (!uid) return;
-    const reason = opts.reason?.trim() ? ` Reason: ${opts.reason.trim()}` : "";
+    const link = "/student/results";
+    const name =
+      (opts.studentName || "").trim() ||
+      (await studentDisplayNameFromAuth(uid)) ||
+      "Student";
+    const copy = Msg.studentExamTerminated({
+      studentName: name,
+      username: opts.username,
+      examTitle: opts.examTitle,
+      courseCode: opts.courseCode,
+      courseTitle: opts.courseTitle,
+      reason: opts.reason,
+      link,
+    });
     await notifyUser({
       recipientUserId: uid,
       schoolId: opts.schoolId,
-      title: "⚠️ Result Terminated",
-      message: `Your result for “${opts.examTitle}” has been terminated.${reason}`,
+      title: copy.title,
+      message: copy.message,
       type: "warning",
-      link: "/student/results",
+      link: templateLink(copy, link),
       entityType: "examination",
       entityId: opts.examId || null,
     });
@@ -651,28 +799,37 @@ export async function notifyOfficersExamSubmitted(opts: {
   examId: string;
   examTitle: string;
   teacherName?: string | null;
+  courseCode?: string | null;
+  courseTitle?: string | null;
   courseLabel?: string | null;
 }): Promise<void> {
   try {
-    const [officers, admins] = await Promise.all([
-      listOfficerUserIds(opts.schoolId),
-      listAdminUserIds(opts.schoolId),
-    ]);
-    const recipients = [...new Set([...officers, ...admins])];
-    const who = opts.teacherName ? ` by ${opts.teacherName}` : "";
-    const course = opts.courseLabel ? ` (${opts.courseLabel})` : "";
+    const officers = await listOfficerUserIds(opts.schoolId);
+    if (!officers.length) return;
+    const teacherName = (opts.teacherName || "A teacher").trim();
     await notifyMany(
-      recipients.map((uid) => ({
-        recipientUserId: uid,
-        schoolId: opts.schoolId,
-        title: "📝 Examination Submitted for Approval",
-        message: `${opts.teacherName ? opts.teacherName + " has submitted" : "A teacher submitted"} “${opts.examTitle}”${course} for approval.`,
-        type: "exam_submitted",
-        link: officers.includes(uid) ? "/officer/approvals" : "/admin/examinations",
-        entityType: "examination",
-        entityId: opts.examId,
-        dedupeMinutes: 10,
-      })),
+      officers.map((uid) => {
+        const link = "/officer/approvals";
+        const copy = Msg.officerExamSubmittedForReview({
+          teacherName,
+          examTitle: opts.examTitle,
+          courseCode: opts.courseCode ?? opts.courseLabel,
+          courseTitle: opts.courseTitle,
+          courseLabel: opts.courseLabel,
+          link,
+        });
+        return {
+          recipientUserId: uid,
+          schoolId: opts.schoolId,
+          title: copy.title,
+          message: copy.message,
+          type: "exam_submitted",
+          link: templateLink(copy, link),
+          entityType: "examination",
+          entityId: opts.examId,
+          dedupeMinutes: 10,
+        };
+      }),
     );
   } catch (e) {
     console.warn("[notify] notifyOfficersExamSubmitted failed", e);
@@ -684,54 +841,59 @@ export async function notifyTeacherExamDecision(opts: {
   schoolId?: string | null;
   examId: string;
   examTitle: string;
-  decision: string;
+  decision: "approved" | "rejected" | "revision_requested";
   note?: string | null;
-  comment?: string | null;
-  scheduleNote?: string | null;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  officerName?: string | null;
 }): Promise<void> {
-  const d = String(opts.decision || "").toLowerCase();
-  const note = (opts.note || opts.comment || "").trim();
-  let title = "✅ Examination Approved";
-  let type: NotifyType = "exam_approved";
-  let message = `Your “${opts.examTitle}” has been approved.`;
-  if (d.includes("reject")) {
-    title = "❌ Examination Rejected";
-    type = "exam_rejected";
-    message = `Your “${opts.examTitle}” was rejected.${note ? ` ${note}` : ""}`;
-  } else if (d.includes("revision") || d.includes("change")) {
-    title = "⚠️ Correction Required";
-    type = "exam_revision_requested";
-    message = `Your “${opts.examTitle}” requires correction.${note ? ` ${note}` : ""}`;
-  } else if (opts.scheduleNote) {
-    message = `Your “${opts.examTitle}” has been approved. ${opts.scheduleNote}`;
-  }
   try {
+    const link = "/teacher/examinations";
+    const teacherName = (await studentDisplayNameFromAuth(opts.teacherUserId)) || "Teacher";
+    let copy: Msg.NotificationTemplate;
+    let type: NotifyType = "info";
+    if (opts.decision === "approved") {
+      type = "exam_approved";
+      copy = Msg.teacherExamApproved({
+        teacherName,
+        examTitle: opts.examTitle,
+        courseCode: opts.courseCode,
+        courseTitle: opts.courseTitle,
+        officerName: opts.officerName,
+        link,
+      });
+    } else if (opts.decision === "rejected") {
+      type = "exam_rejected";
+      copy = Msg.teacherExamRejected({
+        teacherName,
+        examTitle: opts.examTitle,
+        courseCode: opts.courseCode,
+        courseTitle: opts.courseTitle,
+        reason: opts.note,
+        note: opts.note,
+        link,
+      });
+    } else {
+      type = "exam_revision_requested";
+      copy = Msg.teacherExamRevisionRequested({
+        teacherName,
+        examTitle: opts.examTitle,
+        courseCode: opts.courseCode,
+        courseTitle: opts.courseTitle,
+        note: opts.note,
+        link,
+      });
+    }
     await notifyUser({
       recipientUserId: opts.teacherUserId,
       schoolId: opts.schoolId,
-      title,
-      message,
+      title: copy.title,
+      message: copy.message,
       type,
-      link: "/teacher/examinations",
+      link: templateLink(copy, link),
       entityType: "examination",
       entityId: opts.examId,
     });
-    if (opts.schoolId && (type === "exam_approved" || type === "exam_rejected")) {
-      const admins = await listAdminUserIds(opts.schoolId);
-      await notifyMany(
-        admins.map((uid) => ({
-          recipientUserId: uid,
-          schoolId: opts.schoolId,
-          title: type === "exam_approved" ? "✅ Examination Approved" : "❌ Examination Rejected",
-          message: `“${opts.examTitle}” was ${type === "exam_approved" ? "approved" : "rejected"}.`,
-          type,
-          link: "/admin/examinations",
-          entityType: "examination",
-          entityId: opts.examId,
-          dedupeMinutes: 10,
-        })),
-      );
-    }
   } catch (e) {
     console.warn("[notify] notifyTeacherExamDecision failed", e);
   }
@@ -741,36 +903,44 @@ export async function notifyStudentsExamApproved(opts: {
   schoolId: string;
   examId: string;
   examTitle: string;
-  studentAuthUserIds?: string[];
   studentIds?: string[];
-  courseId?: string | null;
-  scheduledStart?: string | null;
+  studentAuthUserIds?: string[];
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  start?: string | null;
+  end?: string | null;
 }): Promise<void> {
   try {
-    let authIds = await resolveStudentAuthIds(opts);
-    if (!authIds.length && opts.courseId) authIds = await courseStudentAuthIds(opts.courseId, opts.schoolId);
-    if (!authIds.length) authIds = await courseStudentAuthIds(null, opts.schoolId);
-    const startLabel = opts.scheduledStart
-      ? new Date(opts.scheduledStart).toLocaleString(undefined, {
-          dateStyle: "medium",
-          timeStyle: "short",
-        })
-      : "";
-    const when = startLabel
-      ? ` It is scheduled for ${startLabel}.`
-      : "";
+    const authIds = await resolveStudentAuthIds(opts);
+    if (!authIds.length) return;
+    const link = "/student/examinations";
+    const namePairs = await Promise.all(
+      authIds.map(async (uid) => [uid, (await studentDisplayNameFromAuth(uid)) || "Student"] as const),
+    );
+    const nameMap = new Map(namePairs);
     await notifyMany(
-      authIds.map((uid) => ({
-        recipientUserId: uid,
-        schoolId: opts.schoolId,
-        title: "🎓 Examination Approved",
-        message: `Your “${opts.examTitle}” examination has been approved and is ready.${when} Open Examinations to prepare or start when it is time.`,
-        type: "exam_scheduled",
-        link: `/student/exam/${opts.examId}`,
-        entityType: "examination",
-        entityId: opts.examId,
-        dedupeMinutes: 60,
-      })),
+      authIds.map((uid) => {
+        const copy = Msg.studentExamScheduled({
+          studentName: nameMap.get(uid) || "Student",
+          examTitle: opts.examTitle,
+          courseCode: opts.courseCode,
+          courseTitle: opts.courseTitle,
+          start: opts.start,
+          end: opts.end,
+          link,
+        });
+        return {
+          recipientUserId: uid,
+          schoolId: opts.schoolId,
+          title: copy.title,
+          message: copy.message,
+          type: "exam_scheduled",
+          link: templateLink(copy, link),
+          entityType: "examination",
+          entityId: opts.examId,
+          dedupeMinutes: 30,
+        };
+      }),
     );
   } catch (e) {
     console.warn("[notify] notifyStudentsExamApproved failed", e);
@@ -782,18 +952,35 @@ export async function notifyStudentExamAvailable(opts: {
   schoolId?: string | null;
   examId: string;
   examTitle: string;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  studentName?: string | null;
+  username?: string | null;
 }): Promise<void> {
   try {
+    const link = `/student/exam/${opts.examId}`;
+    const name =
+      (opts.studentName || "").trim() ||
+      (await studentDisplayNameFromAuth(opts.studentUserId)) ||
+      "Student";
+    const copy = Msg.studentExamStartingNow({
+      studentName: name,
+      username: opts.username,
+      examTitle: opts.examTitle,
+      courseCode: opts.courseCode,
+      courseTitle: opts.courseTitle,
+      link,
+    });
     await notifyUser({
       recipientUserId: opts.studentUserId,
       schoolId: opts.schoolId,
-      title: "🚀 Examination Available",
-      message: `“${opts.examTitle}” is available for you to take.`,
+      title: copy.title,
+      message: copy.message,
       type: "exam_available",
-      link: "/student/examinations",
+      link: templateLink(copy, link),
       entityType: "examination",
       entityId: opts.examId,
-      dedupeMinutes: 120,
+      dedupeMinutes: 30,
     });
   } catch (e) {
     console.warn("[notify] notifyStudentExamAvailable failed", e);
@@ -804,17 +991,25 @@ export async function notifySuperAdminsOfApplication(opts: {
   schoolName: string;
   applicationId: string;
   trackingCode?: string;
+  applicantName?: string | null;
+  applicantUsername?: string | null;
 }): Promise<void> {
   try {
     const ids = await listSuperAdminUserIds();
-    const ref = opts.trackingCode || opts.applicationId.slice(0, 8);
+    const link = "/super-admin/applications";
+    const copy = Msg.newSchoolApplication({
+      schoolName: opts.schoolName,
+      applicantName: opts.applicantName,
+      applicantUsername: opts.applicantUsername ?? opts.trackingCode,
+      link,
+    });
     await notifyMany(
       ids.map((uid) => ({
         recipientUserId: uid,
-        title: "🏫 New School Application",
-        message: `${opts.schoolName} has submitted a new school application (ref ${ref}).`,
+        title: copy.title,
+        message: copy.message,
         type: "system_alert",
-        link: "/super-admin/applications",
+        link: templateLink(copy, link),
         entityType: "school_application",
         entityId: opts.applicationId,
         dedupeMinutes: 5,
@@ -962,6 +1157,10 @@ export async function notifyStudentExamTerminated(opts: {
   examId?: string | null;
   examTitle?: string | null;
   reason?: string | null;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  studentName?: string | null;
+  username?: string | null;
 }): Promise<void> {
   try {
     let uid = (opts.studentUserId || "").trim();
@@ -970,20 +1169,29 @@ export async function notifyStudentExamTerminated(opts: {
       uid = ids[0] || "";
     }
     if (!uid) return;
-    const title = opts.examTitle?.trim() || "your examination";
-    const why = opts.reason?.trim()
-      ? ` ${opts.reason.trim()}`
-      : " because a configured examination security rule was triggered.";
+    const link = "/student/examinations";
+    const name =
+      (opts.studentName || "").trim() ||
+      (await studentDisplayNameFromAuth(uid)) ||
+      "Student";
+    const copy = Msg.studentExamTerminated({
+      studentName: name,
+      username: opts.username,
+      examTitle: opts.examTitle,
+      courseCode: opts.courseCode,
+      courseTitle: opts.courseTitle,
+      reason: opts.reason,
+      link,
+    });
     await notifyUser({
       recipientUserId: uid,
       schoolId: opts.schoolId,
-      title: "🚫 Examination Terminated",
-      message: `Your “${title}” examination has been terminated${why}`,
-      type: "exam_terminated",
-      link: "/student/examinations",
+      title: copy.title,
+      message: copy.message,
+      type: "error",
+      link: templateLink(copy, link),
       entityType: "examination",
-      entityId: opts.examId ?? null,
-      dedupeMinutes: 30,
+      entityId: opts.examId || undefined,
     });
   } catch (e) {
     console.warn("[notify] notifyStudentExamTerminated failed", e);
@@ -996,6 +1204,11 @@ export async function notifyStudentExamAutoSubmitted(opts: {
   schoolId?: string | null;
   examId?: string | null;
   examTitle?: string | null;
+  reason?: string | null;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  studentName?: string | null;
+  username?: string | null;
 }): Promise<void> {
   try {
     let uid = (opts.studentUserId || "").trim();
@@ -1004,17 +1217,29 @@ export async function notifyStudentExamAutoSubmitted(opts: {
       uid = ids[0] || "";
     }
     if (!uid) return;
-    const title = opts.examTitle?.trim() || "your examination";
+    const link = "/student/examinations";
+    const name =
+      (opts.studentName || "").trim() ||
+      (await studentDisplayNameFromAuth(uid)) ||
+      "Student";
+    const copy = Msg.studentAutoSubmitted({
+      studentName: name,
+      username: opts.username,
+      examTitle: opts.examTitle,
+      courseCode: opts.courseCode,
+      courseTitle: opts.courseTitle,
+      reason: opts.reason,
+      link,
+    });
     await notifyUser({
       recipientUserId: uid,
       schoolId: opts.schoolId,
-      title: "⚠️ Examination Auto-Submitted",
-      message: `Your “${title}” examination was automatically submitted because the maximum allowed tab violations were reached.`,
-      type: "exam_submitted",
-      link: "/student/results",
+      title: copy.title,
+      message: copy.message,
+      type: "warning",
+      link: templateLink(copy, link),
       entityType: "examination",
-      entityId: opts.examId ?? null,
-      dedupeMinutes: 30,
+      entityId: opts.examId || undefined,
     });
   } catch (e) {
     console.warn("[notify] notifyStudentExamAutoSubmitted failed", e);
@@ -1027,34 +1252,34 @@ export async function notifyStudentExamReminder(opts: {
   schoolId?: string | null;
   examId: string;
   examTitle: string;
-  studentName?: string | null;
   kind: "24h" | "30m" | "10m" | "start";
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  studentName?: string | null;
+  username?: string | null;
 }): Promise<void> {
   try {
-    const names = await authUserDisplayNames([opts.studentUserId]);
-    const name = (opts.studentName || names.get(opts.studentUserId) || "Student").trim();
-    let title = "⏰ Examination Reminder";
-    let message = "";
-    let type: NotifyType = "exam_scheduled";
-    if (opts.kind === "24h") {
-      title = "📚 Examination Tomorrow";
-      message = `${name}, your ${opts.examTitle} examination is scheduled for tomorrow. Be prepared.`;
-    } else if (opts.kind === "30m") {
-      message = `${name}, your ${opts.examTitle} examination starts in 30 minutes. Be ready!`;
-    } else if (opts.kind === "10m") {
-      message = `${name}, your ${opts.examTitle} examination starts in 10 minutes. Get ready!`;
-    } else {
-      title = "🚀 Examination Starts Now";
-      message = `${name}, your ${opts.examTitle} examination starts now. Tap below to start.`;
-      type = "exam_available";
-    }
+    const link = `/student/exam/${opts.examId}`;
+    const name =
+      (opts.studentName || "").trim() ||
+      (await studentDisplayNameFromAuth(opts.studentUserId)) ||
+      "Student";
+    const copy = Msg.studentExamReminder({
+      studentName: name,
+      username: opts.username,
+      examTitle: opts.examTitle,
+      courseCode: opts.courseCode,
+      courseTitle: opts.courseTitle,
+      kind: opts.kind,
+      link,
+    });
     await notifyUser({
       recipientUserId: opts.studentUserId,
       schoolId: opts.schoolId,
-      title,
-      message,
-      type,
-      link: `/student/exam/${opts.examId}`,
+      title: copy.title,
+      message: copy.message,
+      type: "exam_available",
+      link: templateLink(copy, link),
       entityType: `exam_reminder_${opts.kind}`,
       entityId: opts.examId,
       dedupeMinutes: opts.kind === "start" ? 45 : opts.kind === "10m" ? 20 : opts.kind === "30m" ? 40 : 12 * 60,
