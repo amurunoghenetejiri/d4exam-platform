@@ -4,6 +4,7 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -18,7 +19,7 @@ import { LocalDbBootstrap } from "@/components/LocalDbBootstrap";
 import { OfflineStatusPill } from "@/components/OfflineStatusPill";
 import { NotificationLiveListener } from "@/components/NotificationLiveListener";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
-import { useSessionUser } from "@/lib/session";
+import { useSessionUser, rememberLastPath } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
 import { applyNativeStatusBar } from "@/native/statusBar";
@@ -27,6 +28,12 @@ import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
 
 function NativeBootstrap() {
   const { data: session } = useSessionUser();
+  const pathForPersist = useRouterState({ select: (s) => s.location.pathname });
+  useEffect(() => {
+    if (session?.role && pathForPersist) {
+      rememberLastPath(pathForPersist, session.role);
+    }
+  }, [pathForPersist, session?.role]);
   useEffect(() => {
     if (!isNativeShell()) return;
     let cancelled = false;
