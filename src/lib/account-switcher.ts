@@ -217,24 +217,35 @@ export async function switchToAccount(userId: string): Promise<{ ok: true } | { 
   const vault = readVault();
   const account = vault.accounts.find((a) => a.userId === userId);
   if (!account) return { ok: false, error: "Account not found on this device." };
-  if (!account.refreshToken) {
-    return { ok: false, error: "No saved session for that account. Sign in again.", needsLogin: true };
-  }
 
   const path =
     account.role && account.role in roleHome ? roleHome[account.role] : "/";
 
   try {
+    // Already this user — just navigate to their role home (no token dance)
     try {
       const { data: cur } = await supabase.auth.getSession();
-      if (cur.session?.user?.id === userId) {
+      if (cur.session?.user?.id === userId && cur.session.access_token) {
         setActiveAccountId(userId);
         if (account.role) seedPendingLoginRole(account.role);
+        // Refresh vault tokens from live session
+        try {
+          account.accessToken = cur.session.access_token;
+          if (cur.session.refresh_token) account.refreshToken = cur.session.refresh_token;
+          account.lastUsedAt = Date.now();
+          const idx = vault.accounts.findIndex((a) => a.userId === userId);
+          if (idx >= 0) vault.accounts[idx] = account;
+          writeVault(vault);
+        } catch { /* ignore */ }
         if (typeof window !== "undefined") window.location.replace(path);
         return { ok: true };
       }
     } catch {
       /* continue */
+    }
+
+    if (!account.refreshToken && !account.accessToken) {
+      return { ok: false, error: "No saved session for that account. Sign in again.", needsLogin: true };
     }
 
     try {
@@ -246,27 +257,52 @@ export async function switchToAccount(userId: string): Promise<{ ok: true } | { 
     let access = account.accessToken;
     let refresh = account.refreshToken;
 
-    const { data: setData, error: setErr } = await supabase.auth.setSession({
-      access_token: access,
-      refresh_token: refresh,
-    });
+    // Prefer setSession when we still have both tokens
+    let sessionOk = false;
+    if (access && refresh) {
+      const { data: setData, error: setErr } = await supabase.auth.setSession({
+        access_token: access,
+        refresh_token: refresh,
+      });
+      if (!setErr && setData.session?.access_token) {
+        access = setData.session.access_token;
+        refresh = setData.session.refresh_token || refresh;
+        sessionOk = true;
+      }
+    }
 
-    if (!setErr && setData.session?.access_token && setData.session.refresh_token) {
-      access = setData.session.access_token;
-      refresh = setData.session.refresh_token;
-    } else {
+    // Refresh token path
+    if (!sessionOk && refresh) {
       const { data: refData, error: refErr } = await supabase.auth.refreshSession({
         refresh_token: refresh,
       });
-      if (refErr || !refData.session?.access_token || !refData.session.refresh_token) {
-        return {
-          ok: false,
-          error: "Session expired for that account. Sign in again.",
-          needsLogin: true,
-        };
+      if (!refErr && refData.session?.access_token) {
+        access = refData.session.access_token;
+        refresh = refData.session.refresh_token || refresh;
+        sessionOk = true;
       }
-      access = refData.session.access_token;
-      refresh = refData.session.refresh_token;
+    }
+
+    // Last try: setSession again after a tick
+    if (!sessionOk && access && refresh) {
+      await new Promise((r) => setTimeout(r, 200));
+      const { data: setData2, error: setErr2 } = await supabase.auth.setSession({
+        access_token: access,
+        refresh_token: refresh,
+      });
+      if (!setErr2 && setData2.session?.access_token) {
+        access = setData2.session.access_token;
+        refresh = setData2.session.refresh_token || refresh;
+        sessionOk = true;
+      }
+    }
+
+    if (!sessionOk) {
+      return {
+        ok: false,
+        error: "Could not restore that account on this device. Sign in once to refresh it.",
+        needsLogin: true,
+      };
     }
 
     account.accessToken = access;
