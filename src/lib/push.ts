@@ -183,11 +183,15 @@ async function bindNativePushListeners(userId: string, role?: string | null): Pr
 
     await PushNotifications.addListener("pushNotificationReceived", (notification) => {
       try {
-        const title = notification.title || "D4EXAM";
-        const body = notification.body || "";
         const data = notification.data as Record<string, string> | undefined;
-        toast.info(title, { description: body });
-        void showD4ExamNativeNotification(title, body, data?.link);
+        const title = data?.title || notification.title || "D4EXAM";
+        // Prefer full message from data payload (not truncated shade preview)
+        const body = data?.message || data?.body || notification.body || "";
+        const actionLabel = data?.actionLabel || data?.action_label || undefined;
+        toast.info(title, { description: body.slice(0, 180) });
+        void showD4ExamNativeNotification(title, body, data?.link || data?.actionLink, {
+          actionLabel,
+        });
         // If payload includes exam countdown start, client may start local live timer
         if (data?.examCountdown === "1" && data.examId && data.startIso) {
           void import("@/native/localNotify").then((m) => {
