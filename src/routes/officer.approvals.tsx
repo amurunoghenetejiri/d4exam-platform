@@ -37,6 +37,7 @@ import {
 } from "@/lib/exam-security";
 import { parseExamMeta } from "@/lib/exam-meta";
 import { notifyStudentsExamApproved } from "@/lib/notify";
+import { serverNotifyStudentsExamApproved } from "@/lib/notify-student-exam.functions";
 import { namedTeacherExamDecision as notifyTeacherExamDecision } from "@/lib/notify-named";
 import { toast } from "sonner";
 
@@ -398,7 +399,7 @@ function Page() {
           const endIso = endLocal
             ? new Date(endLocal).toISOString()
             : selected.scheduled_end;
-          await notifyStudentsExamApproved({
+          const payload = {
             schoolId,
             examId: selected.id,
             examTitle: selected.title,
@@ -409,7 +410,14 @@ function Page() {
             end: endIso,
             scheduledStart: startIso,
             scheduledEnd: endIso,
-          });
+          };
+          // Prefer server (service role) so RLS cannot block student resolution
+          try {
+            await serverNotifyStudentsExamApproved({ data: payload });
+          } catch (se) {
+            console.warn("[officer.approvals] server student notify failed, client fallback", se);
+            await notifyStudentsExamApproved(payload);
+          }
         } catch (e) {
           console.warn("[officer.approvals] notify students failed:", e);
         }
