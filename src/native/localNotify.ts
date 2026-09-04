@@ -56,6 +56,34 @@ async function ensureChannel(): Promise<void> {
   }
 }
 
+const ACTION_TYPE_OPEN = "D4EXAM_OPEN";
+let actionTypesReady = false;
+
+async function ensureActionTypes(actionLabel?: string | null): Promise<void> {
+  if (actionTypesReady) return;
+  try {
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    const label = (actionLabel || "OPEN").trim() || "OPEN";
+    await LocalNotifications.registerActionTypes({
+      types: [
+        {
+          id: ACTION_TYPE_OPEN,
+          actions: [
+            {
+              id: "open",
+              title: label,
+              foreground: true,
+            },
+          ],
+        },
+      ],
+    });
+    actionTypesReady = true;
+  } catch {
+    actionTypesReady = true;
+  }
+}
+
 export async function showD4ExamNativeNotification(
   title: string,
   body: string,
@@ -65,6 +93,7 @@ export async function showD4ExamNativeNotification(
     channelId?: string;
     ongoing?: boolean;
     silent?: boolean;
+    actionLabel?: string | null;
   },
 ): Promise<boolean> {
   if (!isNativeShell()) return false;
@@ -77,15 +106,27 @@ export async function showD4ExamNativeNotification(
     if (perm.display !== "granted") return false;
 
     await ensureChannel();
+    const actionLabel = (opts?.actionLabel || "").trim();
+    if (actionLabel) {
+      // Re-register so the button title matches this notification
+      actionTypesReady = false;
+      await ensureActionTypes(actionLabel);
+    } else {
+      await ensureActionTypes("OPEN");
+    }
     const id = opts?.id ?? ((idSeq = (idSeq + 1) % 100000000));
     const isCountdown = opts?.channelId === "d4exam_countdown" || opts?.silent === true;
+    const fullBody = body || "";
 
     await LocalNotifications.schedule({
       notifications: [
         {
           id,
           title: title || "D4EXAM",
-          body: body || "",
+          // Full message — Android shade expands this (big text)
+          body: fullBody,
+          largeBody: fullBody,
+          summaryText: title || "D4EXAM",
           channelId: opts?.channelId || "d4exam_default",
           smallIcon: "ic_stat_d4exam",
           largeIcon: "ic_launcher",
@@ -93,10 +134,12 @@ export async function showD4ExamNativeNotification(
           sound: isCountdown ? undefined : "default",
           ongoing: opts?.ongoing === true,
           autoCancel: opts?.ongoing === true ? false : true,
+          actionTypeId: isCountdown ? undefined : ACTION_TYPE_OPEN,
           extra: {
             ...(link ? { link } : {}),
-            fullBody: body || "",
+            fullBody,
             fullTitle: title || "D4EXAM",
+            actionLabel: actionLabel || "OPEN",
           },
         },
       ],
