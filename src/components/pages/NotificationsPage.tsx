@@ -54,20 +54,48 @@ function actionLabelFor(n: Notif): string | null {
     const ty = (n.type || "").toLowerCase();
     const msg = (n.message || "").toLowerCase();
     const title = (n.title || "").toLowerCase();
-    if (ty.includes("result") || msg.includes("view your result") || msg.includes("result has been released"))
+    // Notification 20.0 style labels
+    if (
+      ty.includes("result") ||
+      title.includes("result released") ||
+      title.includes("result held") ||
+      msg.includes("view your result") ||
+      msg.includes("result has been released") ||
+      msg.includes("result is now available")
+    )
       return "VIEW RESULT";
     if (
+      title.includes("awaiting approval") ||
       title.includes("submitted for review") ||
-      msg.includes("for examination review") ||
+      msg.includes("for your review and approval") ||
       msg.includes("open approvals")
     )
-      return "OPEN APPROVALS";
-    if (ty === "exam_available" || msg.includes("starts now") || msg.includes("tap below to start"))
+      return "REVIEW EXAM";
+    if (
+      ty === "exam_available" ||
+      title.includes("starting now") ||
+      msg.includes("starting now") ||
+      msg.includes("you can now enter the examination")
+    )
       return "START EXAM";
-    if (ty.includes("exam") && (msg.includes("approved") || msg.includes("scheduled"))) return "VIEW EXAM";
+    if (title.includes("changes requested") || msg.includes("requested changes"))
+      return "EDIT EXAM";
+    if (ty.includes("reject") || title.includes("not approved") || title.includes("revision"))
+      return "REVIEW EXAM";
+    if (
+      title.includes("live examination") ||
+      title.includes("monitoring alert") ||
+      msg.includes("live monitoring is available")
+    )
+      return "OPEN MONITORING";
+    if (title.includes("result awaiting") || msg.includes("awaiting review"))
+      return "REVIEW RESULT";
+    if (ty.includes("exam") || title.includes("examination") || title.includes("exam "))
+      return "VIEW EXAM";
     if (ty.includes("school") || title.includes("school application") || title.includes("application approved"))
       return "VIEW DETAILS";
-    if (ty.includes("reject") || ty.includes("revision")) return "REVIEW";
+    if (title.includes("welcome"))
+      return "OPEN DASHBOARD";
     if (n.link || n.action_url) return "VIEW DETAILS";
     return null;
   } catch {
