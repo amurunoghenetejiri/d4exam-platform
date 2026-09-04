@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CameraOff,
@@ -216,6 +216,7 @@ function lastActivityMs(presenceLastSeen: string | null | undefined, row: Attemp
 
 function Page() {
   const { data: user } = useSessionUser();
+  const qc = useQueryClient();
   const schoolId = user?.schoolId ?? null;
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
@@ -995,7 +996,16 @@ function Page() {
         if (error) throw error;
         await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_PAUSE", severity: "medium", description: "Examination paused by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
         await broadcastOfficerCommand("pause", attemptId, studentId, examId);
-        toast.success(`Pause sent to ${selected.name}`);
+        window.setTimeout(() => { void broadcastOfficerCommand("pause", attemptId, studentId, examId); }, 800);
+        qc.setQueryData(["officer-live-attempts", schoolId], (prev: unknown) => {
+          if (!Array.isArray(prev)) return prev;
+          return prev.map((row: { id?: string; metadata?: Record<string, unknown> }) =>
+            String(row?.id) === String(attemptId)
+              ? { ...row, status: "paused", metadata: { ...(row.metadata || {}), officer_hold: true, officer_pause: true, officer_hold_at: nowIso } }
+              : row,
+          );
+        });
+        toast.success(`Paused — Release is available for ${selected.name}`);
       } else if (cmd === "release") {
         const prev = { ...(selected.a.metadata || {}) } as Record<string, unknown>;
         delete prev.officer_hold; delete prev.officer_pause; delete prev.officer_hold_at;
@@ -1003,7 +1013,17 @@ function Page() {
         if (error) throw error;
         await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_RELEASE", severity: "low", description: "Examination released by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
         await broadcastOfficerCommand("release", attemptId, studentId, examId);
-        toast.success(`Release sent to ${selected.name}`);
+        window.setTimeout(() => { void broadcastOfficerCommand("release", attemptId, studentId, examId); }, 800);
+        qc.setQueryData(["officer-live-attempts", schoolId], (prev: unknown) => {
+          if (!Array.isArray(prev)) return prev;
+          return prev.map((row: { id?: string; metadata?: Record<string, unknown> }) => {
+            if (String(row?.id) !== String(attemptId)) return row;
+            const meta = { ...(row.metadata || {}) };
+            delete meta.officer_hold; delete meta.officer_pause; delete meta.officer_hold_at;
+            return { ...row, status: "in_progress", metadata: meta };
+          });
+        });
+        toast.success(`Released — ${selected.name} can continue`);
       } else if (cmd === "terminate") {
         const { error } = await supabase.from("exam_attempts").update({ status: "terminated", terminated_at: nowIso, submitted_at: nowIso, security_review_status: "terminated", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
         if (error) throw error;
@@ -1011,12 +1031,23 @@ function Page() {
         await broadcastOfficerCommand("terminate", attemptId, studentId, examId);
         toast.success(`Terminated ${selected.name}`);
         setSelectedId(null);
-      } else {
-        const { error } = await supabase.from("exam_attempts").update({ status: "submitted", submitted_at: nowIso, updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
+      } else if (cmd === "submit") {
+        const prevMeta = { ...(selected.a.metadata || {}) } as Record<string, unknown>;
+        delete prevMeta.officer_hold; delete prevMeta.officer_pause; delete prevMeta.officer_hold_at;
+        prevMeta.officer_force_submit = true;
+        prevMeta.officer_force_submit_at = nowIso;
+        const { error } = await supabase.from("exam_attempts").update({
+          status: "submitted",
+          submitted_at: nowIso,
+          updated_at: nowIso,
+          metadata: prevMeta,
+        } as never).eq("id", attemptId).eq("school_id", schoolId);
         if (error) throw error;
         await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_SUBMIT", severity: "medium", description: "Examination force-submitted by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
         await broadcastOfficerCommand("submit", attemptId, studentId, examId);
-        toast.success(`Submit command sent to ${selected.name}`);
+        window.setTimeout(() => { void broadcastOfficerCommand("submit", attemptId, studentId, examId); }, 700);
+        window.setTimeout(() => { void broadcastOfficerCommand("submit", attemptId, studentId, examId); }, 1800);
+        toast.success(`Submitted — ${selected.name}'s exam is closed`);
         setSelectedId(null);
       }
       void attemptsQ.refetch();
@@ -1554,7 +1585,10 @@ function Page() {
                   {actionBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
                   Submit Exam
                 </Button>
-                {["paused", "held"].includes(String(selected.a.status || "").toLowerCase()) ? (
+                {(["paused", "held"].includes(String(selected.a.status || "").toLowerCase())
+                  || Boolean((selected.a.metadata as Record<string, unknown> | null | undefined)?.officer_pause)
+                  || Boolean((selected.a.metadata as Record<string, unknown> | null | undefined)?.officer_hold)
+                ) ? (
                   <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("release")}>
                     Release Exam
                   </Button>
