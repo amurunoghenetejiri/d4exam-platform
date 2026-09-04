@@ -122,7 +122,7 @@ export function CbtExamPage() {
     queryKey: ["cbt-exam", id],
     queryFn: async () => {
       const { data, error } = await supabase.from("examinations")
-        .select("id, title, status, duration_minutes, scheduled_start, scheduled_end, course_id, school_id, description, courses(code, name)")
+        .select("id, title, status, duration_minutes, scheduled_start, scheduled_end, course_id, school_id, description, questions_to_answer, courses(code, name)")
         .eq("id", id).maybeSingle();
       if (error) throw error;
       return data;
@@ -483,11 +483,13 @@ export function CbtExamPage() {
   }, [started, done, previewMode, paused, security.fullscreen, security.tabMonitoring, security.maxTabSwitches, security.thresholdAction, id, index, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId]);
 
   const questionsToAnswer = useMemo(() => {
+    const fromExam = (examQ.data as { questions_to_answer?: number | null } | null)?.questions_to_answer;
+    if (typeof fromExam === "number" && fromExam > 0) return Math.floor(fromExam);
     const row = (settingsQ.data as { questions_to_answer?: number } | null)?.questions_to_answer;
     if (typeof row === "number" && row > 0) return Math.floor(row);
     const meta = parseExamMeta(examQ.data?.description);
     return meta.questionsToAnswer && meta.questionsToAnswer > 0 ? meta.questionsToAnswer : null;
-  }, [settingsQ.data, examQ.data?.description]);
+  }, [examQ.data, settingsQ.data, examQ.data?.description]);
 
   const questions = useMemo(() => {
     const key = student?.studentId ?? (previewMode ? "officer-preview" : session?.userId ?? "anon");

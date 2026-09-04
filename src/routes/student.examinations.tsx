@@ -170,8 +170,10 @@ function Page() {
   const examsQ = useQuery({
     queryKey: ["student-exams", schoolId, student?.courseIds?.join(",")],
     enabled: Boolean(schoolId),
-    staleTime: 10_000,
+    staleTime: 2_000,
+    refetchInterval: 5_000,
     refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
       let q = supabase

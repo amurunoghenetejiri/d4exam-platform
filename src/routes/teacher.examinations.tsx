@@ -322,6 +322,7 @@ function Page() {
         scheduled_start: startAt ? new Date(startAt).toISOString() : null,
         scheduled_end: computedEnd ? new Date(computedEnd).toISOString() : null,
         status,
+        questions_to_answer: questionsToAnswer > 0 ? questionsToAnswer : null,
       };
       let examId = editingId;
       if (editingId) {
@@ -400,7 +401,14 @@ function Page() {
       desc = embedSecurityInDescription(desc, sec);
       const { error } = await supabase
         .from("examinations")
-        .update({ status: "pending_approval", description: desc } as never)
+        .update({
+          status: "pending_approval",
+          description: desc,
+          questions_to_answer:
+            meta.questionsToAnswer && meta.questionsToAnswer > 0
+              ? meta.questionsToAnswer
+              : null,
+        } as never)
         .eq("id", id)
         .eq("school_id", teacher.schoolId);
       if (error) throw error;

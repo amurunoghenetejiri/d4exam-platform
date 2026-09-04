@@ -64,6 +64,7 @@ type ExamRow = {
   course_id: string | null;
   created_by: string | null;
   created_at: string;
+  questions_to_answer?: number | null;
   courses: { code: string; name: string } | null;
 };
 
@@ -117,9 +118,9 @@ function Page() {
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
       const full =
-        "id, title, status, duration_minutes, scheduled_start, scheduled_end, description, course_id, created_by, created_at, courses(code, name)";
+        "id, title, status, duration_minutes, scheduled_start, scheduled_end, description, course_id, created_by, created_at, questions_to_answer, courses(code, name)";
       const basic =
-        "id, title, status, duration_minutes, scheduled_start, scheduled_end, description, course_id, created_by, created_at";
+        "id, title, status, duration_minutes, scheduled_start, scheduled_end, description, course_id, created_by, created_at, questions_to_answer";
       let res = await supabase
         .from("examinations")
         .select(full)
@@ -209,8 +210,11 @@ function Page() {
   const settingsMap = settingsQ.data ?? {};
 
   function questionsToAnswerFor(item: ExamRow): number | null {
+    if (typeof item.questions_to_answer === "number" && item.questions_to_answer > 0) {
+      return Math.floor(item.questions_to_answer);
+    }
     const fromSettings = settingsMap[item.id]?.questions_to_answer;
-    if (typeof fromSettings === "number" && fromSettings > 0) return fromSettings;
+    if (typeof fromSettings === "number" && fromSettings > 0) return Math.floor(fromSettings);
     const meta = parseExamMeta(item.description);
     if (meta.questionsToAnswer && meta.questionsToAnswer > 0) return meta.questionsToAnswer;
     const sec = parseSecurityFromDescription(item.description);
