@@ -87,6 +87,7 @@ type IntegrityEvent = {
   created_at: string;
   student_id: string | null;
   exam_id: string | null;
+  attempt_id: string | null;
 };
 
 type FilterKey = "all" | "normal" | "warning" | "violation" | "offline";
@@ -469,11 +470,11 @@ function Page() {
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from("integrity_events")
-        .select("id, event_type, severity, description, created_at, student_id, exam_id")
+        .select("id, event_type, severity, description, created_at, student_id, exam_id, attempt_id")
         .eq("school_id", schoolId)
         .gte("created_at", since)
         .order("created_at", { ascending: false })
-        .limit(80);
+        .limit(120);
       if (error) return [];
       return (data ?? []) as IntegrityEvent[];
     },
@@ -912,9 +913,19 @@ function Page() {
   const unreadAlerts = alerts.filter((a) => !readAlertIds.has(a.id));
   const selectedTimeline = useMemo(() => {
     if (!selected) return [];
+    const attemptId = String(selected.a.id || "");
+    const examId = String(selected.a.exam_id || "");
+    const studentId = String(selected.a.student_id || "");
     return events
-      .filter((e) => e.student_id === selected.a.student_id && (!e.exam_id || e.exam_id === selected.a.exam_id))
-      .slice(0, 20);
+      .filter((e) => {
+        if (String(e.student_id || "") !== studentId) return false;
+        // Prefer attempt-scoped events when attempt_id is present
+        if (e.attempt_id) return String(e.attempt_id) === attemptId;
+        // Fallback: same exam (legacy rows without attempt_id)
+        if (e.exam_id) return String(e.exam_id) === examId;
+        return false;
+      })
+      .slice(0, 30);
   }, [events, selected]);
 
   const primaryExamLabel = (() => {
@@ -1562,8 +1573,11 @@ function Page() {
             )}
             <div className="p-3 sm:p-4">
               <h4 className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Events timeline</h4>
-              {selectedTimeline.length === 0 ? (
-                <p className="text-xs text-slate-500">No integrity events yet for this student on this exam.</p>
+              <p className="mb-2 text-[11px] font-medium text-slate-600">
+                {selected.title || "Exam"} · Attempt {String(selected.a.id).slice(0, 8)}…
+              </p>
+                {selectedTimeline.length === 0 ? (
+                <p className="text-xs text-slate-500">No integrity events yet for this student on this exam attempt.</p>
               ) : (
                 <ul className="space-y-2">
                   {selectedTimeline.map((ev) => (
