@@ -943,26 +943,65 @@ export async function notifyStudentsExamApproved(opts: {
   studentAuthUserIds?: string[];
   courseCode?: string | null;
   courseTitle?: string | null;
+  /** Optional course UUID — used to resolve enrolled students */
+  courseId?: string | null;
   start?: string | null;
   end?: string | null;
+  /** @deprecated alias for start */
+  scheduledStart?: string | null;
+  /** @deprecated alias for end */
+  scheduledEnd?: string | null;
 }): Promise<void> {
   try {
-    const authIds = await resolveStudentAuthIds(opts);
-    if (!authIds.length) return;
+    const startIso = opts.start ?? opts.scheduledStart ?? null;
+    const endIso = opts.end ?? opts.scheduledEnd ?? null;
+
+    // Resolve recipients: explicit list → course enrollments → school students
+    let authIds = await resolveStudentAuthIds(opts);
+    if (!authIds.length) {
+      authIds = await courseStudentAuthIds(opts.courseId ?? null, opts.schoolId);
+    }
+    if (!authIds.length) {
+      console.warn("[notify] notifyStudentsExamApproved: no student recipients", {
+        schoolId: opts.schoolId,
+        examId: opts.examId,
+        courseId: opts.courseId,
+      });
+      return;
+    }
+
+    // Resolve course labels when only courseId was provided
+    let courseCode = opts.courseCode ?? null;
+    let courseTitle = opts.courseTitle ?? null;
+    if (opts.courseId && (!courseCode || !courseTitle)) {
+      try {
+        const { data } = await supabase
+          .from("courses")
+          .select("code, name")
+          .eq("id", opts.courseId)
+          .maybeSingle();
+        const c = data as { code?: string; name?: string } | null;
+        if (c) {
+          courseCode = courseCode || c.code || null;
+          courseTitle = courseTitle || c.name || null;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
     const link = "/student/examinations";
-    const namePairs = await Promise.all(
-      authIds.map(async (uid) => [uid, (await studentDisplayNameFromAuth(uid)) || "Student"] as const),
-    );
-    const nameMap = new Map(namePairs);
+    const names = await authUserDisplayNames(authIds);
     await notifyMany(
       authIds.map((uid) => {
+        const studentName = names.get(uid) || "Student";
         const copy = Msg.studentExamScheduled({
-          studentName: nameMap.get(uid) || "Student",
+          studentName,
           examTitle: opts.examTitle,
-          courseCode: opts.courseCode,
-          courseTitle: opts.courseTitle,
-          start: opts.start,
-          end: opts.end,
+          courseCode,
+          courseTitle,
+          start: startIso,
+          end: endIso,
           link,
         });
         return {
@@ -970,8 +1009,9 @@ export async function notifyStudentsExamApproved(opts: {
           schoolId: opts.schoolId,
           title: copy.title,
           message: copy.message,
-          type: "exam_scheduled",
+          type: "exam_scheduled" as NotifyType,
           link: templateLink(copy, link),
+          actionLabel: copy.action?.label ?? "VIEW EXAM",
           entityType: "examination",
           entityId: opts.examId,
           dedupeMinutes: 30,
@@ -1014,6 +1054,7 @@ export async function notifyStudentExamAvailable(opts: {
       message: copy.message,
       type: "exam_available",
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? "START EXAM",
       entityType: "examination",
       entityId: opts.examId,
       dedupeMinutes: 30,
