@@ -125,20 +125,56 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
     }
 
     let courses: StudentCourse[] = [];
-    try {
-      const { data: sc } = await db
-        .from("student_courses")
-        .select("course_id, courses(id, code, name)")
-        .eq("student_id", student.id as string);
-      courses = (sc ?? [])
+    const mapCourseRows = (rows: unknown[]): StudentCourse[] =>
+      (rows ?? [])
         .map((row) => {
           const c = (row as { courses?: { id?: string; code?: string; name?: string } | null }).courses;
           if (!c?.id) return null;
           return { id: String(c.id), code: String(c.code || ""), name: String(c.name || "") };
         })
         .filter(Boolean) as StudentCourse[];
+    try {
+      const { data: sc } = await db
+        .from("student_courses")
+        .select("course_id, courses(id, code, name)")
+        .eq("student_id", student.id as string);
+      courses = mapCourseRows(sc ?? []);
     } catch {
       courses = [];
+    }
+    if (!courses.length) {
+      try {
+        const { data: en } = await db
+          .from("course_enrollments")
+          .select("course_id, courses(id, code, name)")
+          .eq("student_id", student.id as string);
+        courses = mapCourseRows(en ?? []);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!courses.length && (departmentId || levelId)) {
+      try {
+        let cq = db.from("courses").select("id, code, name").eq("school_id", schoolId).limit(300);
+        if (departmentId) cq = cq.eq("department_id", departmentId);
+        if (levelId) cq = cq.eq("level_id", levelId);
+        const { data: deptCourses } = await cq;
+        courses = (deptCourses ?? []).map((c) => ({
+          id: String((c as { id: string }).id),
+          code: String((c as { code?: string }).code || ""),
+          name: String((c as { name?: string }).name || ""),
+        }));
+      } catch {
+        /* ignore */
+      }
+    }
+    {
+      const seen = new Set<string>();
+      courses = courses.filter((c) => {
+        if (seen.has(c.id)) return false;
+        seen.add(c.id);
+        return true;
+      });
     }
 
     return {
