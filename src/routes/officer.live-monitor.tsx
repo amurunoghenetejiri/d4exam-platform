@@ -1391,14 +1391,28 @@ function Page() {
               return (
                 <div
                   className={cn(
-                    "shrink-0 gap-1.5 bg-slate-100 p-1.5 sm:gap-2 sm:p-2",
-                    dual ? "grid grid-cols-2" : "grid grid-cols-1",
+                    "shrink-0 bg-slate-100 p-1.5 sm:p-2",
+                    // Only mount visible panes — no reserved empty column
+                    dual
+                      ? "grid grid-cols-1 gap-1.5 sm:grid-cols-2 sm:gap-2"
+                      : "flex flex-col gap-1.5",
                   )}
                 >
                   {showCam && (
-                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">
+                    <div
+                      className={cn(
+                        "relative w-full overflow-hidden rounded-xl bg-slate-900 shadow-inner ring-1 ring-black/10",
+                        dual
+                          ? "aspect-[4/3] max-h-[min(38vh,22rem)]"
+                          : "aspect-[4/3] max-h-[min(52vh,30rem)]",
+                      )}
+                    >
                       {showCamFrame ? (
-                        <img src={camF!.src} alt={`${selected.name} camera`} className="h-full w-full object-cover" />
+                        <img
+                          src={camF!.src}
+                          alt={`${selected.name} camera`}
+                          className="h-full w-full object-cover"
+                        />
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-1.5 px-3 text-center text-white/70">
                           {selected.isDone ? (
@@ -1407,38 +1421,67 @@ function Page() {
                             <CameraOff className="h-10 w-10 opacity-40" />
                           )}
                           <p className="text-xs font-semibold text-white/90">
-                            {selected.isDone ? doneStatusLabel(selected.a.status) : (camF && isLiveCamFrameUsable(camF.ts) ? "Camera reconnecting…" : "Camera offline")}
+                            {selected.isDone
+                              ? doneStatusLabel(selected.a.status)
+                              : camF && isLiveCamFrameUsable(camF.ts)
+                                ? "Camera reconnecting…"
+                                : "Camera offline"}
                           </p>
                         </div>
                       )}
                       <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
-                        <span className={cn("h-1.5 w-1.5 rounded-full", camLive ? "animate-pulse bg-red-500" : showCamFrame ? "bg-amber-400" : "bg-slate-400")} />
-                        Camera{camLive ? " · Live" : showCamFrame ? " · Delayed" : ""}
+                        <span
+                          className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            camLive ? "animate-pulse bg-emerald-400" : showCamFrame ? "bg-amber-400" : "bg-slate-400",
+                          )}
+                        />
+                        Camera {camLive ? "· Live" : showCamFrame ? "· Delayed" : ""}
                       </div>
-                      {showCamFrame && (
-                        <div className="absolute right-2 top-2 rounded-full bg-black/55 px-2 py-1 backdrop-blur-sm">
-                          <SignalBars bars={selected.bars} />
-                        </div>
-                      )}
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-6">
-                        <p className="truncate text-xs font-extrabold text-white">{selected.name}</p>
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2.5 pb-2 pt-8">
+                        <p className="truncate text-[11px] font-bold text-white">{selected.name}</p>
                         <p className="truncate text-[10px] text-white/80">{selected.matric}</p>
                       </div>
                     </div>
                   )}
                   {showScr && (
-                    <div className="relative aspect-[4/3] max-h-[28vh] overflow-hidden rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10 sm:max-h-[32vh]">
+                    <div
+                      className={cn(
+                        "relative w-full rounded-xl bg-slate-950 shadow-inner ring-1 ring-black/10",
+                        // Fixed frame; scroll INSIDE when student screen is taller
+                        dual
+                          ? "max-h-[min(38vh,22rem)] overflow-y-auto overflow-x-hidden overscroll-contain"
+                          : "max-h-[min(58vh,34rem)] overflow-y-auto overflow-x-hidden overscroll-contain",
+                      )}
+                    >
                       {showScrFrame ? (
-                        <img src={sf!.src} alt={`${selected.name} screen`} className="h-full w-full object-contain bg-black" />
+                        <div className="relative w-full">
+                          {/* Natural height preserves device aspect; outer scrolls if taller */}
+                          <img
+                            src={sf!.src}
+                            alt={`${selected.name} screen`}
+                            className="mx-auto block h-auto w-full max-w-full bg-black object-contain"
+                          />
+                        </div>
                       ) : (
-                        <div className="flex h-full flex-col items-center justify-center gap-1.5 px-4 text-center text-white/60">
+                        <div
+                          className={cn(
+                            "flex flex-col items-center justify-center gap-1.5 px-4 text-center text-white/60",
+                            dual ? "min-h-[12rem]" : "min-h-[16rem]",
+                          )}
+                        >
                           <Monitor className="h-10 w-10 opacity-30" />
                           <p className="text-xs font-semibold text-white/80">Screen not shared</p>
                           <p className="text-[10px] text-white/50">Appears when the student shares their screen</p>
                         </div>
                       )}
-                      <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
-                        <span className={cn("h-1.5 w-1.5 rounded-full", scrLive ? "animate-pulse bg-emerald-400" : showScrFrame ? "bg-amber-400" : "bg-slate-400")} />
+                      <div className="sticky left-2 top-2 z-[1] inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
+                        <span
+                          className={cn(
+                            "h-1.5 w-1.5 rounded-full",
+                            scrLive ? "animate-pulse bg-emerald-400" : showScrFrame ? "bg-amber-400" : "bg-slate-400",
+                          )}
+                        />
                         Screen {scrLive ? "· Live" : showScrFrame ? "· Delayed" : ""}
                       </div>
                     </div>
@@ -1684,9 +1727,9 @@ function StudentCard({
                 </div>
               )}
             </div>
-            <div className="relative h-full w-1/2 overflow-hidden">
+            <div className="relative h-full w-1/2 overflow-hidden bg-black">
               {scrSrc ? (
-                <img src={scrSrc} alt="" className="h-full w-full object-contain bg-black" />
+                <img src={scrSrc} alt="" className="h-full w-full object-contain" />
               ) : (
                 <div className="grid h-full place-items-center bg-slate-950">
                   <Monitor className="h-5 w-5 text-white/25" />
@@ -1694,8 +1737,17 @@ function StudentCard({
               )}
             </div>
           </div>
+        ) : feedMode === "screen" && scrSrc ? (
+          <img src={scrSrc} alt="" className="h-full w-full object-contain bg-black" />
         ) : frameSrc ? (
-          <img src={frameSrc} alt="" className="h-full w-full object-cover" />
+          <img
+            src={frameSrc}
+            alt=""
+            className={cn(
+              "h-full w-full",
+              feedMode === "screen" ? "object-contain bg-black" : "object-cover",
+            )}
+          />
         ) : (
           <div className="flex h-full items-center justify-center">
             <UserRound className="h-7 w-7 text-white/25 sm:h-10 sm:w-10" />
