@@ -228,6 +228,7 @@ function Page() {
   const [frames, setFrames] = useState<Record<string, FrameEntry>>({});
   const [screenFrames, setScreenFrames] = useState<Record<string, { src: string; ts: number }>>({});
   const [warningBusy, setWarningBusy] = useState(false);
+  const [forcePausedIds, setForcePausedIds] = useState<Record<string, boolean>>({});
   const [actionBusy, setActionBusy] = useState(false);
   const [, setTick] = useState(0);
   const seenAlertIdsRef = useRef<Set<string>>(new Set());
@@ -1005,7 +1006,8 @@ function Page() {
               : row,
           );
         });
-        toast.success(`Paused — Release is available for ${selected.name}`);
+        setForcePausedIds((prev) => ({ ...prev, [String(attemptId)]: true }));
+        toast.success(`Paused — Resume is available for ${selected.name}`);
       } else if (cmd === "release") {
         const prev = { ...(selected.a.metadata || {}) } as Record<string, unknown>;
         delete prev.officer_hold; delete prev.officer_pause; delete prev.officer_hold_at;
@@ -1023,7 +1025,12 @@ function Page() {
             return { ...row, status: "in_progress", metadata: meta };
           });
         });
-        toast.success(`Released — ${selected.name} can continue`);
+        setForcePausedIds((prev) => {
+          const n = { ...prev };
+          delete n[String(attemptId)];
+          return n;
+        });
+        toast.success(`Resumed — ${selected.name} can continue`);
       } else if (cmd === "terminate") {
         const { error } = await supabase.from("exam_attempts").update({ status: "terminated", terminated_at: nowIso, submitted_at: nowIso, security_review_status: "terminated", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
         if (error) throw error;
@@ -1588,9 +1595,10 @@ function Page() {
                 {(["paused", "held"].includes(String(selected.a.status || "").toLowerCase())
                   || Boolean((selected.a.metadata as Record<string, unknown> | null | undefined)?.officer_pause)
                   || Boolean((selected.a.metadata as Record<string, unknown> | null | undefined)?.officer_hold)
+                  || Boolean(forcePausedIds[String(selected.a.id)])
                 ) ? (
                   <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("release")}>
-                    Release Exam
+                    Resume Exam
                   </Button>
                 ) : (
                   <Button size="sm" variant="outline" className="h-8 text-xs font-semibold" disabled={actionBusy || warningBusy} onClick={() => void officerControl("pause")}>
