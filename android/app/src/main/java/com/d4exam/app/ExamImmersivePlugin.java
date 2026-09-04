@@ -86,41 +86,102 @@ public class ExamImmersivePlugin extends Plugin {
   public void vibrate(PluginCall call) {
     try {
       Vibrator vibrator = resolveVibrator();
-      if (vibrator == null || !vibrator.hasVibrator()) {
+      if (vibrator == null) {
         JSObject ret = new JSObject();
         ret.put("ok", false);
+        ret.put("error", "no_vibrator");
         call.resolve(ret);
         return;
+      }
+      try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+          if (!vibrator.hasVibrator()) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("error", "no_hardware");
+            call.resolve(ret);
+            return;
+          }
+        }
+      } catch (Exception ignored) {
       }
 
       long[] pattern = parsePattern(call);
       if (pattern == null || pattern.length == 0) {
-        pattern = new long[] {0, 200};
+        pattern = new long[] {0, 220};
+      }
+      // Ensure first element is delay (0) for createWaveform
+      if (pattern[0] != 0) {
+        long[] padded = new long[pattern.length + 1];
+        padded[0] = 0;
+        System.arraycopy(pattern, 0, padded, 1, pattern.length);
+        pattern = padded;
+      }
+
+      // Cancel any ongoing vibration so the new pattern is felt
+      try {
+        vibrator.cancel();
+      } catch (Exception ignored) {
       }
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1));
+        // Prefer amplitude-capable waveform when available
+        try {
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasAmplitudeControl()) {
+            int[] amps = new int[pattern.length];
+            for (int i = 0; i < pattern.length; i++) {
+              // even indices are delays (amp 0), odd are on-pulses (strong)
+              amps[i] = (i % 2 == 0) ? 0 : 255;
+            }
+            vibrator.vibrate(VibrationEffect.createWaveform(pattern, amps, -1));
+          } else {
+            vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1));
+          }
+        } catch (Exception e1) {
+          try {
+            long total = 0;
+            for (long v : pattern) total += v;
+            if (total <= 0) total = 200;
+            vibrator.vibrate(VibrationEffect.createOneShot(Math.min(total, 1000), VibrationEffect.DEFAULT_AMPLITUDE));
+          } catch (Exception e2) {
+            //noinspection deprecation
+            vibrator.vibrate(pattern, -1);
+          }
+        }
       } else {
         //noinspection deprecation
         vibrator.vibrate(pattern, -1);
       }
       JSObject ret = new JSObject();
       ret.put("ok", true);
+      ret.put("len", pattern.length);
       call.resolve(ret);
     } catch (Exception e) {
       JSObject ret = new JSObject();
       ret.put("ok", false);
-      ret.put("error", e.getMessage());
+      ret.put("error", e.getMessage() != null ? e.getMessage() : "vibrate_failed");
       call.resolve(ret);
     }
   }
 
   private Vibrator resolveVibrator() {
     Context ctx = getContext();
+    if (ctx == null) {
+      try {
+        if (getActivity() != null) ctx = getActivity().getApplicationContext();
+      } catch (Exception ignored) {
+      }
+    }
     if (ctx == null) return null;
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      VibratorManager vm = (VibratorManager) ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
-      if (vm != null) return vm.getDefaultVibrator();
+      try {
+        VibratorManager vm = (VibratorManager) ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+        if (vm != null) {
+          Vibrator v = vm.getDefaultVibrator();
+          if (v != null) return v;
+        }
+      } catch (Exception ignored) {
+      }
     }
     //noinspection deprecation
     return (Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE);
@@ -132,15 +193,33 @@ public class ExamImmersivePlugin extends Plugin {
       if (arr != null && arr.length() > 0) {
         long[] out = new long[arr.length()];
         for (int i = 0; i < arr.length(); i++) {
-          out[i] = Math.max(0, arr.getLong(i));
+          long val = 0;
+          try {
+            val = arr.getLong(i);
+          } catch (Exception e1) {
+            try {
+              val = (long) arr.getDouble(i);
+            } catch (Exception e2) {
+              try {
+                Object o = arr.get(i);
+                if (o instanceof Number) val = ((Number) o).longValue();
+                else if (o != null) val = Long.parseLong(String.valueOf(o));
+              } catch (Exception ignored) {
+              }
+            }
+          }
+          out[i] = Math.max(0, Math.min(val, 5000));
         }
         return out;
       }
     } catch (Exception ignored) {
     }
-    Integer ms = call.getInt("ms");
-    if (ms != null && ms > 0) {
-      return new long[] {0, ms.longValue()};
+    try {
+      Integer ms = call.getInt("ms");
+      if (ms != null && ms > 0) {
+        return new long[] {0, Math.min(ms.longValue(), 5000)};
+      }
+    } catch (Exception ignored) {
     }
     return null;
   }
