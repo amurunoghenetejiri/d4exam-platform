@@ -364,15 +364,26 @@ function Page() {
           action === "approve" && scheduleStart
             ? `Starts ${new Date(scheduleStart).toLocaleString()}.`
             : undefined;
+        // Map UI action → Notification 20.0 decision keys (must not fall through to revision)
+        const decision =
+          action === "approve"
+            ? "approved"
+            : action === "reject"
+              ? "rejected"
+              : "revision_requested";
         try {
           await notifyTeacherExamDecision({
             teacherUserId: selected.created_by,
             schoolId,
             examId: selected.id,
             examTitle: selected.title,
-            decision: action,
+            decision,
             scheduleNote: when,
-            comment: comment.trim() || undefined,
+            note: comment.trim() || undefined,
+            courseCode: courseCode(selected) !== "—" ? courseCode(selected) : undefined,
+            courseTitle: courseName(selected) !== "Course" ? courseName(selected) : undefined,
+            start: scheduleStart || selected.scheduled_start || undefined,
+            end: endLocal || selected.scheduled_end || undefined,
           });
         } catch (e) {
           console.warn("[officer.approvals] notify teacher failed:", e);
