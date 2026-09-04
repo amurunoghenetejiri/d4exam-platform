@@ -37,6 +37,7 @@ import { SchoolLogo } from "@/components/brand/SchoolLogo";
 import { Loader2, Upload, Building2 } from "lucide-react";
 import { PushSettingsCard } from "@/components/settings/PushSettingsCard";
 import { SwitchAccountCard } from "@/components/settings/SwitchAccountCard";
+import { RoleSwitchCard } from "@/components/settings/RoleSwitchCard";
 import { signOutThisAccount, signOutAllAccounts, listSavedAccounts } from "@/lib/account-switcher";
 
 export function SettingsPage({ scope }: { scope: string }) {
@@ -301,7 +302,8 @@ export function SettingsPage({ scope }: { scope: string }) {
           </div>
         </SectionCard>
 
-        <SwitchAccountCard />
+        <RoleSwitchCard />
+      <SwitchAccountCard />
 
         <SectionCard title="Session" description="Device and access information">
           <InfoRow label="Account scope" value={scope} />
