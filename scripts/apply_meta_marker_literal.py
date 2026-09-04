@@ -4,36 +4,26 @@ p = Path(__file__).resolve().parents[1] / "src/routes/teacher.examinations.tsx"
 t = p.read_text()
 changed = False
 
-pairs = [
-(
-"""const metaBlob = `${META_MARKER}${JSON.stringify({ questionsToAnswer, assessmentKind })}`;
-      const secBlob = `${SECURITY_MARKER}${JSON.stringify(sec)}`;""",
-"""const metaBlob = `[[D4_EXAM_META]]${JSON.stringify({ questionsToAnswer, assessmentKind })}`;
-      const secBlob = `[[D4_SECURITY_JSON]]${JSON.stringify(sec)}`;""",
-),
-(
-"""const metaBlob = `${META_MARKER}${JSON.stringify({ ...meta, assessmentKind: meta.assessmentKind || \"examination\" })}`;
-      const secBlob = `${SECURITY_MARKER}${JSON.stringify(sec)}`;""",
-"""const metaBlob = `[[D4_EXAM_META]]${JSON.stringify({ ...meta, assessmentKind: meta.assessmentKind || \"examination\" })}`;
-      const secBlob = `[[D4_SECURITY_JSON]]${JSON.stringify(sec)}`;""",
-),
-]
-for a, b in pairs:
-    if a in t:
-        t = t.replace(a, b, 1)
-        changed = True
-        print("replaced block")
+a1 = "const metaBlob = `${META_MARKER}${JSON.stringify({ questionsToAnswer, assessmentKind })}`;\n      const secBlob = `${SECURITY_MARKER}${JSON.stringify(sec)}`;"
+b1 = "const metaBlob = `[[D4_EXAM_META]]${JSON.stringify({ questionsToAnswer, assessmentKind })}`;\n      const secBlob = `[[D4_SECURITY_JSON]]${JSON.stringify(sec)}`;"
+if a1 in t:
+    t = t.replace(a1, b1, 1)
+    changed = True
+    print("A")
 
-old_imp = """  toExamSettingsRow,
-  META_MARKER,
-  SECURITY_MARKER,
-} from \"@/lib/exam-security\";"""
-new_imp = """  toExamSettingsRow,
-} from \"@/lib/exam-security\";"""
+a2 = 'const metaBlob = `${META_MARKER}${JSON.stringify({ ...meta, assessmentKind: meta.assessmentKind || "examination" })}`;\n      const secBlob = `${SECURITY_MARKER}${JSON.stringify(sec)}`;'
+b2 = 'const metaBlob = `[[D4_EXAM_META]]${JSON.stringify({ ...meta, assessmentKind: meta.assessmentKind || "examination" })}`;\n      const secBlob = `[[D4_SECURITY_JSON]]${JSON.stringify(sec)}`;'
+if a2 in t:
+    t = t.replace(a2, b2, 1)
+    changed = True
+    print("B")
+
+old_imp = "  toExamSettingsRow,\n  META_MARKER,\n  SECURITY_MARKER,\n} from \"@/lib/exam-security\";"
+new_imp = "  toExamSettingsRow,\n} from \"@/lib/exam-security\";"
 if old_imp in t:
     t = t.replace(old_imp, new_imp, 1)
     changed = True
-    print("cleaned import")
+    print("import")
 
 p.write_text(t)
-print("DONE" if changed else "NOOP", "META_MARKER left", t.count("META_MARKER"))
+print("DONE" if changed else "NOOP", t.count("META_MARKER"), t.count("[[D4_EXAM_META]]"))
