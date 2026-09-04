@@ -95,6 +95,7 @@ export function CbtExamPage() {
   const [warnBanner, setWarnBanner] = useState<string | null>(null);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [pauseRemainingSec, setPauseRemainingSec] = useState<number | null>(null);
+  const [isOfficerPause, setIsOfficerPause] = useState(false);
   const attemptIdRef = useRef<string | null>(null);
   const tabSwitchCountRef = useRef(0);
   const fullscreenExitCountRef = useRef(0);
@@ -104,6 +105,10 @@ export function CbtExamPage() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const cameraReconnectLockRef = useRef(false);
   const pauseUntilRef = useRef<number | null>(null);
+  /** Absolute exam end (ms). Remaining time always derived from this. */
+  const endsAtRef = useRef<number | null>(null);
+  /** True when pause is officer-driven (indefinite). */
+  const officerPauseRef = useRef(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const [liveAttemptId, setLiveAttemptId] = useState<string | null>(null);
@@ -214,6 +219,8 @@ export function CbtExamPage() {
 
   const clearTimedPause = useCallback(() => {
     pauseUntilRef.current = null;
+    officerPauseRef.current = false;
+    setIsOfficerPause(false);
     setPauseRemainingSec(null);
     setPaused(false);
     setPauseReason("");
@@ -222,6 +229,8 @@ export function CbtExamPage() {
 
   const beginTimedPause = useCallback((reason: string) => {
     const secs = Math.max(5, Number(security.pauseDurationSeconds) || 300);
+    officerPauseRef.current = false;
+    setIsOfficerPause(false);
     pauseUntilRef.current = Date.now() + secs * 1000;
     setPauseRemainingSec(secs);
     setPauseReason(reason);
@@ -229,13 +238,13 @@ export function CbtExamPage() {
   }, [security.pauseDurationSeconds]);
 
   useEffect(() => {
+    // Integrity timed pause only — do NOT auto-resume at zero
     if (!paused || pauseUntilRef.current == null) return;
     const tick = () => {
       const until = pauseUntilRef.current;
       if (until == null) return;
       const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
       setPauseRemainingSec(left);
-      if (left <= 0) clearTimedPause();
     };
     tick();
     const id = window.setInterval(tick, 250);
@@ -243,13 +252,22 @@ export function CbtExamPage() {
   }, [paused, clearTimedPause]);
 
   useEffect(() => {
-    // Timer keeps running during integrity pause — time loss is the consequence
-    if (!started || done || seconds == null) return;
-    if (seconds <= 0) { void finishAttempt(true); return; }
-    const t = window.setInterval(() => setSeconds((s) => (s == null ? s : Math.max(0, s - 1))), 1000);
+    // Absolute end clock — continues during officer/integrity pause and backgrounding
+    if (!started || done) return;
+    const tick = () => {
+      const ends = endsAtRef.current;
+      if (ends == null) return;
+      const left = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
+      setSeconds(left);
+      if (left <= 0 && !finishingRef.current && !doneRef.current) {
+        void finishAttempt(true);
+      }
+    };
+    tick();
+    const t = window.setInterval(tick, 1000);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, done, seconds === 0]);
+  }, [started, done]);
 
   useEffect(() => {
     if (done) {
@@ -335,25 +353,32 @@ export function CbtExamPage() {
       if (doneRef.current || finishingRef.current) return;
       const cmd = String(p.command).toLowerCase();
       if (cmd === "hold" || cmd === "pause") {
-        // Officer pause: indefinite until release (not timed integrity pause)
+        // Officer pause: indefinite — no auto-resume, no integrity countdown
+        officerPauseRef.current = true;
+        setIsOfficerPause(true);
         pauseUntilRef.current = null;
         setPauseRemainingSec(null);
-        setPauseReason("Paused by examination officer");
+        setPauseReason("Paused by the examination officer");
         setPaused(true);
         setWarnBanner("Your examination has been paused by the officer");
         window.setTimeout(() => setWarnBanner(null), 10000);
       } else if (cmd === "release" || cmd === "resume") {
+        officerPauseRef.current = false;
+        setIsOfficerPause(false);
         pauseUntilRef.current = null;
         setPauseRemainingSec(null);
         setPaused(false);
         setPauseReason("");
-        setWarnBanner("Your examination has been released by the officer");
+        setWarnBanner("Your examination has been resumed by the officer");
         window.setTimeout(() => setWarnBanner(null), 6000);
         void reconnectCamera();
       } else if (cmd === "terminate") {
         setDoneTerminated(true);
+        setPaused(false);
         void finishAttempt(true);
       } else if (cmd === "submit") {
+        setDoneTerminated(false);
+        setPaused(false);
         void finishAttempt(false);
       }
     });
@@ -363,6 +388,69 @@ export function CbtExamPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, done, previewMode, student?.studentId, id]);
+
+  // Backup: poll attempt status so officer actions apply if broadcast is missed
+  useEffect(() => {
+    if (!started || done || previewMode || !student?.studentId || !id) return;
+    const attemptId = attemptIdRef.current;
+    if (!attemptId) return;
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled || finishingRef.current || doneRef.current) return;
+      try {
+        const { data } = await supabase
+          .from("exam_attempts")
+          .select("status, metadata")
+          .eq("id", attemptId)
+          .maybeSingle();
+        if (!data || cancelled) return;
+        const st = String((data as { status?: string }).status || "").toLowerCase();
+        const meta = ((data as { metadata?: Record<string, unknown> | null }).metadata || {}) as Record<
+          string,
+          unknown
+        >;
+        if (st === "submitted" || st === "flagged") {
+          setDoneTerminated(false);
+          void finishAttempt(false);
+          return;
+        }
+        if (st === "terminated") {
+          setDoneTerminated(true);
+          void finishAttempt(true);
+          return;
+        }
+        if (st === "paused" || meta.officer_hold || meta.officer_pause) {
+          if (!pausedRef.current) {
+            officerPauseRef.current = true;
+            setIsOfficerPause(true);
+            pauseUntilRef.current = null;
+            setPauseRemainingSec(null);
+            setPauseReason("Paused by the examination officer");
+            setPaused(true);
+          }
+        } else if (st === "in_progress" || st === "active" || st === "started") {
+          if (pausedRef.current && officerPauseRef.current) {
+            officerPauseRef.current = false;
+            setIsOfficerPause(false);
+            pauseUntilRef.current = null;
+            setPauseRemainingSec(null);
+            setPaused(false);
+            setPauseReason("");
+            void reconnectCamera();
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    const t = window.setInterval(() => void poll(), 4000);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done, previewMode, student?.studentId, id, liveAttemptId]);
 
   // Integrity: fullscreen exit + app background / tab switch
   useEffect(() => {
@@ -735,7 +823,17 @@ export function CbtExamPage() {
           })();
         }
       }
-      setSeconds((examQ.data?.duration_minutes ?? 60) * 60);
+      {
+        const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
+        const now = Date.now();
+        let ends = now + durationSec * 1000;
+        const schedEnd = examQ.data?.scheduled_end ? new Date(String(examQ.data.scheduled_end)).getTime() : NaN;
+        if (!Number.isNaN(schedEnd) && schedEnd > now) {
+          ends = Math.min(ends, schedEnd);
+        }
+        endsAtRef.current = ends;
+        setSeconds(Math.max(0, Math.ceil((ends - now) / 1000)));
+      }
       setStarted(true);
       setIndex(0);
     } finally { setMediaBusy(false); }
@@ -778,9 +876,19 @@ export function CbtExamPage() {
       <div className="grid min-h-dvh place-items-center bg-slate-50 p-4">
         <div className="w-full max-w-lg rounded-2xl border bg-white p-6 text-center shadow-sm">
           <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? session?.schoolName} size="lg" className="mx-auto" />
-          <h1 className="mt-4 text-2xl font-extrabold">{previewMode ? "Preview ended" : "Examination completed"}</h1>
+          <h1 className="mt-4 text-2xl font-extrabold">
+            {previewMode
+              ? "Preview ended"
+              : doneTerminated
+                ? "EXAM TERMINATED"
+                : "EXAM SUBMITTED"}
+          </h1>
           <p className="mt-2 text-sm text-slate-600">
-            {previewMode ? "Officer preview finished." : doneTerminated ? "Your attempt was closed." : "Your answers were submitted successfully."}
+            {previewMode
+              ? "Officer preview finished."
+              : doneTerminated
+                ? "Your examination has been terminated by the examination officer. This examination can no longer be continued."
+                : "Your examination has been submitted. Your examination is no longer active."}
           </p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             {!previewMode && (<Button className="font-semibold" onClick={() => void goToResult()}>View Results</Button>)}
@@ -948,22 +1056,53 @@ export function CbtExamPage() {
       {paused && started && !done && (
         <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-white p-6 text-center shadow-2xl">
-            <h2 className="text-lg font-extrabold text-slate-900">EXAM PAUSED</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Your examination has been paused because an integrity violation was detected.
-            </p>
-            {pauseReason ? <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p> : null}
-            {pauseRemainingSec != null && pauseRemainingSec > 0 ? (
+            {isOfficerPause ? (
               <>
-                <p className="mt-4 font-mono text-3xl font-extrabold tabular-nums text-primary">
-                  {String(Math.floor(pauseRemainingSec / 60)).padStart(2, "0")}:{String(pauseRemainingSec % 60).padStart(2, "0")}
+                <h2 className="text-lg font-extrabold text-slate-900">EXAM PAUSED</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  This examination has been paused by the examination officer.
                 </p>
-                <p className="mt-1 text-xs text-slate-500">Resumes automatically when the timer reaches zero</p>
+                {pauseReason ? (
+                  <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p>
+                ) : null}
+                <p className="mt-4 text-sm font-medium text-slate-700">
+                  Waiting for the examination officer to resume your examination.
+                </p>
+                <p className="mt-2 text-[11px] text-slate-500">
+                  You cannot answer questions while paused. The exam clock continues.
+                </p>
+              </>
+            ) : pauseRemainingSec != null && pauseRemainingSec > 0 ? (
+              <>
+                <h2 className="text-lg font-extrabold text-slate-900">EXAM PAUSED</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  Your examination has been paused because the allowed tab-switch limit was reached.
+                </p>
+                {pauseReason ? (
+                  <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p>
+                ) : null}
+                <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Pause time remaining
+                </p>
+                <p className="mt-1 font-mono text-3xl font-extrabold tabular-nums text-primary">
+                  {String(Math.floor(pauseRemainingSec / 60)).padStart(2, "0")}:
+                  {String(pauseRemainingSec % 60).padStart(2, "0")}
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Please wait until the pause period is completed. The exam clock continues.
+                </p>
               </>
             ) : (
-              <Button className="mt-5 w-full font-semibold" onClick={() => void clearTimedPause()}>
-                Resume examination
-              </Button>
+              <>
+                <h2 className="text-lg font-extrabold text-slate-900">PAUSE PERIOD COMPLETED</h2>
+                <p className="mt-2 text-sm text-slate-600">You may now resume your examination.</p>
+                {pauseReason ? (
+                  <p className="mt-3 text-xs font-semibold text-slate-800">Reason: {pauseReason}</p>
+                ) : null}
+                <Button className="mt-5 w-full font-semibold" onClick={() => void clearTimedPause()}>
+                  Resume Exam
+                </Button>
+              </>
             )}
           </div>
         </div>
