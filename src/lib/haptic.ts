@@ -17,6 +17,8 @@ export type HapticKind =
   | "camera_blocked"
   | "tab_switch"
   | "officer_warning"
+  | "officer_pause"
+  | "officer_submit"
   | "light"
   | "strong";
 
@@ -32,6 +34,10 @@ const PATTERNS: Record<HapticKind, number[]> = {
   officer_warning: [
     0, 250, 35, 300, 35, 350, 40, 400, 40, 450, 45, 500, 45, 550, 50, 600, 50, 650,
   ],
+  // Medium-strong pulse for officer pause
+  officer_pause: [0, 220, 40, 280, 40, 320, 45, 380, 45, 420],
+  // Strong double-burst for force submit / terminate
+  officer_submit: [0, 280, 35, 340, 35, 400, 40, 460, 40, 520, 45, 580],
 };
 
 type ExamImmersivePlugin = {
@@ -187,13 +193,25 @@ export function haptic(kind: HapticKind) {
     "multi",
     "camera_blocked",
     "officer_warning",
+    "officer_pause",
+    "officer_submit",
     "tab_switch",
+    "light",
+    "strong",
   ];
   if (!allowed.includes(kind)) return;
 
   const now = Date.now();
   const cooldown =
-    kind === "officer_warning" ? 500 : kind === "multi" ? 700 : kind === "start" ? 300 : 900;
+    kind === "officer_warning" || kind === "officer_submit"
+      ? 500
+      : kind === "officer_pause"
+        ? 600
+        : kind === "multi"
+          ? 700
+          : kind === "start"
+            ? 300
+            : 900;
   if (lastKind === kind && now - lastAt < cooldown) return;
   lastKind = kind;
   lastAt = now;
@@ -219,6 +237,21 @@ export function haptic(kind: HapticKind) {
       window.setTimeout(() => pulseTrain([300, 350, 400, 450, 500, 550], 35), 20),
       window.setTimeout(() => vibrateRaw([0, 350, 30, 400, 30, 500, 30, 600]), 600),
       window.setTimeout(() => vibrateRaw([0, 400, 30, 500, 30, 600]), 1100),
+    );
+  }
+
+  if (kind === "officer_pause") {
+    timers.push(
+      window.setTimeout(() => vibrateRaw([0, 240, 40, 300, 40, 360]), 200),
+      window.setTimeout(() => vibrateRaw([0, 280, 40, 340]), 500),
+    );
+  }
+
+  if (kind === "officer_submit") {
+    timers.push(
+      window.setTimeout(() => vibrateRaw([0, 320, 30, 380, 30, 440, 35, 500]), 180),
+      window.setTimeout(() => vibrateRaw([0, 360, 30, 420, 30, 500]), 550),
+      window.setTimeout(() => vibrateRaw([0, 400, 30, 500]), 1000),
     );
   }
 }
