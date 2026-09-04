@@ -60,7 +60,7 @@ export function useStudentContext() {
           (session.roles && session.roles.includes("student")) ||
           session?.schoolId),
     ),
-    staleTime: 5 * 60_000,
+    staleTime: 20_000,
     queryFn: async (): Promise<StudentContext | null> => {
       const uid = session?.userId;
       return withOfflineCache(
@@ -127,8 +127,73 @@ export function useStudentContext() {
             const faculties = student.faculties as { name?: string } | null;
             const levels = student.levels as { name?: string } | null;
             const status = String(student.status || "active");
+            const studentId = String(student.id);
+            const departmentId = (student.department_id as string | null) ?? null;
+            const levelId = (student.level_id as string | null) ?? null;
+            // Enrolled courses: student_courses → course_enrollments → dept/level courses
+            let courses: StudentCourse[] = [];
+            const mapRows = (rows: unknown[]): StudentCourse[] =>
+              (rows ?? [])
+                .map((row) => {
+                  const c = (row as { courses?: { id?: string; code?: string; name?: string } | null })
+                    .courses;
+                  if (!c?.id) return null;
+                  return {
+                    id: String(c.id),
+                    code: String(c.code || ""),
+                    name: String(c.name || ""),
+                  };
+                })
+                .filter(Boolean) as StudentCourse[];
+            try {
+              const { data: sc } = await supabase
+                .from("student_courses")
+                .select("course_id, courses(id, code, name)")
+                .eq("student_id", studentId)
+                .limit(300);
+              courses = mapRows(sc ?? []);
+            } catch {
+              courses = [];
+            }
+            if (!courses.length) {
+              try {
+                const { data: en } = await supabase
+                  .from("course_enrollments")
+                  .select("course_id, courses(id, code, name)")
+                  .eq("student_id", studentId)
+                  .limit(300);
+                courses = mapRows(en ?? []);
+              } catch {
+                /* ignore */
+              }
+            }
+            if (!courses.length && schoolId && (departmentId || levelId)) {
+              try {
+                let cq = supabase
+                  .from("courses")
+                  .select("id, code, name")
+                  .eq("school_id", schoolId)
+                  .limit(300);
+                if (departmentId) cq = cq.eq("department_id", departmentId);
+                if (levelId) cq = cq.eq("level_id", levelId);
+                const { data: deptCourses } = await cq;
+                courses = (deptCourses ?? []).map((c) => ({
+                  id: String((c as { id: string }).id),
+                  code: String((c as { code?: string }).code || ""),
+                  name: String((c as { name?: string }).name || ""),
+                }));
+              } catch {
+                /* ignore */
+              }
+            }
+            const seen = new Set<string>();
+            courses = courses.filter((c) => {
+              if (seen.has(c.id)) return false;
+              seen.add(c.id);
+              return true;
+            });
             return {
-              studentId: String(student.id),
+              studentId,
               matric:
                 (student.matric_number as string | null) ??
                 (student.student_id as string | null) ??
@@ -141,8 +206,8 @@ export function useStudentContext() {
                 String(student.matric_number || ""),
               email: (profile.email as string) || "",
               schoolName: session?.schoolName ?? null,
-              departmentId: (student.department_id as string | null) ?? null,
-              levelId: (student.level_id as string | null) ?? null,
+              departmentId,
+              levelId,
               facultyId: (student.faculty_id as string | null) ?? null,
               departmentName: departments?.name ?? null,
               facultyName: faculties?.name ?? null,
@@ -152,8 +217,8 @@ export function useStudentContext() {
               sessionName: null,
               semesterName: null,
               semesterId: null,
-              courses: [],
-              courseIds: [],
+              courses,
+              courseIds: courses.map((c) => c.id),
             };
           } catch (e) {
             console.warn("[student-context] client fallback failed", e);
