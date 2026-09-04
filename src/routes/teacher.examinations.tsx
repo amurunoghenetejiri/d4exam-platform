@@ -307,10 +307,10 @@ function Page() {
     setBusy(true);
     try {
       const plain = stripInternalMarkers(description.trim() || "");
-      let desc: string | null = plain || null;
       const sec = normalizeSecuritySettings(security);
-      desc = embedExamMeta(desc, { questionsToAnswer, assessmentKind });
-      desc = embedSecurityInDescription(desc, sec);
+      const metaBlob = `${META_MARKER}${JSON.stringify({ questionsToAnswer, assessmentKind })}`;
+      const secBlob = `${SECURITY_MARKER}${JSON.stringify(sec)}`;
+      let desc: string | null = [plain, metaBlob, secBlob].filter(Boolean).join("\n") || null;
       const computedEnd = endAt || (startAt ? endFromStart(startAt, durationMinutes) : "");
       const payload = {
         school_id: teacher.schoolId,
@@ -397,8 +397,9 @@ function Page() {
         parseSecurityFromDescription(desc) ?? loadTeacherSecurityDefaults(teacher.teacherId),
       );
       const plain = stripInternalMarkers(desc);
-      desc = embedExamMeta(plain, { ...meta, assessmentKind: meta.assessmentKind || "examination" });
-      desc = embedSecurityInDescription(desc, sec);
+      const metaBlob = `${META_MARKER}${JSON.stringify({ ...meta, assessmentKind: meta.assessmentKind || "examination" })}`;
+      const secBlob = `${SECURITY_MARKER}${JSON.stringify(sec)}`;
+      desc = [plain, metaBlob, secBlob].filter(Boolean).join("\n") || null;
       const { error } = await supabase
         .from("examinations")
         .update({
