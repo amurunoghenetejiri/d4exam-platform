@@ -109,10 +109,16 @@ function Page() {
   );
 
   const examsQ = useQuery({
-    queryKey: ["student-dashboard-exams", student?.schoolId, student?.courseIds?.join(",")],
+    queryKey: [
+      "student-dashboard-exams",
+      student?.schoolId,
+      student?.courseIds?.join(","),
+      student?.departmentId,
+      student?.levelId,
+    ],
     enabled: Boolean(student?.schoolId),
     staleTime: 1_500,
-    refetchInterval: 5_000,
+    refetchInterval: 4_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async () => {
@@ -121,7 +127,7 @@ function Page() {
         uid,
         OfflineKeys.studentDashboardExams,
         async () => {
-          let q = supabase
+          const { data, error } = await supabase
             .from("examinations")
             .select(
               "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
@@ -129,14 +135,20 @@ function Page() {
             .eq("school_id", student!.schoolId)
             .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
             .order("scheduled_start", { ascending: true })
-            .limit(80);
-          if (student?.courseIds?.length) q = q.in("course_id", student.courseIds);
-          const { data, error } = await q;
+            .limit(150);
           if (error) {
             console.warn("[offline]", error);
             return [] as ExamRow[];
           }
-          return (data ?? []) as ExamRow[];
+          const rows = (data ?? []) as ExamRow[];
+          const courseIds = student?.courseIds ?? [];
+          if (!courseIds.length) return rows;
+          const allowed = new Set(courseIds);
+          return rows.filter((e) => {
+            const cid = (e as { course_id?: string | null }).course_id;
+            if (!cid) return true;
+            return allowed.has(cid);
+          });
         },
         { schoolId: student?.schoolId, fallback: [] as ExamRow[] },
       );
@@ -324,8 +336,16 @@ function Page() {
         <DashCard
           to="/student/examinations"
           label="Ready exams"
-          value={readyNow.length}
-          hint={upcoming.length > 0 ? `${upcoming.length} upcoming` : undefined}
+          value={readyList.length}
+          hint={
+            readyNow.length && upcoming.length
+              ? `${readyNow.length} live · ${upcoming.length} upcoming`
+              : upcoming.length > 0
+                ? `${upcoming.length} upcoming`
+                : readyNow.length > 0
+                  ? `${readyNow.length} live now`
+                  : undefined
+          }
           icon={ClipboardList}
           color="bg-blue-50 text-primary"
         />
