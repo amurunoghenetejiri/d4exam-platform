@@ -24,6 +24,59 @@ function isCountdownSpam(row: {
   return false;
 }
 
+/** Match Notification 20.0 action labels from type/title/message */
+function actionLabelFor(row: {
+  title?: string;
+  message?: string;
+  type?: string;
+  link?: string | null;
+}): string {
+  const ty = String(row.type || "").toLowerCase();
+  const msg = String(row.message || "").toLowerCase();
+  const title = String(row.title || "").toLowerCase();
+  if (
+    ty.includes("result") ||
+    title.includes("result released") ||
+    title.includes("result held") ||
+    msg.includes("result has been released") ||
+    msg.includes("result is now available")
+  )
+    return "VIEW RESULT";
+  if (title.includes("awaiting approval") || msg.includes("for your review and approval"))
+    return "REVIEW EXAM";
+  if (
+    ty === "exam_available" ||
+    title.includes("starting now") ||
+    msg.includes("starting now") ||
+    msg.includes("you can now enter the examination")
+  )
+    return "START EXAM";
+  if (title.includes("changes requested") || msg.includes("requested changes"))
+    return "EDIT EXAM";
+  if (ty.includes("reject") || title.includes("not approved"))
+    return "REVIEW EXAM";
+  if (title.includes("live examination") || title.includes("monitoring") || msg.includes("live monitoring"))
+    return "OPEN MONITORING";
+  if (title.includes("scheduled") || ty.includes("exam_scheduled") || title.includes("examination"))
+    return "VIEW EXAM";
+  if (title.includes("welcome"))
+    return "OPEN DASHBOARD";
+  if (row.link) return "VIEW DETAILS";
+  return "VIEW DETAILS";
+}
+
+function safeLink(link?: string | null): string {
+  const raw = (link || "").trim();
+  if (!raw) return "/student/notifications";
+  if (raw.startsWith("/")) return raw;
+  try {
+    const u = new URL(raw);
+    return u.pathname + u.search || "/student/notifications";
+  } catch {
+    return raw.startsWith("http") ? "/student/notifications" : `/${raw}`;
+  }
+}
+
 export function NotificationLiveListener() {
   const { data: session } = useSessionUser();
   const queryClient = useQueryClient();
@@ -69,12 +122,14 @@ export function NotificationLiveListener() {
 
             const title = row.title || "D4EXAM";
             const body = row.message || "";
+            const link = safeLink(row.link);
+            const actionLabel = actionLabelFor({ ...row, link });
             toast.info(title, {
               description: body,
               duration: 10_000,
             });
             if (isNativeShell()) {
-              void showD4ExamNativeNotification(title, body, row.link);
+              void showD4ExamNativeNotification(title, body, link, { actionLabel });
             }
             void queryClient.invalidateQueries({ queryKey: ["count", "notifications"] });
             void queryClient.invalidateQueries({
