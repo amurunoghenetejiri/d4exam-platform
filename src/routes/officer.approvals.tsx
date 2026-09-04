@@ -392,12 +392,23 @@ function Page() {
 
       if (action === "approve" && schoolId) {
         try {
+          const startIso = scheduleStart
+            ? new Date(scheduleStart).toISOString()
+            : selected.scheduled_start;
+          const endIso = endLocal
+            ? new Date(endLocal).toISOString()
+            : selected.scheduled_end;
           await notifyStudentsExamApproved({
             schoolId,
             examId: selected.id,
             examTitle: selected.title,
             courseId: selected.course_id,
-            scheduledStart: scheduleStart || selected.scheduled_start,
+            courseCode: courseCode(selected) !== "—" ? courseCode(selected) : undefined,
+            courseTitle: courseName(selected) !== "Course" ? courseName(selected) : undefined,
+            start: startIso,
+            end: endIso,
+            scheduledStart: startIso,
+            scheduledEnd: endIso,
           });
         } catch (e) {
           console.warn("[officer.approvals] notify students failed:", e);
