@@ -510,11 +510,22 @@ export function CbtExamPage() {
     };
 
     const onVis = () => {
-      if (!security.tabMonitoring) return;
       if (document.visibilityState === "visible") {
         void reconnectCamera();
+        // Keep screen share alive across brief background/tab returns
+        if (security.requireScreenShare && !doneRef.current && !finishingRef.current) {
+          void (async () => {
+            try {
+              const { ensureScreenShareRunning, holdExamScreenShare: holdSS } = await import("@/lib/screen-share");
+              holdSS(true);
+              await ensureScreenShareRunning();
+            } catch { /* ignore */ }
+          })();
+        }
+        if (!security.tabMonitoring) return;
         return;
       }
+      if (!security.tabMonitoring) return;
       if (document.visibilityState !== "hidden") return;
       const now = Date.now();
       if (now - lastTabHiddenAtRef.current < 800) return;
@@ -749,11 +760,34 @@ export function CbtExamPage() {
         screenStreamRef.current = share.stream;
         setScreenStream(share.stream);
         onScreenShareEnded(share.stream, () => {
-          toast.error("Screen sharing stopped. Re-enable to continue the exam.");
-          setPaused(true);
-          setPauseReason("Screen sharing stopped");
-          setScreenStream(null);
-          screenStreamRef.current = null;
+          // Transient native "stopped" (tab switch / brief background) — try recover first
+          void (async () => {
+            try {
+              const { ensureScreenShareRunning, holdExamScreenShare: holdSS } = await import("@/lib/screen-share");
+              holdSS(true);
+              const ok = await ensureScreenShareRunning();
+              if (ok) {
+                // Recovered — do not pause or log a false violation
+                return;
+              }
+            } catch { /* fall through */ }
+            // Only treat as real stop after recovery failed
+            if (doneRef.current || finishingRef.current) return;
+            toast.error("Screen sharing stopped. Re-enable to continue the exam.");
+            setPaused(true);
+            setPauseReason("Screen sharing stopped");
+            setScreenStream(null);
+            screenStreamRef.current = null;
+            const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
+            const studentId = student?.studentId;
+            if (schoolId && studentId && id) {
+              void logSecurityEvent({
+                schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+                eventType: "SCREEN_SHARE_STOPPED", severity: "medium",
+                description: "Screen sharing stopped during examination",
+              });
+            }
+          })();
         });
         toast.success("Screen sharing active");
       }
