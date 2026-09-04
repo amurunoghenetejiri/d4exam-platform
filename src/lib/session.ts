@@ -26,6 +26,41 @@ export type AppRole =
   | "examination_officer"
   | "super_admin";
 
+const LAST_PATH_KEY = "d4exam_last_path_v1";
+const LAST_ROLE_KEY = "d4exam_last_role_v1";
+
+/** Remember last in-app path so Capacitor relaunch restores role route. */
+export function rememberLastPath(path: string, role?: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    const p = (path || "").split("?")[0];
+    if (!p || p === "/" || p === "/login" || p.startsWith("/auth")) return;
+    window.localStorage.setItem(LAST_PATH_KEY, p);
+    if (role) window.localStorage.setItem(LAST_ROLE_KEY, role);
+  } catch { /* ignore */ }
+}
+
+export function readLastPath(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const p = window.localStorage.getItem(LAST_PATH_KEY);
+    if (!p || p === "/" || p === "/login") return null;
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+export function readLastRole(): AppRole | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const r = window.localStorage.getItem(LAST_ROLE_KEY);
+    const known = ["student", "teacher", "school_admin", "examination_officer", "super_admin"];
+    if (r && known.includes(r)) return r as AppRole;
+  } catch { /* ignore */ }
+  return null;
+}
+
 export const roleHome: Record<AppRole, string> = {
   student: "/student",
   teacher: "/teacher",
