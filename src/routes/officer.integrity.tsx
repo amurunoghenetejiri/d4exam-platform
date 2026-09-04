@@ -202,9 +202,12 @@ function Page() {
                       </p>
                       <StatusBadge status={(a.security_review_status || "pending").replaceAll("_", " ")} />
                     </div>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {a.examinations?.title ?? "Exam"} · Score {a.total_score ?? "—"} · Tabs{" "}
-                      {a.tab_switch_count} · FS {a.fullscreen_exit_count ?? 0}
+                    <p className="mt-1 text-xs font-semibold text-slate-700">
+                      {a.examinations?.title ?? "Exam"}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      Score {a.total_score ?? "—"} · Tabs {a.tab_switch_count} · FS {a.fullscreen_exit_count ?? 0}
+                      {" · "}Attempt {String(a.id).slice(0, 8)}…
                     </p>
                   </button>
                   {selectedAttempt === a.id && (
@@ -245,7 +248,11 @@ function Page() {
 
         <SectionCard
           title="Event timeline"
-          description={selectedAttempt ? "Events for selected attempt" : "Recent school-wide events"}
+          description={
+            selectedAttempt
+              ? "Events for the selected examination attempt only"
+              : "Grouped by exam attempt — each examination session is listed separately"
+          }
         >
           {eventsQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading…</p>
@@ -255,19 +262,62 @@ function Page() {
               description="Tab switches, fullscreen exits, copy attempts, face events and connection changes appear here."
             />
           ) : (
-            <ul className="max-h-[70vh] space-y-2 overflow-y-auto">
-              {events.map((ev) => (
-                <li key={ev.id} className="rounded-lg border border-slate-100 px-3 py-2 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-bold text-slate-900">{ev.event_type}</p>
-                    <span className="text-[10px] font-semibold uppercase text-slate-500">{ev.severity}</span>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    {ev.description || "—"} · {new Date(ev.created_at).toLocaleString()}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto">
+              {(() => {
+                // Group by attempt_id (preferred) or exam_id so Exam A / Exam B stay separate
+                const groups = new Map<string, { key: string; examId: string; attemptId: string | null; items: EventRow[] }>();
+                for (const ev of events) {
+                  const attemptId = ev.attempt_id ? String(ev.attempt_id) : null;
+                  const examId = String(ev.exam_id || "unknown");
+                  const key = attemptId ? `attempt:${attemptId}` : `exam:${examId}`;
+                  let g = groups.get(key);
+                  if (!g) {
+                    g = { key, examId, attemptId, items: [] };
+                    groups.set(key, g);
+                  }
+                  g.items.push(ev);
+                }
+                const attemptTitle = (examId: string) => {
+                  const a = attempts.find((x) => String(x.exam_id) === examId || String(x.id) === examId);
+                  return a?.examinations?.title ?? `Exam ${examId.slice(0, 8)}…`;
+                };
+                return Array.from(groups.values()).map((g) => {
+                  const title =
+                    attempts.find((a) => g.attemptId && String(a.id) === g.attemptId)?.examinations?.title ||
+                    attemptTitle(g.examId);
+                  const studentLabel =
+                    attempts.find((a) => g.attemptId && String(a.id) === g.attemptId)?.students?.profiles?.full_name ||
+                    attempts.find((a) => g.attemptId && String(a.id) === g.attemptId)?.students?.matric_number ||
+                    null;
+                  return (
+                    <div key={g.key} className="rounded-xl border border-slate-200 bg-slate-50/60 p-2">
+                      <div className="mb-2 border-b border-slate-200 px-1 pb-1.5">
+                        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-800">{title}</p>
+                        <p className="text-[10px] text-slate-500">
+                          {studentLabel ? `${studentLabel} · ` : ""}
+                          {g.attemptId ? `Attempt ${g.attemptId.slice(0, 8)}…` : `Exam ${g.examId.slice(0, 8)}…`}
+                          {" · "}
+                          {g.items.length} event{g.items.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <ul className="space-y-2">
+                        {g.items.map((ev) => (
+                          <li key={ev.id} className="rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="font-bold text-slate-900">{ev.event_type}</p>
+                              <span className="text-[10px] font-semibold uppercase text-slate-500">{ev.severity}</span>
+                            </div>
+                            <p className="text-xs text-slate-500">
+                              {ev.description || "—"} · {new Date(ev.created_at).toLocaleString()}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
           )}
         </SectionCard>
       </div>
