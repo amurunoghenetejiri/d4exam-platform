@@ -22,7 +22,7 @@ import { logSecurityEvent } from "@/lib/cbt-security";
 import { mapFaceSecurityEvent } from "@/lib/live-monitor";
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
-import { haptic } from "@/lib/haptic";
+import { haptic, primeHaptics } from "@/lib/haptic";
 import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, holdExamScreenShare } from "@/lib/screen-share";
 import { useLiveScreenPublish } from "@/lib/use-live-screen-publish";
 import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
@@ -802,7 +802,7 @@ export function CbtExamPage() {
         });
         /* screen share active — silent */
       }
-      /* no start vibration toast noise */
+      try { primeHaptics(); } catch { /* ignore */ }
       if (security.fullscreen) {
         const ok = await requestExamFullscreen();
         if (!ok) { setFsGate(true); }
