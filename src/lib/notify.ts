@@ -421,6 +421,7 @@ export async function notifyOfficersStudentResultPending(opts: {
         message: copy.message,
         type: "result_pending_release",
         link: templateLink(copy, link),
+        actionLabel: copy.action?.label ?? "REVIEW RESULT",
         entityType: "examination",
         entityId: opts.examId || opts.examTitle,
         dedupeMinutes: 15,
@@ -464,6 +465,7 @@ export async function notifyStudentResultPublished(opts: {
       message: copy.message,
       type: "result_published",
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? null,
       entityType: "examination",
       entityId: opts.examId,
     });
@@ -505,6 +507,7 @@ export async function notifyStudentsResultsReleased(opts: {
           message: copy.message,
           type: "result_published",
           link: templateLink(copy, link),
+          actionLabel: copy.action?.label ?? null,
           entityType: "examination",
           entityId: examId,
           dedupeMinutes: 30,
@@ -547,6 +550,7 @@ export async function notifyStudentExamSubmitted(opts: {
       message: copy.message,
       type: "exam_submitted",
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? null,
       entityType: "examination",
       entityId: opts.examId,
     });
@@ -591,6 +595,7 @@ export async function notifyStudentOfficerWarning(opts: {
       message: copy.message,
       type: "officer_warning",
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? null,
       entityType: "examination",
       entityId: opts.examId || undefined,
       dedupeMinutes: 2,
@@ -634,6 +639,7 @@ export async function notifyStudentsResultsHeld(opts: {
           message: copy.message,
           type: "result_pending_release",
           link: templateLink(copy, link),
+          actionLabel: copy.action?.label ?? null,
           entityType: "examination",
           entityId: opts.examId || "held",
           dedupeMinutes: 30,
@@ -661,10 +667,11 @@ export async function notifyStudentsExamRescheduled(opts: {
     const authIds = await studentIdsToAuthUserIds(opts.studentIds);
     if (!authIds.length) return;
     const link = "/student/examinations";
+    const names = await authUserDisplayNames(authIds);
     await notifyMany(
       authIds.map((uid) => {
         const copy = Msg.studentExamRescheduled({
-          studentName: "Student",
+          studentName: names.get(uid) || "Student",
           examTitle: opts.examTitle,
           courseCode: opts.courseCode,
           courseTitle: opts.courseTitle,
@@ -673,12 +680,7 @@ export async function notifyStudentsExamRescheduled(opts: {
           link,
         });
         let message = copy.message;
-        if (opts.windowLabel) message += `
-
-New window: ${opts.windowLabel}`;
-        if (opts.reason) message += `
-
-Note: ${opts.reason}`;
+        if (opts.windowLabel) message += `\n\nNew window: ${opts.windowLabel}`;
         return {
           recipientUserId: uid,
           schoolId: opts.schoolId,
@@ -686,6 +688,7 @@ Note: ${opts.reason}`;
           message,
           type: "exam_scheduled",
           link: templateLink(copy, link),
+          actionLabel: copy.action?.label ?? "VIEW SCHEDULE",
           entityType: "examination",
           entityId: opts.examTitle,
           dedupeMinutes: 20,
@@ -739,6 +742,7 @@ Please open D4EXAM to start when ready.`,
           message: copy.message,
           type: "exam_available",
           link: templateLink(copy, link),
+          actionLabel: copy.action?.label ?? null,
           entityType: "examination",
           entityId: opts.examId || "rewrite",
           dedupeMinutes: 30,
@@ -790,6 +794,7 @@ export async function notifyStudentResultTerminated(opts: {
       message: copy.message,
       type: "warning",
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? null,
       entityType: "examination",
       entityId: opts.examId || null,
     });
@@ -829,6 +834,7 @@ export async function notifyOfficersExamSubmitted(opts: {
           message: copy.message,
           type: "exam_submitted",
           link: templateLink(copy, link),
+          actionLabel: copy.action?.label ?? null,
           entityType: "examination",
           entityId: opts.examId,
           dedupeMinutes: 10,
@@ -1054,6 +1060,7 @@ export async function notifyStudentExamAvailable(opts: {
       message: copy.message,
       type: "exam_available",
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? null,
       actionLabel: copy.action?.label ?? "START EXAM",
       entityType: "examination",
       entityId: opts.examId,
@@ -1087,6 +1094,7 @@ export async function notifySuperAdminsOfApplication(opts: {
         message: copy.message,
         type: "system_alert",
         link: templateLink(copy, link),
+        actionLabel: copy.action?.label ?? "VIEW APPLICATION",
         entityType: "school_application",
         entityId: opts.applicationId,
         dedupeMinutes: 5,
@@ -1106,13 +1114,26 @@ export async function notifySuperAdminsStudentsAdded(opts: {
     if (opts.count < 1) return;
     const name = opts.schoolName || (await schoolNameById(opts.schoolId));
     const ids = await listSuperAdminUserIds();
+    const link = "/super-admin/schools";
+    const copy = Msg.newStudentRegistered({
+      studentName: `${opts.count} new student(s)`,
+      schoolName: name,
+      link,
+    });
+    // Prefer 20.0 weekly-style summary for batch adds
+    const batch = Msg.weeklyEnrollmentUpdate({
+      schoolName: name,
+      students: opts.count,
+      link,
+    });
     await notifyMany(
       ids.map((uid) => ({
         recipientUserId: uid,
-        title: "👨‍🎓 Students Added",
-        message: `${name} added ${opts.count} new student(s).`,
+        title: batch.title,
+        message: batch.message,
         type: "system_alert",
-        link: "/super-admin/schools",
+        link: templateLink(batch, link),
+        actionLabel: batch.action?.label ?? "VIEW STUDENTS",
         entityType: "school",
         entityId: opts.schoolId,
         dedupeMinutes: 5,
@@ -1123,6 +1144,7 @@ export async function notifySuperAdminsStudentsAdded(opts: {
   }
 }
 
+
 export async function notifySuperAdminsTeachersAdded(opts: {
   schoolId: string;
   count: number;
@@ -1132,13 +1154,22 @@ export async function notifySuperAdminsTeachersAdded(opts: {
     if (opts.count < 1) return;
     const name = opts.schoolName || (await schoolNameById(opts.schoolId));
     const ids = await listSuperAdminUserIds();
+    const link = "/super-admin/schools";
+    const copy = Msg.newTeacherRegistered({
+      teacherName: `${opts.count} new teacher(s)`,
+      schoolName: name,
+      link,
+    });
     await notifyMany(
       ids.map((uid) => ({
         recipientUserId: uid,
-        title: "👨‍🏫 Teachers Added",
-        message: `${name} added ${opts.count} new teacher(s).`,
+        title: copy.title,
+        message:
+          copy.message +
+          (opts.count > 1 ? `\n\nCount: ${opts.count} teachers were added.` : ""),
         type: "system_alert",
-        link: "/super-admin/schools",
+        link: templateLink(copy, link),
+        actionLabel: copy.action?.label ?? "VIEW DETAILS",
         entityType: "school",
         entityId: opts.schoolId,
         dedupeMinutes: 5,
@@ -1149,45 +1180,51 @@ export async function notifySuperAdminsTeachersAdded(opts: {
   }
 }
 
+
 export async function notifyExamCompleted(opts: {
   schoolId: string;
-  examId: string;
+  examId?: string;
   examTitle: string;
-  submittedCount?: number;
-  totalCount?: number;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  attempted?: number;
+  submitted?: number;
 }): Promise<void> {
   try {
-    const school = await schoolNameById(opts.schoolId);
-    const counts =
-      opts.submittedCount != null && opts.totalCount != null
-        ? ` ${opts.submittedCount}/${opts.totalCount} students submitted.`
-        : "";
-    const supers = await listSuperAdminUserIds();
     const officers = await listOfficerUserIds(opts.schoolId);
     const admins = await listAdminUserIds(opts.schoolId);
+    const recipients = [...new Set([...officers, ...admins])];
+    if (!recipients.length) return;
+    const school = await schoolNameById(opts.schoolId);
+    const exam = [opts.courseCode, opts.examTitle || opts.courseTitle].filter(Boolean).join(" — ") || opts.examTitle;
+    const counts =
+      opts.attempted != null || opts.submitted != null
+        ? `\n\n📊 Attempts: ${opts.attempted ?? "—"}\n✅ Submitted: ${opts.submitted ?? "—"}`
+        : "";
+    const link = "/officer/results";
+    const copy = Msg.systemAlert({
+      title: "Examination Completed",
+      message:
+        `The examination has been completed.\n\n` +
+        `🏫 School: ${school}\n` +
+        `📝 Examination: ${exam}` +
+        counts +
+        `\n\nResults and monitoring records are available for review.`,
+      link,
+      actionLabel: "VIEW RESULTS",
+    });
     await notifyMany(
-      supers.map((uid) => ({
-        recipientUserId: uid,
-        title: "🎓 Examination Completed",
-        message: `${school} has completed “${opts.examTitle}”.${counts}`,
-        type: "system_alert",
-        link: "/super-admin/examinations",
-        entityType: "examination",
-        entityId: opts.examId,
-        dedupeMinutes: 120,
-      })),
-    );
-    await notifyMany(
-      [...new Set([...officers, ...admins])].map((uid) => ({
+      recipients.map((uid) => ({
         recipientUserId: uid,
         schoolId: opts.schoolId,
-        title: "🎓 Examination Completed",
-        message: `“${opts.examTitle}” has been completed.${counts}`,
-        type: "exam_submitted",
-        link: officers.includes(uid) ? "/officer/results" : "/admin/results",
+        title: copy.title,
+        message: copy.message,
+        type: "info",
+        link: templateLink(copy, link),
+        actionLabel: copy.action?.label ?? "VIEW RESULTS",
         entityType: "examination",
-        entityId: opts.examId,
-        dedupeMinutes: 120,
+        entityId: opts.examId || opts.examTitle,
+        dedupeMinutes: 30,
       })),
     );
   } catch (e) {
@@ -1195,31 +1232,61 @@ export async function notifyExamCompleted(opts: {
   }
 }
 
+
 export async function notifyStudentsNewMaterial(opts: {
   schoolId: string;
   courseId?: string | null;
-  courseName?: string;
-  materialType?: string;
-  title?: string;
+  courseLabel?: string | null;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  materialTitle?: string | null;
+  kind?: string | null;
+  studentAuthUserIds?: string[];
+  studentIds?: string[];
 }): Promise<void> {
   try {
-    const authIds = await courseStudentAuthIds(opts.courseId ?? null, opts.schoolId);
+    let authIds = await resolveStudentAuthIds(opts);
+    if (!authIds.length && opts.courseId) {
+      authIds = await courseStudentAuthIds(opts.courseId, opts.schoolId);
+    }
     if (!authIds.length) return;
-    const course = opts.courseName?.trim() || "your course";
-    const kind = opts.materialType?.trim() || "material";
-    const label = opts.title?.trim() ? ` “${opts.title.trim()}”` : "";
+    const course =
+      opts.courseCode ||
+      opts.courseTitle ||
+      opts.courseLabel ||
+      "your course";
+    const kind = (opts.kind || "material").trim();
+    const label = opts.materialTitle?.trim() ? `: ${opts.materialTitle.trim()}` : "";
+    const link = "/student/materials";
+    const names = await authUserDisplayNames(authIds);
     await notifyMany(
-      authIds.map((uid) => ({
-        recipientUserId: uid,
-        schoolId: opts.schoolId,
-        title: "📚 New Study Material",
-        message: `New ${kind}${label} has been uploaded for ${course}.`,
-        type: "announcement",
-        link: "/student/materials",
-        entityType: "course_material",
-        entityId: opts.courseId || opts.schoolId,
-        dedupeMinutes: 5,
-      })),
+      authIds.map((uid) => {
+        const studentName = names.get(uid) || "Student";
+        const copy = Msg.roleNotification({
+          name: studentName,
+          role: "Student",
+          title: "New Study Material",
+          message:
+            `New study material has been uploaded.\n\n` +
+            `📚 Type: ${kind}${label}\n` +
+            `📖 Course: ${course}\n\n` +
+            `Open D4EXAM to view the material.`,
+          link,
+          actionLabel: "VIEW MATERIAL",
+        });
+        return {
+          recipientUserId: uid,
+          schoolId: opts.schoolId,
+          title: copy.title,
+          message: copy.message,
+          type: "info",
+          link: templateLink(copy, link),
+          actionLabel: copy.action?.label ?? "VIEW MATERIAL",
+          entityType: "material",
+          entityId: opts.courseId || "material",
+          dedupeMinutes: 30,
+        };
+      }),
     );
   } catch (e) {
     console.warn("[notify] notifyStudentsNewMaterial failed", e);
@@ -1267,6 +1334,7 @@ export async function notifyStudentExamTerminated(opts: {
       message: copy.message,
       type: "error",
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? null,
       entityType: "examination",
       entityId: opts.examId || undefined,
     });
@@ -1315,6 +1383,7 @@ export async function notifyStudentExamAutoSubmitted(opts: {
       message: copy.message,
       type: "warning",
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? null,
       entityType: "examination",
       entityId: opts.examId || undefined,
     });
@@ -1357,6 +1426,7 @@ export async function notifyStudentExamReminder(opts: {
       message: copy.message,
       type: "exam_available",
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? null,
       entityType: `exam_reminder_${opts.kind}`,
       entityId: opts.examId,
       dedupeMinutes: opts.kind === "start" ? 45 : opts.kind === "10m" ? 20 : opts.kind === "30m" ? 40 : 12 * 60,
@@ -1370,40 +1440,54 @@ export async function notifyOfficersStudentViolation(opts: {
   schoolId: string;
   examId?: string | null;
   examTitle?: string | null;
-  studentId?: string | null;
+  courseCode?: string | null;
+  courseTitle?: string | null;
   studentName?: string | null;
-  eventType: string;
-  description?: string | null;
-  severity?: string | null;
+  eventType?: string | null;
+  detail?: string | null;
 }): Promise<void> {
   try {
-    const sev = String(opts.severity || "medium").toLowerCase();
-    if (sev === "low") return;
     const officers = await listOfficerUserIds(opts.schoolId);
     if (!officers.length) return;
-    const who =
-      (opts.studentName || "").trim() ||
-      (opts.studentId ? await studentDisplayName(opts.studentId) : "A student");
-    const exam = (opts.examTitle || "an examination").trim();
-    const et = String(opts.eventType || "VIOLATION").replace(/_/g, " ");
-    const detail = (opts.description || "").trim();
+    const who = (opts.studentName || "A student").trim();
+    const et = (opts.eventType || "a security event").trim();
+    const exam =
+      [opts.courseCode, opts.examTitle || opts.courseTitle].filter(Boolean).join(" — ") ||
+      opts.examTitle ||
+      "an examination";
+    const detail = (opts.detail || "").trim();
+    const link = "/officer/live-monitor";
+    const copy = Msg.systemAlert({
+      title: "Examination Security Alert",
+      message:
+        `A security event was detected during an examination.\n\n` +
+        `👤 Student: ${who}\n` +
+        `📝 Examination: ${exam}\n` +
+        `⚠️ Event: ${et}` +
+        (detail ? `\n\nDetails:\n${detail}` : "") +
+        `\n\nOpen live monitoring to review this student.`,
+      link,
+      actionLabel: "OPEN MONITORING",
+    });
     await notifyMany(
       officers.map((uid) => ({
         recipientUserId: uid,
         schoolId: opts.schoolId,
-        title: "⚠️ Examination Security Alert",
-        message: `${who} triggered ${et} during ${exam}.${detail ? ` ${detail}` : ""} Tap to open live monitoring.`,
+        title: copy.title,
+        message: copy.message,
         type: "warning",
-        link: "/officer/live-monitor",
-        entityType: "integrity_event",
-        entityId: `${opts.examId || "x"}:${opts.studentId || "s"}:${opts.eventType}`,
-        dedupeMinutes: 3,
+        link: templateLink(copy, link),
+        actionLabel: copy.action?.label ?? "OPEN MONITORING",
+        entityType: "examination",
+        entityId: opts.examId || opts.examTitle || "violation",
+        dedupeMinutes: 2,
       })),
     );
   } catch (e) {
     console.warn("[notify] notifyOfficersStudentViolation failed", e);
   }
 }
+
 
 export async function processDueExamReminders(schoolId?: string | null): Promise<{ sent: number }> {
   let sent = 0;
@@ -1466,32 +1550,71 @@ export async function processWeeklyAggregationSummaries(schoolId?: string | null
       const weekKey = new Date().toISOString().slice(0, 10);
       const payloads: Parameters<typeof notifyMany>[0] = [];
       if ((studentCount ?? 0) > 0) {
+        const copy = Msg.weeklyEnrollmentUpdate({
+          schoolName: school.name,
+          students: studentCount ?? 0,
+          link: "/admin/students",
+        });
         for (const uid of admins) {
           payloads.push({
-            recipientUserId: uid, schoolId: school.id,
-            title: "👥 Weekly Enrollment Summary",
-            message: `${school.name}: ${studentCount} students were enrolled this week.`,
-            type: "info", link: "/admin/students", entityType: "weekly_enrollment", entityId: `${school.id}:${weekKey}`, dedupeMinutes: 6 * 24 * 60,
+            recipientUserId: uid,
+            schoolId: school.id,
+            title: copy.title,
+            message: copy.message,
+            type: "info",
+            link: templateLink(copy, "/admin/students"),
+            actionLabel: copy.action?.label ?? "VIEW STUDENTS",
+            entityType: "weekly_enrollment",
+            entityId: `${school.id}:${weekKey}`,
+            dedupeMinutes: 6 * 24 * 60,
           });
         }
       }
-      if ((examCount ?? 0) > 0) {
+      if ((examCount ?? 0) > 0 || (studentCount ?? 0) > 0) {
+        const copy = Msg.weeklySchoolReport({
+          schoolName: school.name,
+          students: studentCount ?? undefined,
+          exams: examCount ?? undefined,
+          link: "/admin",
+        });
         for (const uid of admins) {
           payloads.push({
-            recipientUserId: uid, schoolId: school.id,
-            title: "📊 Weekly Examination Summary",
-            message: `${school.name}: ${examCount} examinations were created this week.`,
-            type: "info", link: "/admin/examinations", entityType: "weekly_exams", entityId: `${school.id}:${weekKey}`, dedupeMinutes: 6 * 24 * 60,
+            recipientUserId: uid,
+            schoolId: school.id,
+            title: copy.title,
+            message: copy.message,
+            type: "info",
+            link: templateLink(copy, "/admin"),
+            actionLabel: copy.action?.label ?? "OPEN DASHBOARD",
+            entityType: "weekly_exams",
+            entityId: `${school.id}:${weekKey}`,
+            dedupeMinutes: 6 * 24 * 60,
           });
         }
       }
       if ((violationCount ?? 0) > 0) {
+        const copy = Msg.systemAlert({
+          title: "Weekly Security Summary",
+          message:
+            `Weekly examination security summary.\n\n` +
+            `🏫 School: ${school.name}\n` +
+            `🛡️ ${violationCount} examination security violations were recorded this week.\n\n` +
+            `Review integrity reports in the school dashboard.`,
+          link: "/admin",
+          actionLabel: "OPEN DASHBOARD",
+        });
         for (const uid of admins) {
           payloads.push({
-            recipientUserId: uid, schoolId: school.id,
-            title: "🛡️ Weekly Security Summary",
-            message: `${school.name}: ${violationCount} examination security violations were recorded this week.`,
-            type: "warning", link: "/admin", entityType: "weekly_security", entityId: `${school.id}:${weekKey}`, dedupeMinutes: 6 * 24 * 60,
+            recipientUserId: uid,
+            schoolId: school.id,
+            title: copy.title,
+            message: copy.message,
+            type: "warning",
+            link: templateLink(copy, "/admin"),
+            actionLabel: copy.action?.label ?? "OPEN DASHBOARD",
+            entityType: "weekly_security",
+            entityId: `${school.id}:${weekKey}`,
+            dedupeMinutes: 6 * 24 * 60,
           });
         }
       }
