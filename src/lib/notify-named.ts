@@ -111,8 +111,18 @@ export async function namedTeacherExamDecision(opts: {
   schoolId?: string | null;
   examId: string;
   examTitle: string;
-  decision: "approved" | "rejected" | "revision_requested";
+  /** Accept UI actions (approve/reject/changes) or canonical keys */
+  decision:
+    | "approved"
+    | "rejected"
+    | "revision_requested"
+    | "approve"
+    | "reject"
+    | "changes"
+    | string;
   note?: string | null;
+  /** @deprecated alias for note */
+  comment?: string | null;
   scheduleNote?: string | null;
   courseCode?: string | null;
   courseTitle?: string | null;
@@ -123,9 +133,29 @@ export async function namedTeacherExamDecision(opts: {
   const names = await authNames([opts.teacherUserId]);
   const teacherName = names.get(opts.teacherUserId) || "Teacher";
   const link = "/teacher/examinations";
+  const note = (opts.note ?? opts.comment ?? "").trim() || null;
+
+  // Normalize UI action → Notification 20.0 decision
+  const raw = String(opts.decision || "").toLowerCase().trim();
+  let decision: "approved" | "rejected" | "revision_requested";
+  if (raw === "approved" || raw === "approve") decision = "approved";
+  else if (raw === "rejected" || raw === "reject") decision = "rejected";
+  else if (
+    raw === "revision_requested" ||
+    raw === "changes" ||
+    raw === "request_changes" ||
+    raw === "changes_requested"
+  )
+    decision = "revision_requested";
+  else {
+    // Unknown value must not silently become "changes requested"
+    console.warn("[notify-named] unknown exam decision:", opts.decision);
+    decision = "revision_requested";
+  }
+
   let copy: Msg.NotificationTemplate;
   let type: NotifyType = "info";
-  if (opts.decision === "approved") {
+  if (decision === "approved") {
     type = "exam_approved";
     copy = Msg.teacherExamApproved({
       teacherName,
@@ -137,15 +167,15 @@ export async function namedTeacherExamDecision(opts: {
       end: opts.end,
       link,
     });
-  } else if (opts.decision === "rejected") {
+  } else if (decision === "rejected") {
     type = "exam_rejected";
     copy = Msg.teacherExamRejected({
       teacherName,
       examTitle: opts.examTitle,
       courseCode: opts.courseCode,
       courseTitle: opts.courseTitle,
-      reason: opts.note,
-      note: opts.note,
+      reason: note,
+      note,
       link,
     });
   } else {
@@ -155,7 +185,7 @@ export async function namedTeacherExamDecision(opts: {
       examTitle: opts.examTitle,
       courseCode: opts.courseCode,
       courseTitle: opts.courseTitle,
-      note: opts.note,
+      note,
       link,
     });
   }
@@ -170,24 +200,51 @@ export async function namedTeacherExamDecision(opts: {
     message,
     type,
     link: href(copy, link),
+    actionLabel: copy.action?.label ?? null,
     entityType: "examination",
     entityId: opts.examId,
   });
   if (opts.schoolId && (type === "exam_approved" || type === "exam_rejected")) {
     const admins = await listAdminUserIds(opts.schoolId);
-    await notifyMany(
-      admins.map((uid) => ({
-        recipientUserId: uid,
-        schoolId: opts.schoolId,
-        title: type === "exam_approved" ? "✅ Examination Approved" : "❌ Examination Rejected",
-        message: `“${opts.examTitle}” was ${type === "exam_approved" ? "approved" : "rejected"}.`,
-        type,
-        link: "/admin/examinations",
-        entityType: "examination",
-        entityId: opts.examId,
-        dedupeMinutes: 10,
-      })),
-    );
+    // Do not notify the same teacher again if they are also an admin
+    const adminOnly = admins.filter((uid) => uid !== opts.teacherUserId);
+    if (adminOnly.length) {
+      const adminCopy =
+        type === "exam_approved"
+          ? Msg.teacherExamApproved({
+              teacherName,
+              examTitle: opts.examTitle,
+              courseCode: opts.courseCode,
+              courseTitle: opts.courseTitle,
+              officerName: opts.officerName,
+              start: opts.start,
+              end: opts.end,
+              link: "/admin/examinations",
+            })
+          : Msg.teacherExamRejected({
+              teacherName,
+              examTitle: opts.examTitle,
+              courseCode: opts.courseCode,
+              courseTitle: opts.courseTitle,
+              reason: note,
+              note,
+              link: "/admin/examinations",
+            });
+      await notifyMany(
+        adminOnly.map((uid) => ({
+          recipientUserId: uid,
+          schoolId: opts.schoolId,
+          title: adminCopy.title,
+          message: adminCopy.message,
+          type,
+          link: href(adminCopy, "/admin/examinations"),
+          actionLabel: adminCopy.action?.label ?? null,
+          entityType: "examination",
+          entityId: opts.examId,
+          dedupeMinutes: 10,
+        })),
+      );
+    }
   }
 }
 
