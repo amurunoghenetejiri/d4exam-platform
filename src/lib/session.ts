@@ -28,6 +28,7 @@ export type AppRole =
 
 const LAST_PATH_KEY = "d4exam_last_path_v1";
 const LAST_ROLE_KEY = "d4exam_last_role_v1";
+const PREFERRED_ROLE_KEY = "d4exam_preferred_role_v1";
 
 /** Remember last in-app path so Capacitor relaunch restores role route. */
 export function rememberLastPath(path: string, role?: string | null): void {
@@ -60,6 +61,82 @@ export function readLastRole(): AppRole | null {
   } catch { /* ignore */ }
   return null;
 }
+
+
+const KNOWN_ROLES: AppRole[] = [
+  "student",
+  "teacher",
+  "school_admin",
+  "examination_officer",
+  "super_admin",
+];
+
+/** Persist preferred role for multi-role accounts (does not change auth). */
+export function setPreferredRole(role: AppRole | string | null | undefined): void {
+  if (typeof window === "undefined") return;
+  try {
+    const r = String(role || "").trim();
+    if (r && KNOWN_ROLES.includes(r as AppRole)) {
+      window.localStorage.setItem(PREFERRED_ROLE_KEY, r);
+      window.localStorage.setItem(LAST_ROLE_KEY, r);
+    }
+  } catch { /* ignore */ }
+}
+
+export function readPreferredRole(): AppRole | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const r = window.localStorage.getItem(PREFERRED_ROLE_KEY);
+    if (r && KNOWN_ROLES.includes(r as AppRole)) return r as AppRole;
+  } catch { /* ignore */ }
+  return null;
+}
+
+export function clearPreferredRole(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(PREFERRED_ROLE_KEY);
+  } catch { /* ignore */ }
+}
+
+/**
+ * Switch active dashboard role for the current signed-in user.
+ * Uses user_roles the account already has — no re-login.
+ */
+export async function switchActiveRole(role: AppRole | string): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  const target = String(role || "").trim() as AppRole;
+  if (!KNOWN_ROLES.includes(target)) {
+    return { ok: false, error: "Unknown role." };
+  }
+  const path = roleHome[target];
+  if (!path) return { ok: false, error: "Unknown role." };
+
+  setPreferredRole(target);
+  seedPendingLoginRole(target);
+
+  // Clear last path so we do not restore a different role's page
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(LAST_PATH_KEY);
+    }
+  } catch { /* ignore */ }
+
+  // Soft-verify roles when online (non-blocking if offline)
+  try {
+    const user = await fetchSessionUser();
+    if (user && Array.isArray(user.roles) && user.roles.length > 0 && !user.roles.includes(target)) {
+      return { ok: false, error: "This account does not have that role." };
+    }
+  } catch {
+    /* allow switch with preferred role even if network is slow */
+  }
+
+  if (typeof window !== "undefined") {
+    window.location.replace(path);
+  }
+  return { ok: true, path };
+}
+
 
 export const roleHome: Record<AppRole, string> = {
   student: "/student",
@@ -318,7 +395,11 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
       "teacher",
       "student",
     ];
-    const primaryRoleFast = priorityFast.find((r) => roles.includes(r)) ?? null;
+    const preferredFast = readPreferredRole() || readPendingLoginRole();
+    const primaryRoleFast =
+      (preferredFast && roles.includes(preferredFast) ? preferredFast : null) ||
+      priorityFast.find((r) => roles.includes(r)) ||
+      null;
     let statusFast = (profile?.status as string | undefined) ?? (rpcCtx?.status as string | undefined) ?? "active";
     if (primaryRoleFast && (statusFast === "pending" || statusFast === "invited")) statusFast = "active";
     const fullNameFast =
@@ -460,7 +541,11 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     "teacher",
     "student",
   ];
-  const primaryRole = priority.find((r) => roles.includes(r)) ?? null;
+  const preferred = readPreferredRole() || readPendingLoginRole();
+  const primaryRole =
+    (preferred && roles.includes(preferred) ? preferred : null) ||
+    priority.find((r) => roles.includes(r)) ||
+    null;
   let status = (profile?.status as string | undefined) ?? "pending";
   if (primaryRole === "super_admin" && (status === "pending" || status === "invited" || !profile)) {
     status = "active";
