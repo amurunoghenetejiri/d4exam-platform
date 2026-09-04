@@ -175,16 +175,16 @@ function NotificationBell({ to, unread }: { to: string; unread: number }) {
     <Button
       variant="ghost"
       size="icon"
-      className="relative shrink-0"
+      className="relative h-11 w-11 shrink-0 rounded-full"
       aria-label={hasUnread ? `${unread} unread notifications` : "Notifications"}
       asChild
     >
-      <Link to={to as string} preload="intent">
-        <span className={cn("inline-flex", hasUnread && "bell-ring")}>
-          <Bell className="h-6 w-6 text-slate-600" aria-hidden />
+      <Link to={to as string} preload="intent" className="inline-flex h-11 w-11 items-center justify-center">
+        <span className={cn("inline-flex items-center justify-center", hasUnread && "bell-ring")}>
+          <Bell className="h-7 w-7 text-slate-700" strokeWidth={2.25} aria-hidden />
         </span>
         {hasUnread ? (
-          <span className="absolute right-0.5 top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+          <span className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold leading-none text-white shadow-sm">
             {label}
           </span>
         ) : null}
