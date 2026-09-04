@@ -63,7 +63,7 @@ async function ensureActionTypes(actionLabel?: string | null): Promise<void> {
   if (actionTypesReady) return;
   try {
     const { LocalNotifications } = await import("@capacitor/local-notifications");
-    const label = (actionLabel || "OPEN").trim() || "OPEN";
+    const label = (actionLabel || "VIEW DETAILS").trim() || "VIEW DETAILS";
     await LocalNotifications.registerActionTypes({
       types: [
         {
@@ -112,7 +112,7 @@ export async function showD4ExamNativeNotification(
       actionTypesReady = false;
       await ensureActionTypes(actionLabel);
     } else {
-      await ensureActionTypes("OPEN");
+      await ensureActionTypes("VIEW DETAILS");
     }
     const id = opts?.id ?? ((idSeq = (idSeq + 1) % 100000000));
     const isCountdown = opts?.channelId === "d4exam_countdown" || opts?.silent === true;
@@ -139,7 +139,7 @@ export async function showD4ExamNativeNotification(
             ...(link ? { link } : {}),
             fullBody,
             fullTitle: title || "D4EXAM",
-            actionLabel: actionLabel || "OPEN",
+            actionLabel: actionLabel || "VIEW DETAILS",
           },
         },
       ],
@@ -266,10 +266,19 @@ export async function bindLocalNotificationActions(): Promise<void> {
           link?: string;
           fullBody?: string;
           fullTitle?: string;
+          actionLabel?: string;
         } | undefined;
-        const link = extra?.link;
-        if (link && typeof window !== "undefined") {
-          window.location.assign(link.startsWith("http") ? link : link);
+        let link = (extra?.link || "").trim();
+        if (!link) link = "/student/notifications";
+        if (link.startsWith("http")) {
+          try {
+            const u = new URL(link);
+            link = u.pathname + (u.search || "");
+          } catch { /* keep */ }
+        }
+        if (!link.startsWith("/")) link = `/${link}`;
+        if (typeof window !== "undefined") {
+          window.location.assign(link);
         }
       } catch {
         /* ignore */
