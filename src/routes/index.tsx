@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { PublicLayout } from "@/components/layout/PublicLayout";
 import { Button } from "@/components/ui/button";
-import { fetchSessionUser, roleHome } from "@/lib/session";
+import { fetchSessionUser, roleHome, readLastPath } from "@/lib/session";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -32,18 +32,15 @@ export const Route = createFileRoute("/")({
     ],
   }),
   beforeLoad: async () => {
-    // Hard timeout so a stuck profiles/RLS query cannot freeze the whole site
-    let user: Awaited<ReturnType<typeof fetchSessionUser>> = null;
-    try {
-      user = await Promise.race([
-        fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_500)),
-      ]);
-    } catch {
-      user = null;
-    }
+    const user = await fetchSessionUser();
     if (user?.role) {
-      throw redirect({ to: roleHome[user.role] as never });
+      const last = readLastPath();
+      const home = roleHome[user.role];
+      // Restore last in-app route when possible; otherwise role home (never stay on marketing)
+      if (last && last.startsWith(home.split("/").slice(0, 2).join("/") || home)) {
+        throw redirect({ to: last as never });
+      }
+      throw redirect({ to: home as never });
     }
   },
   component: HomePage,
