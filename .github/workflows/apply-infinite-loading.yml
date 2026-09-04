@@ -1,0 +1,21 @@
+name: Apply infinite loading fix
+on:
+  push:
+    paths:
+      - scripts/apply_infinite_loading_fix.py
+      - .github/workflows/apply-infinite-loading.yml
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/apply_infinite_loading_fix.py
+      - name: Commit
+        run: |
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else git commit -m "fix: never cache incomplete sessions; fast profile exit"; git push; fi
