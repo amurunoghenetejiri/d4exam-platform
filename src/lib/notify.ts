@@ -39,6 +39,8 @@ export type NotifyPayload = {
   message: string;
   type?: NotifyType | string;
   link?: string | null;
+  /** Optional action button label for push / native tray (e.g. VIEW EXAM) */
+  actionLabel?: string | null;
   entityType?: string | null;
   entityId?: string | null;
   dedupeMinutes?: number;
@@ -49,6 +51,7 @@ async function firePush(
   title: string,
   message: string,
   link: string | null,
+  actionLabel?: string | null,
 ): Promise<void> {
   if (!recipientUserId) return;
   try {
@@ -59,6 +62,7 @@ async function firePush(
         title,
         message,
         link: link || "/",
+        actionLabel: actionLabel || undefined,
       },
     });
     const r = result as { sent?: number; skipped?: boolean; reason?: string };
@@ -162,7 +166,7 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
     } as never);
 
     if (!rpcErr && rpcId) {
-      await firePush(p.recipientUserId, p.title, p.message, p.link ?? null);
+      await firePush(p.recipientUserId, p.title, p.message, p.link ?? null, p.actionLabel);
       return String(rpcId);
     }
 
@@ -185,7 +189,7 @@ export async function notifyUser(p: NotifyPayload): Promise<string | null> {
       console.warn("[notify] insert failed", error.message);
       return null;
     }
-    if (data?.id) await firePush(p.recipientUserId, p.title, p.message, p.link ?? null);
+    if (data?.id) await firePush(p.recipientUserId, p.title, p.message, p.link ?? null, p.actionLabel);
     return (data?.id as string) ?? null;
   } catch (e) {
     console.warn("[notify] error:", e);
@@ -841,18 +845,45 @@ export async function notifyTeacherExamDecision(opts: {
   schoolId?: string | null;
   examId: string;
   examTitle: string;
-  decision: "approved" | "rejected" | "revision_requested";
+  decision:
+    | "approved"
+    | "rejected"
+    | "revision_requested"
+    | "approve"
+    | "reject"
+    | "changes"
+    | string;
   note?: string | null;
+  comment?: string | null;
   courseCode?: string | null;
   courseTitle?: string | null;
   officerName?: string | null;
+  start?: string | null;
+  end?: string | null;
+  scheduleNote?: string | null;
 }): Promise<void> {
   try {
     const link = "/teacher/examinations";
     const teacherName = (await studentDisplayNameFromAuth(opts.teacherUserId)) || "Teacher";
+    const note = (opts.note ?? opts.comment ?? "").trim() || null;
+    const raw = String(opts.decision || "").toLowerCase().trim();
+    let decision: "approved" | "rejected" | "revision_requested";
+    if (raw === "approved" || raw === "approve") decision = "approved";
+    else if (raw === "rejected" || raw === "reject") decision = "rejected";
+    else if (
+      raw === "revision_requested" ||
+      raw === "changes" ||
+      raw === "request_changes" ||
+      raw === "changes_requested"
+    )
+      decision = "revision_requested";
+    else {
+      console.warn("[notify] unknown exam decision:", opts.decision);
+      decision = "revision_requested";
+    }
     let copy: Msg.NotificationTemplate;
     let type: NotifyType = "info";
-    if (opts.decision === "approved") {
+    if (decision === "approved") {
       type = "exam_approved";
       copy = Msg.teacherExamApproved({
         teacherName,
@@ -860,17 +891,19 @@ export async function notifyTeacherExamDecision(opts: {
         courseCode: opts.courseCode,
         courseTitle: opts.courseTitle,
         officerName: opts.officerName,
+        start: opts.start,
+        end: opts.end,
         link,
       });
-    } else if (opts.decision === "rejected") {
+    } else if (decision === "rejected") {
       type = "exam_rejected";
       copy = Msg.teacherExamRejected({
         teacherName,
         examTitle: opts.examTitle,
         courseCode: opts.courseCode,
         courseTitle: opts.courseTitle,
-        reason: opts.note,
-        note: opts.note,
+        reason: note,
+        note,
         link,
       });
     } else {
@@ -880,17 +913,20 @@ export async function notifyTeacherExamDecision(opts: {
         examTitle: opts.examTitle,
         courseCode: opts.courseCode,
         courseTitle: opts.courseTitle,
-        note: opts.note,
+        note,
         link,
       });
     }
+    let message = copy.message;
+    if (opts.scheduleNote) message = `${copy.message}\n${opts.scheduleNote}`;
     await notifyUser({
       recipientUserId: opts.teacherUserId,
       schoolId: opts.schoolId,
       title: copy.title,
-      message: copy.message,
+      message,
       type,
       link: templateLink(copy, link),
+      actionLabel: copy.action?.label ?? null,
       entityType: "examination",
       entityId: opts.examId,
     });
