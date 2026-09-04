@@ -1362,6 +1362,7 @@ export function systemAlert(opts: {
   title?: string | null;
   message: string;
   link?: string | null;
+  actionLabel?: string | null;
 }): NotificationTemplate {
   const name = personName(opts.name, "User");
   const title = clean(opts.title, "D4EXAM System Alert");
@@ -1372,7 +1373,7 @@ export function systemAlert(opts: {
       `⚠️ ${name}\n\n` +
       `${clean(opts.message, "There is an important update from D4EXAM.")}\n\n` +
       `Please check D4EXAM for more information.`,
-    action: action("VIEW DETAILS", opts.link),
+    action: action(clean(opts.actionLabel, "VIEW DETAILS"), opts.link),
   };
 }
 
