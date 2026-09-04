@@ -125,6 +125,38 @@ function applyNativeJpeg(raw: string | undefined | null, ts?: number): boolean {
   return true;
 }
 
+
+/** Public: try to keep/restore native MediaProjection while exam is active. */
+export async function ensureScreenShareRunning(): Promise<boolean> {
+  if (!isNativeAndroid()) {
+    // Web: if we still have a live track, treat as running
+    try {
+      const t = nativeStream?.getVideoTracks?.()?.[0];
+      if (t && t.readyState === "live") return true;
+    } catch { /* ignore */ }
+    return Boolean(nativeActive && status === "active");
+  }
+  try {
+    examHoldLock = true;
+    try { await D4ScreenShare().setKeepAlive({ hold: true }); } catch { /* ignore */ }
+    const st = await D4ScreenShare().isActive();
+    if (st?.active || st?.hasProjection || st?.capturing) {
+      nativeActive = true;
+      status = "active";
+      return true;
+    }
+    const ensured = await D4ScreenShare().ensureRunning();
+    if (ensured?.active) {
+      nativeActive = true;
+      status = "active";
+      return true;
+    }
+  } catch (e) {
+    console.warn("[screen-share] ensureScreenShareRunning", e);
+  }
+  return false;
+}
+
 export function holdExamScreenShare(hold: boolean): void {
   examHoldLock = hold;
   console.info("[screen-share] SCREEN_SHARE_EXAM_HOLD", hold ? "on" : "off");
