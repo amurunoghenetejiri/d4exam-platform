@@ -214,9 +214,18 @@ async function bindNativePushListeners(userId: string, role?: string | null): Pr
     await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
       try {
         const data = action.notification?.data as Record<string, string> | undefined;
-        const link = data?.link || data?.url;
-        if (link && typeof window !== "undefined") {
-          window.location.assign(link.startsWith("http") ? link : link);
+        let link = (data?.link || data?.actionLink || data?.url || "").trim();
+        if (!link) link = "/student/notifications";
+        // Prefer in-app path so Capacitor WebView stays in the app (avoid external 404)
+        if (link.startsWith("http")) {
+          try {
+            const u = new URL(link);
+            link = u.pathname + (u.search || "");
+          } catch { /* keep */ }
+        }
+        if (!link.startsWith("/")) link = `/${link}`;
+        if (typeof window !== "undefined") {
+          window.location.assign(link);
         }
       } catch {
         /* ignore */
@@ -415,12 +424,14 @@ async function enableWebPushNotifications(
 
     onMessage(msg, (payload) => {
       try {
-        const title = payload.notification?.title || payload.data?.title || "D4EXAM";
+        const data = (payload.data || {}) as Record<string, string>;
+        const title = payload.notification?.title || data.title || "D4EXAM";
         const body =
-          payload.notification?.body || payload.data?.body || payload.data?.message || "";
-        const link = payload.data?.link;
-        showLocalNotification(title, body, link);
-        toast.info(title, { description: body });
+          data.message || data.body || payload.notification?.body || "";
+        const link = data.link || data.actionLink || "/";
+        const actionLabel = data.actionLabel || data.action_label || undefined;
+        void showD4ExamNativeNotification(title, body, link, { actionLabel });
+        toast.info(title, { description: body.slice(0, 180) });
       } catch {
         /* ignore */
       }
