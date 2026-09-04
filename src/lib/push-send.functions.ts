@@ -32,6 +32,7 @@ type PushInput = {
   title: string;
   message: string;
   link?: string | null;
+  actionLabel?: string | null;
 };
 
 type ServiceAccount = {
@@ -104,6 +105,7 @@ async function sendFcmV1(
   link: string,
   sa: ServiceAccount,
   accessToken: string,
+  actionLabel?: string | null,
 ) {
   const projectId = sa.project_id || process.env["FIREBASE_PROJECT_ID"] || "d4exam-6506a";
   const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
@@ -112,6 +114,11 @@ async function sendFcmV1(
   const absoluteLink = link.startsWith("http")
     ? link
     : `${origin}${link.startsWith("/") ? link : `/${link}`}`;
+
+  // Full body for expandable shade text (do not truncate)
+  const fullBody = String(body || "");
+  const fullTitle = String(title || "D4EXAM");
+  const action = (actionLabel || "").trim();
 
   const res = await fetch(url, {
     method: "POST",
@@ -123,18 +130,23 @@ async function sendFcmV1(
       message: {
         token,
         notification: {
-          title: String(title),
-          body: String(body),
+          title: fullTitle,
+          body: fullBody,
           image: icon,
         },
         data: {
-          title: String(title),
-          body: String(body),
-          message: String(body),
-          link: String(absoluteLink),
+          title: fullTitle,
+          body: fullBody,
+          message: fullBody,
+          link: link || "/",
+          url: absoluteLink,
           icon: String(icon),
           badge: String(icon),
           tag: "d4exam-notification",
+          actionLabel: action,
+          action_label: action,
+          actionLink: link || "/",
+          click_action: absoluteLink,
         },
         android: {
           priority: "HIGH",
@@ -147,9 +159,10 @@ async function sendFcmV1(
             visibility: "PUBLIC",
             click_action: "FCM_PLUGIN_ACTIVITY",
             image: icon,
+            // Encourage big-text style when shade is expanded
+            ticker: fullTitle,
           },
         },
-        // No webpush block when sending to native-prefer tokens — reduces Chrome delivery
       },
     }),
   });
@@ -166,9 +179,13 @@ async function sendFcmLegacy(
   body: string,
   link: string,
   serverKey: string,
+  actionLabel?: string | null,
 ) {
   const origin = appOrigin();
   const icon = `${origin}/logo.png`;
+  const fullBody = String(body || "");
+  const fullTitle = String(title || "D4EXAM");
+  const action = (actionLabel || "").trim();
   const res = await fetch("https://fcm.googleapis.com/fcm/send", {
     method: "POST",
     headers: {
@@ -177,15 +194,18 @@ async function sendFcmLegacy(
     },
     body: JSON.stringify({
       to: token,
-      notification: { title, body, sound: "default", icon },
+      notification: { title: fullTitle, body: fullBody, sound: "default", icon },
       data: {
-        title,
-        body,
-        message: body,
+        title: fullTitle,
+        body: fullBody,
+        message: fullBody,
         link: link || "/",
         icon,
         badge: icon,
         tag: "d4exam-notification",
+        actionLabel: action,
+        action_label: action,
+        actionLink: link || "/",
       },
       priority: "high",
       content_available: true,
@@ -218,6 +238,7 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
       title: String(o.title || "D4EXAM"),
       message: String(o.message || ""),
       link: o.link != null ? String(o.link) : "/",
+      actionLabel: o.actionLabel != null ? String(o.actionLabel) : undefined,
     } satisfies PushInput;
   })
   .handler(async ({ data }) => {
@@ -304,6 +325,7 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
                 data.link || "/",
                 sa,
                 accessToken,
+                data.actionLabel,
               )
             : await sendFcmLegacy(
                 token,
@@ -311,6 +333,7 @@ export const dispatchPushToUser = createServerFn({ method: "POST" })
                 data.message || "",
                 data.link || "/",
                 legacyKey,
+                data.actionLabel,
               );
 
         if (result.ok) sent += 1;
