@@ -40,8 +40,6 @@ import {
   securitySummaryLines,
   stripInternalMarkers,
   toExamSettingsRow,
-  META_MARKER,
-  SECURITY_MARKER,
 } from "@/lib/exam-security";
 import { embedExamMeta, parseExamMeta, assessmentKindLabel, type AssessmentKind } from "@/lib/exam-meta";
 import { namedOfficersExamSubmitted as notifyOfficersExamSubmitted } from "@/lib/notify-named";
@@ -310,8 +308,8 @@ function Page() {
     try {
       const plain = stripInternalMarkers(description.trim() || "");
       const sec = normalizeSecuritySettings(security);
-      const metaBlob = `${META_MARKER}${JSON.stringify({ questionsToAnswer, assessmentKind })}`;
-      const secBlob = `${SECURITY_MARKER}${JSON.stringify(sec)}`;
+      const metaBlob = `[[D4_EXAM_META]]${JSON.stringify({ questionsToAnswer, assessmentKind })}`;
+      const secBlob = `[[D4_SECURITY_JSON]]${JSON.stringify(sec)}`;
       let desc: string | null = [plain, metaBlob, secBlob].filter(Boolean).join("\n") || null;
       const computedEnd = endAt || (startAt ? endFromStart(startAt, durationMinutes) : "");
       const payload = {
@@ -399,8 +397,8 @@ function Page() {
         parseSecurityFromDescription(desc) ?? loadTeacherSecurityDefaults(teacher.teacherId),
       );
       const plain = stripInternalMarkers(desc);
-      const metaBlob = `${META_MARKER}${JSON.stringify({ ...meta, assessmentKind: meta.assessmentKind || "examination" })}`;
-      const secBlob = `${SECURITY_MARKER}${JSON.stringify(sec)}`;
+      const metaBlob = `[[D4_EXAM_META]]${JSON.stringify({ ...meta, assessmentKind: meta.assessmentKind || "examination" })}`;
+      const secBlob = `[[D4_SECURITY_JSON]]${JSON.stringify(sec)}`;
       desc = [plain, metaBlob, secBlob].filter(Boolean).join("\n") || null;
       const { error } = await supabase
         .from("examinations")
