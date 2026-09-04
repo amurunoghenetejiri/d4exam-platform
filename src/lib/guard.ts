@@ -28,8 +28,6 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     user = queryClient.getQueryData<SessionUser | null>(["session-user"]);
   }
 
-  // Never trust a cached null right after login — always re-resolve when missing.
-  // Also re-resolve when we only have a cached null but an auth session exists.
   let hasAuthSession = false;
   try {
     const { data: sess } = await supabase.auth.getSession();
@@ -38,39 +36,52 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     hasAuthSession = false;
   }
 
-  if (user === undefined || (user === null && hasAuthSession)) {
+  // Incomplete = school-bound role with no schoolId. NEVER trust that cache.
+  const needsSchool = (u: SessionUser | null | undefined) =>
+    Boolean(u?.role && u.role !== "super_admin" && !u.schoolId);
+  const isIncomplete = (u: SessionUser | null | undefined) =>
+    Boolean(u && (needsSchool(u) || (!u.fullName && !u.email)));
+
+  const mustResolve =
+    user === undefined ||
+    (user === null && hasAuthSession) ||
+    (hasAuthSession && isIncomplete(user));
+
+  if (mustResolve) {
     try {
       user = await Promise.race([
         fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000)),
       ]);
     } catch {
       user = null;
     }
-    // Retry if auth session exists but profile/roles were slow
-    if (!user && hasAuthSession) {
+    if ((!user || isIncomplete(user)) && hasAuthSession) {
       try {
-        await new Promise((r) => setTimeout(r, 500));
-        user = await Promise.race([
+        await new Promise((r) => setTimeout(r, 400));
+        const again = await Promise.race([
           fetchSessionUser(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_000)),
         ]);
+        if (again && (!user || !isIncomplete(again))) user = again;
+        else if (again && isIncomplete(user) && !isIncomplete(again)) user = again;
+        else if (again && !user) user = again;
       } catch {
         /* ignore */
       }
     }
-    if (!user) {
+    if (!user || isIncomplete(user)) {
       try {
         const last = readLastUserId();
         if (last) {
           const env = await offlineGet<SessionUser>(last, OfflineKeys.sessionUser);
-          if (env?.data) user = env.data;
+          if (env?.data && !isIncomplete(env.data)) user = env.data;
         }
       } catch {
         /* ignore */
       }
     }
-    if (queryClient && user) {
+    if (queryClient && user && !isIncomplete(user)) {
       queryClient.setQueryData(["session-user"], user);
     }
   }
@@ -81,6 +92,19 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
       const { data: sess } = await supabase.auth.getSession();
       const pending = readPendingLoginRole();
       if (sess.session?.user && pending && allowed.includes(pending)) {
+        try {
+          const hard = await Promise.race([
+            fetchSessionUser(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_500)),
+          ]);
+          if (hard && (hard.role === "super_admin" || hard.schoolId)) {
+            if (queryClient) queryClient.setQueryData(["session-user"], hard);
+            clearPendingLoginRole();
+            return { user: hard };
+          }
+        } catch {
+          /* continue to minimal */
+        }
         const minimal: SessionUser = {
           userId: sess.session.user.id,
           profileId: sess.session.user.id,
@@ -96,8 +120,7 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
           identifier: sess.session.user.email || null,
           identifierLabel: "Email",
         };
-        if (queryClient) queryClient.setQueryData(["session-user"], minimal);
-        // Keep pending role longer so nested navigations still pass
+        // Do NOT cache incomplete session — next navigation must re-resolve
         window.setTimeout(() => clearPendingLoginRole(), 60_000);
         return { user: minimal };
       }

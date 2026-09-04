@@ -257,6 +257,59 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     (roleRes.data ?? []).map((r) => (r as { school_id?: string | null }).school_id).find(Boolean) ||
     null;
 
+  // FAST EXIT: RPC already resolved identity — only load school branding
+  if (roles.length > 0 && (schoolId || roles.includes("super_admin"))) {
+    let schoolName: string | null = null;
+    let schoolCode: string | null = null;
+    let schoolLogoUrl: string | null = null;
+    if (schoolId) {
+      try {
+        const { data: school } = await withTimeout(
+          supabase.from("schools").select("name, school_code, logo_url").eq("id", schoolId).maybeSingle().then((r) => r),
+          2_000,
+          "school",
+        );
+        schoolName = school?.name ?? null;
+        schoolCode = school?.school_code ?? null;
+        schoolLogoUrl = (school?.logo_url as string | null) ?? null;
+      } catch {
+        /* non-fatal */
+      }
+    }
+    const priorityFast: AppRole[] = [
+      "super_admin",
+      "school_admin",
+      "examination_officer",
+      "teacher",
+      "student",
+    ];
+    const primaryRoleFast = priorityFast.find((r) => roles.includes(r)) ?? null;
+    let statusFast = (profile?.status as string | undefined) ?? (rpcCtx?.status as string | undefined) ?? "active";
+    if (primaryRoleFast && (statusFast === "pending" || statusFast === "invited")) statusFast = "active";
+    const fullNameFast =
+      displayNameFromProfile(profile as { full_name?: string | null; first_name?: string | null; last_name?: string | null } | null) ||
+      (rpcCtx?.full_name || "").trim() ||
+      (typeof profile?.full_name === "string" ? profile.full_name.trim() : "") ||
+      user.email ||
+      "";
+    clearPendingLoginRole();
+    return {
+      userId: user.id,
+      profileId: (rpcCtx?.profile_id as string | undefined) || profile?.id || user.id,
+      email: (profile?.email as string | undefined) ?? rpcCtx?.email ?? user.email ?? "",
+      fullName: fullNameFast,
+      status: statusFast,
+      schoolId,
+      schoolName,
+      schoolCode,
+      schoolLogoUrl,
+      roles,
+      role: primaryRoleFast,
+      identifier: rpcCtx?.officer_id || rpcCtx?.staff_id || rpcCtx?.matric || (profile?.email as string | undefined) || user.email || null,
+      identifierLabel: rpcCtx?.officer_id ? "Officer ID" : rpcCtx?.staff_id ? "Staff ID" : rpcCtx?.matric ? "Matric" : "Email",
+    };
+  }
+
   if (!schoolId && profile?.id) {
     try {
       const { data: extraRoles } = await supabase
@@ -425,11 +478,11 @@ export function useSessionUser() {
         last,
         OfflineKeys.sessionUser,
         async () => {
-          const u = await withTimeout(fetchSessionUser(), 5000, "session");
+          const u = await withTimeout(fetchSessionUser(), 6000, "session");
           if (u?.userId) {
             rememberLastUserId(u.userId);
-            const needsSchool = u.role && u.role !== "super_admin";
-            if (!needsSchool || u.schoolId) {
+            const complete = u.role === "super_admin" || Boolean(u.schoolId);
+            if (complete) {
               await offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
               void mirrorSessionUser(u);
             }
