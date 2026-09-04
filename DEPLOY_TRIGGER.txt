@@ -1,1 +1,1 @@
-redeploy 20260902104500 session+teacher profile resolution + student list hydrate
+redeploy 2026-09-04T18:16:07Z
