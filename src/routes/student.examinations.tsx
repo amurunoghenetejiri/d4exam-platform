@@ -168,15 +168,16 @@ function Page() {
   );
 
   const examsQ = useQuery({
-    queryKey: ["student-exams", schoolId, student?.courseIds?.join(",")],
+    queryKey: ["student-exams", schoolId, student?.courseIds?.join(","), student?.departmentId, student?.levelId],
     enabled: Boolean(schoolId),
-    staleTime: 2_000,
-    refetchInterval: 5_000,
+    staleTime: 1_500,
+    refetchInterval: 4_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async () => {
       if (!schoolId) return [] as ExamRow[];
-      let q = supabase
+      // Load school exams first (avoid missing exams when enrollment rows are incomplete)
+      const { data, error } = await supabase
         .from("examinations")
         .select(
           "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
@@ -184,15 +185,21 @@ function Page() {
         .eq("school_id", schoolId)
         .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
         .order("scheduled_start", { ascending: true, nullsFirst: false })
-        .limit(100);
-
-      if (student?.courseIds?.length) {
-        q = q.in("course_id", student.courseIds);
+        .limit(150);
+      if (error) {
+        console.warn("[student-exams]", error);
+        return [] as ExamRow[];
       }
-
-      const { data, error } = await q;
-      if (error) { console.warn("[offline]", error); return []; }
-      return (data ?? []) as ExamRow[];
+      const rows = (data ?? []) as ExamRow[];
+      const courseIds = student?.courseIds ?? [];
+      if (!courseIds.length) return rows;
+      const allowed = new Set(courseIds);
+      // Keep exams for enrolled courses; also keep exams with no course_id
+      return rows.filter((e) => {
+        const cid = (e as { course_id?: string | null }).course_id;
+        if (!cid) return true;
+        return allowed.has(cid);
+      });
     },
   });
 
