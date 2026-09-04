@@ -54,7 +54,7 @@ export function SwitchAccountCard() {
       const result = await switchToAccount(userId);
       if (!result.ok) {
         if (result.needsLogin) {
-          toast.error("Session expired for that account. Sign in again.");
+          toast.error("Could not restore that account. Tap Add Account and sign in once to refresh it.");
           await removeAccountFromDevice(userId);
           refresh();
         } else {
