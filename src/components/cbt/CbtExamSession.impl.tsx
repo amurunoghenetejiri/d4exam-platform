@@ -235,6 +235,7 @@ export function CbtExamPage() {
     setPauseRemainingSec(secs);
     setPauseReason(reason);
     setPaused(true);
+    try { haptic("strong"); } catch { /* ignore */ }
   }, [security.pauseDurationSeconds]);
 
   useEffect(() => {
@@ -362,6 +363,7 @@ export function CbtExamPage() {
         setPaused(true);
         setWarnBanner("Your examination has been paused by the officer");
         window.setTimeout(() => setWarnBanner(null), 10000);
+        try { haptic("officer_pause"); } catch { /* ignore */ }
       } else if (cmd === "release" || cmd === "resume") {
         officerPauseRef.current = false;
         setIsOfficerPause(false);
@@ -372,13 +374,16 @@ export function CbtExamPage() {
         setWarnBanner("Your examination has been resumed by the officer");
         window.setTimeout(() => setWarnBanner(null), 6000);
         void reconnectCamera();
+        try { haptic("light"); } catch { /* ignore */ }
       } else if (cmd === "terminate") {
         setDoneTerminated(true);
         setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
         void finishAttempt(true);
       } else if (cmd === "submit") {
         setDoneTerminated(false);
         setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
         void finishAttempt(false);
       }
     });
@@ -623,6 +628,12 @@ export function CbtExamPage() {
     if (!schoolId || !studentId || !id) return;
     const isViolation = ev.kind === "none" || ev.kind === "multi" || ev.kind === "camera_blocked";
     if (isViolation) faceWarnCountRef.current += 1;
+    // Vibration intensity by face event
+    try {
+      if (ev.kind === "none" || ev.kind === "unclear") haptic("none");
+      else if (ev.kind === "multi") haptic("multi");
+      else if (ev.kind === "camera_blocked") haptic("camera_blocked");
+    } catch { /* ignore */ }
     void logSecurityEvent({
       schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
       eventType: mapped.eventType, severity: mapped.severity, description: mapped.description,
@@ -741,7 +752,7 @@ export function CbtExamPage() {
           stopMediaStream(mediaStreamRef.current);
           mediaStreamRef.current = stream;
           setLiveStream(stream);
-          toast.success(needCam ? "Camera ready" : "Microphone ready");
+          /* media ready — silent */
         } catch {
           toast.error(needCam ? "Camera is required for this examination." : "Microphone is required for this examination.");
           return;
@@ -789,12 +800,12 @@ export function CbtExamPage() {
             }
           })();
         });
-        toast.success("Screen sharing active");
+        /* screen share active — silent */
       }
-      try { haptic("start"); } catch { /* ignore */ }
+      /* no start vibration toast noise */
       if (security.fullscreen) {
         const ok = await requestExamFullscreen();
-        if (!ok) { toast.message("Please allow fullscreen to continue the exam"); setFsGate(true); }
+        if (!ok) { setFsGate(true); }
       }
       if (!previewMode && student?.studentId && examQ.data?.school_id) {
         // Load existing attempt for stable question set
@@ -875,7 +886,7 @@ export function CbtExamPage() {
 
   async function restoreFullscreenFromUser() {
     const ok = await requestExamFullscreen();
-    if (ok) { setFsGate(false); setPaused(false); toast.success("Fullscreen restored"); }
+    if (ok) { setFsGate(false); setPaused(false); }
     else toast.error("Could not enter fullscreen. Tap again or check device permissions.");
   }
 
