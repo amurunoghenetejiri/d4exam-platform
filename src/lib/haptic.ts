@@ -1,11 +1,10 @@
 /**
- * CBT exam vibration (motor only — no sound).
- * Hierarchy (weakest → strongest):
- *   light < tab_switch < none/unclear < multi/strong < officer_pause < officer_warning/submit
+ * CBT exam vibration (motor only - no sound).
+ * Hierarchy (weakest -> strongest):
+ *   none/unclear < tab_switch < multi < officer_pause < officer_warning/submit
  *
- * Android APK: ExamImmersive.vibrate only (native Vibrator).
- *   Do NOT also call navigator.vibrate on Android — WebView often cancels the native motor.
- * Web / browser: navigator.vibrate.
+ * Android APK: ExamImmersive.vibrate (native Vibrator) + navigator.vibrate fallback.
+ * Web: navigator.vibrate.
  */
 
 import { Capacitor, registerPlugin } from "@capacitor/core";
@@ -23,22 +22,19 @@ export type HapticKind =
   | "light"
   | "strong";
 
-/**
- * Alternating [delay, on, delay, on, ...] in ms (navigator.vibrate / Android waveform format).
- * Longer on-pulses so mid/low-end phones actually feel them.
- */
+/** Clear alternating delay/on patterns (ms). Keep relatively short so they always complete. */
 const PATTERNS: Record<HapticKind, number[]> = {
-  start: [0, 80, 40, 120],
-  light: [0, 60],
-  tab_switch: [0, 90, 40, 110],
-  none: [0, 140, 50, 160],
-  unclear: [0, 150, 50, 170],
-  camera_blocked: [0, 180, 45, 200],
-  multi: [0, 200, 40, 240, 40, 280],
-  strong: [0, 260, 40, 300, 40, 340],
-  officer_pause: [0, 280, 40, 320, 40, 360],
-  officer_submit: [0, 320, 35, 380, 35, 440, 35, 500],
-  officer_warning: [0, 340, 30, 400, 30, 460, 30, 520, 35, 580],
+  start: [0, 120, 60, 140],
+  light: [0, 120],
+  none: [0, 160, 60, 180],
+  unclear: [0, 160, 60, 180],
+  tab_switch: [0, 100, 50, 120],
+  camera_blocked: [0, 180, 50, 200],
+  multi: [0, 220, 50, 260, 50, 300],
+  strong: [0, 240, 50, 280, 50, 320],
+  officer_pause: [0, 260, 45, 300, 45, 340],
+  officer_submit: [0, 300, 40, 360, 40, 420, 40, 480],
+  officer_warning: [0, 320, 35, 380, 35, 440, 35, 500, 40, 560],
 };
 
 type ExamImmersivePlugin = {
@@ -63,14 +59,6 @@ function isNativeAndroid(): boolean {
   }
 }
 
-function isNativeIos(): boolean {
-  try {
-    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "ios";
-  } catch {
-    return false;
-  }
-}
-
 let timers: number[] = [];
 let keepAliveTimer: number | null = null;
 let lastKind: HapticKind | null = null;
@@ -79,7 +67,7 @@ let lastAt = 0;
 export function canVibrate(): boolean {
   try {
     if (typeof window === "undefined") return false;
-    if (isNativeAndroid() || isNativeIos()) return true;
+    if (isNativeAndroid()) return true;
     const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
     return typeof nav?.vibrate === "function";
   } catch {
@@ -99,19 +87,16 @@ function clearTimers() {
 }
 
 function normalizePattern(arg: number | number[]): number[] {
-  const pattern = Array.isArray(arg)
-    ? arg.map((n) => Math.max(0, Math.round(Number(n) || 0)))
-    : [Math.max(0, Math.round(Number(arg) || 0))];
+  const pattern = Array.isArray(arg) ? arg.map((n) => Math.max(0, Math.round(Number(n) || 0))) : [Math.max(0, Math.round(Number(arg) || 0))];
   if (!pattern.length) return [0, 200];
-  // Cap individual segments so the motor doesn't get cut off by OS limits
-  const capped = pattern.map((n) => Math.min(n, 2000));
-  return capped[0] === 0 ? capped : [0, ...capped];
+  return pattern[0] === 0 ? pattern : [0, ...pattern];
 }
 
 function vibrateWeb(pattern: number[]): boolean {
   try {
     const nav = navigator as Navigator & { vibrate?: (p: number | number[]) => boolean };
     if (typeof nav?.vibrate !== "function") return false;
+    // Cancel previous then fire
     try {
       nav.vibrate(0);
     } catch {
@@ -123,23 +108,20 @@ function vibrateWeb(pattern: number[]): boolean {
   }
 }
 
-/**
- * Fire the motor.
- * Android: native ExamImmersive ONLY (WebView vibrate often cancels native).
- * Web: navigator.vibrate.
- */
+/** Fire native Android vibrator AND web fallback. Returns true if either path accepted. */
 function vibrateRaw(arg: number | number[]): boolean {
   try {
     const pattern = normalizePattern(arg);
+    let ok = false;
 
     if (isNativeAndroid()) {
       try {
+        // Fire-and-forget but also attach catch so failures don't break exam UI
         void ExamImmersive()
           .vibrate({ pattern })
           .then((r) => {
             if (r && r.ok === false) {
               console.warn("[haptic] native vibrate rejected", r.error);
-              // Only fall back to web if native explicitly failed
               vibrateWeb(pattern);
             }
           })
@@ -147,16 +129,20 @@ function vibrateRaw(arg: number | number[]): boolean {
             console.warn("[haptic] native vibrate error", e);
             vibrateWeb(pattern);
           });
-        return true;
+        ok = true;
       } catch (e) {
         console.warn("[haptic] native invoke failed", e);
-        return vibrateWeb(pattern);
       }
     }
 
-    // Browser / iOS WebView
-    if (vibrateWeb(pattern)) return true;
-    return vibrateWeb([0, 200]);
+    // Always try web path too (helps on some WebViews / when native is delayed)
+    if (vibrateWeb(pattern)) ok = true;
+
+    // Last resort: single pulse
+    if (!ok) {
+      ok = vibrateWeb([0, 200]);
+    }
+    return ok;
   } catch {
     return false;
   }
@@ -171,11 +157,7 @@ function extractOns(pattern: number[]): number[] {
   return ons.length ? ons : [200];
 }
 
-function patternDurationMs(pattern: number[]): number {
-  return pattern.reduce((a, b) => a + b, 0);
-}
-
-function pulseTrain(ons: number[], gap = 45) {
+function pulseTrain(ons: number[], gap = 40) {
   let delay = 0;
   for (const pulse of ons) {
     const id = window.setTimeout(() => {
@@ -186,31 +168,29 @@ function pulseTrain(ons: number[], gap = 45) {
   }
 }
 
-/** Unlock vibration from a user gesture (Start Exam). Call once on Start. */
+/** Unlock vibration from a user gesture (Start Exam). */
 export function primeHaptics() {
   clearTimers();
   const pattern = PATTERNS.start;
   vibrateRaw(pattern);
-  // Second kick shortly after so the motor is clearly felt on first start
   timers.push(
     window.setTimeout(() => {
-      vibrateRaw([0, 100, 40, 140]);
-    }, 70),
+      vibrateRaw(pattern);
+    }, 50),
   );
   startHapticKeepAlive();
 }
 
 export function refreshHapticUnlock() {
-  /* API compatibility — no-op */
+  /* kept for API compatibility */
 }
 
 export function startHapticKeepAlive() {
   if (typeof window === "undefined") return;
   stopHapticKeepAlive();
-  // Keep the module warm; do not vibrate on interval (that would drain battery / annoy)
   keepAliveTimer = window.setInterval(() => {
-    /* no-op */
-  }, 30_000);
+    /* keep module warm */
+  }, 20_000);
 }
 
 export function stopHapticKeepAlive() {
@@ -228,46 +208,43 @@ export function haptic(kind: HapticKind) {
   if (typeof window === "undefined") return;
 
   const now = Date.now();
+  // Short cooldowns so rapid face events still feel, but don't stack forever
   const cooldown =
     kind === "officer_warning" || kind === "officer_submit"
-      ? 500
-      : kind === "multi" || kind === "officer_pause" || kind === "strong"
-        ? 600
+      ? 400
+      : kind === "multi" || kind === "officer_pause"
+        ? 550
         : kind === "none" || kind === "unclear"
-          ? 750
-          : 400;
+          ? 700
+          : 450;
   if (lastKind === kind && now - lastAt < cooldown) return;
   lastKind = kind;
   lastAt = now;
 
   const pattern = PATTERNS[kind] ?? PATTERNS.none;
   const ons = extractOns(pattern);
-  const totalMs = patternDurationMs(pattern);
   clearTimers();
 
   // Primary fire
   vibrateRaw(pattern);
 
-  // One reinforcement after the main pattern ends so weak motors still register
-  const reinforceAt = Math.max(80, Math.min(totalMs + 20, 900));
+  // Reinforce once so weak devices still feel it
   timers.push(
-    window.setTimeout(() => {
-      if (kind === "light" || kind === "tab_switch") {
-        vibrateRaw([0, 70]);
-      } else if (kind === "officer_warning" || kind === "officer_submit") {
-        vibrateRaw([0, 300, 40, 360]);
-      } else if (kind === "strong" || kind === "multi" || kind === "officer_pause") {
-        vibrateRaw([0, 240, 40, 280]);
-      } else {
-        vibrateRaw([0, 160]);
-      }
-    }, reinforceAt),
+    window.setTimeout(() => vibrateRaw(pattern), 60),
   );
 
-  // Extra pulse train for the strongest exam events
+  if (kind === "multi" || kind === "strong") {
+    timers.push(window.setTimeout(() => vibrateRaw([0, 280, 40, 320]), 280));
+  }
+
+  if (kind === "officer_pause") {
+    timers.push(window.setTimeout(() => vibrateRaw([0, 280, 40, 320]), 250));
+  }
+
   if (kind === "officer_warning" || kind === "officer_submit") {
     timers.push(
-      window.setTimeout(() => pulseTrain(ons.slice(0, 3), 40), 100),
+      window.setTimeout(() => pulseTrain(ons.slice(0, 4), 35), 120),
+      window.setTimeout(() => vibrateRaw([0, 350, 40, 420]), 500),
     );
   }
 }

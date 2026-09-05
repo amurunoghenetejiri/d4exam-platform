@@ -17,10 +17,10 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import org.json.JSONArray;
 
 /**
- * Immersive CBT chrome + reliable native vibration.
- * WebView navigator.vibrate is unreliable on Android; this is the real motor path.
+ * Immersive CBT chrome + reliable native vibration (WebView navigator.vibrate is unreliable).
  */
 @CapacitorPlugin(name = "ExamImmersive")
 public class ExamImmersivePlugin extends Plugin {
@@ -81,11 +81,7 @@ public class ExamImmersivePlugin extends Plugin {
     });
   }
 
-  /**
-   * Native motor vibration.
-   * pattern: ms alternating [delay, on, delay, on, ...] (same as navigator.vibrate).
-   * Always max amplitude when the device supports it so the shake is clearly felt.
-   */
+  /** Native motor vibration — pattern is ms on/off alternating (same as navigator.vibrate). */
   @PluginMethod
   public void vibrate(PluginCall call) {
     try {
@@ -114,7 +110,7 @@ public class ExamImmersivePlugin extends Plugin {
       if (pattern == null || pattern.length == 0) {
         pattern = new long[] {0, 220};
       }
-      // Waveform must start with delay (0)
+      // Ensure first element is delay (0) for createWaveform
       if (pattern[0] != 0) {
         long[] padded = new long[pattern.length + 1];
         padded[0] = 0;
@@ -122,56 +118,42 @@ public class ExamImmersivePlugin extends Plugin {
         pattern = padded;
       }
 
-      // Stop any ongoing vibration so the new pattern is felt cleanly
+      // Cancel any ongoing vibration so the new pattern is felt
       try {
         vibrator.cancel();
       } catch (Exception ignored) {
       }
 
-      boolean fired = false;
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        // Prefer amplitude-capable waveform when available
         try {
-          if (vibrator.hasAmplitudeControl()) {
-            // Full strength on every "on" segment
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasAmplitudeControl()) {
             int[] amps = new int[pattern.length];
             for (int i = 0; i < pattern.length; i++) {
+              // even indices are delays (amp 0), odd are on-pulses (strong)
               amps[i] = (i % 2 == 0) ? 0 : 255;
             }
             vibrator.vibrate(VibrationEffect.createWaveform(pattern, amps, -1));
-            fired = true;
           } else {
             vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1));
-            fired = true;
           }
         } catch (Exception e1) {
           try {
             long total = 0;
             for (long v : pattern) total += v;
-            if (total <= 0) total = 220;
-            // One strong shot if waveform fails
-            int amp = VibrationEffect.DEFAULT_AMPLITUDE;
-            try {
-              if (vibrator.hasAmplitudeControl()) amp = 255;
-            } catch (Exception ignored) {
-            }
-            vibrator.vibrate(
-              VibrationEffect.createOneShot(Math.min(total, 1200), amp)
-            );
-            fired = true;
+            if (total <= 0) total = 200;
+            vibrator.vibrate(VibrationEffect.createOneShot(Math.min(total, 1000), VibrationEffect.DEFAULT_AMPLITUDE));
           } catch (Exception e2) {
             //noinspection deprecation
             vibrator.vibrate(pattern, -1);
-            fired = true;
           }
         }
       } else {
         //noinspection deprecation
         vibrator.vibrate(pattern, -1);
-        fired = true;
       }
-
       JSObject ret = new JSObject();
-      ret.put("ok", fired);
+      ret.put("ok", true);
       ret.put("len", pattern.length);
       call.resolve(ret);
     } catch (Exception e) {
@@ -193,8 +175,7 @@ public class ExamImmersivePlugin extends Plugin {
     if (ctx == null) return null;
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       try {
-        VibratorManager vm =
-          (VibratorManager) ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+        VibratorManager vm = (VibratorManager) ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
         if (vm != null) {
           Vibrator v = vm.getDefaultVibrator();
           if (v != null) return v;
@@ -227,8 +208,7 @@ public class ExamImmersivePlugin extends Plugin {
               }
             }
           }
-          // Cap segment length; too long can be truncated by OEM policies
-          out[i] = Math.max(0, Math.min(val, 3000));
+          out[i] = Math.max(0, Math.min(val, 5000));
         }
         return out;
       }
@@ -237,7 +217,7 @@ public class ExamImmersivePlugin extends Plugin {
     try {
       Integer ms = call.getInt("ms");
       if (ms != null && ms > 0) {
-        return new long[] {0, Math.min(ms.longValue(), 3000)};
+        return new long[] {0, Math.min(ms.longValue(), 5000)};
       }
     } catch (Exception ignored) {
     }
