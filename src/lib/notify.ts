@@ -576,7 +576,7 @@ export async function notifyStudentOfficerWarning(opts: {
       uid = ids[0] || "";
     }
     if (!uid) return;
-    const link = opts.examId ? `/student/exam/${opts.examId}` : "/student/examinations";
+    const link = "/student/examinations";
     const name =
       (opts.studentName || "").trim() ||
       (await studentDisplayNameFromAuth(uid)) ||
@@ -1038,19 +1038,24 @@ export async function notifyStudentExamAvailable(opts: {
   courseTitle?: string | null;
   studentName?: string | null;
   username?: string | null;
+  start?: string | null;
+  end?: string | null;
 }): Promise<void> {
   try {
-    const link = `/student/exam/${opts.examId}`;
+    const link = "/student/examinations";
     const name =
       (opts.studentName || "").trim() ||
       (await studentDisplayNameFromAuth(opts.studentUserId)) ||
       "Student";
-    const copy = Msg.studentExamStartingNow({
+    // Notification 20.0 scheduled template (name + exam + schedule)
+    const copy = Msg.studentExamScheduled({
       studentName: name,
       username: opts.username,
       examTitle: opts.examTitle,
       courseCode: opts.courseCode,
       courseTitle: opts.courseTitle,
+      start: opts.start,
+      end: opts.end,
       link,
     });
     await notifyUser({
@@ -1405,7 +1410,7 @@ export async function notifyStudentExamReminder(opts: {
   username?: string | null;
 }): Promise<void> {
   try {
-    const link = `/student/exam/${opts.examId}`;
+    const link = "/student/examinations";
     const name =
       (opts.studentName || "").trim() ||
       (await studentDisplayNameFromAuth(opts.studentUserId)) ||
