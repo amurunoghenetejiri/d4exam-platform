@@ -1,0 +1,57 @@
+name: Restore app exactly to 514d36d9
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: restore-app-514d36d9
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: Restore source tree from 514d36d9
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Overlay 514d36d9 tree (except .github/workflows)
+        run: |
+          set -euo pipefail
+          TARGET=514d36d9bee0abd6552ce7fbd3ad9dce7cea5781
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin "$TARGET"
+
+          # Snapshot current workflows so we do not rewrite workflow files (GITHUB_TOKEN restriction)
+          rm -rf /tmp/keep-workflows
+          mkdir -p /tmp/keep-workflows
+          if [ -d .github/workflows ]; then
+            cp -a .github/workflows/. /tmp/keep-workflows/
+          fi
+
+          # Make working tree match TARGET exactly
+          git checkout "$TARGET" -- .
+
+          # Restore workflows from current main tip (avoid workflows permission error)
+          mkdir -p .github/workflows
+          rm -rf .github/workflows/*
+          cp -a /tmp/keep-workflows/. .github/workflows/ || true
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Already matches target tree (plus workflows)"
+            exit 0
+          fi
+
+          git commit -m "restore: exact app state from 514d36d9bee0abd6552ce7fbd3ad9dce7cea5781"
+          git push origin HEAD:main
+          echo "Pushed restore commit. App source matches 514d36d9."
+          git log -1 --oneline
