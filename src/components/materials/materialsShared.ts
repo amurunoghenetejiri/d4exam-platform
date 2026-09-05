@@ -74,6 +74,10 @@ export type MaterialRow = {
   created_at: string;
   download_count?: number | null;
   tags?: string | null;
+  /** OCR / handwriting conversion text (optional column) */
+  ocr_text?: string | null;
+  ocr_status?: string | null;
+  converted_pdf_url?: string | null;
 };
 
 export function typeMeta(t: string) {
