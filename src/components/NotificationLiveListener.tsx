@@ -66,15 +66,21 @@ function actionLabelFor(row: {
 }
 
 function safeLink(link?: string | null): string {
-  const raw = (link || "").trim();
+  let raw = (link || "").trim();
   if (!raw) return "/student/notifications";
-  if (raw.startsWith("/")) return raw;
-  try {
-    const u = new URL(raw);
-    return u.pathname + u.search || "/student/notifications";
-  } catch {
-    return raw.startsWith("http") ? "/student/notifications" : `/${raw}`;
+  if (raw.startsWith("http")) {
+    try {
+      const u = new URL(raw);
+      raw = u.pathname + (u.search || "");
+    } catch {
+      return "/student/notifications";
+    }
   }
+  if (!raw.startsWith("/")) raw = `/${raw}`;
+  // Stable student destinations (avoid 404 on exam deep links)
+  if (raw.startsWith("/student/exam")) return "/student/examinations";
+  if (raw.startsWith("/student/results/")) return "/student/results";
+  return raw;
 }
 
 export function NotificationLiveListener() {
