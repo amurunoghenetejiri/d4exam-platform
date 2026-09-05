@@ -1,0 +1,25 @@
+/* Material Reader full-screen immersion — imported from styles.css */
+html.d4-material-reader-open,
+body.d4-material-reader-open {
+  overflow: hidden !important;
+  background: #000000 !important;
+  overscroll-behavior: none;
+}
+body.d4-material-reader-open nav[aria-label="Primary"],
+html.d4-material-reader-open nav[aria-label="Primary"],
+body.d4-material-reader-open nav.d4-app-bottom-nav,
+html.d4-material-reader-open nav.d4-app-bottom-nav {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+}
+body.d4-material-reader-open header.d4-app-topbar,
+html.d4-material-reader-open header.d4-app-topbar {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
