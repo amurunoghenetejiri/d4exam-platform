@@ -270,6 +270,7 @@ export async function bindLocalNotificationActions(): Promise<void> {
         } | undefined;
         let link = (extra?.link || "").trim();
         if (!link) link = "/student/notifications";
+        // Normalize to same-origin path so SPA routing always hits a real route
         if (link.startsWith("http")) {
           try {
             const u = new URL(link);
@@ -277,8 +278,16 @@ export async function bindLocalNotificationActions(): Promise<void> {
           } catch { /* keep */ }
         }
         if (!link.startsWith("/")) link = `/${link}`;
+        // Prefer known student destinations (avoid broken /student/exam deep links)
+        if (link.startsWith("/student/exam/") || link === "/student/exam") {
+          link = "/student/examinations";
+        }
+        if (link.startsWith("/student/results/")) {
+          link = "/student/results";
+        }
         if (typeof window !== "undefined") {
-          window.location.assign(link);
+          const origin = window.location.origin || "";
+          window.location.assign(origin ? `${origin}${link}` : link);
         }
       } catch {
         /* ignore */
