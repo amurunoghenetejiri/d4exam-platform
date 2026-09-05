@@ -104,8 +104,20 @@ function actionLabelFor(n: Notif): string | null {
 }
 
 function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
-  const direct = (n.link || n.action_url || "").trim();
-  if (direct.startsWith("/")) return direct;
+  let direct = (n.link || n.action_url || "").trim();
+  if (direct.startsWith("http")) {
+    try {
+      const u = new URL(direct);
+      direct = u.pathname + (u.search || "");
+    } catch {
+      direct = "";
+    }
+  }
+  if (direct.startsWith("/")) {
+    if (direct.startsWith("/student/exam")) return "/student/examinations";
+    if (direct.startsWith("/student/results/")) return "/student/results";
+    return direct;
+  }
 
   const scope = normalizeNotifScope(scopeRaw);
   const ty = (n.type || "info").toLowerCase();
