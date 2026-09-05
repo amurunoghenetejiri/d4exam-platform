@@ -10,6 +10,7 @@ import {
   examAvailability,
   formatExamWindow,
   isExamAttemptFinished,
+  filterExamsForStudent,
 } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
 import { processDueExamReminders } from "@/lib/notify";
@@ -38,7 +39,8 @@ type ExamRow = {
   scheduled_end: string | null;
   duration_minutes: number;
   course_id: string | null;
-  courses: { code: string; name: string } | null;
+  school_id?: string | null;
+  courses: { code: string; name: string; department_id?: string | null; level_id?: string | null } | null;
 };
 
 type AttemptRow = {
@@ -169,18 +171,19 @@ function Page() {
 
   const examsQ = useQuery({
     queryKey: ["student-exams", schoolId, student?.courseIds?.join(","), student?.departmentId, student?.levelId],
-    enabled: Boolean(schoolId),
+    enabled: Boolean(schoolId && student?.studentId),
     staleTime: 1_500,
     refetchInterval: 4_000,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async () => {
-      if (!schoolId) return [] as ExamRow[];
-      // Load school exams first (avoid missing exams when enrollment rows are incomplete)
+      if (!schoolId || !student) return [] as ExamRow[];
+      // School-scoped fetch, then strict eligibility filter (course enrollment or dept+level match).
+      // Never return all school exams when the student has no enrollments.
       const { data, error } = await supabase
         .from("examinations")
         .select(
-          "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, courses(code, name)",
+          "id, title, status, scheduled_start, scheduled_end, duration_minutes, course_id, school_id, courses(code, name, department_id, level_id)",
         )
         .eq("school_id", schoolId)
         .in("status", [...STUDENT_VISIBLE_EXAM_STATUSES])
@@ -191,15 +194,7 @@ function Page() {
         return [] as ExamRow[];
       }
       const rows = (data ?? []) as ExamRow[];
-      const courseIds = student?.courseIds ?? [];
-      if (!courseIds.length) return rows;
-      const allowed = new Set(courseIds);
-      // Keep exams for enrolled courses; also keep exams with no course_id
-      return rows.filter((e) => {
-        const cid = (e as { course_id?: string | null }).course_id;
-        if (!cid) return true;
-        return allowed.has(cid);
-      });
+      return filterExamsForStudent(student, rows);
     },
   });
 
@@ -306,8 +301,8 @@ function Page() {
         title="My Examinations"
         description={
           termLine
-            ? `${termLine} · Only officer-approved exams appear here.`
-            : "You only see exams after the Examination Officer has approved them."
+            ? `${termLine} · Only officer-approved exams for your department and level appear here.`
+            : "You only see exams for your department and level after the Examination Officer has approved them."
         }
       />
 
@@ -316,7 +311,7 @@ function Page() {
       ) : exams.length === 0 ? (
         <EmptyState
           title="No examinations available"
-          description="When your lecturers submit exams and the officer approves them, they will appear here."
+          description="When your lecturers submit exams for your courses (or department and level) and the officer approves them, they will appear here."
         />
       ) : (
         <div className="space-y-4 sm:space-y-6">
