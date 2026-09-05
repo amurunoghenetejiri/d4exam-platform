@@ -140,7 +140,7 @@ function showLocalNotification(title: string, body: string, link?: string | null
     if (link) {
       n.onclick = () => {
         window.focus();
-        window.location.assign(link.startsWith("http") ? link : link);
+        { let path = String(link||""); if (path.startsWith("http")) { try { const u=new URL(path); path=u.pathname+(u.search||"");} catch{} } if (!path.startsWith("/")) path="/"+path; if (path.startsWith("/student/exam")) path="/student/examinations"; if (path.startsWith("/student/results/")) path="/student/results"; window.location.assign((window.location.origin||"")+path); }
         n.close();
       };
     }
