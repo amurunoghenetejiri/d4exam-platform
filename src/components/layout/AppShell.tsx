@@ -261,7 +261,7 @@ export function AppShell({
 
       <header
         className={cn(
-          "fixed top-0 right-0 z-50 border-b border-slate-200/90",
+          "d4-app-topbar fixed top-0 right-0 z-50 border-b border-slate-200/90",
           "left-0 lg:left-64",
           "bg-white shadow-sm",
           "supports-[backdrop-filter]:bg-white/95 supports-[backdrop-filter]:backdrop-blur-md",
@@ -452,7 +452,7 @@ export function AppShell({
       {config.bottomNav && (
         <nav
           className={cn(
-            "fixed inset-x-0 bottom-0 z-40 lg:hidden",
+            "d4-app-bottom-nav fixed inset-x-0 bottom-0 z-40 lg:hidden",
             "border-t border-white/10 bg-[#0b1b3a]",
             "pb-[env(safe-area-inset-bottom,0px)]",
             "shadow-[0_-4px_16px_rgba(11,27,58,0.35)]",
