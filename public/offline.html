@@ -2,9 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0b1b3a" />
-    <title>D4EXAM — Offline</title>
+    <title>D4EXAM</title>
     <style>
       * { box-sizing: border-box; }
       body {
@@ -32,24 +32,24 @@
     <div>
       <div class="mark">D4</div>
       <h1>You're offline</h1>
-      <p>Connect to the Internet and tap Retry to open D4EXAM. After you use the app online once, previously opened pages load from saved data when the connection drops.</p>
-      <button type="button" id="retry">Retry</button>
+      <p>Connect once to sync. After that, saved pages open offline like WhatsApp. Tap Open app to load the local shell.</p>
+      <button type="button" id="open">Open app</button>
       <p class="hint">Content not available offline yet will appear as a friendly message inside the app — not a browser error page.</p>
     </div>
     <script>
       (function () {
-        var LIVE = "https://d4exam-platform.vercel.app/";
-        function go() {
+        function goLocal() {
           try {
-            window.location.replace(LIVE + "?offline_retry=" + Date.now());
+            window.location.replace("./index.html");
           } catch (e) {
-            window.location.href = LIVE;
+            window.location.href = "./index.html";
           }
         }
-        document.getElementById("retry").addEventListener("click", go);
-        window.addEventListener("online", function () {
-          setTimeout(go, 400);
-        });
+        document.getElementById("open").addEventListener("click", goLocal);
+        // Prefer local shell immediately — never bounce to Vercel
+        try {
+          if (navigator.onLine) goLocal();
+        } catch (e) {}
       })();
     </script>
   </body>
