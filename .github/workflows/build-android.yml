@@ -48,11 +48,9 @@ jobs:
       - name: Build Capacitor SPA shell (local assets, no Vercel)
         run: |
           set -euo pipefail
-          # Full client SPA via vite.capacitor.config.ts + server stubs
           node scripts/prepare-capacitor-dist.mjs
           test -f dist/index.html
           test -d dist/assets
-          # Ensure offline fallback is present in the bundled assets
           if [ -f public/offline.html ]; then
             cp -f public/offline.html dist/offline.html
           fi
@@ -199,18 +197,26 @@ jobs:
       - name: Verify capacitor is local-only (no Vercel server.url)
         run: |
           set -euo pipefail
-          CFG="capacitor.config.ts"
-          if grep -E 'url:[[:space:]]*["'\''']https?://' "$CFG"; then
-            echo "FATAL: capacitor.config.ts still has server.url — offline will break"
-            grep -n 'url:' "$CFG" || true
-            exit 1
-          fi
-          if grep -q 'd4exam-platform.vercel.app' "$CFG"; then
-            echo "FATAL: capacitor.config.ts still references Vercel"
-            exit 1
-          fi
-          test -f dist/index.html
-          echo "OK: local SPA shell only (no server.url)"
+          python3 - <<'PY'
+          from pathlib import Path
+          cfg = Path("capacitor.config.ts").read_text()
+          bad = False
+          for i, line in enumerate(cfg.splitlines(), 1):
+              s = line.strip()
+              if s.startswith("//") or s.startswith("*") or s.startswith("/*"):
+                  continue
+              if "d4exam-platform.vercel.app" in line:
+                  print(f"FATAL line {i}: still references Vercel")
+                  bad = True
+              if "url:" in line and ("http://" in line or "https://" in line):
+                  print(f"FATAL line {i}: server.url still set -> {s}")
+                  bad = True
+          if bad:
+              raise SystemExit(1)
+          if not Path("dist/index.html").is_file():
+              raise SystemExit("FATAL: dist/index.html missing")
+          print("OK: local SPA shell only (no server.url)")
+          PY
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
