@@ -1,9 +1,6 @@
 name: Apply notify 20.0 templates
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/APPLY-NOTIFY-20.yml
 permissions:
   contents: write
 jobs:
@@ -11,54 +8,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch notify-messages templates
+      - name: Patch
+        env:
+          B64: |
+            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
         run: |
-          set -euo pipefail
-          python3 << 'PY'
-          import base64, gzip, pathlib, re
-          path = pathlib.Path("src/lib/notify-messages.ts")
+          python3 - <<'PY'
+          import base64, gzip, pathlib, re, os
+          path = pathlib.Path('src/lib/notify-messages.ts')
           text = path.read_text()
-          blob = base64.b64decode("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")
+          blob = base64.b64decode(os.environ['B64'].replace('\n','').strip())
           block = gzip.decompress(blob).decode()
-          pat = re.compile(
-              r"function examDisplay\([\s\S]*?(?=export function studentExamEnded\()",
-              re.M,
-          )
-          if not pat.search(text):
-              raise SystemExit("examDisplay..StartingNow block not found")
-          text2 = pat.sub(block, text, count=1)
-          path.write_text(text2)
-          assert "Examination available" in text2
-          assert "VIEW EXAMINATIONS" in text2
-          print("notify-messages patched", path.stat().st_size)
+          pat = re.compile(r'function examDisplay\([\s\S]*?(?=export function studentExamEnded\()', re.M)
+          m = pat.search(text)
+          if not m:
+            raise SystemExit('block not found')
+          path.write_text(pat.sub(block, text, count=1))
+          out = path.read_text()
+          assert 'Examination available' in out
+          assert 'VIEW EXAMINATIONS' in out
+          print('ok', path.stat().st_size)
           PY
-      - name: Patch notify.ts action labels
-        run: |
-          set -euo pipefail
-          python3 << 'PY'
+          python3 - <<'PY'
           from pathlib import Path
-          p = Path("src/lib/notify.ts")
+          p = Path('src/lib/notify.ts')
           t = p.read_text()
-          t = t.replace(
-              'actionLabel: copy.action?.label ?? "VIEW EXAM",',
-              'actionLabel: copy.action?.label ?? "VIEW EXAMINATIONS",',
-          )
-          if "actionLabel: copy.action?.label ?? null," in t and 'actionLabel: copy.action?.label ?? "START EXAM"' in t:
-              t = t.replace(
-                  '''actionLabel: copy.action?.label ?? null,
-      actionLabel: copy.action?.label ?? "START EXAM",''',
-                  '''actionLabel: copy.action?.label ?? "START EXAM",''',
-                  1,
-              )
+          t = t.replace('actionLabel: copy.action?.label ?? "VIEW EXAM",', 'actionLabel: copy.action?.label ?? "VIEW EXAMINATIONS",')
           p.write_text(t)
-          print("notify.ts patched", p.stat().st_size)
+          print('notify ok')
           PY
       - name: Commit
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add src/lib/notify-messages.ts src/lib/notify.ts
-          if git diff --cached --quiet; then echo No changes; else
-            git commit -m "fix(notify): Notification 20.0 student exam copy (name, course, exam, schedule, START/VIEW actions)"
-            git push
-          fi
+          git diff --cached --quiet || (git commit -m "fix(notify): Notification 20.0 student exam copy" && git push)
