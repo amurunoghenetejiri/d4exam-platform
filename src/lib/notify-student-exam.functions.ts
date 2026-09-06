@@ -145,7 +145,7 @@ export const serverNotifyStudentsExamApproved = createServerFn({ method: "POST" 
         end: data.end,
         link,
       });
-      const actionLabel = copy.action?.label || "VIEW EXAM";
+      const actionLabel = copy.action?.label || "VIEW EXAMINATIONS";
 
       // Dedupe 30 min
       const since = new Date(Date.now() - 30 * 60_000).toISOString();
@@ -168,6 +168,7 @@ export const serverNotifyStudentsExamApproved = createServerFn({ method: "POST" 
         type: "exam_scheduled",
         link,
         action_url: link,
+        action_label: actionLabel,
         entity_type: "examination",
         entity_id: data.examId,
       } as never);
