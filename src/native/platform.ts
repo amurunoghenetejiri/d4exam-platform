@@ -1,6 +1,6 @@
 /**
  * Platform detection — web today, Capacitor Android/iOS shell for native APK.
- * Must detect native even when server.url loads the remote Vercel site.
+ * Detects native Capacitor Android/iOS shell (local SPA assets; no remote URL required).
  */
 export type RuntimePlatform = "web" | "ios" | "android" | "unknown";
 
