@@ -33,6 +33,7 @@ import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { withOfflineCache } from "@/lib/offline-query";
+import { isOnlineNow } from "@/lib/offline-sync";
 import { OfflineKeys } from "@/lib/offline-cache";
 import { cn } from "@/lib/utils";
 import { processDueExamReminders } from "@/lib/notify";
@@ -121,7 +122,7 @@ function Page() {
     ],
     enabled: Boolean(student?.schoolId),
     staleTime: 1_500,
-    refetchInterval: 4_000,
+    refetchInterval: isOnlineNow() ? 4_000 : false,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     queryFn: async () => {
@@ -155,7 +156,7 @@ function Page() {
     queryKey: ["student-dashboard-attempts", student?.studentId],
     enabled: Boolean(student?.studentId),
     staleTime: 1_500,
-    refetchInterval: 5_000,
+    refetchInterval: isOnlineNow() ? 5_000 : false,
     refetchOnMount: "always",
     queryFn: async () => {
       const uid = user?.userId ?? student?.profileId;
@@ -182,7 +183,7 @@ function Page() {
     queryKey: ["student-dashboard-results", student?.studentId],
     enabled: Boolean(student?.studentId),
     staleTime: 2_000,
-    refetchInterval: 10_000,
+    refetchInterval: isOnlineNow() ? 10_000 : false,
     refetchOnMount: "always",
     queryFn: async () => {
       const uid = user?.userId ?? student?.profileId;
@@ -213,7 +214,7 @@ function Page() {
     queryKey: ["student-dashboard-notifs", user?.userId],
     enabled: Boolean(user?.userId),
     staleTime: 5_000,
-    refetchInterval: 10_000,
+    refetchInterval: isOnlineNow() ? 10_000 : false,
     queryFn: async () => {
       return withOfflineCache(
         user!.userId,

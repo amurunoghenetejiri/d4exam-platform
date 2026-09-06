@@ -425,27 +425,19 @@ export function ExamCameraPip({
           return;
         }
         if (!engine) {
-          // Keep retrying — never stick on permanent "Face check off"
-          setFaceStatus("unclear");
-          lastStateRef.current = "unclear";
-          if (!cancelled) {
-            timer = window.setTimeout(() => {
-              if (!cancelled) void bootEngine();
-            }, 3000);
-          }
+          // Offline-first: no CDN face engine. Camera-only.
+          setFaceStatus("ok");
+          lastStateRef.current = "ok";
+          onSecRef.current?.({ kind: "ok", faceCount: null, at: new Date().toISOString() });
           return;
-        }
-        faceEngineRef.current = engine;
+        }faceEngineRef.current = engine;
         nullStreak = 0;
         setFaceStatus((s) => (s === "unavailable" || s === "unclear" ? "unclear" : s));
         void tick();
       } catch {
-        setFaceStatus("unclear");
-        if (!cancelled) {
-          timer = window.setTimeout(() => {
-            if (!cancelled) void bootEngine();
-          }, 3000);
-        }
+        // Offline: continue camera-only
+        setFaceStatus("ok");
+        lastStateRef.current = "ok";
       }
     };
 

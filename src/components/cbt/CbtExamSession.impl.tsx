@@ -23,6 +23,7 @@ import { mapFaceSecurityEvent } from "@/lib/live-monitor";
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
 import { haptic, primeHaptics } from "@/lib/haptic";
+import { assertOnlineAction } from "@/lib/offline-guard";
 import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, holdExamScreenShare } from "@/lib/screen-share";
 import { useLiveScreenPublish } from "@/lib/use-live-screen-publish";
 import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
@@ -724,6 +725,14 @@ export function CbtExamPage() {
   }
 
   async function beginWithMedia(_opts: { skipScreenShare: boolean; caps: DeviceCapabilities }) {
+    // Exam start always requires internet (WhatsApp-style: only live actions need online)
+    if (!previewMode) {
+      const offlineMsg = await assertOnlineAction();
+      if (offlineMsg) {
+        toast.error(offlineMsg);
+        return;
+      }
+    }
     setMediaBusy(true);
     try {
       if (!previewMode && student?.studentId) {

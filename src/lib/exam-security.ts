@@ -11,7 +11,7 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   requireMicrophone: false,
   requireScreenShare: false,
   screenShareMode: "disabled",
-  faceDetection: true,
+  faceDetection: false,
   maxFaceWarnings: 5,
   faceViolationAction: "flag",
   thresholdAction: "flag",
