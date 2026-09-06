@@ -45,30 +45,20 @@ jobs:
           set -euo pipefail
           npm install --no-fund --no-audit
 
-      - name: Build web application
+      - name: Build Capacitor SPA shell (local assets, no Vercel)
         run: |
           set -euo pipefail
-          npm run build
-
-      - name: Prepare Capacitor dist (fallback assets; shell is Vercel URL)
-        run: |
-          set -euo pipefail
-          if [ -f scripts/prepare-capacitor-dist.mjs ]; then
-            node scripts/prepare-capacitor-dist.mjs || true
-          fi
-          mkdir -p dist
-          if [ ! -f dist/index.html ]; then
-            if [ -d .output/public ]; then
-              cp -R .output/public/. dist/
-            elif [ -d public ]; then
-              cp -R public/. dist/
-            fi
-          fi
-          if [ ! -f dist/index.html ]; then
-            printf '%s\n' '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>D4EXAM</title></head><body><p>Loading…</p></body></html>' > dist/index.html
+          # Full client SPA via vite.capacitor.config.ts + server stubs
+          node scripts/prepare-capacitor-dist.mjs
+          test -f dist/index.html
+          test -d dist/assets
+          # Ensure offline fallback is present in the bundled assets
+          if [ -f public/offline.html ]; then
+            cp -f public/offline.html dist/offline.html
           fi
           if [ -f public/logo.png ]; then cp -f public/logo.png dist/logo.png; fi
-          echo "dist ready (runtime shell = https://d4exam-platform.vercel.app)"
+          echo "dist SPA shell ready (local only — no server.url)"
+          ls -la dist/ | head -20
 
       - name: Ensure complete Android platform
         run: |
@@ -206,12 +196,21 @@ jobs:
             echo "WARNING: No google-services.json — Allow will not crash; FCM token may not register until secret is set"
           fi
 
-      - name: Verify capacitor uses Vercel shell URL
+      - name: Verify capacitor is local-only (no Vercel server.url)
         run: |
           set -euo pipefail
           CFG="capacitor.config.ts"
-          grep -q 'd4exam-platform.vercel.app' "$CFG"
-          echo "OK: Capacitor server.url points at Vercel production"
+          if grep -E 'url:[[:space:]]*["'\''']https?://' "$CFG"; then
+            echo "FATAL: capacitor.config.ts still has server.url — offline will break"
+            grep -n 'url:' "$CFG" || true
+            exit 1
+          fi
+          if grep -q 'd4exam-platform.vercel.app' "$CFG"; then
+            echo "FATAL: capacitor.config.ts still references Vercel"
+            exit 1
+          fi
+          test -f dist/index.html
+          echo "OK: local SPA shell only (no server.url)"
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
