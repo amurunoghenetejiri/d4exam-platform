@@ -1,0 +1,12 @@
+name: Apply notify templates integration
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder then real apply runs via dispatch
+        run: echo ready
