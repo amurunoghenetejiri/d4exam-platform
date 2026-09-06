@@ -11,7 +11,7 @@ export const DEFAULT_EXAM_SECURITY: ExamSecuritySettings = {
   requireMicrophone: false,
   requireScreenShare: false,
   screenShareMode: "disabled",
-  faceDetection: false,
+  faceDetection: true,
   maxFaceWarnings: 5,
   faceViolationAction: "flag",
   thresholdAction: "flag",
@@ -216,10 +216,6 @@ export function fromExamSettingsRow(
     if (row.questions_to_answer != null) fromRow.questionsToAnswer = row.questions_to_answer;
   }
 
-  // Description JSON is always written on teacher save and is the most complete snapshot.
-  // Table columns fill gaps when description is absent (older exams / migration).
-  // When description has explicit keys, those win so students never see false "Off"
-  // just because a row defaulted require_camera/face_detection to false.
   const hasDesc = Object.keys(fromDesc).length > 0;
   return normalizeSecuritySettings(
     hasDesc
