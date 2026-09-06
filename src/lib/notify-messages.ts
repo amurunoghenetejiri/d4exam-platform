@@ -58,13 +58,14 @@ function examDisplay(
   courseTitle?: string | null,
 ): string {
   const code = clean(courseCode, "");
-  const title = clean(courseTitle || examTitle, "");
-
-  if (code && title && !title.toUpperCase().includes(code.toUpperCase())) {
-    return `${code} — ${title}`;
-  }
-
-  return code || title || "Examination";
+  const ctitle = clean(courseTitle, "");
+  const etitle = clean(examTitle, "");
+  const parts: string[] = [];
+  if (code) parts.push(code);
+  if (ctitle && ctitle.toUpperCase() !== etitle.toUpperCase()) parts.push(ctitle);
+  if (etitle) parts.push(etitle);
+  else if (ctitle && !code) parts.push(ctitle);
+  return parts.join(" — ") || "Examination";
 }
 
 function action(
@@ -164,45 +165,83 @@ export function studentExamScheduled(opts: {
 }): NotificationTemplate {
   const name = personName(opts.studentName, "Student");
   const username = clean(opts.username, "");
-  const exam = examDisplay(
-    opts.courseCode,
-    opts.examTitle,
-    opts.courseTitle,
-  );
+  const code = clean(opts.courseCode, "");
+  const ctitle = clean(opts.courseTitle, "");
+  const etitle = clean(opts.examTitle, "Examination");
+  const exam = examDisplay(opts.courseCode, opts.examTitle, opts.courseTitle);
 
   const date = fmtDate(opts.start);
   const startT = fmtTime(opts.start);
   const endT = fmtTime(opts.end);
 
+  const startMs = opts.start ? new Date(opts.start).getTime() : NaN;
+  const endMs = opts.end ? new Date(opts.end).getTime() : NaN;
+  const now = Date.now();
+  const windowOpen =
+    !Number.isNaN(startMs) &&
+    startMs <= now + 60_000 &&
+    (Number.isNaN(endMs) || endMs >= now);
+
   let message =
-    `🎓 ${name}\n\n` +
-    `Your examination has been scheduled successfully.\n\n` +
-    `📝 Examination: ${exam}`;
+    `🎓 ${name}
+
+` +
+    `Hello ${name},
+
+` +
+    (windowOpen
+      ? `An examination is now available for you to write.
+
+`
+      : `An examination has been approved and scheduled for you.
+
+`);
+
+  if (code || ctitle) {
+    message += `📚 Course: ${[code, ctitle].filter(Boolean).join(" — ")}
+`;
+  }
+  message += `📝 Examination: ${etitle}`;
+  if (exam && exam !== etitle && exam !== code) {
+    /* already covered by course + title lines */
+  }
 
   if (username) {
-    message += `\n👤 Username: ${username}`;
+    message += `
+👤 Student: ${name} (${username})`;
   }
 
   if (date) {
-    message += `\n📅 Date: ${date}`;
+    message += `
+📅 Date: ${date}`;
   }
-
   if (startT) {
-    message += `\n🕐 Starts: ${startT}`;
+    message += `
+🕐 Starts: ${startT}`;
   }
-
   if (endT) {
-    message += `\n⏰ Ends: ${endT}`;
+    message += `
+⏰ Ends: ${endT}`;
   }
 
   message +=
-    `\n\nPlease be prepared and log in before the examination begins.` +
-    `\n\nGood luck from D4EXAM!`;
+    `
 
+Tap START EXAM when you are ready to begin, or open VIEW EXAMINATIONS to review details.` +
+    `
+
+Please prepare your device, camera and internet connection.` +
+    `
+
+Good luck from D4EXAM!`;
+
+  const primary = windowOpen ? "START EXAM" : "VIEW EXAMINATIONS";
   return {
-    title: `📅 Examination Scheduled — ${name}`,
+    title: windowOpen
+      ? `Examination available — ${name}`
+      : `Examination scheduled — ${name}`,
     message,
-    action: action("VIEW EXAM", opts.link),
+    action: action(primary, opts.link || "/student/examinations"),
   };
 }
 
@@ -230,22 +269,33 @@ export function studentExamCountdown(opts: {
   const endT = fmtTime(opts.end);
 
   let message =
-    `⏳ ${name}\n\n` +
-    `Your examination is starting soon.\n\n` +
-    `📝 Examination: ${exam}\n` +
+    `⏳ ${name}
+
+` +
+    `Your examination is starting soon.
+
+` +
+    `📝 Examination: ${exam}
+` +
     `⏱️ Time remaining: ${cd}`;
 
   if (date) {
-    message += `\n📅 Date: ${date}`;
+    message += `
+📅 Date: ${date}`;
   }
 
   if (startT) {
-    message += `\n🕐 Starts: ${startT}${endT ? ` – ${endT}` : ""}`;
+    message += `
+🕐 Starts: ${startT}${endT ? ` – ${endT}` : ""}`;
   }
 
   message +=
-    `\n\nPlease get ready and make sure your device and internet connection are stable.` +
-    `\n\nD4EXAM`;
+    `
+
+Please get ready and make sure your device and internet connection are stable.` +
+    `
+
+D4EXAM`;
 
   return {
     title: `⏳ ${name} · ${cd}`,
@@ -263,22 +313,40 @@ export function studentExamStartingNow(opts: {
   link?: string | null;
 }): NotificationTemplate {
   const name = personName(opts.studentName, "Student");
-  const exam = examDisplay(
-    opts.courseCode,
-    opts.examTitle,
-    opts.courseTitle,
-  );
+  const code = clean(opts.courseCode, "");
+  const ctitle = clean(opts.courseTitle, "");
+  const etitle = clean(opts.examTitle, "Examination");
+
+  let message =
+    `🚀 ${name}
+
+` +
+    `Hello ${name},
+
+` +
+    `Your examination is starting now.
+
+`;
+  if (code || ctitle) {
+    message += `📚 Course: ${[code, ctitle].filter(Boolean).join(" — ")}
+`;
+  }
+  message +=
+    `📝 Examination: ${etitle}
+
+` +
+    `Tap START EXAM to begin, or open VIEW EXAMINATIONS for details.` +
+    `
+
+Please follow all examination rules and instructions.` +
+    `
+
+Good luck from D4EXAM!`;
 
   return {
-    title: `🚀 Examination Starting Now — ${name}`,
-    message:
-      `🚀 ${name}\n\n` +
-      `Your examination is starting now.\n\n` +
-      `📝 Examination: ${exam}\n\n` +
-      `You can now enter the examination.` +
-      `\n\nPlease follow all examination rules and instructions.` +
-      `\n\nGood luck!`,
-    action: action("START EXAM", opts.link),
+    title: `Examination starting now — ${name}`,
+    message,
+    action: action("START EXAM", opts.link || "/student/examinations"),
   };
 }
 

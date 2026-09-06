@@ -1017,7 +1017,7 @@ export async function notifyStudentsExamApproved(opts: {
           message: copy.message,
           type: "exam_scheduled" as NotifyType,
           link: templateLink(copy, link),
-          actionLabel: copy.action?.label ?? "VIEW EXAM",
+          actionLabel: copy.action?.label ?? "VIEW EXAMINATIONS",
           entityType: "examination",
           entityId: opts.examId,
           dedupeMinutes: 30,
