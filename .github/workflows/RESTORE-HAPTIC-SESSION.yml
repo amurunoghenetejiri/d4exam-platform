@@ -8,19 +8,64 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Restore CbtExamSession.impl.tsx
+        with:
+          fetch-depth: 0
+      - name: Restore session from last good commit and wire haptic unlock
         run: |
           python3 << 'PY'
-          import base64, gzip, pathlib
-          parts = [
-          'H4sIAHa2nGoC/+192XIbSZLgu74ihK1tA6pwkDpqukCRXImipmSja0VW1YzJZKwEMkhkM5EJZSZ4FBtm87QfsLbfsL+w7/sp/SXr',
-'7nFHRiZASqqe6p026xKYcUe4e/gdyXyRFxW7Ya+S7LzPliV/FxXRvKSfb6KL5CyqOFux0yKfs85/q6KsrKLp+ajg0bQaFPmy4kVn',
-'516iuoFWh6enfFpRB6/5PKcfRxV0Q3/e81P69yBK0wn0pPumHr2u/vuSF9d9/esgTXhWNc7mE9axe3iRRmd9djDjF0WeveKnlf7j',
-'fXI2g79e5VHMiwd99jq6SubJb2al6XKaxHxQm9SzZVXlmZnCaJpDUQbTKkfLZDShYrvB0XSW5+mr/CwPN5oUURaPTC1vB0TByxjq',
-'JtW11UWaTEYlFQ4SWWo3PbyK5kd8uizg+z87R2gPPp1UI7+m3cs080ZcVkla2jXK5SKaRKXdf5JV/KyIqiTPypEqH03p7PzVVUuc'
-          ]
-          print('PLACEHOLDER_WORKFLOW_NEEDS_FULL_CHUNKS')
+          from pathlib import Path
+          import subprocess
+          # Restore full session body from known-good commit (before placeholder accidents)
+          blob = subprocess.check_output(
+              ["git", "show", "aaeee1296e7302c3ae3caed94c8bd75bdf0f12ae:src/components/cbt/CbtExamSession.impl.tsx"],
+              text=True,
+          )
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = blob
+          old_import = 'import { haptic, primeHaptics } from "@/lib/haptic";'
+          new_import = 'import { haptic, primeHaptics, refreshHapticUnlock } from "@/lib/haptic";'
+          if old_import in t:
+              t = t.replace(old_import, new_import, 1)
+          elif "refreshHapticUnlock" not in t:
+              raise SystemExit("import line not found")
+          if "Keep vibration unlocked while the student interacts" not in t:
+              block = (
+                  '  /** Keep vibration unlocked while the student interacts with the exam UI. */\n'
+                  '  useEffect(() => {\n'
+                  '    if (previewMode || !started || done) return;\n'
+                  '    const onInteract = () => {\n'
+                  '      try {\n'
+                  '        refreshHapticUnlock();\n'
+                  '      } catch {\n'
+                  '        /* ignore */\n'
+                  '      }\n'
+                  '    };\n'
+                  '    document.addEventListener("pointerdown", onInteract, { passive: true });\n'
+                  '    document.addEventListener("touchstart", onInteract, { passive: true });\n'
+                  '    return () => {\n'
+                  '      document.removeEventListener("pointerdown", onInteract);\n'
+                  '      document.removeEventListener("touchstart", onInteract);\n'
+                  '    };\n'
+                  '  }, [previewMode, started, done]);\n\n'
+              )
+              for anchor in ("  useExamAttemptHeartbeat({", "  useLiveCamPublish({"):
+                  if anchor in t:
+                      t = t.replace(anchor, block + anchor, 1)
+                      break
+              else:
+                  raise SystemExit("no anchor for unlock effect")
+          p.write_text(t)
+          assert "refreshHapticUnlock" in p.read_text()
+          assert "prepareStudentPaper" in p.read_text()
+          assert "export function CbtExamPage" in p.read_text()
+          print("OK", p.stat().st_size)
           PY
       - name: Commit
         run: |
-          echo skip
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(haptic): restore CBT session + refreshHapticUnlock on touch"
+            git push
+          fi
