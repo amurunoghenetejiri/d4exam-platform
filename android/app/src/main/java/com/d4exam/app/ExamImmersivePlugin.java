@@ -2,6 +2,8 @@ package com.d4exam.app;
 
 import android.content.Context;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
@@ -19,10 +21,13 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONArray;
 
 /**
- * Immersive CBT chrome + reliable native vibration (WebView navigator.vibrate is unreliable).
+ * Immersive CBT chrome + reliable native vibration.
+ * WebView navigator.vibrate is unreliable and can cancel the motor — always use this plugin.
  */
 @CapacitorPlugin(name = "ExamImmersive")
 public class ExamImmersivePlugin extends Plugin {
+
+  private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
   @PluginMethod
   public void enter(PluginCall call) {
@@ -80,75 +85,82 @@ public class ExamImmersivePlugin extends Plugin {
     });
   }
 
-  /** Native motor vibration — pattern is ms on/off alternating (same as navigator.vibrate). */
   @PluginMethod
   public void vibrate(PluginCall call) {
-    try {
-      Vibrator vibrator = resolveVibrator();
-      if (vibrator == null) {
-        JSObject ret = new JSObject();
-        ret.put("ok", false);
-        ret.put("error", "no_vibrator");
-        call.resolve(ret);
-        return;
-      }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        if (!vibrator.hasVibrator()) {
+    final long[] pattern = parsePattern(call);
+    mainHandler.post(() -> {
+      try {
+        Vibrator vibrator = resolveVibrator();
+        if (vibrator == null) {
           JSObject ret = new JSObject();
           ret.put("ok", false);
-          ret.put("error", "has_vibrator_false");
+          ret.put("error", "no_vibrator");
           call.resolve(ret);
           return;
         }
-      }
 
-      long[] pattern = parsePattern(call);
-      if (pattern.length == 0) {
-        pattern = new long[] { 0, 200 };
-      }
-
-      try {
-        vibrator.cancel();
-      } catch (Exception ignored) {
-      }
-
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        try {
-          int[] amps = new int[pattern.length];
-          for (int i = 0; i < pattern.length; i++) {
-            amps[i] = (i % 2 == 1) ? 255 : 0;
-          }
-          boolean useAmps = pattern.length >= 2 && pattern[0] == 0;
-          if (useAmps) {
-            vibrator.vibrate(VibrationEffect.createWaveform(pattern, amps, -1));
-          } else {
-            vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1));
-          }
-        } catch (Exception e) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
           try {
-            long total = 0;
-            for (long p : pattern) total += p;
-            vibrator.vibrate(VibrationEffect.createOneShot(Math.min(total, 1000), VibrationEffect.DEFAULT_AMPLITUDE));
-          } catch (Exception e2) {
-            //noinspection deprecation
-            vibrator.vibrate(pattern, -1);
+            if (!vibrator.hasVibrator()) {
+              JSObject ret = new JSObject();
+              ret.put("ok", false);
+              ret.put("error", "has_vibrator_false");
+              call.resolve(ret);
+              return;
+            }
+          } catch (Exception ignored) {
           }
         }
-      } else {
-        //noinspection deprecation
-        vibrator.vibrate(pattern, -1);
-      }
 
-      JSObject ret = new JSObject();
-      ret.put("ok", true);
-      call.resolve(ret);
-    } catch (Exception e) {
-      JSObject ret = new JSObject();
-      ret.put("ok", false);
-      ret.put("error", e.getMessage() != null ? e.getMessage() : "vibrate_failed");
-      call.resolve(ret);
-    }
+        try {
+          vibrator.cancel();
+        } catch (Exception ignored) {
+        }
+
+        long[] p = pattern;
+        if (p == null || p.length == 0) {
+          p = new long[] { 0, 220 };
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          try {
+            int[] amps = new int[p.length];
+            for (int i = 0; i < p.length; i++) {
+              amps[i] = (i % 2 == 1) ? 255 : 0;
+            }
+            if (p.length >= 2 && p[0] == 0) {
+              vibrator.vibrate(VibrationEffect.createWaveform(p, amps, -1));
+            } else {
+              vibrator.vibrate(VibrationEffect.createWaveform(p, -1));
+            }
+          } catch (Exception e) {
+            try {
+              long total = 0;
+              for (long x : p) total += x;
+              long ms = Math.max(80, Math.min(total > 0 ? total : 220, 1200));
+              vibrator.vibrate(
+                VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)
+              );
+            } catch (Exception e2) {
+              //noinspection deprecation
+              vibrator.vibrate(p, -1);
+            }
+          }
+        } else {
+          //noinspection deprecation
+          vibrator.vibrate(p, -1);
+        }
+
+        JSObject ret = new JSObject();
+        ret.put("ok", true);
+        call.resolve(ret);
+      } catch (Exception e) {
+        JSObject ret = new JSObject();
+        ret.put("ok", false);
+        ret.put("error", e.getMessage() != null ? e.getMessage() : "vibrate_failed");
+        call.resolve(ret);
+      }
+    });
   }
 
   private Vibrator resolveVibrator() {
@@ -162,7 +174,8 @@ public class ExamImmersivePlugin extends Plugin {
     if (ctx == null) return null;
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       try {
-        VibratorManager vm = (VibratorManager) ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+        VibratorManager vm =
+          (VibratorManager) ctx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
         if (vm != null) {
           Vibrator v = vm.getDefaultVibrator();
           if (v != null) return v;
@@ -180,16 +193,24 @@ public class ExamImmersivePlugin extends Plugin {
       if (arr != null && arr.length() > 0) {
         long[] out = new long[arr.length()];
         for (int i = 0; i < arr.length(); i++) {
-          out[i] = Math.max(0, arr.optLong(i, 0));
+          double d = arr.optDouble(i, Double.NaN);
+          if (Double.isNaN(d)) {
+            out[i] = Math.max(0, arr.optLong(i, 0));
+          } else {
+            out[i] = Math.max(0, Math.round(d));
+          }
         }
         return out;
       }
     } catch (Exception ignored) {
     }
-    Integer ms = call.getInt("ms");
-    if (ms != null && ms > 0) {
-      return new long[] { 0, ms.longValue() };
+    try {
+      Integer ms = call.getInt("ms");
+      if (ms != null && ms > 0) {
+        return new long[] { 0, ms.longValue() };
+      }
+    } catch (Exception ignored) {
     }
-    return new long[] { 0, 200 };
+    return new long[] { 0, 220 };
   }
 }
