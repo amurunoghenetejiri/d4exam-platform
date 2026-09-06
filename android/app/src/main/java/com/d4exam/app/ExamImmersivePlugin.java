@@ -11,7 +11,6 @@ import android.view.WindowManager;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
-import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -93,55 +92,43 @@ public class ExamImmersivePlugin extends Plugin {
         call.resolve(ret);
         return;
       }
-      try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
-          if (!vibrator.hasVibrator()) {
-            JSObject ret = new JSObject();
-            ret.put("ok", false);
-            ret.put("error", "no_hardware");
-            call.resolve(ret);
-            return;
-          }
+
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (!vibrator.hasVibrator()) {
+          JSObject ret = new JSObject();
+          ret.put("ok", false);
+          ret.put("error", "has_vibrator_false");
+          call.resolve(ret);
+          return;
         }
-      } catch (Exception ignored) {
       }
 
       long[] pattern = parsePattern(call);
-      if (pattern == null || pattern.length == 0) {
-        pattern = new long[] {0, 220};
-      }
-      // Ensure first element is delay (0) for createWaveform
-      if (pattern[0] != 0) {
-        long[] padded = new long[pattern.length + 1];
-        padded[0] = 0;
-        System.arraycopy(pattern, 0, padded, 1, pattern.length);
-        pattern = padded;
+      if (pattern.length == 0) {
+        pattern = new long[] { 0, 200 };
       }
 
-      // Cancel any ongoing vibration so the new pattern is felt
       try {
         vibrator.cancel();
       } catch (Exception ignored) {
       }
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        // Prefer amplitude-capable waveform when available
         try {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasAmplitudeControl()) {
-            int[] amps = new int[pattern.length];
-            for (int i = 0; i < pattern.length; i++) {
-              // even indices are delays (amp 0), odd are on-pulses (strong)
-              amps[i] = (i % 2 == 0) ? 0 : 255;
-            }
+          int[] amps = new int[pattern.length];
+          for (int i = 0; i < pattern.length; i++) {
+            amps[i] = (i % 2 == 1) ? 255 : 0;
+          }
+          boolean useAmps = pattern.length >= 2 && pattern[0] == 0;
+          if (useAmps) {
             vibrator.vibrate(VibrationEffect.createWaveform(pattern, amps, -1));
           } else {
             vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1));
           }
-        } catch (Exception e1) {
+        } catch (Exception e) {
           try {
             long total = 0;
-            for (long v : pattern) total += v;
-            if (total <= 0) total = 200;
+            for (long p : pattern) total += p;
             vibrator.vibrate(VibrationEffect.createOneShot(Math.min(total, 1000), VibrationEffect.DEFAULT_AMPLITUDE));
           } catch (Exception e2) {
             //noinspection deprecation
@@ -152,9 +139,9 @@ public class ExamImmersivePlugin extends Plugin {
         //noinspection deprecation
         vibrator.vibrate(pattern, -1);
       }
+
       JSObject ret = new JSObject();
       ret.put("ok", true);
-      ret.put("len", pattern.length);
       call.resolve(ret);
     } catch (Exception e) {
       JSObject ret = new JSObject();
@@ -168,7 +155,7 @@ public class ExamImmersivePlugin extends Plugin {
     Context ctx = getContext();
     if (ctx == null) {
       try {
-        if (getActivity() != null) ctx = getActivity().getApplicationContext();
+        ctx = getActivity();
       } catch (Exception ignored) {
       }
     }
@@ -189,38 +176,20 @@ public class ExamImmersivePlugin extends Plugin {
 
   private long[] parsePattern(PluginCall call) {
     try {
-      JSArray arr = call.getArray("pattern");
+      JSONArray arr = call.getArray("pattern");
       if (arr != null && arr.length() > 0) {
         long[] out = new long[arr.length()];
         for (int i = 0; i < arr.length(); i++) {
-          long val = 0;
-          try {
-            val = arr.getLong(i);
-          } catch (Exception e1) {
-            try {
-              val = (long) arr.getDouble(i);
-            } catch (Exception e2) {
-              try {
-                Object o = arr.get(i);
-                if (o instanceof Number) val = ((Number) o).longValue();
-                else if (o != null) val = Long.parseLong(String.valueOf(o));
-              } catch (Exception ignored) {
-              }
-            }
-          }
-          out[i] = Math.max(0, Math.min(val, 5000));
+          out[i] = Math.max(0, arr.optLong(i, 0));
         }
         return out;
       }
     } catch (Exception ignored) {
     }
-    try {
-      Integer ms = call.getInt("ms");
-      if (ms != null && ms > 0) {
-        return new long[] {0, Math.min(ms.longValue(), 5000)};
-      }
-    } catch (Exception ignored) {
+    Integer ms = call.getInt("ms");
+    if (ms != null && ms > 0) {
+      return new long[] { 0, ms.longValue() };
     }
-    return null;
+    return new long[] { 0, 200 };
   }
 }
