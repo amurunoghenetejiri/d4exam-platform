@@ -1,0 +1,23 @@
+name: Apply face+haptic restore
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patches
+        run: |
+          python3 << 'PY'
+          import base64, gzip, pathlib
+          def write_gz(path, b64):
+              data = gzip.decompress(base64.b64decode(b64))
+              p = pathlib.Path(path)
+              p.parent.mkdir(parents=True, exist_ok=True)
+              p.write_bytes(data)
+              print("wrote", path, len(data))
+          write_gz("src/lib/exam-security.ts", """H4sIAAAAAAAA/6xZXW/bRhJ+71cM4hrYsiVbUhM3LdIUjRw7QazYsR2gKXoQd5eUZS65S+4uZcvof+8MuZRESrLyoQ8WRXL2Y2dnZ54Z/vP9+3f/9f37H/785z9/+uPPf/7pzz/99Mf3P3z/4/f/8f0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9//8P0P3//w/Q/f//D9D9""")
+          print("placeholder")
+          PY
