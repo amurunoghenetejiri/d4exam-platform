@@ -1,0 +1,226 @@
+name: Apply local SPA shell offline fix
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch build-android + ensure local capacitor
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          Path("capacitor.config.ts").write_text('''import type { CapacitorConfig } from "@capacitor/cli";
+
+/**
+ * D4EXAM Capacitor config — OFFLINE-FIRST local shell (WhatsApp-style).
+ *
+ * NO server.url: the APK loads bundled assets from webDir (dist/), so the
+ * app opens offline after the first online sync. Data still syncs from
+ * Supabase when online; exam start / new content requires network.
+ *
+ * Build path: node scripts/prepare-capacitor-dist.mjs → dist/ SPA shell
+ * (vite.capacitor.config.ts + server stubs). Do not point at Vercel.
+ */
+const config: CapacitorConfig = {
+  appId: "com.d4exam.app",
+  appName: "D4EXAM",
+  webDir: "dist",
+  server: {
+    // Local-only: do NOT set url (that forced Vercel and broke offline).
+    androidScheme: "https",
+    cleartext: false,
+  },
+  android: {
+    allowMixedContent: false,
+    backgroundColor: "#0b1b3a",
+    webContentsDebuggingEnabled: false,
+  },
+  plugins: {
+    SplashScreen: {
+      launchShowDuration: 0,
+      launchAutoHide: false,
+      backgroundColor: "#0b1b3a",
+      androidSplashResourceName: "splash",
+      androidScaleType: "CENTER_CROP",
+      showSpinner: false,
+      splashFullScreen: true,
+      splashImmersive: true,
+    },
+    StatusBar: {
+      style: "DARK",
+      backgroundColor: "#0b1b3a",
+      overlaysWebView: false,
+    },
+    PushNotifications: {
+      presentationOptions: ["badge", "sound", "alert"],
+    },
+    LocalNotifications: {
+      smallIcon: "ic_stat_d4exam",
+      iconColor: "#0b1b3a",
+      sound: "default",
+    },
+  },
+};
+
+export default config;
+''')
+
+          Path("capacitor.config.json").write_text('''{
+  "appId": "com.d4exam.app",
+  "appName": "D4EXAM",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "backgroundColor": "#0b1b3a"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 0,
+      "launchAutoHide": false,
+      "backgroundColor": "#0b1b3a",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false,
+      "splashFullScreen": true,
+      "splashImmersive": true
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0b1b3a",
+      "overlaysWebView": false
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_d4exam",
+      "iconColor": "#0b1b3a",
+      "sound": "default"
+    }
+  }
+}
+''')
+
+          Path("public/offline.html").write_text('''<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1b3a" />
+    <title>D4EXAM</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100dvh; display: grid; place-items: center;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: #0b1b3a; color: #e2e8f0; text-align: center;
+        padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem max(1.25rem, env(safe-area-inset-bottom));
+      }
+      .mark {
+        width: 72px; height: 72px; margin: 0 auto 1rem; border-radius: 18px;
+        background: #1e3a5f; display: grid; place-items: center;
+        font-weight: 800; font-size: 1.25rem; color: #93c5fd;
+      }
+      h1 { font-size: 1.15rem; margin: 0 0 0.45rem; font-weight: 700; }
+      p { margin: 0 auto; font-size: 0.9rem; color: #94a3b8; max-width: 22rem; line-height: 1.45; }
+      button {
+        margin-top: 1.25rem; border: 0; border-radius: 0.75rem;
+        background: #2563eb; color: #fff; font-weight: 600;
+        padding: 0.75rem 1.35rem; font-size: 0.9rem; cursor: pointer;
+      }
+      .hint { margin-top: 1rem; font-size: 0.75rem; color: #64748b; max-width: 22rem; }
+    </style>
+  </head>
+  <body>
+    <div>
+      <div class="mark">D4</div>
+      <h1>You're offline</h1>
+      <p>Connect once to sync. After that, saved pages open offline like WhatsApp. Tap Open app to load the local shell.</p>
+      <button type="button" id="open">Open app</button>
+      <p class="hint">Content not available offline yet will appear as a friendly message inside the app — not a browser error page.</p>
+    </div>
+    <script>
+      (function () {
+        function goLocal() {
+          try {
+            window.location.replace("./index.html");
+          } catch (e) {
+            window.location.href = "./index.html";
+          }
+        }
+        document.getElementById("open").addEventListener("click", goLocal);
+        try {
+          if (navigator.onLine) goLocal();
+        } catch (e) {}
+      })();
+    </script>
+  </body>
+</html>
+''')
+
+          yml = Path(".github/workflows/build-android.yml")
+          t = yml.read_text()
+          t = re.sub(
+              r'      - name: Build web application\n.*?echo "dist ready \(runtime shell = https://d4exam-platform\.vercel\.app\)"\n',
+              '''      - name: Build Capacitor SPA shell (local assets, no Vercel)
+        run: |
+          set -euo pipefail
+          node scripts/prepare-capacitor-dist.mjs
+          test -f dist/index.html
+          test -d dist/assets
+          if [ -f public/offline.html ]; then
+            cp -f public/offline.html dist/offline.html
+          fi
+          if [ -f public/logo.png ]; then cp -f public/logo.png dist/logo.png; fi
+          echo "dist SPA shell ready (local only — no server.url)"
+          ls -la dist/ | head -20
+''',
+              t,
+              count=1,
+              flags=re.S,
+          )
+          t = re.sub(
+              r'      - name: Verify capacitor uses Vercel shell URL\n        run: \|\n          set -euo pipefail\n          CFG="capacitor\.config\.ts"\n          grep -q \'d4exam-platform\.vercel\.app\' "\$CFG"\n          echo "OK: Capacitor server\.url points at Vercel production"\n',
+              '''      - name: Verify capacitor is local-only (no Vercel server.url)
+        run: |
+          set -euo pipefail
+          CFG="capacitor.config.ts"
+          if grep -E \'url:[[:space:]]*["'\''']https?://\' "$CFG"; then
+            echo "FATAL: capacitor.config.ts still has server.url — offline will break"
+            grep -n \'url:\' "$CFG" || true
+            exit 1
+          fi
+          if grep -q \'d4exam-platform.vercel.app\' "$CFG"; then
+            echo "FATAL: capacitor.config.ts still references Vercel"
+            exit 1
+          fi
+          test -f dist/index.html
+          echo "OK: local SPA shell only (no server.url)"
+''',
+              t,
+              count=1,
+          )
+          yml.write_text(t)
+          assert "d4exam-platform.vercel.app" not in Path("capacitor.config.ts").read_text()
+          assert "Build Capacitor SPA shell" in yml.read_text()
+          assert "Verify capacitor is local-only" in yml.read_text()
+          print("ALL PATCHES OK")
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add capacitor.config.ts capacitor.config.json public/offline.html .github/workflows/build-android.yml
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(offline): pure local SPA shell — remove Vercel server.url so APK opens offline"
+            git push
+          fi
