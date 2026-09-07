@@ -1,0 +1,49 @@
+name: PATCH-SUPERADMIN
+on:
+  push:
+    paths:
+      - ".github/workflows/PATCH-SUPERADMIN.yml"
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch
+        run: |
+          python3 -c "
+          from pathlib import Path
+          p=Path('src/components/pages/SettingsPage.tsx')
+          t=p.read_text()
+          old='const isSchoolAdmin =\n    scopeLower.includes(\"school admin\") ||\n    scopeLower.includes(\"admin\") ||\n    scopeLower === \"school\";'
+          new='const isSuperAdmin = scopeLower.includes(\"super\") || session?.role === \"super_admin\" || (session?.roles ?? []).includes(\"super_admin\");\n  const isSchoolAdmin = !isSuperAdmin && (scopeLower.includes(\"school admin\") || (scopeLower.includes(\"admin\") && !scopeLower.includes(\"super\")) || scopeLower === \"school\" || session?.role === \"school_admin\");'
+          if old in t:
+            p.write_text(t.replace(old,new)); print('settings ok')
+          else:
+            print('settings skip')
+          p=Path('src/components/pages/NotificationsPage.tsx')
+          t=p.read_text()
+          needle='if (direct.startsWith(\"/\")) {\n    if (direct.startsWith(\"/student/exam\")) return \"/student/examinations\";\n    if (direct.startsWith(\"/student/results/\")) return \"/student/results\";\n    return direct;\n  }'
+          repl='if (direct.startsWith(\"/\")) {\n    if (direct.startsWith(\"/student/exam\")) return \"/student/examinations\";\n    if (direct.startsWith(\"/student/results/\")) return \"/student/results\";\n    const scope = normalizeNotifScope(scopeRaw);\n    if (scope === \"super-admin\") {\n      if (direct.startsWith(\"/admin\") || direct.startsWith(\"/officer\") || direct.startsWith(\"/teacher\") || direct.startsWith(\"/student\")) return \"/super-admin\";\n      if (!direct.startsWith(\"/super-admin\")) return \"/super-admin/notifications\";\n    }\n    return direct;\n  }'
+          if needle in t:
+            p.write_text(t.replace(needle,repl)); print('notif ok')
+          else:
+            print('notif skip')
+          p=Path('src/lib/student.ts')
+          t=p.read_text()
+          if 'Only auto-map courses' in t:
+            import re
+            t2=re.sub(r'// Only auto-map courses.*?}\n            ', '// Students self-enrol from Courses page.\n            ', t, count=1, flags=re.S)
+            if t2!=t:
+              p.write_text(t2); print('student ok')
+            else:
+              print('student skip re')
+          else:
+            print('student skip')
+          "
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          git diff --cached --quiet || (git commit -m "fix: super-admin settings/notif isolation + student self-enrol" && git push)
