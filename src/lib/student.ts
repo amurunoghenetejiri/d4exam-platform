@@ -166,8 +166,7 @@ export function useStudentContext() {
                 /* ignore */
               }
             }
-            // Students self-enrol from Courses page.
-            }
+            // Students self-enrol from Courses page — do not auto-map dept courses as enrolled.
             const seen = new Set<string>();
             courses = courses.filter((c) => {
               if (seen.has(c.id)) return false;
