@@ -12,12 +12,15 @@ export function SchoolLogo({
   className,
   size = "md",
   rounded = true,
+  priority = false,
 }: {
   logoUrl?: string | null;
   schoolName?: string | null;
   className?: string;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   rounded?: boolean;
+  /** When true, load immediately (header / critical UI). */
+  priority?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   const dims = {
@@ -36,8 +39,9 @@ export function SchoolLogo({
         src="/logo.png"
         alt={schoolName ? `${schoolName} (D4EXAM)` : "D4EXAM"}
         className={cn(dims, "shrink-0 object-contain bg-transparent", rounded && "rounded-lg", className)}
-        loading="lazy"
+        loading={priority ? "eager" : "lazy"}
         decoding="async"
+        fetchPriority={priority ? "high" : undefined}
       />
     );
   }
@@ -52,8 +56,9 @@ export function SchoolLogo({
         rounded && "rounded-lg",
         className,
       )}
-      loading="lazy"
+      loading={priority ? "eager" : "lazy"}
       decoding="async"
+      fetchPriority={priority ? "high" : undefined}
       onError={() => setFailed(true)}
     />
   );
@@ -78,7 +83,7 @@ export function DualBrand({
 }) {
   return (
     <span className={cn("inline-flex min-w-0 items-center gap-2", className)}>
-      <SchoolLogo logoUrl={logoUrl} schoolName={schoolName} size={size} className="bg-transparent" />
+      <SchoolLogo logoUrl={logoUrl} schoolName={schoolName} size={size} className="bg-transparent" priority />
       {schoolName && (
         <span className="hidden min-w-0 truncate text-xs font-bold text-inherit sm:inline sm:max-w-[140px] md:max-w-[200px] lg:max-w-[240px]">
           {schoolName}
