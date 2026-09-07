@@ -1,0 +1,45 @@
+name: STITCH-MAP-TRIAL
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/STITCH-MAP-TRIAL.yml"
+      - ".d4exam-payload/**"
+jobs:
+  stitch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stitch and write routes
+        run: |
+          set -euo pipefail
+          python3 << 'ENDPY'
+          import base64, pathlib, glob
+          def assemble(prefix, dest):
+            parts = sorted(glob.glob(f".d4exam-payload/{prefix}/*.b64"))
+            assert parts, f"no chunks for {prefix}"
+            b64 = "".join(pathlib.Path(p).read_text().strip() for p in parts)
+            data = base64.b64decode(b64)
+            pathlib.Path(dest).write_bytes(data)
+            text = data.decode()
+            assert "PLACEHOLDER" not in text, dest
+            print(dest, len(data))
+            return text
+          sa = assemble("sa", "src/routes/school-application.tsx")
+          su = assemble("su", "src/routes/super-admin.applications.tsx")
+          idx = assemble("idx", "src/routes/index.tsx")
+          assert "loadLeaflet" in sa
+          assert "TrialCountdown" in su
+          assert "type=trial" in idx
+          print("ALL OK")
+          ENDPY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/school-application.tsx src/routes/super-admin.applications.tsx src/routes/index.tsx
+          git status
+          git commit -m "feat: interactive Leaflet click-to-pin map, Trial/Demo badges+countdown, Full vs Trial CTAs" || echo nochange
+          git push
