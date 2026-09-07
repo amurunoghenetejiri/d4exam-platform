@@ -1,20 +1,65 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { BookOpen } from "lucide-react";
+import { useState } from "react";
+import { BookOpen, CheckCircle2, Loader2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
-import { useStudentContext } from "@/lib/student";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useStudentContext, type StudentCourse } from "@/lib/student";
+import { useSessionUser } from "@/lib/session";
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/student/courses")({
   head: () => ({
     meta: [
       { title: "My Courses — D4EXAM" },
-      { name: "description", content: "Courses for your department and level." },
+      { name: "description", content: "Courses for your department and level. Enrol to sit related exams." },
     ],
   }),
   component: Page,
 });
 
 function Page() {
+  const { data: session } = useSessionUser();
   const { data: student, isLoading } = useStudentContext();
+  const qc = useQueryClient();
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const availableQ = useQuery({
+    queryKey: [
+      "student-available-courses",
+      student?.schoolId,
+      student?.departmentId,
+      student?.levelId,
+    ],
+    enabled: Boolean(student?.schoolId && student?.departmentId),
+    staleTime: 30_000,
+    queryFn: async (): Promise<StudentCourse[]> => {
+      if (!student?.schoolId || !student.departmentId) return [];
+      const { data, error } = await supabase
+        .from("courses")
+        .select("id, code, name, level_id")
+        .eq("school_id", student.schoolId)
+        .eq("department_id", student.departmentId)
+        .limit(400);
+      if (error) {
+        console.warn("[student-courses] available", error.message);
+        return [];
+      }
+      let rows = (data ?? []) as { id: string; code?: string; name?: string; level_id?: string | null }[];
+      if (student.levelId) {
+        const sameLevel = rows.filter((r) => !r.level_id || String(r.level_id) === String(student.levelId));
+        if (sameLevel.length) rows = sameLevel;
+      }
+      return rows.map((c) => ({
+        id: String(c.id),
+        code: String(c.code || ""),
+        name: String(c.name || ""),
+      }));
+    },
+  });
 
   if (isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
 
@@ -27,10 +72,43 @@ function Page() {
     );
   }
 
-  const courses = student.courses ?? [];
+  const enrolled = student.courses ?? [];
+  const enrolledIds = new Set(enrolled.map((c) => c.id));
+  const available = (availableQ.data ?? []).filter((c) => !enrolledIds.has(c.id));
   const programme = [student.facultyName, student.departmentName, student.levelName]
     .filter(Boolean)
     .join(" · ");
+
+  async function enroll(course: StudentCourse) {
+    if (!student?.studentId) return;
+    setBusyId(course.id);
+    try {
+      let inserted = false;
+      const { error: enErr } = await supabase.from("course_enrollments").insert({
+        student_id: student.studentId,
+        course_id: course.id,
+        school_id: student.schoolId,
+      } as never);
+      if (!enErr) inserted = true;
+      else {
+        const { error: scErr } = await supabase.from("student_courses").insert({
+          student_id: student.studentId,
+          course_id: course.id,
+        } as never);
+        if (scErr) throw new Error(scErr.message || enErr.message || "Could not enrol");
+        inserted = true;
+      }
+      if (inserted) {
+        toast.success(`Enrolled in ${course.code || course.name}`);
+        await qc.invalidateQueries({ queryKey: ["student-context"] });
+        await qc.invalidateQueries({ queryKey: ["student-available-courses"] });
+      }
+    } catch (e) {
+      toast.error((e as Error).message || "Could not enrol in course");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <>
@@ -50,33 +128,29 @@ function Page() {
               .join(" → ") || "—"}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            You see courses offered to your department and level (for example Computer Engineering
-            100 Level — not other departments).
+            Courses offered to your department appear below. Enrol in a course to receive its exams
+            and related notifications.
           </p>
         </div>
       )}
 
-      <SectionCard title={`Courses (${courses.length})`}>
-        {courses.length === 0 ? (
+      <SectionCard title={`Enrolled (${enrolled.length})`}>
+        {enrolled.length === 0 ? (
           <EmptyState
-            title="No courses yet"
-            description={
-              student.departmentId
-                ? "Admin has not offered any courses for your department/level yet. Once courses are added under Academic Structure → Level → Courses, they will appear here."
-                : "Your account is not linked to a department yet. Ask School Admin to place you under the correct department and level."
-            }
+            title="Not enrolled in any course yet"
+            description="Browse available courses for your department below and enrol to sit exams."
             icon={BookOpen}
           />
         ) : (
           <ul className="space-y-3">
-            {courses.map((c) => (
+            {enrolled.map((c) => (
               <li
                 key={c.id}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white p-3.5 shadow-sm"
               >
                 <div className="flex items-start gap-3">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                    <BookOpen className="h-5 w-5" />
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+                    <CheckCircle2 className="h-5 w-5" />
                   </span>
                   <div>
                     <p className="text-sm font-bold text-slate-900">
@@ -84,15 +158,78 @@ function Page() {
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500">
                       {[student.departmentName, student.levelName].filter(Boolean).join(" · ") ||
-                        "Programme course"}
+                        "Enrolled"}
                     </p>
                   </div>
                 </div>
+                <Badge variant="secondary" className="bg-emerald-50 text-emerald-700">
+                  Enrolled
+                </Badge>
               </li>
             ))}
           </ul>
         )}
       </SectionCard>
+
+      <div className="mt-6">
+        <SectionCard
+          title={`Available to enrol (${availableQ.isLoading ? "…" : available.length})`}
+          description="Courses assigned to your department (and level when set)"
+        >
+          {availableQ.isLoading ? (
+            <p className="flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading courses…
+            </p>
+          ) : available.length === 0 ? (
+            <EmptyState
+              title="No more courses to enrol"
+              description={
+                student.departmentId
+                  ? enrolled.length
+                    ? "You are enrolled in all courses currently offered for your department."
+                    : "Admin has not offered any courses for your department/level yet."
+                  : "Your account is not linked to a department yet. Ask School Admin to place you under the correct department and level."
+              }
+              icon={BookOpen}
+            />
+          ) : (
+            <ul className="space-y-3">
+              {available.map((c) => (
+                <li
+                  key={c.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white p-3.5 shadow-sm"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                      <BookOpen className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">
+                        {c.code} — {c.name}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {[student.departmentName, student.levelName].filter(Boolean).join(" · ") ||
+                          "Programme course"}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="font-semibold"
+                    disabled={busyId === c.id}
+                    onClick={() => void enroll(c)}
+                  >
+                    {busyId === c.id ? (
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    ) : null}
+                    Enrol
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
+      </div>
     </>
   );
 }
