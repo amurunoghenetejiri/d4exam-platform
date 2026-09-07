@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - ".github/workflows/RESTORE-APPSHELL-BRAND.yml"
-      - "scripts/appshell_b64_*.txt"
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -12,18 +11,30 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Decode AppShell
+        with:
+          fetch-depth: 0
+      - name: Restore AppShell from good commit and patch branding
         run: |
+          set -e
+          git show ce656997a9201d5f2a76115f1ffbdb58335bb1f5:src/components/layout/AppShell.tsx > src/components/layout/AppShell.tsx
           python3 << 'PY'
-          import base64
           from pathlib import Path
-          parts = [Path(f"scripts/appshell_b64_{i}.txt").read_text().strip() for i in range(4)]
-          data = base64.b64decode("".join(parts).encode()).decode()
-          assert "export function AppShell" in data
-          Path("src/components/layout/AppShell.tsx").write_text(data)
-          print("restored", len(data))
+          p = Path("src/components/layout/AppShell.tsx")
+          text = p.read_text()
+          assert "export function AppShell" in text
+          old = '''  const unreadQ = useUnreadNotificationCount(session?.userId);\n  const unreadCount = unreadQ.data ?? 0;\n  const notifPath = `${config.home}/notifications`;\n  const logoUrl = school?.logoUrl ?? session?.schoolLogoUrl ?? null;\n  const schoolName = school?.name ?? session?.schoolName ?? null;\n  const isSchoolPortal = Boolean(session?.schoolId) && session?.role !== \"super_admin\";\n  const avatarLetters = user.avatar || initials(user.name || \"U\");\n  const role = session?.role ?? null;'''
+          helper = '''\nconst SCHOOL_BRAND_KEY = \"d4exam_school_brand_v1\";\nfunction readSeededSchoolBrand(schoolId?: string | null): { name: string | null; logoUrl: string | null } {\n  if (typeof window === \"undefined\" || !schoolId) return { name: null, logoUrl: null };\n  try {\n    const raw = window.localStorage.getItem(SCHOOL_BRAND_KEY);\n    if (!raw) return { name: null, logoUrl: null };\n    const parsed = JSON.parse(raw) as { id?: string; name?: string | null; logoUrl?: string | null };\n    if (parsed?.id && String(parsed.id) === String(schoolId)) {\n      return { name: parsed.name ?? null, logoUrl: parsed.logoUrl ?? null };\n    }\n  } catch { /* ignore */ }\n  return { name: null, logoUrl: null };\n}\nfunction seedSchoolBrand(schoolId?: string | null, name?: string | null, logoUrl?: string | null) {\n  if (typeof window === \"undefined\" || !schoolId) return;\n  if (!name && !logoUrl) return;\n  try {\n    window.localStorage.setItem(SCHOOL_BRAND_KEY, JSON.stringify({ id: schoolId, name: name || null, logoUrl: logoUrl || null, ts: Date.now() }));\n  } catch { /* ignore */ }\n}\n'''
+          new = '''  const unreadQ = useUnreadNotificationCount(session?.userId);\n  const unreadCount = unreadQ.data ?? 0;\n  const notifPath = `${config.home}/notifications`;\n  const isSuperAdmin = session?.role === \"super_admin\";\n  const isSchoolPortal = Boolean(session?.schoolId) && !isSuperAdmin;\n  const seeded = isSchoolPortal ? readSeededSchoolBrand(session?.schoolId) : { name: null, logoUrl: null };\n  const logoUrl = isSuperAdmin ? null : (school?.logoUrl ?? session?.schoolLogoUrl ?? seeded.logoUrl ?? null);\n  const schoolName = isSuperAdmin ? null : (school?.name ?? session?.schoolName ?? seeded.name ?? null);\n  if (isSchoolPortal && session?.schoolId && (schoolName || logoUrl)) {\n    seedSchoolBrand(session.schoolId, schoolName, logoUrl);\n  }\n  const avatarLetters = user.avatar || initials(user.name || \"U\");\n  const role = session?.role ?? null;'''
+          if old not in text:
+              raise SystemExit("pattern missing in AppShell")
+          text = text.replace(old, new)
+          if "function seedSchoolBrand" not in text:
+              text = text.replace("export function AppShell(", helper + "\nexport function AppShell(", 1)
+          p.write_text(text)
+          print("patched", len(text))
           PY
           git config user.name d4exam-bot
           git config user.email bot@d4exam.local
           git add src/components/layout/AppShell.tsx
-          git diff --cached --quiet || (git commit -m "fix: AppShell immediate school branding" && git push origin HEAD:main)
+          git commit -m "fix: AppShell immediate school branding + super-admin isolation" || true
+          git push origin HEAD:main
