@@ -1,0 +1,25 @@
+name: MIN-RESTORE-SERVER
+on:
+  push:
+    paths:
+      - ".github/workflows/MIN-RESTORE-SERVER.yml"
+  workflow_dispatch:
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore
+        run: |
+          set -euo pipefail
+          git show b9fe14902deff22227339787fafafa5412b49990:src/lib/student.server.ts > src/lib/student.server.ts
+          wc -l src/lib/student.server.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/student.server.ts
+          git commit -m "fix: restore student.server.ts (remove PLACEHOLDER)" || echo nochange
+          git push
