@@ -21,7 +21,6 @@ import {
   PenSquare,
   Home,
   Network,
-  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import type { Role } from "@/types";
@@ -57,7 +56,6 @@ export const studentNav: RoleConfig = {
         { label: "Results", to: "/student/results", icon: BarChart3 },
         { label: "My Courses", to: "/student/courses", icon: BookOpen },
         { label: "Materials", to: "/student/materials", icon: FolderOpen },
-        { label: "Study Orb", to: "/student/study-orb", icon: Sparkles },
       ],
     },
     {
