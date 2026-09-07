@@ -1,0 +1,137 @@
+name: FIX-SUPERADMIN-COURSES
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/FIX-SUPERADMIN-COURSES.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Settings + Notifications + student context
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+
+          # Settings: exclude super-admin from school identity card
+          p = Path("src/components/pages/SettingsPage.tsx")
+          t = p.read_text()
+          old = '''  const scopeLower = (scope || "").toLowerCase();
+  const isSchoolAdmin =
+    scopeLower.includes("school admin") ||
+    scopeLower.includes("admin") ||
+    scopeLower === "school";'''
+          new = '''  const scopeLower = (scope || "").toLowerCase();
+  const isSuperAdmin =
+    scopeLower.includes("super") ||
+    session?.role === "super_admin" ||
+    (session?.roles ?? []).includes("super_admin");
+  const isSchoolAdmin =
+    !isSuperAdmin &&
+    (scopeLower.includes("school admin") ||
+      (scopeLower.includes("admin") && !scopeLower.includes("super")) ||
+      scopeLower === "school" ||
+      session?.role === "school_admin");'''
+          if old in t:
+              t = t.replace(old, new)
+              p.write_text(t)
+              print("Settings patched")
+          else:
+              print("Settings already patched or pattern missing")
+
+          # Notifications: remap /admin links for super-admin
+          p = Path("src/components/pages/NotificationsPage.tsx")
+          t = p.read_text()
+          old = '''  if (direct.startsWith("/")) {
+    if (direct.startsWith("/student/exam")) return "/student/examinations";
+    if (direct.startsWith("/student/results/")) return "/student/results";
+    return direct;
+  }'''
+          new = '''  if (direct.startsWith("/")) {
+    if (direct.startsWith("/student/exam")) return "/student/examinations";
+    if (direct.startsWith("/student/results/")) return "/student/results";
+    const scope = normalizeNotifScope(scopeRaw);
+    if (scope === "super-admin") {
+      if (direct.startsWith("/admin")) return "/super-admin";
+      if (direct.startsWith("/officer")) return "/super-admin";
+      if (direct.startsWith("/teacher")) return "/super-admin";
+      if (direct.startsWith("/student")) return "/super-admin";
+      if (!direct.startsWith("/super-admin")) return "/super-admin/notifications";
+    }
+    return direct;
+  }'''
+          if old in t:
+              t = t.replace(old, new)
+              p.write_text(t)
+              print("Notifications patched")
+          else:
+              print("Notifications already patched or pattern missing")
+
+          # student.ts: remove auto-enrol of all dept courses
+          p = Path("src/lib/student.ts")
+          t = p.read_text()
+          marker = "// Only auto-map courses when BOTH department and level are known"
+          if marker in t:
+              start = t.index(marker)
+              # remove from marker through the next closing of that if block - find "if (!courses.length && schoolId && departmentId && levelId)"
+              block_start = t.rfind("if (!courses.length && schoolId && departmentId && levelId)", 0, start+1)
+              if block_start < 0:
+                  block_start = start
+              # find end of this if block by brace counting from first {
+              i = t.find("{", block_start)
+              depth = 0
+              end = i
+              while end < len(t):
+                  if t[end] == "{": depth += 1
+                  elif t[end] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          end += 1
+                          break
+                  end += 1
+              replacement = "// Do not auto-enrol: students must enrol themselves from the Courses page.\n"
+              t = t[:block_start] + replacement + t[end:]
+              p.write_text(t)
+              print("student.ts auto-map removed")
+          else:
+              print("student.ts already cleaned")
+
+          # session.ts: seed school brand to localStorage
+          p = Path("src/lib/session.ts")
+          t = p.read_text()
+          if "d4exam_school_brand_v1" not in t:
+              seed_fn = '''
+function seedSchoolBrandFromSession(schoolId: string | null, name: string | null, logoUrl: string | null) {
+  if (typeof window === "undefined" || !schoolId) return;
+  if (!name && !logoUrl) return;
+  try {
+    window.localStorage.setItem(
+      "d4exam_school_brand_v1",
+      JSON.stringify({ id: schoolId, name: name || null, logoUrl: logoUrl || null, ts: Date.now() }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+'''
+              t = t.replace("export async function fetchSessionUser()", seed_fn + "\nexport async function fetchSessionUser()")
+              # seed on returns that set schoolName
+              t = t.replace(
+                  "clearPendingLoginRole();\n    return {\n      userId: user.id,",
+                  "clearPendingLoginRole();\n    seedSchoolBrandFromSession(schoolId, schoolName, schoolLogoUrl);\n    return {\n      userId: user.id,",
+                  1,
+              )
+              p.write_text(t)
+              print("session seed added")
+          else:
+              print("session already seeded")
+          PY
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add -A
+          git status
+          git diff --cached --quiet || (git commit -m "fix: super-admin no school settings/links; students self-enrol courses; session brand seed" && git push origin HEAD:main)
