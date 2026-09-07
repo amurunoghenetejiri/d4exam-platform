@@ -1,0 +1,31 @@
+name: RESTORE-BRAND-FILES
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/RESTORE-BRAND-FILES.yml"
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore and patch
+        run: |
+          set -euo pipefail
+          GOOD=866ea06316e09fcf7b91830b45d8ca084c154af1
+          git show $GOOD:src/components/layout/AppShell.tsx > src/components/layout/AppShell.tsx
+          git show $GOOD:src/lib/student.ts > src/lib/student.ts
+          git show $GOOD:src/lib/session.ts > src/lib/session.ts
+          python3 scripts/apply_brand_patch.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/layout/AppShell.tsx src/lib/student.ts src/lib/session.ts
+          git commit -m "fix: instant school header brand, session seed, student self-enrol" || echo nochange
+          git push origin HEAD:main
