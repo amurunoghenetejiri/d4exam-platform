@@ -1,0 +1,100 @@
+    <nav className="flex flex-col gap-5 px-3 py-4" aria-label={`${config.label} navigation`}>
+      {config.groups.map((group, gi) => (
+        <div key={gi}>
+          {group.label && (
+            <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              {group.label}
+            </p>
+          )}
+          <ul className="space-y-1">
+            {group.items.map((item) => {
+              const active =
+                item.to === config.home ? pathname === item.to : pathname.startsWith(item.to);
+              return (
+                <li key={item.to}>
+                  <Link
+                    to={item.to}
+                    preload="intent"
+                    onClick={onNavigate}
+                    className={cn(
+                      "pressable flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors",
+                      "active:scale-[0.98] active:bg-white/10",
+                      active
+                        ? "bg-blue-500/20 text-white"
+                        : "text-slate-300 hover:bg-white/5 hover:text-white",
+                    )}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <item.icon className="h-4 w-4 shrink-0" aria-hidden />
+                    <span className="truncate">{item.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+function PortalBrand({
+  isSchoolPortal,
+  logoUrl,
+  schoolName,
+  homeTo,
+}: {
+  isSchoolPortal: boolean;
+  logoUrl: string | null;
+  schoolName: string | null;
+  homeTo: string;
+}) {
+  if (isSchoolPortal) {
+    return (
+      <Link
+        to={homeTo}
+        preload="intent"
+        className="pressable flex min-w-0 items-center gap-2.5 active:scale-[0.98]"
+        aria-label={schoolName || "School home"}
+      >
+        <SchoolLogo
+          logoUrl={logoUrl}
+          schoolName={schoolName}
+          size="md"
+          className="shrink-0 bg-transparent"
+          priority
+        />
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-extrabold leading-tight text-white sm:text-base">
+            {schoolName || "School"}
+          </span>
+          <span className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
+            <img
+              src="/logo.png"
+              alt=""
+              className="h-3.5 w-auto object-contain bg-transparent opacity-80"
+            />
+            Powered by D4EXAM
+          </span>
+        </span>
+      </Link>
+    );
+  }
+  return (
+    <Link to="/" preload="intent" aria-label="D4EXAM home" className="pressable min-w-0 active:scale-[0.98]">
+      <Logo size="md" />
+    </Link>
+  );
+}
+
+function NotificationBell({ to, unread }: { to: string; unread: number }) {
+  const hasUnread = unread > 0;
+  const label = unread > 99 ? "99+" : unread > 0 ? String(unread) : undefined;
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="relative h-11 w-11 shrink-0 rounded-full"
+      aria-label={hasUnread ? `${unread} unread notifications` : "Notifications"}
+      asChild
+    >
