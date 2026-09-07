@@ -1,0 +1,77 @@
+name: PATCH-SCHOOL-MAP
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/PATCH-SCHOOL-MAP.yml"
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch school-application to use MapPinPicker
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+          p = Path("src/routes/school-application.tsx")
+          text = p.read_text()
+          if "MapPinPicker" not in text:
+            text = text.replace(
+              'import { notifySuperAdminsOfApplication } from "@/lib/notify-super-admin-application";',
+              'import { notifySuperAdminsOfApplication } from "@/lib/notify-super-admin-application";\nimport { MapPinPicker } from "@/components/MapPinPicker";',
+            )
+          old = 'const [appType, setAppType] = useState<"full" | "trial">("full");'
+          new = '''const [appType, setAppType] = useState<"full" | "trial">(() => {
+    if (typeof window === "undefined") return "full";
+    try {
+      const q = new URLSearchParams(window.location.search).get("type");
+      if (q === "trial" || q === "demo") return "trial";
+    } catch { /* ignore */ }
+    return "full";
+  });'''
+          text = text.replace(old, new)
+          # Replace map block
+          start = text.find('<Label>Pin school on map (optional)</Label>')
+          if start > 0:
+            div_start = text.rfind('<div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/80 p-3">', 0, start)
+            end = text.find(') : null}\n              </div>', div_start)
+            if end > 0:
+              end = text.find('</div>', end) + len('</div>')
+              replacement = '''<MapPinPicker
+                lat={lat}
+                lng={lng}
+                onChange={(a, b) => {
+                  setLat(a);
+                  setLng(b);
+                }}
+                city={city}
+                state={state}
+                country={country}
+                onError={(msg) => setError(msg || "")}
+              />'''
+              text = text[:div_start] + replacement + text[end:]
+          text = text.replace('>48h trial<', '>Trial / Demo<')
+          text = text.replace('48-hour trial', 'Trial / Demo')
+          text = text.replace('(48h trial)', '(Trial/Demo)')
+          text = text.replace('Your 48-hour trial request', 'Your Trial/Demo request')
+          text = text.replace('Full school or 48-hour trial.', 'Choose Full school or Trial / Demo.')
+          text = re.sub(r'\n  async function searchMapPlace\(\) \{.*?\n  \}\n', '\n', text, count=1, flags=re.S)
+          text = text.replace('  const [mapQuery, setMapQuery] = useState("");\n', '')
+          text = text.replace('  const [mapResults, setMapResults] = useState<Array<{ display_name: string; lat: string; lon: string }>>([]);\n', '')
+          text = text.replace('  const [mapSearching, setMapSearching] = useState(false);\n', '')
+          p.write_text(text)
+          assert "MapPinPicker" in text
+          assert "openstreetmap.org/export/embed" not in text
+          print("patched", len(text))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/school-application.tsx
+          git commit -m "feat: school-application interactive MapPinPicker + Trial/Demo labels" || echo nochange
+          git push
