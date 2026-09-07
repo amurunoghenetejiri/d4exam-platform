@@ -81,28 +81,27 @@ function Page() {
 
   async function enroll(course: StudentCourse) {
     if (!student?.studentId) return;
+    if (!student.schoolId) {
+      toast.error("No school linked to your account. Ask School Admin to fix your profile.");
+      return;
+    }
     setBusyId(course.id);
     try {
-      let inserted = false;
-      const { error: enErr } = await supabase.from("course_enrollments").insert({
+      const payload = {
         student_id: student.studentId,
         course_id: course.id,
         school_id: student.schoolId,
-      } as never);
-      if (!enErr) inserted = true;
-      else {
-        const { error: scErr } = await supabase.from("student_courses").insert({
-          student_id: student.studentId,
-          course_id: course.id,
-        } as never);
-        if (scErr) throw new Error(scErr.message || enErr.message || "Could not enrol");
-        inserted = true;
+      };
+      const { error: scErr } = await supabase.from("student_courses").insert(payload as never);
+      if (scErr) {
+        // Already enrolled is fine
+        if (!/duplicate|unique/i.test(scErr.message || "")) {
+          throw new Error(scErr.message || "Could not enrol");
+        }
       }
-      if (inserted) {
-        toast.success(`Enrolled in ${course.code || course.name}`);
-        await qc.invalidateQueries({ queryKey: ["student-context"] });
-        await qc.invalidateQueries({ queryKey: ["student-available-courses"] });
-      }
+      toast.success(`Enrolled in ${course.code || course.name}`);
+      await qc.invalidateQueries({ queryKey: ["student-context"] });
+      await qc.invalidateQueries({ queryKey: ["student-available-courses"] });
     } catch (e) {
       toast.error((e as Error).message || "Could not enrol in course");
     } finally {
