@@ -1,0 +1,4 @@
+src/lib/student.server.ts|2|12060
+src/routes/student.courses.tsx|2|9666
+src/components/materials/CourseMaterialsPanel.tsx|3|25962
+src/components/materials/MaterialViewer.tsx|4|31199
