@@ -1,0 +1,27 @@
+name: APPLY-IDX-CTAS
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-IDX-CTAS.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write index from known good homepage
+        run: |
+          set -euo pipefail
+          # Restore dual CTA homepage from commit that already has it (da106894)
+          git show da1068948cbc591eec1898be0f7f027a2d605280:src/routes/index.tsx > src/routes/index.tsx || true
+          grep -q 'type=trial' src/routes/index.tsx && echo OK_INDEX || echo MISSING
+          wc -c src/routes/index.tsx
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/index.tsx
+          git commit -m "feat: ensure Full vs Trial homepage CTAs" || echo nochange
+          git push
