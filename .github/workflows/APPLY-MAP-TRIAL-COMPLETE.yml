@@ -1,0 +1,32 @@
+name: APPLY-MAP-TRIAL-COMPLETE
+on:
+  push:
+    paths:
+      - ".github/workflows/APPLY-MAP-TRIAL-COMPLETE.yml"
+      - "scripts/payloads/school-application.tsx.b64"
+      - "scripts/payloads/super-admin.applications.tsx.b64"
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode and write route files
+        run: |
+          set -euo pipefail
+          mkdir -p src/routes
+          base64 -d scripts/payloads/school-application.tsx.b64 > src/routes/school-application.tsx
+          base64 -d scripts/payloads/super-admin.applications.tsx.b64 > src/routes/super-admin.applications.tsx
+          wc -c src/routes/school-application.tsx src/routes/super-admin.applications.tsx
+          grep -q loadLeaflet src/routes/school-application.tsx
+          grep -q TrialCountdown src/routes/super-admin.applications.tsx
+          echo OK
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/school-application.tsx src/routes/super-admin.applications.tsx
+          git commit -m "feat: interactive Leaflet click-to-pin map + Trial/Demo badges and live countdown" || echo nochange
+          git push
