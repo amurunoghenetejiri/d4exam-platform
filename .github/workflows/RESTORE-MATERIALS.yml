@@ -15,8 +15,8 @@ jobs:
       - name: Decode and commit materials components
         run: |
           set -e
-          cat scripts/mat-payload/pg* > /tmp/p.gz.b64
-          cat scripts/mat-payload/vg* > /tmp/v.gz.b64
+          cat scripts/mat-payload/p[0-9]* > /tmp/p.gz.b64
+          cat scripts/mat-payload/v[0-9]* > /tmp/v.gz.b64
           base64 -d /tmp/p.gz.b64 | gunzip > src/components/materials/CourseMaterialsPanel.tsx
           base64 -d /tmp/v.gz.b64 | gunzip > src/components/materials/MaterialViewer.tsx
           head -c 50 src/components/materials/CourseMaterialsPanel.tsx; echo
