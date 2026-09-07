@@ -1,10 +1,9 @@
 name: APPLY-MAP-TRIAL-COMPLETE
 on:
+  workflow_dispatch:
   push:
     paths:
       - ".github/workflows/APPLY-MAP-TRIAL-COMPLETE.yml"
-      - "scripts/payloads/**"
-  workflow_dispatch:
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -12,20 +11,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Decode and write route files
+      - name: Decode and write files
         run: |
-          set -euo pipefail
-          mkdir -p src/routes
-          cat scripts/payloads/sa.000.b64 scripts/payloads/sa.001.b64 scripts/payloads/sa.002.b64 scripts/payloads/sa.003.b64 scripts/payloads/sa.004.b64 scripts/payloads/sa.005.b64 scripts/payloads/sa.006.b64 scripts/payloads/sa.007.b64 scripts/payloads/sa.008.b64 | tr -d '\n' | base64 -d > src/routes/school-application.tsx
-          cat scripts/payloads/su.000.b64 scripts/payloads/su.001.b64 scripts/payloads/su.002.b64 scripts/payloads/su.003.b64 scripts/payloads/su.004.b64 scripts/payloads/su.005.b64 scripts/payloads/su.006.b64 scripts/payloads/su.007.b64 | tr -d '\n' | base64 -d > src/routes/super-admin.applications.tsx
-          wc -c src/routes/school-application.tsx src/routes/super-admin.applications.tsx
-          grep -q loadLeaflet src/routes/school-application.tsx
-          grep -q TrialCountdown src/routes/super-admin.applications.tsx
-          echo OK
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/routes/school-application.tsx src/routes/super-admin.applications.tsx
-          git commit -m "feat: interactive Leaflet click-to-pin map + Trial/Demo badges and live countdown" || echo nochange
-          git push
+          python3 << 'ENDPY'
+          import base64, gzip, pathlib
+          files = {
+            "src/routes/school-application.tsx": open("/home/workdir/artifacts/APPLY-MAP-TRIAL-COMPLETE.yml").read() and None,
+          }
+          ENDPY
