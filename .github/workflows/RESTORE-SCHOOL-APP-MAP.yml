@@ -1,0 +1,27 @@
+name: RESTORE-SCHOOL-APP-MAP
+on:
+  push:
+    paths:
+      - ".github/workflows/RESTORE-SCHOOL-APP-MAP.yml"
+  workflow_dispatch:
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore school-application from last good commit
+        run: |
+          set -euo pipefail
+          # Last known good school-application (before accidental PLACEHOLDER)
+          git show c37abd8a8b6242ba7c8fb581a91c0f30042aed11:src/routes/school-application.tsx > src/routes/school-application.tsx
+          wc -l src/routes/school-application.tsx
+          head -5 src/routes/school-application.tsx
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/school-application.tsx
+          git commit -m "fix: restore school-application (Leaflet/map improvements next)" || echo nochange
+          git push
