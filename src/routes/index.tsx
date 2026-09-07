@@ -36,7 +36,6 @@ export const Route = createFileRoute("/")({
     if (user?.role) {
       const last = readLastPath();
       const home = roleHome[user.role];
-      // Restore last in-app route when possible; otherwise role home (never stay on marketing)
       if (last && last.startsWith(home.split("/").slice(0, 2).join("/") || home)) {
         throw redirect({ to: last as never });
       }
@@ -149,7 +148,7 @@ function HomePage() {
             <div className="mt-8 flex flex-wrap gap-3">
               <Button size="lg" className="rounded-full px-7 font-semibold" asChild>
                 <Link to="/school-application">
-                  Get Started
+                  Apply — Full school
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>
@@ -159,7 +158,7 @@ function HomePage() {
                 className="rounded-full border-white/40 bg-white/10 px-7 font-semibold text-white hover:bg-white/20 hover:text-white"
                 asChild
               >
-                <Link to="/pricing">View Pricing</Link>
+                <Link to="/school-application?type=trial">Start Trial / Demo</Link>
               </Button>
             </div>
             <ul className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-200">
@@ -315,15 +314,15 @@ function HomePage() {
                 Bring your examinations online — properly.
               </h2>
               <p className="mt-2 max-w-xl text-slate-600">
-                Apply as an institution today and get guided onboarding with the D4EXAM team.
+                Choose full school registration or a short Trial / Demo. Super admin reviews and activates you.
               </p>
             </div>
             <div className="flex shrink-0 flex-col gap-3 sm:flex-row">
               <Button size="lg" className="rounded-full px-6 font-semibold" asChild>
-                <Link to="/school-application">Apply Now</Link>
+                <Link to="/school-application">Apply — Full school</Link>
               </Button>
               <Button size="lg" variant="outline" className="rounded-full px-6 font-semibold" asChild>
-                <Link to="/support">Contact Support</Link>
+                <Link to="/school-application?type=trial">Start Trial / Demo</Link>
               </Button>
             </div>
           </div>
