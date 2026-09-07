@@ -1,0 +1,43 @@
+name: APPLY-ENROL-MATERIALS
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-ENROL-MATERIALS.yml"
+      - "scripts/enrol-materials-payload/**"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Assemble and write files
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          import base64, pathlib
+          root = pathlib.Path("scripts/enrol-materials-payload")
+          if not (root / "MANIFEST.txt").exists():
+              print("no payload yet")
+              raise SystemExit(0)
+          for line in (root / "MANIFEST.txt").read_text().strip().splitlines():
+              path, nchunks, _ = line.split("|")
+              safe = path.replace("/", "__")
+              data = "".join((root / f"{safe}.{i}.b64").read_text() for i in range(int(nchunks)))
+              raw = base64.b64decode(data)
+              out = pathlib.Path(path)
+              out.parent.mkdir(parents=True, exist_ok=True)
+              out.write_bytes(raw)
+              print("wrote", path, len(raw))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/lib/student.server.ts src/routes/student.courses.tsx src/components/materials/CourseMaterialsPanel.tsx src/components/materials/MaterialViewer.tsx
+          git commit -m "fix: student self-enrol server path + slim materials + full-screen viewer" || echo nochange
+          git push origin HEAD:main
