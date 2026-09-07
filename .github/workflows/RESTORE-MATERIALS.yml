@@ -1,0 +1,32 @@
+name: RESTORE-MATERIALS
+on:
+  push:
+    paths:
+      - "scripts/mat-payload/**"
+      - ".github/workflows/RESTORE-MATERIALS.yml"
+  workflow_dispatch:
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode and commit materials components
+        run: |
+          set -e
+          cat scripts/mat-payload/panel.* > /tmp/p.b64
+          cat scripts/mat-payload/viewer.* > /tmp/v.b64
+          base64 -d /tmp/p.b64 > src/components/materials/CourseMaterialsPanel.tsx
+          base64 -d /tmp/v.b64 > src/components/materials/MaterialViewer.tsx
+          head -c 40 src/components/materials/CourseMaterialsPanel.tsx
+          echo
+          grep -q "hideFromMyList" src/components/materials/CourseMaterialsPanel.tsx
+          grep -q "createPortal" src/components/materials/MaterialViewer.tsx
+          grep -q "100dvh" src/components/materials/MaterialViewer.tsx
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/materials/CourseMaterialsPanel.tsx src/components/materials/MaterialViewer.tsx
+          git diff --cached --quiet && echo "no changes" && exit 0
+          git commit -m "fix: restore compact mobile material cards + black full-screen viewer + student Remove"
+          git push
