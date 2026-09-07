@@ -1,0 +1,42 @@
+name: EMERGENCY-RESTORE-MATERIALS
+on:
+  push:
+    paths:
+      - ".github/workflows/EMERGENCY-RESTORE-MATERIALS.yml"
+  workflow_dispatch:
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore materials from good commit
+        run: |
+          set -e
+          git show 20cf9891eaaad2eef141d758176ba6a5b646bb6a:src/components/materials/CourseMaterialsPanel.tsx > src/components/materials/CourseMaterialsPanel.tsx
+          for sha in 5310e536692b293ebd9cc7762b9c5ce646eb98bc 20cf9891eaaad2eef141d758176ba6a5b646bb6a 156717f68522e532de2543409a804c0244ab9d8a; do
+            if git cat-file -e "${sha}:src/components/materials/MaterialViewer.tsx" 2>/dev/null; then
+              CONTENT=$(git show "${sha}:src/components/materials/MaterialViewer.tsx" | head -c 20)
+              if [ "$CONTENT" != "PLACEHOLDER" ] && [ -n "$CONTENT" ]; then
+                git show "${sha}:src/components/materials/MaterialViewer.tsx" > src/components/materials/MaterialViewer.tsx
+                echo "viewer from $sha"
+                break
+              fi
+            fi
+          done
+          sed -i 's/#0b1b3a/#000000/g' src/components/materials/MaterialViewer.tsx || true
+          sed -i 's/relative rounded-2xl border border-slate-100 bg-white p-4 shadow-sm/relative flex items-center gap-2.5 rounded-xl border border-slate-100 bg-white px-2.5 py-2 shadow-sm sm:block sm:px-3 sm:py-2.5/g' src/components/materials/CourseMaterialsPanel.tsx
+          sed -i 's/grid h-11 w-11 place-items-center rounded-xl/grid h-9 w-9 shrink-0 place-items-center rounded-lg/g' src/components/materials/CourseMaterialsPanel.tsx
+          sed -i 's/grid gap-3 sm:grid-cols-2 lg:grid-cols-3/grid gap-1.5 sm:grid-cols-2 sm:gap-2.5 lg:grid-cols-3 xl:grid-cols-4/g' src/components/materials/CourseMaterialsPanel.tsx
+          head -c 60 src/components/materials/CourseMaterialsPanel.tsx; echo
+          wc -c src/components/materials/CourseMaterialsPanel.tsx src/components/materials/MaterialViewer.tsx
+          grep -q "export function CourseMaterialsPanel" src/components/materials/CourseMaterialsPanel.tsx
+          ! grep -q "PLACEHOLDER" src/components/materials/CourseMaterialsPanel.tsx
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/materials/CourseMaterialsPanel.tsx src/components/materials/MaterialViewer.tsx
+          git commit -m "fix: emergency restore materials panel + viewer (compact mobile, black chrome)"
+          git push
