@@ -1,0 +1,215 @@
+name: PATCH-SUPER-TRIAL
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/PATCH-SUPER-TRIAL.yml"
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch super-admin applications
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/routes/super-admin.applications.tsx")
+          text = p.read_text()
+          if "TrialCountdown" in text and "Application extras" in text:
+            print("already done", len(text))
+          else:
+            helper = '''
+          function TrialCountdown({ endsAt }: { endsAt?: string | null }) {
+            const [now, setNow] = useState(() => Date.now());
+            useEffect(() => {
+              if (!endsAt) return;
+              const t = window.setInterval(() => setNow(Date.now()), 1000);
+              return () => window.clearInterval(t);
+            }, [endsAt]);
+            if (!endsAt) return <span className="text-xs text-amber-700">Pending activation</span>;
+            const end = new Date(endsAt).getTime();
+            if (!Number.isFinite(end)) return null;
+            const ms = end - now;
+            if (ms <= 0) {
+              return (
+                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-rose-800">
+                  Expired
+                </span>
+              );
+            }
+            const totalSec = Math.floor(ms / 1000);
+            const h = Math.floor(totalSec / 3600);
+            const m = Math.floor((totalSec % 3600) / 60);
+            const s = totalSec % 60;
+            const label =
+              h > 0
+                ? `${h}h ${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s left`
+                : `${m}m ${String(s).padStart(2, "0")}s left`;
+            return <span className="font-mono text-xs text-amber-800">{label}</span>;
+          }
+
+          function extrasFromApp(app: AppRow): {
+            website?: string | null;
+            social_link?: string | null;
+            approx_students?: string | null;
+            approx_teachers?: string | null;
+            application_type?: string | null;
+            is_trial?: boolean;
+            trial_hours?: number | null;
+            trial_ends_at?: string | null;
+            lat?: number | null;
+            lng?: number | null;
+          } {
+            const docs = parseDocuments(app.documents) as Record<string, unknown> | null;
+            if (!docs) return {};
+            const num = (v: unknown) => {
+              if (typeof v === "number" && Number.isFinite(v)) return v;
+              if (typeof v === "string" && v.trim() && !Number.isNaN(Number(v))) return Number(v);
+              return null;
+            };
+            return {
+              website: typeof docs.website === "string" ? docs.website : null,
+              social_link: typeof docs.social_link === "string" ? docs.social_link : null,
+              approx_students: docs.approx_students != null ? String(docs.approx_students) : null,
+              approx_teachers: docs.approx_teachers != null ? String(docs.approx_teachers) : null,
+              application_type: typeof docs.application_type === "string" ? docs.application_type : null,
+              is_trial: Boolean(docs.is_trial) || docs.application_type === "trial",
+              trial_hours: num(docs.trial_hours),
+              trial_ends_at: typeof docs.trial_ends_at === "string" ? docs.trial_ends_at : null,
+              lat: num(docs.lat),
+              lng: num(docs.lng),
+            };
+          }
+          '''
+            marker = "function locationLine(app: AppRow)"
+            if marker in text and "function extrasFromApp" not in text:
+              text = text.replace(marker, helper + "\n\n" + marker)
+            old_badge = '<StatusBadge status={app.status || "pending"} />'
+            if old_badge in text and "Trial / Demo" not in text:
+              text = text.replace(
+                old_badge,
+                '''<StatusBadge status={app.status || "pending"} />
+                        {extrasFromApp(app).is_trial ? (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                            Trial / Demo
+                          </span>
+                        ) : null}
+                        {extrasFromApp(app).lat != null ? (
+                          <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-800">
+                            Map
+                          </span>
+                        ) : null}''',
+                1,
+              )
+            insert_before = '<div className="mt-4">\n          <SectionCard title="School logo">'
+            extras_block = '''
+          {(() => {
+            const x = extrasFromApp(selected);
+            return (
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <SectionCard title="Application extras">
+                  <dl className="space-y-2 text-sm">
+                    <div className="flex gap-2">
+                      <dt className="w-28 shrink-0 font-semibold text-slate-500">Type</dt>
+                      <dd className="font-semibold text-slate-800">
+                        {x.is_trial ? (
+                          <span className="inline-flex flex-wrap items-center gap-2">
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-800">
+                              Trial / Demo
+                            </span>
+                            <TrialCountdown endsAt={x.trial_ends_at} />
+                          </span>
+                        ) : (
+                          "Full school"
+                        )}
+                      </dd>
+                    </div>
+                    {x.website ? (
+                      <div className="flex gap-2">
+                        <dt className="w-28 shrink-0 font-semibold text-slate-500">Website</dt>
+                        <dd className="break-all text-slate-800">
+                          <a href={x.website.startsWith("http") ? x.website : `https://${x.website}`} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                            {x.website}
+                          </a>
+                        </dd>
+                      </div>
+                    ) : null}
+                    {x.social_link ? (
+                      <div className="flex gap-2">
+                        <dt className="w-28 shrink-0 font-semibold text-slate-500">Social</dt>
+                        <dd className="break-all text-slate-800">{x.social_link}</dd>
+                      </div>
+                    ) : null}
+                    {(x.approx_students || x.approx_teachers) ? (
+                      <div className="flex gap-2">
+                        <dt className="w-28 shrink-0 font-semibold text-slate-500">Size</dt>
+                        <dd className="text-slate-800">
+                          {[
+                            x.approx_students ? `${x.approx_students} students` : null,
+                            x.approx_teachers ? `${x.approx_teachers} teachers` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </dd>
+                      </div>
+                    ) : null}
+                  </dl>
+                </SectionCard>
+                {x.lat != null && x.lng != null ? (
+                  <SectionCard title="Map location" description="Pinned by the applicant">
+                    <p className="mb-2 font-mono text-xs text-slate-500">
+                      {x.lat.toFixed(5)}, {x.lng.toFixed(5)}
+                    </p>
+                    <iframe
+                      title="Applicant map pin"
+                      className="h-56 w-full rounded-xl border border-slate-200"
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                      src={
+                        "https://www.openstreetmap.org/export/embed.html?bbox=" +
+                        (x.lng - 0.03) +
+                        "%2C" +
+                        (x.lat - 0.02) +
+                        "%2C" +
+                        (x.lng + 0.03) +
+                        "%2C" +
+                        (x.lat + 0.02) +
+                        "&layer=mapnik&marker=" +
+                        x.lat +
+                        "%2C" +
+                        x.lng
+                      }
+                    />
+                    <div className="mt-2 flex flex-wrap gap-3 text-xs font-semibold">
+                      <a className="text-primary hover:underline" href={`https://www.openstreetmap.org/?mlat=${x.lat}&mlon=${x.lng}#map=17/${x.lat}/${x.lng}`} target="_blank" rel="noreferrer">
+                        Open in OpenStreetMap
+                      </a>
+                      <a className="text-primary hover:underline" href={`https://www.google.com/maps?q=${x.lat},${x.lng}`} target="_blank" rel="noreferrer">
+                        Open in Google Maps
+                      </a>
+                    </div>
+                  </SectionCard>
+                ) : null}
+              </div>
+            );
+          })()}
+
+          '''
+            if insert_before in text and "Application extras" not in text:
+              text = text.replace(insert_before, extras_block + insert_before, 1)
+            p.write_text(text)
+            print("patched", len(text))
+          assert "TrialCountdown" in p.read_text()
+          assert "extrasFromApp" in p.read_text()
+          print("OK")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/super-admin.applications.tsx
+          git commit -m "feat: super-admin Trial/Demo badges, live countdown, map + extras" || echo nochange
+          git push
