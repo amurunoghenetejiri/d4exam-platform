@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - ".github/workflows/APPLY-ENROL-MATERIALS.yml"
-      - "scripts/enrol-materials-payload/**"
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -15,29 +14,201 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Assemble and write files
+      - name: Restore and patch
         run: |
           set -euo pipefail
+          GOOD_SERVER=b9fe14902deff22227339787fafafa5412b49990
+          git show "$GOOD_SERVER:src/lib/student.server.ts" > src/lib/student.server.ts
           python3 << 'PY'
-          import base64, pathlib
-          root = pathlib.Path("scripts/enrol-materials-payload")
-          if not (root / "MANIFEST.txt").exists():
-              print("no payload yet")
-              raise SystemExit(0)
-          for line in (root / "MANIFEST.txt").read_text().strip().splitlines():
-              path, nchunks, _ = line.split("|")
-              safe = path.replace("/", "__")
-              data = "".join((root / f"{safe}.{i}.b64").read_text() for i in range(int(nchunks)))
-              raw = base64.b64decode(data)
-              out = pathlib.Path(path)
-              out.parent.mkdir(parents=True, exist_ok=True)
-              out.write_bytes(raw)
-              print("wrote", path, len(raw))
+          from pathlib import Path
+          p = Path("src/lib/student.server.ts")
+          t = p.read_text()
+          if "enrolStudentInCourse" not in t:
+              fn = r'''
+
+/** Student self-enrol in a department course (bypasses RLS via admin client after ownership checks). */
+export const enrolStudentInCourse = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) =>
+    z
+      .object({
+        courseId: z.string().uuid(),
+        studentId: z.string().uuid().optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const userId = context.userId as string;
+    let db = context.supabase;
+    try {
+      const mod = await import("@/integrations/supabase/client.server");
+      if (mod.supabaseAdmin) db = mod.supabaseAdmin as unknown as typeof db;
+    } catch {
+      /* user client */
+    }
+
+    const { data: profile } = await db
+      .from("profiles")
+      .select("id, school_id")
+      .eq("auth_user_id", userId)
+      .maybeSingle();
+    if (!profile?.id || !profile.school_id) {
+      throw new Error("Student profile not found.");
+    }
+    const schoolId = String(profile.school_id);
+    const profileId = String(profile.id);
+
+    const { data: student } = await db
+      .from("students")
+      .select("id, school_id, department_id, level_id, profile_id")
+      .eq("profile_id", profileId)
+      .eq("school_id", schoolId)
+      .maybeSingle();
+    if (!student?.id) {
+      throw new Error("Student record not found.");
+    }
+    const studentId = String(student.id);
+    if (data.studentId && String(data.studentId) !== studentId) {
+      throw new Error("You can only enrol yourself.");
+    }
+
+    const { data: course, error: cErr } = await db
+      .from("courses")
+      .select("id, school_id, department_id, level_id, code, name")
+      .eq("id", data.courseId)
+      .maybeSingle();
+    if (cErr || !course) throw new Error(cErr?.message || "Course not found.");
+    if (String(course.school_id) !== schoolId) {
+      throw new Error("Course is not in your school.");
+    }
+    if (
+      student.department_id &&
+      course.department_id &&
+      String(student.department_id) !== String(course.department_id)
+    ) {
+      throw new Error("Course is not offered to your department.");
+    }
+
+    const scPayload = {
+      student_id: studentId,
+      course_id: data.courseId,
+      school_id: schoolId,
+      status: "enrolled",
+    };
+    const { error: scErr } = await db.from("student_courses").insert(scPayload as never);
+    if (!scErr || /duplicate|unique/i.test(scErr.message || "")) {
+      return {
+        ok: true as const,
+        course: {
+          id: String(course.id),
+          code: String(course.code || ""),
+          name: String(course.name || ""),
+        },
+      };
+    }
+
+    const { error: enErr } = await db.from("course_enrollments").insert({
+      student_id: studentId,
+      course_id: data.courseId,
+      school_id: schoolId,
+    } as never);
+    if (enErr && !/duplicate|unique/i.test(enErr.message || "")) {
+      throw new Error(scErr.message || enErr.message || "Could not enrol");
+    }
+    return {
+      ok: true as const,
+      course: {
+        id: String(course.id),
+        code: String(course.code || ""),
+        name: String(course.name || ""),
+      },
+    };
+  });
+'''
+              p.write_text(t.rstrip() + "\n" + fn + "\n")
+              print("appended enrolStudentInCourse")
+          else:
+              print("enrol already present")
+          PY
+
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+          p = Path("src/routes/student.courses.tsx")
+          t = p.read_text()
+          new_enroll = r'''  async function enroll(course: StudentCourse) {
+    if (!student?.studentId) return;
+    setBusyId(course.id);
+    try {
+      const { enrolStudentInCourse } = await import("@/lib/student.server");
+      const res = await enrolStudentInCourse({
+        data: { courseId: course.id, studentId: student.studentId },
+      });
+      if (!res?.ok) throw new Error("Could not enrol");
+      toast.success(`Enrolled in ${course.code || course.name}`);
+      await qc.invalidateQueries({ queryKey: ["student-context"] });
+      await qc.invalidateQueries({ queryKey: ["student-available-courses"] });
+    } catch (e) {
+      const msg = (e as Error).message || "Could not enrol in course";
+      if (/row-level security|RLS|permission denied|Missing Supabase/i.test(msg)) {
+        toast.error(
+          "Enrolment needs server setup (SUPABASE_SERVICE_ROLE_KEY) or School Admin can enrol you.",
+        );
+      } else {
+        toast.error(msg);
+      }
+    } finally {
+      setBusyId(null);
+    }
+  }'''
+          t2, n = re.subn(
+              r"  async function enroll\(course: StudentCourse\) \{[\s\S]*?\n  \}\n\n  return \(",
+              new_enroll + "\n\n  return (",
+              t,
+              count=1,
+          )
+          if n:
+              p.write_text(t2)
+              print("patched enroll", n)
+          else:
+              print("enroll pattern not found")
+          PY
+
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/components/materials/CourseMaterialsPanel.tsx")
+          if not p.exists():
+              print("no panel"); raise SystemExit(0)
+          t = p.read_text()
+          reps = [
+            ('grid gap-3 sm:grid-cols-2 lg:grid-cols-3', 'grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'),
+            ('rounded-2xl border border-slate-100 bg-white p-4 shadow-sm', 'rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm'),
+            ('className={cn("grid h-11 w-11 place-items-center rounded-xl", meta.wrap)}', 'className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg", meta.wrap)}'),
+            ('className={cn("grid h-10 w-10 place-items-center rounded-xl", meta.wrap)}', 'className={cn("grid h-8 w-8 place-items-center rounded-lg", meta.wrap)}'),
+            ('"flex items-center gap-3 rounded-2xl border p-3 text-left shadow-sm transition sm:p-4"', '"flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left shadow-sm transition sm:px-3 sm:py-2.5"'),
+          ]
+          for a,b in reps:
+              if a in t:
+                  t = t.replace(a,b)
+                  print("replaced", a[:40])
+          p.write_text(t)
+          PY
+
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/components/materials/MaterialViewer.tsx")
+          if not p.exists():
+              print("no viewer"); raise SystemExit(0)
+          t = p.read_text()
+          if "createPortal(reader, document.body)" in t:
+              print("viewer ok portal")
+          else:
+              print("viewer may not portal")
           PY
       - name: Commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/lib/student.server.ts src/routes/student.courses.tsx src/components/materials/CourseMaterialsPanel.tsx src/components/materials/MaterialViewer.tsx
-          git commit -m "fix: student self-enrol server path + slim materials + full-screen viewer" || echo nochange
+          git add src/lib/student.server.ts src/routes/student.courses.tsx src/components/materials/CourseMaterialsPanel.tsx src/components/materials/MaterialViewer.tsx || true
+          git commit -m "fix: student self-enrol via server + slim materials cards" || echo nochange
           git push origin HEAD:main
