@@ -1,0 +1,98 @@
+name: FIX-MATERIALS
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/FIX-MATERIALS.yml"
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore and patch materials components
+        run: |
+          set -e
+          git show 20cf9891eaaad2eef141d758176ba6a5b646bb6a:src/components/materials/CourseMaterialsPanel.tsx > src/components/materials/CourseMaterialsPanel.tsx
+          # MaterialViewer from commit that had full-screen portal if present
+          for sha in 5310e536692b293ebd9cc7762b9c5ce646eb98bc 20cf9891eaaad2eef141d758176ba6a5b646bb6a 156717f68522e532de2543409a804c0244ab9d8a; do
+            if git cat-file -e ${sha}:src/components/materials/MaterialViewer.tsx 2>/dev/null; then
+              git show ${sha}:src/components/materials/MaterialViewer.tsx > src/components/materials/MaterialViewer.tsx
+              break
+            fi
+          done
+          sed -i 's/#0b1b3a/#000000/g' src/components/materials/MaterialViewer.tsx || true
+          sed -i 's/rgba(11,27,58,0.98)/rgba(0,0,0,0.98)/g' src/components/materials/MaterialViewer.tsx || true
+          sed -i 's/relative rounded-2xl border border-slate-100 bg-white p-4 shadow-sm/relative flex items-center gap-2.5 rounded-xl border border-slate-100 bg-white px-2.5 py-2 shadow-sm sm:flex-col sm:items-stretch sm:px-3 sm:py-2.5/g' src/components/materials/CourseMaterialsPanel.tsx
+          sed -i 's/grid h-11 w-11 place-items-center rounded-xl/grid h-9 w-9 shrink-0 place-items-center rounded-lg sm:h-8 sm:w-8/g' src/components/materials/CourseMaterialsPanel.tsx
+          sed -i 's/grid gap-3 sm:grid-cols-2 lg:grid-cols-3/grid gap-1.5 sm:grid-cols-2 sm:gap-2.5 lg:grid-cols-3 xl:grid-cols-4/g' src/components/materials/CourseMaterialsPanel.tsx
+          sed -i 's/flex items-center gap-3 rounded-2xl border p-3 text-left shadow-sm transition sm:p-4/flex items-center gap-2 rounded-xl border px-2.5 py-2 text-left shadow-sm transition sm:px-3 sm:py-2.5/g' src/components/materials/CourseMaterialsPanel.tsx
+          sed -i 's/grid h-10 w-10 place-items-center rounded-xl/grid h-8 w-8 place-items-center rounded-lg/g' src/components/materials/CourseMaterialsPanel.tsx
+          python3 << 'PY'
+from pathlib import Path
+p = Path("src/components/materials/CourseMaterialsPanel.tsx")
+t = p.read_text()
+if "hideFromMyList" not in t:
+    insert = '''
+  function hideFromMyList(id: string) {
+    const key = `d4-hidden-materials:${session?.userId || "anon"}`;
+    try {
+      const raw = localStorage.getItem(key);
+      const arr = raw ? (JSON.parse(raw) as string[]) : [];
+      if (!arr.includes(id)) arr.push(id);
+      localStorage.setItem(key, JSON.stringify(arr));
+    } catch {}
+    setMenuId(null);
+    toast.success("Removed from your list");
+    void qc.invalidateQueries({ queryKey: ["course-materials"] });
+  }
+'''
+    t = t.replace("async function downloadMaterial", insert + "\n  async function downloadMaterial")
+    t = t.replace("let rows = [...all];", '''let rows = [...all];
+    try {
+      const raw = localStorage.getItem(`d4-hidden-materials:${session?.userId || "anon"}`);
+      const hidden = new Set(raw ? (JSON.parse(raw) as string[]) : []);
+      if (hidden.size) rows = rows.filter((m) => !hidden.has(m.id));
+    } catch {}''')
+    old = '''{mine && (
+                          <>
+                            <button type="button" className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50" onClick={() => openEdit(m)}>
+                              <Pencil className="h-3.5 w-3.5" /> Edit
+                            </button>
+                            <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50" onClick={() => void remove(m.id)}>
+                              <Trash2 className="h-3.5 w-3.5" /> Delete
+                            </button>
+                          </>
+                        )}'''
+    new = '''{mine ? (
+                          <>
+                            <button type="button" className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50" onClick={() => openEdit(m)}>
+                              <Pencil className="h-3.5 w-3.5" /> Edit
+                            </button>
+                            <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50" onClick={() => void remove(m.id)}>
+                              <Trash2 className="h-3.5 w-3.5" /> Delete
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50" onClick={() => hideFromMyList(m.id)}>
+                            <Trash2 className="h-3.5 w-3.5" /> Remove
+                          </button>
+                        )}'''
+    if old in t:
+        t = t.replace(old, new)
+        print("menu updated")
+    else:
+        print("menu block not exact")
+    p.write_text(t)
+    print("hideFromMyList", "hideFromMyList" in t)
+PY
+          head -c 50 src/components/materials/CourseMaterialsPanel.tsx; echo
+          ! grep -q PLACEHOLDER src/components/materials/CourseMaterialsPanel.tsx
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/materials/CourseMaterialsPanel.tsx src/components/materials/MaterialViewer.tsx
+          git commit -m "fix: compact mobile material cards, black reader chrome, student Remove" || echo "nothing"
+          git push
