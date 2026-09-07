@@ -4,8 +4,7 @@ on:
   push:
     paths:
       - ".github/workflows/RESTORE-APPSHELL-BRAND.yml"
-      - "scripts/_appshell_p1.txt"
-      - "scripts/_appshell_p2.txt"
+      - "scripts/appshell_b64_*.txt"
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -13,10 +12,18 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Assemble AppShell
+      - name: Decode AppShell
         run: |
-          python3 -c "from pathlib import Path; p1=Path('scripts/_appshell_p1.txt').read_text(); p2=Path('scripts/_appshell_p2.txt').read_text(); Path('src/components/layout/AppShell.tsx').write_text(p1+p2); print(len(p1)+len(p2))"
+          python3 << 'PY'
+          import base64
+          from pathlib import Path
+          parts = [Path(f"scripts/appshell_b64_{i}.txt").read_text().strip() for i in range(4)]
+          data = base64.b64decode("".join(parts).encode()).decode()
+          assert "export function AppShell" in data
+          Path("src/components/layout/AppShell.tsx").write_text(data)
+          print("restored", len(data))
+          PY
           git config user.name d4exam-bot
           git config user.email bot@d4exam.local
           git add src/components/layout/AppShell.tsx
-          git diff --cached --quiet || (git commit -m "fix: restore AppShell with immediate school branding" && git push origin HEAD:main)
+          git diff --cached --quiet || (git commit -m "fix: AppShell immediate school branding" && git push origin HEAD:main)
