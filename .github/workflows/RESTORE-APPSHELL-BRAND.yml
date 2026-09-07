@@ -1,0 +1,22 @@
+name: RESTORE-APPSHELL-BRAND
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/RESTORE-APPSHELL-BRAND.yml"
+      - "scripts/_appshell_p1.txt"
+      - "scripts/_appshell_p2.txt"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble AppShell
+        run: |
+          python3 -c "from pathlib import Path; p1=Path('scripts/_appshell_p1.txt').read_text(); p2=Path('scripts/_appshell_p2.txt').read_text(); Path('src/components/layout/AppShell.tsx').write_text(p1+p2); print(len(p1)+len(p2))"
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add src/components/layout/AppShell.tsx
+          git diff --cached --quiet || (git commit -m "fix: restore AppShell with immediate school branding" && git push origin HEAD:main)
