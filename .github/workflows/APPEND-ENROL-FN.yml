@@ -1,0 +1,106 @@
+name: APPEND-ENROL-FN
+on:
+  push:
+    paths:
+      - ".github/workflows/APPEND-ENROL-FN.yml"
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Append enrol + patch courses
+        run: |
+          set -euo pipefail
+          if ! grep -q enrolStudentInCourse src/lib/student.server.ts; then
+            cat >> src/lib/student.server.ts << 'END'
+
+export const enrolStudentInCourse = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) =>
+    z.object({ courseId: z.string().uuid(), studentId: z.string().uuid().optional() }).parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const userId = context.userId as string;
+    let db = context.supabase;
+    try {
+      const mod = await import("@/integrations/supabase/client.server");
+      if (mod.supabaseAdmin) db = mod.supabaseAdmin as unknown as typeof db;
+    } catch {}
+    const { data: profile } = await db.from("profiles").select("id, school_id").eq("auth_user_id", userId).maybeSingle();
+    if (!profile?.id || !profile.school_id) throw new Error("Student profile not found.");
+    const schoolId = String(profile.school_id);
+    const { data: student } = await db.from("students").select("id, school_id, department_id, level_id, profile_id").eq("profile_id", profile.id).eq("school_id", schoolId).maybeSingle();
+    if (!student?.id) throw new Error("Student record not found.");
+    const studentId = String(student.id);
+    if (data.studentId && String(data.studentId) !== studentId) throw new Error("You can only enrol yourself.");
+    const { data: course, error: cErr } = await db.from("courses").select("id, school_id, department_id, level_id, code, name").eq("id", data.courseId).maybeSingle();
+    if (cErr || !course) throw new Error(cErr?.message || "Course not found.");
+    if (String(course.school_id) !== schoolId) throw new Error("Course is not in your school.");
+    if (student.department_id && course.department_id && String(student.department_id) !== String(course.department_id)) throw new Error("Course is not offered to your department.");
+    const { error: scErr } = await db.from("student_courses").insert({ student_id: studentId, course_id: data.courseId, school_id: schoolId, status: "enrolled" } as never);
+    if (!scErr || /duplicate|unique/i.test(scErr.message || "")) {
+      return { ok: true as const, course: { id: String(course.id), code: String(course.code || ""), name: String(course.name || "") } };
+    }
+    const { error: enErr } = await db.from("course_enrollments").insert({ student_id: studentId, course_id: data.courseId, school_id: schoolId } as never);
+    if (enErr && !/duplicate|unique/i.test(enErr.message || "")) throw new Error(scErr.message || enErr.message || "Could not enrol");
+    return { ok: true as const, course: { id: String(course.id), code: String(course.code || ""), name: String(course.name || "") } };
+  });
+END
+            echo appended
+          else
+            echo already
+          fi
+          python3 -c "
+import re
+from pathlib import Path
+p=Path('src/routes/student.courses.tsx')
+t=p.read_text()
+if 'enrolStudentInCourse' in t:
+  print('courses already uses server enrol')
+else:
+  new='''  async function enroll(course: StudentCourse) {
+    if (!student?.studentId) return;
+    setBusyId(course.id);
+    try {
+      const { enrolStudentInCourse } = await import(\"@/lib/student.server\");
+      const res = await enrolStudentInCourse({ data: { courseId: course.id, studentId: student.studentId } });
+      if (!res?.ok) throw new Error(\"Could not enrol\");
+      toast.success(\`Enrolled in \${course.code || course.name}\`);
+      await qc.invalidateQueries({ queryKey: [\"student-context\"] });
+      await qc.invalidateQueries({ queryKey: [\"student-available-courses\"] });
+    } catch (e) {
+      const msg = (e as Error).message || \"Could not enrol in course\";
+      if (/row-level security|RLS|permission denied|Missing Supabase/i.test(msg)) {
+        toast.error(\"Enrolment needs SUPABASE_SERVICE_ROLE_KEY on the server, or ask School Admin to enrol you.\");
+      } else toast.error(msg);
+    } finally { setBusyId(null); }
+  }'''
+  t2,n=re.subn(r'  async function enroll\(course: StudentCourse\) \{[\s\S]*?\n  \}\n\n  return \(', new+'\n\n  return (', t, count=1)
+  print('enroll patches', n)
+  if n: p.write_text(t2)
+"
+          python3 -c "
+from pathlib import Path
+p=Path('src/components/materials/CourseMaterialsPanel.tsx')
+if p.exists():
+  t=p.read_text()
+  for a,b in [
+    ('grid gap-3 sm:grid-cols-2 lg:grid-cols-3','grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'),
+    ('rounded-2xl border border-slate-100 bg-white p-4 shadow-sm','rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm'),
+    ('grid h-11 w-11 place-items-center rounded-xl','grid h-8 w-8 shrink-0 place-items-center rounded-lg'),
+    ('grid h-10 w-10 place-items-center rounded-xl','grid h-8 w-8 place-items-center rounded-lg'),
+  ]:
+    if a in t:
+      t=t.replace(a,b); print('slim', a[:28])
+  p.write_text(t)
+"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/student.server.ts src/routes/student.courses.tsx src/components/materials/CourseMaterialsPanel.tsx || true
+          git commit -m "fix: enrolStudentInCourse + slim materials cards" || echo nochange
+          git push
