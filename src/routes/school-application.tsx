@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { uploadSchoolLogo } from "@/lib/school-identity";
 import { notifySuperAdminsOfApplication } from "@/lib/notify-super-admin-application";
+import { MapPinPicker } from "@/components/MapPinPicker";
 
 export const Route = createFileRoute("/school-application")({
   head: () => ({
@@ -57,12 +58,16 @@ function Page() {
   const [socialLink, setSocialLink] = useState("");
   const [approxStudents, setApproxStudents] = useState("");
   const [approxTeachers, setApproxTeachers] = useState("");
-  const [appType, setAppType] = useState<"full" | "trial">("full");
+  const [appType, setAppType] = useState<"full" | "trial">(() => {
+    if (typeof window === "undefined") return "full";
+    try {
+      const q = new URLSearchParams(window.location.search).get("type");
+      if (q === "trial" || q === "demo") return "trial";
+    } catch { /* ignore */ }
+    return "full";
+  });
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
-  const [mapQuery, setMapQuery] = useState("");
-  const [mapResults, setMapResults] = useState<Array<{ display_name: string; lat: string; lon: string }>>([]);
-  const [mapSearching, setMapSearching] = useState(false);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [isTrialResult, setIsTrialResult] = useState(false);
@@ -79,24 +84,6 @@ function Page() {
     } catch { /* ignore */ }
   }, []);
 
-  async function searchMapPlace() {
-    const q = mapQuery.trim();
-    if (!q) return;
-    setMapSearching(true);
-    setMapResults([]);
-    try {
-      const url = "https://nominatim.openstreetmap.org/search?format=json&limit=5&q=" + encodeURIComponent(q);
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      const data = (await res.json()) as Array<{ display_name: string; lat: string; lon: string }>;
-      setMapResults(Array.isArray(data) ? data : []);
-      if (!data?.length) setError("No places found. Try a different search.");
-      else setError("");
-    } catch {
-      setError("Map search failed. You can still submit without a pin.");
-    } finally {
-      setMapSearching(false);
-    }
-  }
 
   function onLogoPick(f: File | null) {
     if (!f) return;
@@ -197,7 +184,7 @@ function Page() {
         localStorage.removeItem(DRAFT_KEY);
       } catch { /* ignore */ }
       try {
-        void notifySuperAdminsOfApplication(schoolName.trim() + (isTrial ? " (48h trial)" : ""), data.id as string, savedCode);
+        void notifySuperAdminsOfApplication(schoolName.trim() + (isTrial ? " (Trial/Demo)" : ""), data.id as string, savedCode);
       } catch { /* ignore */ }
     } catch (err) {
       setError((err as Error).message || "Could not submit application.");
@@ -222,7 +209,7 @@ function Page() {
         <div className="mx-auto max-w-lg space-y-4 px-4 py-12 text-center">
           <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
           <h1 className="text-2xl font-extrabold text-slate-900">{isTrialResult ? "Trial application submitted" : "Application submitted"}</h1>
-          <p className="text-sm text-slate-600">{isTrialResult ? "Your 48-hour trial request is in. Keep your reference code. Super admin activates it quickly." : "Keep your reference code to track review."}</p>
+          <p className="text-sm text-slate-600">{isTrialResult ? "Your Trial / Demo request is in. Keep your reference code. Super admin activates it quickly." : "Keep your reference code to track review."}</p>
           <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-mono text-lg font-bold text-emerald-900">{trackingCode}</p>
           <Button asChild className="font-semibold"><Link to="/application-status">Check application status</Link></Button>
         </div>
@@ -235,7 +222,7 @@ function Page() {
       <div className="mx-auto max-w-xl space-y-6 px-4 py-10">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900">Apply for your school</h1>
-          <p className="mt-1 text-sm text-slate-500">Full school or 48-hour trial. Logo required for full applications; map pin is optional.</p>
+          <p className="mt-1 text-sm text-slate-500">Full school or Trial / Demo. Logo required for full applications; map pin is optional.</p>
         </div>
         <div className="grid grid-cols-4 gap-2">
           {steps.map((s, i) => (
@@ -252,7 +239,7 @@ function Page() {
               <div className="space-y-1.5"><Label>Application type</Label>
                 <div className="flex gap-2">
                   <button type="button" className={cn("flex-1 rounded-lg border px-3 py-2 text-sm font-semibold", appType === "full" ? "border-primary bg-primary/5 text-primary" : "border-slate-200")} onClick={() => setAppType("full")}>Full school</button>
-                  <button type="button" className={cn("flex-1 rounded-lg border px-3 py-2 text-sm font-semibold", appType === "trial" ? "border-primary bg-primary/5 text-primary" : "border-slate-200")} onClick={() => setAppType("trial")}>48h trial</button>
+                  <button type="button" className={cn("flex-1 rounded-lg border px-3 py-2 text-sm font-semibold", appType === "trial" ? "border-primary bg-primary/5 text-primary" : "border-slate-200")} onClick={() => setAppType("trial")}>Trial / Demo</button>
                 </div>
               </div>
               <div className="space-y-1.5"><Label htmlFor="schoolName">School name</Label><Input id="schoolName" value={schoolName} onChange={(e) => setSchoolName(e.target.value)} className="h-11" required /></div>
@@ -289,22 +276,18 @@ function Page() {
                 <div className="space-y-1.5"><Label htmlFor="approxStudents">Approx. students</Label><Input id="approxStudents" value={approxStudents} onChange={(e) => setApproxStudents(e.target.value)} className="h-11" inputMode="numeric" /></div>
                 <div className="space-y-1.5"><Label htmlFor="approxTeachers">Approx. teachers</Label><Input id="approxTeachers" value={approxTeachers} onChange={(e) => setApproxTeachers(e.target.value)} className="h-11" inputMode="numeric" /></div>
               </div>
-              <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50/80 p-3">
-                <Label>Pin school on map (optional)</Label>
-                <div className="flex gap-2">
-                  <Input value={mapQuery} onChange={(e) => setMapQuery(e.target.value)} className="h-10" placeholder="Search place…" onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void searchMapPlace(); } }} />
-                  <Button type="button" variant="outline" disabled={mapSearching} onClick={() => void searchMapPlace()}>{mapSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Search"}</Button>
-                </div>
-                {mapResults.map((r) => (
-                  <button key={r.lat + r.lon} type="button" className="block w-full rounded-lg border bg-white px-2 py-1.5 text-left text-xs" onClick={() => { setLat(Number(r.lat)); setLng(Number(r.lon)); setMapResults([]); setMapQuery(r.display_name); }}>{r.display_name}</button>
-                ))}
-                {lat != null && lng != null ? (
-                  <div className="space-y-2">
-                    <p className="font-mono text-xs">{lat.toFixed(5)}, {lng.toFixed(5)} <button type="button" className="text-rose-600 font-semibold" onClick={() => { setLat(null); setLng(null); }}>Clear</button></p>
-                    <iframe title="map" className="h-44 w-full rounded-lg border" loading="lazy" src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.02}%2C${lat - 0.015}%2C${lng + 0.02}%2C${lat + 0.015}&layer=mapnik&marker=${lat}%2C${lng}`} />
-                  </div>
-                ) : null}
-              </div>
+              <MapPinPicker
+                lat={lat}
+                lng={lng}
+                onChange={(a, b) => {
+                  setLat(a);
+                  setLng(b);
+                }}
+                city={city}
+                state={state}
+                country={country}
+                onError={(msg) => setError(msg || "")}
+              />
             </>
           )}
           {step === 1 && (
@@ -323,7 +306,7 @@ function Page() {
           )}
           {step === 3 && (
             <div className="space-y-2 text-sm text-slate-700">
-              <p><span className="font-semibold">Type:</span> {appType === "trial" ? "48-hour trial" : "Full school"}</p>
+              <p><span className="font-semibold">Type:</span> {appType === "trial" ? "Trial / Demo" : "Full school"}</p>
               <p><span className="font-semibold">School:</span> {schoolName || "—"} ({schoolType})</p>
               <p><span className="font-semibold">Location:</span> {[city, state, country].filter(Boolean).join(", ") || "—"}</p>
               {lat != null && lng != null ? <p><span className="font-semibold">Map pin:</span> {lat.toFixed(5)}, {lng.toFixed(5)}</p> : null}
