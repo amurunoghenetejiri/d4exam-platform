@@ -1,2 +1,1 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-// RESTORE_IN_PROGRESS
+RESTORE_FROM_ARTIFACTS
