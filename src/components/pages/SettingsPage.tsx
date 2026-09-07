@@ -50,10 +50,8 @@ export function SettingsPage({ scope }: { scope: string }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const scopeLower = (scope || "").toLowerCase();
-  const isSchoolAdmin =
-    scopeLower.includes("school admin") ||
-    scopeLower.includes("admin") ||
-    scopeLower === "school";
+  const isSuperAdmin = scopeLower.includes("super") || session?.role === "super_admin" || (session?.roles ?? []).includes("super_admin");
+  const isSchoolAdmin = !isSuperAdmin && (scopeLower.includes("school admin") || (scopeLower.includes("admin") && !scopeLower.includes("super")) || scopeLower === "school" || session?.role === "school_admin");
 
   useEffect(() => {
     if (!session?.userId) return;

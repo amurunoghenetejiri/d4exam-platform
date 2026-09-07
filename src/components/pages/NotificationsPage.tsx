@@ -116,6 +116,11 @@ function resolveNotifHref(n: Notif, scopeRaw: string): string | null {
   if (direct.startsWith("/")) {
     if (direct.startsWith("/student/exam")) return "/student/examinations";
     if (direct.startsWith("/student/results/")) return "/student/results";
+    const scope = normalizeNotifScope(scopeRaw);
+    if (scope === "super-admin") {
+      if (direct.startsWith("/admin") || direct.startsWith("/officer") || direct.startsWith("/teacher") || direct.startsWith("/student")) return "/super-admin";
+      if (!direct.startsWith("/super-admin")) return "/super-admin/notifications";
+    }
     return direct;
   }
 

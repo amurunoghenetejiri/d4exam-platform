@@ -166,24 +166,7 @@ export function useStudentContext() {
                 /* ignore */
               }
             }
-            // Only auto-map courses when BOTH department and level are known (prevents cross-level leaks)
-            if (!courses.length && schoolId && departmentId && levelId) {
-              try {
-                const { data: deptCourses } = await supabase
-                  .from("courses")
-                  .select("id, code, name")
-                  .eq("school_id", schoolId)
-                  .eq("department_id", departmentId)
-                  .eq("level_id", levelId)
-                  .limit(300);
-                courses = (deptCourses ?? []).map((c) => ({
-                  id: String((c as { id: string }).id),
-                  code: String((c as { code?: string }).code || ""),
-                  name: String((c as { name?: string }).name || ""),
-                }));
-              } catch {
-                /* ignore */
-              }
+            // Students self-enrol from Courses page.
             }
             const seen = new Set<string>();
             courses = courses.filter((c) => {
