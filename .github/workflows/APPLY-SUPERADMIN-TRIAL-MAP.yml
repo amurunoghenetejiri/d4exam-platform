@@ -1,0 +1,15 @@
+name: APPLY-SUPERADMIN-TRIAL-MAP
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-SUPERADMIN-TRIAL-MAP.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Note
+        run: echo "Use local enhanced super-admin; full body applied in follow-up if needed"
