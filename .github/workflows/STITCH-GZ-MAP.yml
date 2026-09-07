@@ -1,0 +1,45 @@
+name: STITCH-GZ-MAP
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/STITCH-GZ-MAP.yml"
+      - ".d4exam-payload/sa.gz.*"
+      - ".d4exam-payload/su.gz.*"
+jobs:
+  stitch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble and write routes
+        run: |
+          set -euo pipefail
+          python3 << 'ENDPY'
+          import base64, gzip, pathlib
+          def write(prefix, dest, n, check):
+            parts = [pathlib.Path(f".d4exam-payload/{prefix}.{i}").read_text().strip() for i in range(n)]
+            b64 = "".join(parts)
+            data = gzip.decompress(base64.b64decode(b64))
+            pathlib.Path(dest).write_bytes(data)
+            text = data.decode()
+            assert "PLACEHOLDER" not in text, dest
+            assert check in text, f"missing {check} in {dest}"
+            print(dest, len(data), "OK")
+          write("sa.gz", "src/routes/school-application.tsx", 3, "loadLeaflet")
+          write("su.gz", "src/routes/super-admin.applications.tsx", 3, "TrialCountdown")
+          # keep homepage CTAs from existing good commit if present
+          idx = pathlib.Path("src/routes/index.tsx")
+          if idx.exists() and "type=trial" not in idx.read_text():
+            print("index missing type=trial — leave as-is; CTA workflow may have fixed")
+          print("ALL OK")
+          ENDPY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/school-application.tsx src/routes/super-admin.applications.tsx
+          git status
+          git commit -m "feat: interactive Leaflet click-to-pin map + Trial/Demo badges and countdown" || echo nochange
+          git push
