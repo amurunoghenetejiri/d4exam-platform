@@ -1,0 +1,26 @@
+name: ASSEMBLE-CBT
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".d4exam-payload/cbt-parts/**"
+      - ".github/workflows/ASSEMBLE-CBT.yml"
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Concatenate parts
+        run: |
+          set -eux
+          cat .d4exam-payload/cbt-parts/part*.txt > src/components/cbt/CbtExamSession.impl.tsx
+          wc -c src/components/cbt/CbtExamSession.impl.tsx
+          grep -q useLiveMicPublish src/components/cbt/CbtExamSession.impl.tsx
+          grep -q "export function CbtExamPage" src/components/cbt/CbtExamSession.impl.tsx
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/cbt/CbtExamSession.impl.tsx
+          git commit -m "fix: restore full CbtExamSession.impl with live mic"
+          git push
