@@ -11,6 +11,8 @@ on:
       - "vite.capacitor.config.ts"
       - "src/capacitor-main.tsx"
       - "src/lib/haptic.ts"
+      - "public/icon-512.png"
+      - "public/logo.png"
       - "package.json"
       - "bun.lock"
       - ".github/workflows/build-android.yml"
@@ -50,6 +52,13 @@ jobs:
           bun run build:app
           test -f dist/index.html
           test -d dist/assets
+          test -f dist/assets/capacitor-app.js
+          # Prove offline shell — no Vercel URL in entry HTML
+          if grep -E 'https?://[^"'\'' ]*vercel' dist/index.html; then
+            echo "ERROR: dist/index.html still points at Vercel"
+            exit 1
+          fi
+          echo "OK: local SPA built"
         env:
           NODE_ENV: production
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
@@ -65,7 +74,6 @@ jobs:
           fi
           echo "OK: local SPA, no remote server.url"
 
-      # Capacitor 8 requires compileSdk/targetSdk 36 — regenerate platform every run
       - name: Ensure complete Android platform
         run: |
           set -euo pipefail
@@ -74,7 +82,7 @@ jobs:
           test -f android/gradlew
           chmod +x android/gradlew
 
-      - name: Overlay native plugins (vibrate + screen share)
+      - name: Overlay native plugins + themes + D4EXAM icon
         run: |
           set -euo pipefail
           test -d native-android
@@ -83,32 +91,66 @@ jobs:
             android/app/src/main/java/com/d4exam/app/
 
           DRAW="android/app/src/main/res/drawable"
-          mkdir -p "$DRAW"
+          VALS="android/app/src/main/res/values"
+          mkdir -p "$DRAW" "$VALS"
+
           if [ -d native-android/app/src/main/res/drawable ]; then
             cp -a native-android/app/src/main/res/drawable/. "$DRAW/" || true
           fi
-
-          # Cap generates splash.png; our overlay may add splash.xml — same resource name = build fail.
-          # Prefer solid-color splash.xml (branded navy) and drop any splash bitmap.
+          # Prefer splash.xml (navy) over Cap splash.png
           if [ -f "$DRAW/splash.xml" ]; then
             rm -f "$DRAW"/splash.png "$DRAW"/splash.jpg "$DRAW"/splash.webp "$DRAW"/splash.gif
-            echo "OK: kept splash.xml, removed splash bitmap duplicates"
           fi
-          # Also drop any other basename collisions (foo.xml + foo.png)
           for xml in "$DRAW"/*.xml; do
             [ -f "$xml" ] || continue
             base="$(basename "$xml" .xml)"
             for ext in png jpg jpeg webp gif; do
-              if [ -f "$DRAW/${base}.${ext}" ]; then
-                echo "Removing duplicate drawable: ${base}.${ext}"
-                rm -f "$DRAW/${base}.${ext}"
-              fi
+              rm -f "$DRAW/${base}.${ext}"
             done
           done
 
-          if [ -d native-android/app/src/main/res/values ]; then
-            mkdir -p android/app/src/main/res/values
-            cp -f native-android/app/src/main/res/values/colors.xml android/app/src/main/res/values/ 2>/dev/null || true
+          # Themes + colors (safe AppCompat launch theme — no Theme.SplashScreen crash)
+          cp -f native-android/app/src/main/res/values/colors.xml "$VALS/" 2>/dev/null || true
+          cp -f native-android/app/src/main/res/values/styles.xml "$VALS/" 2>/dev/null || true
+
+          # --- App icon: replace default Capacitor icon with public/icon-512.png (D4EXAM) ---
+          ICON_SRC=""
+          for candidate in public/icon-512.png public/logo.png public/apple-touch-icon.png public/favicon.png; do
+            if [ -f "$candidate" ]; then ICON_SRC="$candidate"; break; fi
+          done
+          if [ -z "$ICON_SRC" ]; then
+            echo "WARN: no brand icon in public/; keeping Cap default"
+          else
+            echo "Using icon source: $ICON_SRC"
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq imagemagick
+            # density -> pixel size for legacy mipmap icons
+            for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+              dens="${pair%%:*}"
+              px="${pair##*:}"
+              dir="android/app/src/main/res/mipmap-${dens}"
+              mkdir -p "$dir"
+              convert "$ICON_SRC" -resize "${px}x${px}" -background none -gravity center -extent "${px}x${px}" "$dir/ic_launcher.png"
+              convert "$ICON_SRC" -resize "${px}x${px}" -background none -gravity center -extent "${px}x${px}" "$dir/ic_launcher_round.png"
+              # foreground slightly inset for adaptive icons
+              fg=$(( px * 72 / 100 ))
+              convert "$ICON_SRC" -resize "${fg}x${fg}" -background none -gravity center -extent "${px}x${px}" "$dir/ic_launcher_foreground.png"
+            done
+            # anydpi adaptive icon XML (API 26+)
+            ANY="android/app/src/main/res/mipmap-anydpi-v26"
+            mkdir -p "$ANY"
+            cat > "$ANY/ic_launcher.xml" <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/splash_background"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>
+XML
+            cp "$ANY/ic_launcher.xml" "$ANY/ic_launcher_round.xml"
+            # notification small icon (monochrome-ish fallback)
+            convert "$ICON_SRC" -resize 48x48 -colorspace Gray "$DRAW/ic_stat_d4exam.png" || true
+            echo "OK: D4EXAM launcher icons written"
+            ls -la android/app/src/main/res/mipmap-xxxhdpi/ || true
           fi
 
           MAN="android/app/src/main/AndroidManifest.xml"
@@ -128,16 +170,24 @@ jobs:
             fi
           done
 
+          # Ensure launcher uses @mipmap/ic_launcher
+          if ! grep -q 'android:icon="@mipmap/ic_launcher"' "$MAN"; then
+            sed -i 's|android:icon="[^"]*"|android:icon="@mipmap/ic_launcher"|' "$MAN" || true
+          fi
+
           test -f android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java
           test -f android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
           test -f android/app/src/main/java/com/d4exam/app/MainActivity.java
+          # MainActivity must NOT reference androidx SplashScreen (crash source)
+          if grep -q 'androidx.core.splashscreen' android/app/src/main/java/com/d4exam/app/MainActivity.java; then
+            echo "ERROR: MainActivity still imports SplashScreen API"
+            exit 1
+          fi
           grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'ScreenSharePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'android.permission.VIBRATE' "$MAN"
-          echo "OK: native plugins + VIBRATE"
-          ls -la "$DRAW" || true
+          echo "OK: native plugins + themes + icon"
 
-      # Capacitor 8 official minimums: compileSdk 36 / targetSdk 36
       - name: Pin compileSdk 36 (Capacitor 8 requirement)
         run: |
           set -euo pipefail
@@ -170,35 +220,30 @@ jobs:
         run: |
           set -euo pipefail
           bunx cap sync android
-          # Re-pin after sync (cap may rewrite variables)
           if [ -f android/variables.gradle ]; then
             sed -i 's/compileSdkVersion *= *[0-9]*/compileSdkVersion = 36/' android/variables.gradle
             sed -i 's/targetSdkVersion *= *[0-9]*/targetSdkVersion = 36/' android/variables.gradle
             sed -i 's/minSdkVersion *= *[0-9]*/minSdkVersion = 24/' android/variables.gradle
-            cat android/variables.gradle
           fi
-          # cap sync can restore splash.png — de-dupe again
+          # Re-apply native MainActivity (cap sync must not wipe plugins)
+          cp -a native-android/app/src/main/java/com/d4exam/app/. \
+            android/app/src/main/java/com/d4exam/app/
+          # Re-apply styles/colors + splash de-dupe
+          VALS="android/app/src/main/res/values"
           DRAW="android/app/src/main/res/drawable"
+          mkdir -p "$VALS" "$DRAW"
+          cp -f native-android/app/src/main/res/values/colors.xml "$VALS/" 2>/dev/null || true
+          cp -f native-android/app/src/main/res/values/styles.xml "$VALS/" 2>/dev/null || true
           if [ -f "$DRAW/splash.xml" ]; then
             rm -f "$DRAW"/splash.png "$DRAW"/splash.jpg "$DRAW"/splash.webp "$DRAW"/splash.gif
           fi
-          for xml in "$DRAW"/*.xml; do
-            [ -f "$xml" ] || continue
-            base="$(basename "$xml" .xml)"
-            for ext in png jpg jpeg webp gif; do
-              rm -f "$DRAW/${base}.${ext}"
-            done
-          done
-          # Re-apply overlay colors if present
-          if [ -f native-android/app/src/main/res/values/colors.xml ]; then
-            mkdir -p android/app/src/main/res/values
-            cp -f native-android/app/src/main/res/values/colors.xml android/app/src/main/res/values/
-          fi
           chmod +x android/gradlew
+          if grep -q 'androidx.core.splashscreen' android/app/src/main/java/com/d4exam/app/MainActivity.java; then
+            echo "ERROR: SplashScreen API reappeared after sync"
+            exit 1
+          fi
           grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
-          grep -q 'android.permission.VIBRATE' android/app/src/main/AndroidManifest.xml
-          echo "OK: sync complete (compileSdk 36, splash de-duped)"
-          ls -la "$DRAW" || true
+          echo "OK: sync complete — local SPA + safe MainActivity"
 
       - name: Build debug APK
         run: |
@@ -214,21 +259,10 @@ jobs:
           fi
           export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          test -n "$ANDROID_HOME"
-          test -d "$ANDROID_HOME"
-          ls -la "$ANDROID_HOME/platforms" || true
-          test -d "$ANDROID_HOME/platforms/android-36" || {
-            echo "Installing android-36 platform..."
-            sdkmanager "platforms;android-36" "build-tools;36.0.0"
-          }
+          test -n "$ANDROID_HOME" && test -d "$ANDROID_HOME"
+          test -d "$ANDROID_HOME/platforms/android-36" || sdkmanager "platforms;android-36" "build-tools;36.0.0"
           cd android
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          cat local.properties
-          echo "===== variables.gradle ====="
-          cat variables.gradle || true
-          echo "===== drawable dir ====="
-          ls -la app/src/main/res/drawable/ || true
           set +e
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle-assemble.log
           STATUS=${PIPESTATUS[0]}

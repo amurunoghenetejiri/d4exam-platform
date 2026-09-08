@@ -3,50 +3,27 @@ package com.d4exam.app;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.Window;
 import android.view.View;
-import androidx.core.splashscreen.SplashScreen;
+import android.view.Window;
 import com.getcapacitor.BridgeActivity;
 
 /**
- * D4EXAM main activity.
+ * D4EXAM main activity — local bundled SPA only (no Vercel server.url).
  *
- * Native splash (Theme.SplashScreen + Capacitor SplashScreen) shows the branded
- * D4EXAM artwork immediately on cold start — offline, no Vercel dependency.
- * Plugins registered before super.onCreate as required by Capacitor.
+ * Do NOT call androidx.core.splashscreen.SplashScreen.installSplashScreen here:
+ * that requires Theme.SplashScreen + core-splashscreen and was crashing on cold start
+ * when Cap regenerated the Android project without those pieces.
+ * Splash is handled by windowBackground + Capacitor SplashScreen plugin + web boot UI.
  */
 public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
-    // Android 12+ system splash → seamless handoff to Capacitor splash drawable
-    SplashScreen splash = SplashScreen.installSplashScreen(this);
-    splash.setKeepOnScreenCondition(() -> false);
-
+    // Register native plugins BEFORE super.onCreate (Capacitor requirement)
     registerPlugin(ExamImmersivePlugin.class);
     registerPlugin(ScreenSharePlugin.class);
+
     super.onCreate(savedInstanceState);
     applyChromeColors();
-    try {
-      Window w = getWindow();
-      if (w != null) {
-        w.setStatusBarColor(Color.parseColor("#0b1b3a"));
-        w.setNavigationBarColor(Color.parseColor("#0b1b3a"));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-          w.setNavigationBarContrastEnforced(false);
-        }
-      }
-    } catch (Exception ignored) { }
-
-    // Subtle fade-in of web content after splash (decorative only).
-    try {
-      View content = findViewById(android.R.id.content);
-      if (content != null) {
-        content.setAlpha(0f);
-        content.animate().alpha(1f).setDuration(350).start();
-      }
-    } catch (Throwable ignored) {
-      // Never block launch
-    }
   }
 
   @Override
@@ -73,7 +50,7 @@ public class MainActivity extends BridgeActivity {
         decor.setSystemUiVisibility(flags);
       }
     } catch (Exception ignored) {
+      // Never block launch
     }
   }
-
 }

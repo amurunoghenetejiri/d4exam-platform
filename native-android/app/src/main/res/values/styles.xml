@@ -1,33 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
+    <!-- Safe themes: no Theme.SplashScreen (avoids missing core-splashscreen crash) -->
+
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
     </style>
 
-    <!-- Post-splash app theme: status bar navy, system nav bar WHITE (matches in-app bottom nav) -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
         <item name="android:statusBarColor">@color/splash_background</item>
-        <item name="android:navigationBarColor">#FFFFFF</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:navigationBarColor">@color/splash_background</item>
+        <item name="android:windowBackground">@color/splash_background</item>
     </style>
 
-    <!--
-      System launch splash = solid app theme navy only (no centered logo).
-      AnimatedSplash is the only branded screen (logo + SMART. SECURE. SEAMLESS.).
-    -->
-    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
-        <item name="windowSplashScreenIconBackgroundColor">@color/splash_background</item>
-        <item name="windowSplashScreenAnimationDuration">0</item>
-        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
-        <item name="android:windowBackground">@color/splash_background</item>
+    <!-- Launch theme: solid navy only — matches branded boot screen in index.html -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowBackground">@drawable/splash</item>
         <item name="android:statusBarColor">@color/splash_background</item>
         <item name="android:navigationBarColor">@color/splash_background</item>
     </style>
