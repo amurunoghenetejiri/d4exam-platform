@@ -1,0 +1,224 @@
+name: FIX-MIC-SUBSCRIBER
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/FIX-MIC-SUBSCRIBER.yml"
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure live mic subscriber + CBT audio + haptic
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          # --- Officer live monitor: add missing startLiveMicSubscriber effect ---
+          op = Path("src/routes/officer.live-monitor.tsx")
+          o = op.read_text()
+          changed = False
+
+          if "startLiveMicSubscriber" not in o:
+              o = o.replace(
+                  'from "@/lib/live-video";',
+                  'from "@/lib/live-video";\nimport {\n  startLiveMicSubscriber,\n  playMicChunk,\n  type LiveMicChunkPayload,\n} from "@/lib/live-audio";',
+              )
+              changed = True
+
+          if "MicOff" not in o:
+              o = o.replace("Monitor,", "Monitor,\n  Mic,\n  MicOff,")
+              changed = True
+
+          if "audioMuted" not in o:
+              o = o.replace(
+                  "const [selectedId, setSelectedId] = useState<string | null>(null);",
+                  "const [selectedId, setSelectedId] = useState<string | null>(null);\n  const [audioMuted, setAudioMuted] = useState(true);\n  const audioCtxRef = useRef<AudioContext | null>(null);\n  const audioMutedRef = useRef(true);\n  const selectedIdRef = useRef<string | null>(null);\n  audioMutedRef.current = audioMuted;\n  selectedIdRef.current = selectedId;",
+              )
+              changed = True
+
+          mic_effect = '''
+  useEffect(() => {
+    if (!schoolId) return;
+    const sub = startLiveMicSubscriber({
+      schoolId,
+      onChunk: (payload: LiveMicChunkPayload) => {
+        const focused = selectedIdRef.current;
+        const muted = audioMutedRef.current;
+        let play = false;
+        if (focused) {
+          play = payload.attemptId === focused;
+        } else {
+          play = !muted;
+        }
+        if (!play) return;
+        try {
+          if (!audioCtxRef.current) {
+            const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+            audioCtxRef.current = new AC();
+          }
+          const ctx = audioCtxRef.current;
+          if (ctx.state === "suspended") void ctx.resume();
+          playMicChunk(ctx, payload, focused ? 1.15 : 0.55);
+        } catch {
+          /* ignore */
+        }
+      },
+    });
+    return () => sub.stop();
+  }, [schoolId]);
+'''
+
+          if "startLiveMicSubscriber({" not in o:
+              marker = "startLiveScreenSubscriber({"
+              i = o.find(marker)
+              if i < 0:
+                  raise SystemExit("screen subscriber not found")
+              end = o.find("return () => sub.stop();", i)
+              if end < 0:
+                  raise SystemExit("screen stop not found")
+              end2 = o.find("}, [schoolId]);", end)
+              if end2 < 0:
+                  raise SystemExit("schoolId deps not found")
+              end2 += len("}, [schoolId]);")
+              o = o[:end2] + "\n" + mic_effect + o[end2:]
+              changed = True
+              print("inserted mic subscriber effect")
+          else:
+              print("mic subscriber effect already present")
+
+          if "setAudioMuted" not in o or "MicOff" not in o:
+              print("WARNING: mute UI may be incomplete")
+          else:
+              print("mute UI present")
+
+          if changed:
+              op.write_text(o)
+          print("officer size", op.stat().st_size)
+
+          # --- CBT: ensure useLiveMicPublish + audio track ---
+          cp = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          if cp.stat().st_size < 1000:
+              import subprocess
+              sha = subprocess.check_output(
+                  ["bash", "-c",
+                   "git log --all --pretty=format:%H -- src/components/cbt/CbtExamSession.impl.tsx | while read h; do "
+                   "sz=$(git cat-file -s \"$h:src/components/cbt/CbtExamSession.impl.tsx\" 2>/dev/null || echo 0); "
+                   "if [ \"$sz\" -gt 10000 ]; then echo $h; break; fi; done"],
+                  text=True,
+              ).strip()
+              if not sha:
+                  raise SystemExit("no good CBT history")
+              subprocess.check_call(["git", "show", f"{sha}:src/components/cbt/CbtExamSession.impl.tsx"], stdout=open(cp, "w"))
+              print("restored CBT from", sha, "size", cp.stat().st_size)
+
+          s = cp.read_text()
+          if "useLiveMicPublish" not in s:
+              s = s.replace(
+                  'import { useLiveCamPublish } from "@/lib/use-live-cam-publish";',
+                  'import { useLiveCamPublish } from "@/lib/use-live-cam-publish";\nimport { useLiveMicPublish } from "@/lib/use-live-mic-publish";',
+              )
+          s = s.replace(
+              "audio: Boolean(security.requireMicrophone)",
+              "audio: Boolean(security.requireMicrophone || security.requireCamera)",
+          )
+          if "useLiveMicPublish({" not in s:
+              idx = s.find("useLiveScreenPublish({")
+              if idx < 0:
+                  raise SystemExit("useLiveScreenPublish missing")
+              end = s.find("});", idx) + 3
+              hook = """
+  useLiveMicPublish({
+    enabled: started && !done && !previewMode,
+    schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,
+    studentId: student?.studentId,
+    examId: id,
+    attemptId: liveAttemptId || attemptIdRef.current,
+    getStream: () => mediaStreamRef.current || liveStream,
+  });
+"""
+              s = s[:end] + hook + s[end:]
+          cp.write_text(s)
+          print("cbt size", cp.stat().st_size, "has mic", "useLiveMicPublish({" in s)
+
+          # --- ensure use-live-mic-publish exists ---
+          um = Path("src/lib/use-live-mic-publish.ts")
+          if not um.exists() or um.stat().st_size < 200:
+              um.write_text('''/**
+ * Publish student microphone PCM chunks while an exam is in progress.
+ */
+import { useEffect, useRef } from "react";
+import { startLiveMicPublisher, type LiveMicPublisher } from "@/lib/live-audio";
+
+export function useLiveMicPublish(opts: {
+  enabled: boolean;
+  schoolId?: string | null;
+  studentId?: string | null;
+  examId?: string | null;
+  attemptId?: string | null;
+  getStream: () => MediaStream | null;
+}) {
+  const pubRef = useRef<LiveMicPublisher | null>(null);
+  const getStreamRef = useRef(opts.getStream);
+  getStreamRef.current = opts.getStream;
+
+  useEffect(() => {
+    const schoolId = opts.schoolId;
+    const attemptId = opts.attemptId;
+    if (!opts.enabled || !schoolId || !attemptId) {
+      pubRef.current?.stop();
+      pubRef.current = null;
+      return;
+    }
+
+    pubRef.current?.stop();
+    pubRef.current = startLiveMicPublisher({
+      schoolId,
+      attemptId,
+      studentId: opts.studentId,
+      examId: opts.examId,
+      getStream: () => getStreamRef.current(),
+    });
+
+    return () => {
+      pubRef.current?.stop();
+      pubRef.current = null;
+    };
+  }, [opts.enabled, opts.schoolId, opts.attemptId, opts.studentId, opts.examId]);
+}
+''')
+              print("wrote use-live-mic-publish")
+          else:
+              print("use-live-mic-publish ok", um.stat().st_size)
+
+          # --- haptic must not be placeholder ---
+          hp = Path("src/lib/haptic.ts")
+          ht = hp.read_text()
+          if "PLACEHOLDER" in ht or "officer_pause" not in ht or len(ht) < 2000:
+              raise SystemExit("haptic.ts is broken / placeholder")
+          print("haptic ok", hp.stat().st_size)
+
+          la = Path("src/lib/live-audio.ts")
+          if not la.exists() or "startLiveMicPublisher" not in la.read_text():
+              raise SystemExit("live-audio.ts missing publisher")
+          print("live-audio ok", la.stat().st_size)
+
+          print("ALL CHECKS PASSED")
+          PY
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix: wire live mic subscriber on officer monitor + ensure CBT publish/audio"
+            git push
+          fi
