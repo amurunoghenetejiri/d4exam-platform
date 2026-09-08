@@ -60,7 +60,6 @@ jobs:
           fi
           echo "OK: local SPA ready"
 
-      # Proven approach: regenerate a complete Android project (includes gradlew + resources)
       - name: Generate fresh Android platform
         run: |
           set -euo pipefail
@@ -73,9 +72,14 @@ jobs:
         run: |
           set -euo pipefail
           test -d native-android
-          cp -a native-android/. android/
-          echo "Native overlay applied:"
-          find android/app/src/main/java -type f | sort
+          # Only overlay Java + res we own — do not wipe Capacitor-generated gradle/resources
+          mkdir -p android/app/src/main/java/com/d4exam/app
+          cp -a native-android/app/src/main/java/com/d4exam/app/. \
+            android/app/src/main/java/com/d4exam/app/
+          if [ -d native-android/app/src/main/res ]; then
+            cp -a native-android/app/src/main/res/. android/app/src/main/res/
+          fi
+
           MAN="android/app/src/main/AndroidManifest.xml"
           if ! grep -q 'ScreenCaptureService' "$MAN"; then
             sed -i 's|</application>|        <service android:name=".ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />\n    </application>|' "$MAN"
@@ -92,16 +96,28 @@ jobs:
               sed -i "s|</manifest>|    <uses-permission android:name=\"$perm\" />\n</manifest>|" "$MAN"
             fi
           done
+
+          # Force SDK levels that CI installs (avoid compileSdk 36 without platform)
+          if [ -f android/variables.gradle ]; then
+            sed -i 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/' android/variables.gradle
+            sed -i 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/' android/variables.gradle
+          fi
+
           grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'ScreenSharePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'android.permission.VIBRATE' "$MAN"
-          echo "OK: plugins + VIBRATE permission"
+          echo "OK: plugins + VIBRATE + compileSdk 35"
+          cat android/variables.gradle || true
 
       - name: Capacitor sync
         run: |
           set -euo pipefail
           bunx cap sync android
-          test -f android/gradlew
+          # Re-apply SDK pin after sync (cap can rewrite variables)
+          if [ -f android/variables.gradle ]; then
+            sed -i 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/' android/variables.gradle
+            sed -i 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/' android/variables.gradle
+          fi
           chmod +x android/gradlew
 
       - name: Set up JDK 21
@@ -112,21 +128,49 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools platforms;android-35 platforms;android-34 build-tools;35.0.0 build-tools;34.0.0
 
-      - name: Accept licenses
+      - name: Install SDK packages + licenses
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          yes | sdkmanager --licenses >/tmp/sdk-licenses.txt 2>&1 || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "platforms;android-34" \
+            "build-tools;35.0.0" \
+            "build-tools;34.0.0"
+          sdkmanager --list_installed | head -40
 
       - name: Assemble debug APK
         working-directory: android
         run: |
           set -euo pipefail
           export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          cat local.properties
+          cat variables.gradle || true
+          set +e
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle-assemble.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            echo "===== GRADLE FAILURE (last 150 lines) ====="
+            tail -n 150 /tmp/gradle-assemble.log
+            exit "$STATUS"
+          fi
+
+      - name: Upload Gradle log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-assemble-log
+          path: /tmp/gradle-assemble.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

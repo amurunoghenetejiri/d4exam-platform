@@ -1,8 +1,8 @@
 /**
  * CBT exam vibration (motor only — no sound).
  *
- * On the native APK: uses ExamImmersive.vibrate (reliable Android Vibrator API).
- * On web: navigator.vibrate (Chrome/Android browser). iOS Safari is generally a no-op.
+ * On the native APK: uses ExamImmersive.vibrate (Android Vibrator / VibratorManager).
+ * On web: navigator.vibrate. iOS Safari is generally a no-op.
  */
 
 import { Capacitor, registerPlugin } from "@capacitor/core";
@@ -20,7 +20,7 @@ export type HapticKind =
   | "light"
   | "strong";
 
-/** [delay, on, delay, on, …] milliseconds — same shape as navigator.vibrate */
+/** [delay, on, delay, on, …] ms — same shape as navigator.vibrate */
 const PATTERNS: Record<HapticKind, number[]> = {
   start: [0, 120, 50, 160],
   none: [0, 40, 50, 45, 50, 50],
@@ -38,7 +38,7 @@ const PATTERNS: Record<HapticKind, number[]> = {
 };
 
 type ExamImmersivePlugin = {
-  vibrate: (opts: { pattern?: number[]; ms?: number }) => Promise<{ ok?: boolean }>;
+  vibrate: (opts: { pattern?: number[]; ms?: number }) => Promise<{ ok?: boolean; error?: string }>;
   enter?: () => Promise<void>;
   exit?: () => Promise<void>;
 };
@@ -69,14 +69,14 @@ function clearTimers() {
   timers = [];
 }
 
-/** Prefer native plugin on APK; fall back to navigator.vibrate on web. */
+/** Prefer native ExamImmersive on APK; fall back to navigator.vibrate on web. */
 async function vibratePattern(pattern: number[]): Promise<boolean> {
   const p = pattern.length ? pattern : [0, 120];
   try {
     if (Capacitor.isNativePlatform()) {
       const ret = await ExamImmersive.vibrate({ pattern: p });
       if (ret && ret.ok === false) {
-        // still try web fallback inside WebView
+        // fall through to web vibrate inside WebView
       } else {
         return true;
       }
@@ -102,6 +102,7 @@ function vibrateFireAndForget(pattern: number[]) {
 export function primeHaptics() {
   primed = true;
   clearTimers();
+  // Tiny tick unlocks some OEM motors, then full start pattern
   vibrateFireAndForget([0, 1]);
   const pattern = PATTERNS.start;
   vibrateFireAndForget(pattern);
