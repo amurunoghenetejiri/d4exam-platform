@@ -1,1 +1,68 @@
-PLACEHOLDER
+name: Build Android APK (local SPA)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "android/**"
+      - "capacitor.config.*"
+      - "scripts/prepare-capacitor-dist.mjs"
+      - "vite.capacitor.config.ts"
+      - "src/capacitor-main.tsx"
+      - "package.json"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build local Capacitor SPA (no Vercel)
+        run: node scripts/prepare-capacitor-dist.mjs
+        env:
+          NODE_ENV: production
+
+      - name: Verify local SPA (no server.url)
+        run: |
+          set -e
+          test -f dist/index.html
+          test -d dist/assets
+          if grep -q '"url"' capacitor.config.json 2>/dev/null; then
+            echo "ERROR: server.url must not be set in capacitor.config.json"
+            cat capacitor.config.json
+            exit 1
+          fi
+          if grep -q 'server.url\|vercel.app' capacitor.config.ts 2>/dev/null; then
+            if grep -E 'url:\s*["'\'']https?://' capacitor.config.ts; then
+              echo "ERROR: server.url must not point at a remote URL"
+              exit 1
+            fi
+          fi
+          echo "OK: local SPA present, no remote server.url"
+
+      - name: Capacitor sync
+        run: npx cap sync android
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Assemble debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: d4exam-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
