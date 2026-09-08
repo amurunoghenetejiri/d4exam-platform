@@ -1,9 +1,8 @@
 /**
  * CBT exam vibration (motor only — no sound).
  *
- * Android Chrome: navigator.vibrate
- * Capacitor native: @capacitor/haptics when available
- * iOS Safari: generally no-op for vibrate; Capacitor path used in shell
+ * Android Chrome supports navigator.vibrate.
+ * iOS Safari generally does not — calls are no-ops there.
  */
 
 export type HapticKind =
@@ -72,41 +71,11 @@ function vibrateRaw(arg: number | number[]): boolean {
   }
 }
 
-/** Optional Capacitor Haptics (native Android/iOS shell). */
-async function capacitorImpact(style: "light" | "medium" | "heavy") {
-  try {
-    const mod = await import("@capacitor/haptics").catch(() => null);
-    if (!mod?.Haptics) return false;
-    const ImpactStyle = mod.ImpactStyle ?? { Light: "LIGHT", Medium: "MEDIUM", Heavy: "HEAVY" };
-    const map = {
-      light: ImpactStyle.Light ?? "LIGHT",
-      medium: ImpactStyle.Medium ?? "MEDIUM",
-      heavy: ImpactStyle.Heavy ?? "HEAVY",
-    };
-    await mod.Haptics.impact({ style: map[style] as never });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function capacitorVibrate(durationMs: number) {
-  try {
-    const mod = await import("@capacitor/haptics").catch(() => null);
-    if (!mod?.Haptics?.vibrate) return false;
-    await mod.Haptics.vibrate({ duration: durationMs });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function pulseTrain(ons: number[], gap = 60) {
   let delay = 0;
   for (const ms of ons) {
     const id = window.setTimeout(() => {
       vibrateRaw(ms);
-      void capacitorVibrate(ms);
     }, delay);
     timers.push(id);
     delay += ms + gap;
@@ -121,20 +90,15 @@ function extractOns(pattern: number[]): number[] {
   return ons.length ? ons : [40, 45, 50];
 }
 
-function kindImpact(kind: HapticKind): "light" | "medium" | "heavy" {
-  if (kind === "none" || kind === "unclear" || kind === "light" || kind === "tab_switch") return "light";
-  if (kind === "start" || kind === "officer_pause") return "medium";
-  return "heavy";
-}
-
 export function primeHaptics() {
   primed = true;
   clearTimers();
   vibrateRaw(0);
   const pattern = PATTERNS.start;
   const ok = vibrateRaw(pattern);
-  if (!ok) pulseTrain(extractOns(pattern), 60);
-  void capacitorImpact("medium");
+  if (!ok) {
+    pulseTrain(extractOns(pattern), 60);
+  }
   const id = window.setTimeout(() => {
     vibrateRaw(pattern);
   }, 100);
@@ -158,7 +122,6 @@ export function haptic(kind: HapticKind) {
   vibrateRaw(0);
 
   let ok = vibrateRaw(pattern);
-  void capacitorImpact(kindImpact(kind));
 
   const idRetry = window.setTimeout(() => {
     if (!ok) ok = vibrateRaw(pattern);
@@ -177,7 +140,6 @@ export function haptic(kind: HapticKind) {
       window.setTimeout(() => pulseTrain([180, 220, 260], 90), 80),
       window.setTimeout(() => vibrateRaw([220, 90, 280]), 4000),
     );
-    void capacitorVibrate(280);
   }
 
   if (kind === "officer_submit") {
@@ -186,7 +148,6 @@ export function haptic(kind: HapticKind) {
       window.setTimeout(() => vibrateRaw([200, 80, 280]), 1800),
       window.setTimeout(() => pulseTrain([160, 200, 240], 85), 70),
     );
-    void capacitorVibrate(320);
   }
 
   if (kind === "officer_pause") {
