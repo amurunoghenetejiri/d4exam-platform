@@ -10,10 +10,9 @@ import com.getcapacitor.BridgeActivity;
 /**
  * D4EXAM main activity — local bundled SPA only (no Vercel server.url).
  *
- * Do NOT call androidx.core.splashscreen.SplashScreen.installSplashScreen here:
- * that requires Theme.SplashScreen + core-splashscreen and was crashing on cold start
- * when Cap regenerated the Android project without those pieces.
- * Splash is handled by windowBackground + Capacitor SplashScreen plugin + web boot UI.
+ * Do not use the AndroidX system splash install API here: it needs a matching
+ * theme + dependency and caused instant cold-start crashes when CI regenerates
+ * the Android project. Splash is handled by windowBackground + Cap plugin + web boot UI.
  */
 public class MainActivity extends BridgeActivity {
   @Override
