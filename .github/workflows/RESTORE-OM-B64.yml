@@ -1,0 +1,15 @@
+name: RESTORE-OM-B64
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/RESTORE-OM-B64.yml"
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder trigger - full file next
+        run: echo starting
