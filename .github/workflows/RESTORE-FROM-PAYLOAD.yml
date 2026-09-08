@@ -1,0 +1,44 @@
+name: RESTORE-FROM-PAYLOAD
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".d4exam-payload/restore/**"
+      - ".github/workflows/RESTORE-FROM-PAYLOAD.yml"
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode payloads and commit
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          import gzip, base64, pathlib
+          root = pathlib.Path(".d4exam-payload/restore")
+          def assemble(prefix, dest):
+              parts = sorted(root.glob(prefix + ".*.b64"))
+              if not parts:
+                  print("skip", prefix)
+                  return False
+              b64 = "".join(p.read_text().strip() for p in parts)
+              data = gzip.decompress(base64.b64decode(b64))
+              pathlib.Path(dest).write_bytes(data)
+              print("wrote", dest, len(data))
+              return True
+          ok = False
+          ok |= assemble("cbt", "src/components/cbt/CbtExamSession.impl.tsx")
+          ok |= assemble("olm", "src/routes/officer.live-monitor.tsx")
+          if not ok:
+              raise SystemExit("nothing assembled")
+          PY
+          test $(wc -c < src/components/cbt/CbtExamSession.impl.tsx) -gt 1000
+          grep -q useLiveMicPublish src/components/cbt/CbtExamSession.impl.tsx
+          grep -q startLiveMicSubscriber src/routes/officer.live-monitor.tsx
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
+          git commit -m "fix: restore CBT exam session + live mic for officer monitor"
+          git push
