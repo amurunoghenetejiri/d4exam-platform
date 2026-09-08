@@ -32,18 +32,17 @@
   <div>
     <div class="mark">D4</div>
     <h1>You're offline</h1>
-    <p>Connect to the Internet and tap Retry to open D4EXAM. After you use the app online, cached pages and data stay available when the connection is weak.</p>
+    <p>Connect to the Internet and tap Retry. D4EXAM loads from this device — no website required. After you use the app online, cached pages stay available when the connection is weak.</p>
     <button type="button" id="retry">Retry</button>
-    <p class="hint">Exam start and new notifications still need a live connection.</p>
+    <p class="hint">Exam start, live monitoring, and new notifications still need a live connection to Supabase.</p>
   </div>
   <script>
     (function () {
-      var LIVE = "https://d4exam-platform.vercel.app/";
       function go() {
         try {
-          window.location.replace(LIVE + "?offline_retry=" + Date.now());
+          window.location.replace("./index.html?retry=" + Date.now());
         } catch (e) {
-          window.location.href = LIVE;
+          window.location.reload();
         }
       }
       document.getElementById("retry").addEventListener("click", go);
