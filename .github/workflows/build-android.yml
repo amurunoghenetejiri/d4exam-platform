@@ -22,21 +22,24 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.2.19"
 
-      - name: Setup Node (for npx / Vite helpers)
+      - name: Setup Node (for Vite / cap CLI helpers)
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
+      # Do NOT use --frozen-lockfile: package.json and bun.lock can drift after
+      # restores / dependency bumps. Install resolves and continues.
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Build local Capacitor SPA (no Vercel)
         run: bun run build:app
         env:
           NODE_ENV: production
-          # Public client keys (set these as repo secrets so the SPA has a real Supabase URL)
+          # Same Supabase project as the Website (public client keys only).
+          # Prefer repo secrets; falls back to committed .env if present.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}

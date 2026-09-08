@@ -1,112 +1,111 @@
 # D4EXAM — Website vs Native App
 
+## Same Supabase for both products
+
+**You do not create a second Supabase project.**
+
+| Product | How it talks to Supabase |
+|---|---|
+| **Website** | Vercel + client (`VITE_SUPABASE_*`) + server keys on Vercel |
+| **App (APK)** | Client only — same `VITE_SUPABASE_URL` + same anon/publishable key |
+
+Same database, same tables, same RLS, same users, same exams.  
+The App never uses the service role key (that stays on Vercel only).
+
+Set these **once** in GitHub Actions secrets (same values as your Website / `.env`):
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY` or `VITE_SUPABASE_ANON_KEY`
+
+If secrets are empty, the build still works when `.env` is present in the repo (Vite loads it).
+
+---
+
 ## Two products, one codebase
 
 | | **Website** | **App (APK)** |
 |---|---|---|
-| **What users open** | Browser → `https://d4exam-platform.vercel.app` | Install APK on Android phone |
-| **Hosting** | Vercel (SSR + server functions) | Files baked into the APK (`dist/`) |
-| **Build command** | `bun run build` (or Vercel auto) | `bun run build:app` → `prepare-capacitor-dist.mjs` |
-| **Capacitor `server.url`** | N/A | **Never set** (must not point at Vercel) |
-| **Backend** | Supabase + Vercel server functions | Supabase client only (`VITE_` keys); server fns stubbed |
-| **Offline** | Normal browser offline | `offline.html` reloads local `./index.html` |
+| **Users open** | Browser → Vercel URL | Install APK on Android |
+| **UI / assets** | Served by Vercel (SSR) | **Bundled inside the APK** (`dist/`) — no Vercel at runtime |
+| **Backend** | Same Supabase | Same Supabase |
+| **Offline shell** | Browser cache | App opens from disk; `offline.html` if a remote resource fails |
+| **Needs network** | Yes for data | Yes for login, live exams, push, new data. Shell UI loads offline. |
 
-They share UI, routes, components, and Supabase schema.  
-They do **not** share runtime: the App never loads the Website URL.
+The App is **not** a second website. It is a native shell that loads a **local SPA**. It does **not** open `d4exam-platform.vercel.app`.
 
 ---
 
-## How the App loads (no Vercel)
+## Offline behaviour (App)
 
-1. `bun run build:app` runs `scripts/prepare-capacitor-dist.mjs`
-2. That stubs server modules, builds client SPA with `vite.capacitor.config.ts`
-3. Writes `dist/index.html` + `dist/assets/capacitor-app.js`
-4. Capacitor `webDir: "dist"` → WebView loads **local** assets only
-5. Supabase is called directly from the phone (needs network for auth/data)
+What works **without** internet:
+
+- App opens (splash → local `index.html` → SPA from `dist/`)
+- UI chrome, routes that do not need live data
+- `offline.html` if something remote fails → **Retry** reloads local `./index.html` (not Vercel)
+
+What still needs internet (same Supabase):
+
+- Login / session refresh
+- Fetching exams, materials, live monitoring
+- Push notifications
+- Submitting answers / new writes
+
+That is expected: one shared live database. Full offline exam cache can be extended later with the existing SQLite plugin; the shell is already local.
 
 ---
 
-## How to get / update the **Website**
+## How to get the Website
 
-1. Push any change to `main` (or your Vercel-connected branch).
-2. Vercel builds and deploys automatically.
-3. Open: **https://d4exam-platform.vercel.app**
-
-No extra steps. Website deploy is independent of the APK.
+1. Push to `main`
+2. Vercel deploys automatically
+3. Open your Vercel URL
 
 ---
 
-## How to get / update the **App (APK)**
+## How to get the App (APK)
 
-### Option A — GitHub Actions (recommended)
+### GitHub Actions
 
-1. Go to the repo → **Actions** → **Build Android APK (local SPA)**
-2. Click **Run workflow** → **Run workflow**
-3. When it finishes (green), open the run → **Artifacts** → download **d4exam-debug-apk**
-4. Unzip → install the `.apk` on your phone (enable “Install from unknown sources” if needed)
+1. **Actions** → **Build Android APK (local SPA)** → **Run workflow**
+2. When green → **Artifacts** → download **d4exam-debug-apk**
+3. Install the `.apk` on the phone
 
-**Required secrets** (Settings → Secrets and variables → Actions):
-
-| Secret name | Value |
-|---|---|
-| `VITE_SUPABASE_URL` | Your Supabase project URL |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` or `VITE_SUPABASE_ANON_KEY` | Your anon/public key |
-
-Without these, the SPA builds but cannot talk to Supabase until you rebuild with keys.
-
-### Option B — Local machine
+### Local
 
 ```bash
-# Install deps once
 bun install
-
-# Build local SPA + copy into Android project
 bun run cap:sync
-
-# Open Android Studio
 bun run cap:open
+# Android Studio → Build APK
+# or: cd android && ./gradlew assembleDebug
 ```
 
-In Android Studio: **Build → Build Bundle(s) / APK(s) → Build APK(s)**  
-Or: `cd android && ./gradlew assembleDebug`
-
-APK path: `android/app/build/outputs/apk/debug/app-debug.apk`
-
 ---
 
-## Is updating easy?
+## Updating
 
-| What you change | Website | App |
+| Change | Website | App |
 |---|---|---|
-| UI, pages, styles, client logic | Push → Vercel auto-deploys | Rebuild APK (`cap:sync` or CI) + reinstall |
-| Server functions / SSR only | Push → Vercel | No effect (stubs in App) |
-| Supabase schema / RLS | Apply migration (shared) | Shared — both see new schema |
-| Native plugins / AndroidManifest | N/A | Rebuild APK |
+| UI / client code | Push → live on Vercel | Rebuild APK + reinstall |
+| Supabase schema / RLS | One migration | Both products see it |
+| Native plugins | N/A | Rebuild APK |
 
-**Rule of thumb**
-
-- Everyday product changes → push once; **Website updates automatically**.
-- **App** needs a new APK build + install when you change code that ships inside the bundle (UI, client logic, native plugins).
-- Database changes apply to both as soon as you migrate Supabase.
-
-There is no “hot update” of the APK from Vercel. Each release is a new APK (or you can later add Capacitor Live Updates / CodePush if you want OTA).
+Day-to-day product work: push once → Website updates.  
+New APK only when you want a new native install.
 
 ---
 
-## Scripts (package.json)
+## Scripts
 
 ```bash
-bun run build          # Website (TanStack Start)
-bun run build:app      # App SPA only → dist/
-bun run cap:sync       # prepare-capacitor-dist + cap sync android
-bun run cap:open       # Android Studio
+bun run build       # Website (TanStack Start / Vercel)
+bun run build:app   # App SPA only → dist/
+bun run cap:sync    # prepare-capacitor-dist + cap sync android
+bun run cap:open    # Android Studio
 ```
 
----
+## Safety
 
-## Safety checks
-
-- `capacitor.config.ts` has **no** `server.url`
+- No `server.url` in Capacitor config (App never loads Vercel)
 - CI fails if a remote URL is reintroduced
-- Website routing, auth, schema, RLS, and Vercel deploy are untouched by App builds
-- App uses only public `VITE_` Supabase keys (never service role)
+- Website and schema are not changed by App builds
