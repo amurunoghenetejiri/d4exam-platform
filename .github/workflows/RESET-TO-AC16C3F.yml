@@ -1,0 +1,39 @@
+name: RESET-TO-AC16C3F
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Hard-reset main to ac16c3f and force-push
+        env:
+          TARGET: ac16c3f32633781eaad742e81ef97b42361eeeba
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Verify target exists
+          git cat-file -t "$TARGET"
+
+          # Point local main at the target commit
+          git checkout -B main "$TARGET"
+
+          echo "main is now at:"
+          git log -1 --oneline
+
+          # Force-push (needs contents:write; fails if branch protection blocks force push)
+          git push --force origin HEAD:main
+
+          echo "OK: main force-pushed to $TARGET"
