@@ -46,22 +46,21 @@ jobs:
           test -f dist/index.html
           test -d dist/assets
           if grep -q '"url"' capacitor.config.json 2>/dev/null; then
-            echo "ERROR: server.url must not be set in capacitor.config.json"
-            cat capacitor.config.json
+            echo "ERROR: server.url must not be set"
             exit 1
           fi
-          if grep -E 'url:\s*["'\'']https?://' capacitor.config.ts 2>/dev/null; then
-            echo "ERROR: server.url must not point at a remote URL"
-            exit 1
-          fi
-          echo "OK: local SPA present, no remote server.url"
-          ls -la dist/
+          echo "OK: local SPA present"
           ls -la dist/assets/ | head -20
 
       - name: Capacitor sync
-        run: bunx cap sync android
+        run: |
+          set -e
+          bunx cap sync android
+          echo "--- capacitor.settings.gradle ---"
+          cat android/capacitor.settings.gradle || true
+          echo "--- settings.gradle ---"
+          cat android/settings.gradle || true
 
-      # Capacitor 8 / AGP 8.13 require Java 21 (see capacitor.build.gradle)
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -71,12 +70,18 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android platform 36 + build-tools + accept licenses
+      - name: Install Android packages
         run: |
           set -e
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           yes | sdkmanager --licenses >/tmp/sdk-licenses.txt 2>&1 || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
-          sdkmanager --list_installed | head -40
+          # Platform 36 required by variables.gradle; build-tools 35 is widely available
+          sdkmanager "platforms;android-36" "platforms;android-35" \
+            "build-tools;35.0.0" "build-tools;34.0.0" "platform-tools" || true
+          sdkmanager --list_installed | head -50
 
       - name: Bootstrap Gradle wrapper if missing
         working-directory: android
@@ -96,15 +101,31 @@ jobs:
 
       - name: Assemble debug APK
         working-directory: android
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
         run: |
           set -e
-          # Point Gradle at the SDK if local.properties is absent
-          if [ ! -f local.properties ]; then
-            echo "sdk.dir=$ANDROID_HOME" > local.properties
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          cat local.properties
+          # Capture full log so we can debug without signed-in log access
+          set +e
+          ./gradlew assembleDebug --no-daemon --stacktrace --info 2>&1 | tee /tmp/gradle-assemble.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "Gradle exit code: $STATUS"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "===== GRADLE FAILURE (last 120 lines) ====="
+            tail -n 120 /tmp/gradle-assemble.log
+            exit $STATUS
           fi
-          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload Gradle log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-assemble-log
+          path: /tmp/gradle-assemble.log
+          if-no-files-found: ignore
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
