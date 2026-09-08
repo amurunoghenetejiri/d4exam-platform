@@ -61,21 +61,29 @@ jobs:
       - name: Capacitor sync
         run: bunx cap sync android
 
-      - name: Set up JDK 17
+      # Capacitor 8 / AGP 8.13 require Java 21 (see capacitor.build.gradle)
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Bootstrap Gradle wrapper (repo is missing gradlew)
+      - name: Install Android platform 36 + build-tools + accept licenses
+        run: |
+          set -e
+          yes | sdkmanager --licenses >/tmp/sdk-licenses.txt 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          sdkmanager --list_installed | head -40
+
+      - name: Bootstrap Gradle wrapper if missing
         working-directory: android
         run: |
           set -e
-          if [ ! -f gradlew ]; then
-            echo "gradlew missing — generating wrapper for Gradle 8.14.3"
+          if [ ! -f gradlew ] || [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "Generating Gradle 8.14.3 wrapper…"
             curl -sL -o /tmp/gradle-8.14.3-bin.zip \
               "https://services.gradle.org/distributions/gradle-8.14.3-bin.zip"
             unzip -q -o /tmp/gradle-8.14.3-bin.zip -d /tmp
@@ -84,14 +92,19 @@ jobs:
               --distribution-type all
           fi
           chmod +x gradlew
-          test -f gradlew
-          test -f gradle/wrapper/gradle-wrapper.jar
-          echo "Gradle wrapper ready"
           ./gradlew --version
 
       - name: Assemble debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: |
+          set -e
+          # Point Gradle at the SDK if local.properties is absent
+          if [ ! -f local.properties ]; then
+            echo "sdk.dir=$ANDROID_HOME" > local.properties
+          fi
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
