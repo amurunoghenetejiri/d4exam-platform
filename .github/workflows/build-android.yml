@@ -65,7 +65,7 @@ jobs:
           fi
           echo "OK: local SPA, no remote server.url"
 
-      # Proven path that produced working APKs before (platform 34 + cap add)
+      # Capacitor 8 requires compileSdk/targetSdk 36 — regenerate platform every run
       - name: Ensure complete Android platform
         run: |
           set -euo pipefail
@@ -87,7 +87,6 @@ jobs:
           fi
           if [ -d native-android/app/src/main/res/values ]; then
             mkdir -p android/app/src/main/res/values
-            # only copy colors if present; do not overwrite Capacitor styles wholesale
             cp -f native-android/app/src/main/res/values/colors.xml android/app/src/main/res/values/ 2>/dev/null || true
           fi
 
@@ -116,12 +115,15 @@ jobs:
           grep -q 'android.permission.VIBRATE' "$MAN"
           echo "OK: native plugins + VIBRATE"
 
-      - name: Pin compileSdk 34 (matches CI packages)
+      # Capacitor 8 official minimums: compileSdk 36 / targetSdk 36
+      - name: Pin compileSdk 36 (Capacitor 8 requirement)
         run: |
           set -euo pipefail
           if [ -f android/variables.gradle ]; then
-            sed -i 's/compileSdkVersion *= *[0-9]*/compileSdkVersion = 34/' android/variables.gradle
-            sed -i 's/targetSdkVersion *= *[0-9]*/targetSdkVersion = 34/' android/variables.gradle
+            sed -i 's/compileSdkVersion *= *[0-9]*/compileSdkVersion = 36/' android/variables.gradle
+            sed -i 's/targetSdkVersion *= *[0-9]*/targetSdkVersion = 36/' android/variables.gradle
+            # ensure minSdk is at least 24 (Capacitor 8)
+            sed -i 's/minSdkVersion *= *[0-9]*/minSdkVersion = 24/' android/variables.gradle
             cat android/variables.gradle
           fi
 
@@ -134,13 +136,15 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools platforms;android-34 build-tools;34.0.0
+          packages: platform-tools platforms;android-36 build-tools;36.0.0
 
       - name: Accept Android licenses
         run: |
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" || true
+          # also pull 34 as fallback if any transitive dep needs it
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" || true
 
       - name: Capacitor sync Android
         run: |
@@ -148,18 +152,19 @@ jobs:
           bunx cap sync android
           # Re-pin after sync (cap may rewrite variables)
           if [ -f android/variables.gradle ]; then
-            sed -i 's/compileSdkVersion *= *[0-9]*/compileSdkVersion = 34/' android/variables.gradle
-            sed -i 's/targetSdkVersion *= *[0-9]*/targetSdkVersion = 34/' android/variables.gradle
+            sed -i 's/compileSdkVersion *= *[0-9]*/compileSdkVersion = 36/' android/variables.gradle
+            sed -i 's/targetSdkVersion *= *[0-9]*/targetSdkVersion = 36/' android/variables.gradle
+            sed -i 's/minSdkVersion *= *[0-9]*/minSdkVersion = 24/' android/variables.gradle
+            cat android/variables.gradle
           fi
           chmod +x android/gradlew
           grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'android.permission.VIBRATE' android/app/src/main/AndroidManifest.xml
-          echo "OK: sync complete"
+          echo "OK: sync complete (compileSdk 36)"
 
       - name: Build debug APK
         run: |
           set -euo pipefail
-          # setup-android sets ANDROID_SDK_ROOT; ensure both vars + local.properties
           export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
           if [ -z "${ANDROID_SDK_ROOT}" ]; then
             for candidate in "$HOME/Android/Sdk" /usr/local/lib/android/sdk "$ANDROID_HOME"; do
@@ -174,17 +179,24 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           test -n "$ANDROID_HOME"
           test -d "$ANDROID_HOME"
+          # Confirm platform 36 is present
+          ls -la "$ANDROID_HOME/platforms" || true
+          test -d "$ANDROID_HOME/platforms/android-36" || {
+            echo "Installing android-36 platform..."
+            sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          }
           cd android
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           cat local.properties
+          echo "===== variables.gradle ====="
           cat variables.gradle || true
           set +e
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle-assemble.log
           STATUS=${PIPESTATUS[0]}
           set -e
           if [ "$STATUS" -ne 0 ]; then
-            echo "===== GRADLE FAILURE (last 200 lines) ====="
-            tail -n 200 /tmp/gradle-assemble.log
+            echo "===== GRADLE FAILURE (last 250 lines) ====="
+            tail -n 250 /tmp/gradle-assemble.log
             exit "$STATUS"
           fi
           ls -la app/build/outputs/apk/debug/ || true
