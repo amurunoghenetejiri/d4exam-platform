@@ -81,10 +81,31 @@ jobs:
           mkdir -p android/app/src/main/java/com/d4exam/app
           cp -a native-android/app/src/main/java/com/d4exam/app/. \
             android/app/src/main/java/com/d4exam/app/
+
+          DRAW="android/app/src/main/res/drawable"
+          mkdir -p "$DRAW"
           if [ -d native-android/app/src/main/res/drawable ]; then
-            mkdir -p android/app/src/main/res/drawable
-            cp -a native-android/app/src/main/res/drawable/. android/app/src/main/res/drawable/ || true
+            cp -a native-android/app/src/main/res/drawable/. "$DRAW/" || true
           fi
+
+          # Cap generates splash.png; our overlay may add splash.xml — same resource name = build fail.
+          # Prefer solid-color splash.xml (branded navy) and drop any splash bitmap.
+          if [ -f "$DRAW/splash.xml" ]; then
+            rm -f "$DRAW"/splash.png "$DRAW"/splash.jpg "$DRAW"/splash.webp "$DRAW"/splash.gif
+            echo "OK: kept splash.xml, removed splash bitmap duplicates"
+          fi
+          # Also drop any other basename collisions (foo.xml + foo.png)
+          for xml in "$DRAW"/*.xml; do
+            [ -f "$xml" ] || continue
+            base="$(basename "$xml" .xml)"
+            for ext in png jpg jpeg webp gif; do
+              if [ -f "$DRAW/${base}.${ext}" ]; then
+                echo "Removing duplicate drawable: ${base}.${ext}"
+                rm -f "$DRAW/${base}.${ext}"
+              fi
+            done
+          done
+
           if [ -d native-android/app/src/main/res/values ]; then
             mkdir -p android/app/src/main/res/values
             cp -f native-android/app/src/main/res/values/colors.xml android/app/src/main/res/values/ 2>/dev/null || true
@@ -114,6 +135,7 @@ jobs:
           grep -q 'ScreenSharePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'android.permission.VIBRATE' "$MAN"
           echo "OK: native plugins + VIBRATE"
+          ls -la "$DRAW" || true
 
       # Capacitor 8 official minimums: compileSdk 36 / targetSdk 36
       - name: Pin compileSdk 36 (Capacitor 8 requirement)
@@ -122,7 +144,6 @@ jobs:
           if [ -f android/variables.gradle ]; then
             sed -i 's/compileSdkVersion *= *[0-9]*/compileSdkVersion = 36/' android/variables.gradle
             sed -i 's/targetSdkVersion *= *[0-9]*/targetSdkVersion = 36/' android/variables.gradle
-            # ensure minSdk is at least 24 (Capacitor 8)
             sed -i 's/minSdkVersion *= *[0-9]*/minSdkVersion = 24/' android/variables.gradle
             cat android/variables.gradle
           fi
@@ -143,7 +164,6 @@ jobs:
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" || true
-          # also pull 34 as fallback if any transitive dep needs it
           sdkmanager "platforms;android-34" "build-tools;34.0.0" || true
 
       - name: Capacitor sync Android
@@ -157,10 +177,28 @@ jobs:
             sed -i 's/minSdkVersion *= *[0-9]*/minSdkVersion = 24/' android/variables.gradle
             cat android/variables.gradle
           fi
+          # cap sync can restore splash.png — de-dupe again
+          DRAW="android/app/src/main/res/drawable"
+          if [ -f "$DRAW/splash.xml" ]; then
+            rm -f "$DRAW"/splash.png "$DRAW"/splash.jpg "$DRAW"/splash.webp "$DRAW"/splash.gif
+          fi
+          for xml in "$DRAW"/*.xml; do
+            [ -f "$xml" ] || continue
+            base="$(basename "$xml" .xml)"
+            for ext in png jpg jpeg webp gif; do
+              rm -f "$DRAW/${base}.${ext}"
+            done
+          done
+          # Re-apply overlay colors if present
+          if [ -f native-android/app/src/main/res/values/colors.xml ]; then
+            mkdir -p android/app/src/main/res/values
+            cp -f native-android/app/src/main/res/values/colors.xml android/app/src/main/res/values/
+          fi
           chmod +x android/gradlew
           grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'android.permission.VIBRATE' android/app/src/main/AndroidManifest.xml
-          echo "OK: sync complete (compileSdk 36)"
+          echo "OK: sync complete (compileSdk 36, splash de-duped)"
+          ls -la "$DRAW" || true
 
       - name: Build debug APK
         run: |
@@ -179,7 +217,6 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           test -n "$ANDROID_HOME"
           test -d "$ANDROID_HOME"
-          # Confirm platform 36 is present
           ls -la "$ANDROID_HOME/platforms" || true
           test -d "$ANDROID_HOME/platforms/android-36" || {
             echo "Installing android-36 platform..."
@@ -190,6 +227,8 @@ jobs:
           cat local.properties
           echo "===== variables.gradle ====="
           cat variables.gradle || true
+          echo "===== drawable dir ====="
+          ls -la app/src/main/res/drawable/ || true
           set +e
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/gradle-assemble.log
           STATUS=${PIPESTATUS[0]}
