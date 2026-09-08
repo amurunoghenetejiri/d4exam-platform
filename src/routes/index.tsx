@@ -77,13 +77,6 @@ const roles = [
   { icon: ClipboardCheck, title: "Exam Officers", body: "Approve exams, monitor live sessions and integrity." },
 ];
 
-const stats = [
-  { value: "Live", label: "Institutions" },
-  { value: "Secure", label: "CBT delivery" },
-  { value: "Fast", label: "Results" },
-  { value: "Global", label: "Access" },
-];
-
 const plans = [
   {
     name: "Starter",
@@ -122,12 +115,19 @@ const plans = [
 function HomePage() {
   return (
     <PublicLayout>
-      <section className="relative overflow-hidden bg-slate-950 text-white">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/40 via-slate-950 to-slate-950" />
-        <div className="relative mx-auto grid w-full max-w-[1180px] gap-10 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:items-center lg:py-24">
-          <div>
-            <p className="mb-3 inline-flex items-center rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-blue-200">
-              Smart · Secure · Institutional
+      {/* Original hero: student exam background + dark navy overlay */}
+      <section className="relative min-h-[min(88vh,720px)] w-full overflow-hidden">
+        <img
+          src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1920&q=85"
+          alt="Students using laptops for online examination"
+          className="absolute inset-0 h-full w-full object-cover"
+          loading="eager"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#0b1b3a]/95 via-[#0b1b3a]/75 to-[#0b1b3a]/40" />
+        <div className="relative mx-auto flex min-h-[min(88vh,720px)] w-full max-w-[1180px] items-center px-4 py-16 sm:px-6">
+          <div className="max-w-2xl text-white">
+            <p className="mb-3 text-sm font-semibold uppercase tracking-wider text-blue-200">
+              Smart. Secure. Seamless.
             </p>
             <h1 className="text-3xl font-extrabold leading-tight sm:text-4xl lg:text-5xl">
               Smart Examination Management for Every Institution
@@ -136,17 +136,22 @@ function HomePage() {
               Conduct exams, manage students, create questions, automate marking and publish results
               seamlessly — for universities, polytechnics, colleges and technical schools.
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button size="lg" className="rounded-full px-7 font-semibold" asChild>
+            {/* Always side-by-side CTAs; smaller padding on narrow screens so they stay in one row */}
+            <div className="mt-8 flex flex-row flex-nowrap items-center gap-2 sm:gap-3">
+              <Button
+                size="lg"
+                className="h-11 shrink-0 rounded-full px-4 text-sm font-semibold sm:h-12 sm:px-7 sm:text-base"
+                asChild
+              >
                 <Link to="/school-application">
                   Apply — Full school
-                  <ArrowRight className="ml-2 h-4 w-4" />
+                  <ArrowRight className="ml-1.5 h-4 w-4 sm:ml-2" />
                 </Link>
               </Button>
               <Button
                 size="lg"
                 variant="outline"
-                className="rounded-full border-white/40 bg-white/10 px-7 font-semibold text-white hover:bg-white/20 hover:text-white"
+                className="h-11 shrink-0 rounded-full border-white/40 bg-white/10 px-4 text-sm font-semibold text-white hover:bg-white/20 hover:text-white sm:h-12 sm:px-7 sm:text-base"
                 asChild
               >
                 <Link to="/school-application?type=trial">Start Trial / Demo</Link>
@@ -163,17 +168,6 @@ function HomePage() {
               )}
             </ul>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:gap-4">
-            {stats.map((s) => (
-              <div
-                key={s.label}
-                className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm"
-              >
-                <p className="text-2xl font-extrabold text-white sm:text-3xl">{s.value}</p>
-                <p className="mt-1 text-sm text-slate-300">{s.label}</p>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
 
@@ -181,7 +175,7 @@ function HomePage() {
         <div className="mx-auto grid w-full max-w-[1180px] gap-4 px-4 py-12 sm:grid-cols-2 sm:px-6 lg:grid-cols-4">
           {features.map((f) => (
             <div key={f.title} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-700">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-primary">
                 <f.icon className="h-5 w-5" />
               </span>
               <h3 className="mt-4 text-base font-bold text-slate-900">{f.title}</h3>
@@ -200,7 +194,7 @@ function HomePage() {
           <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {steps.map((s) => (
               <div key={s.n} className="rounded-2xl border border-slate-200 bg-slate-50/80 p-5">
-                <p className="font-mono text-xs font-bold text-blue-600">{s.n}</p>
+                <p className="font-mono text-xs font-bold text-primary">{s.n}</p>
                 <h3 className="mt-2 text-base font-bold text-slate-900">{s.title}</h3>
                 <p className="mt-2 text-sm text-slate-600">{s.body}</p>
               </div>
@@ -261,7 +255,7 @@ function HomePage() {
                 key={p.name}
                 className={
                   p.highlight
-                    ? "rounded-2xl border-2 border-blue-600 bg-white p-6 shadow-md"
+                    ? "rounded-2xl border-2 border-primary bg-white p-6 shadow-md ring-2 ring-primary/20"
                     : "rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
                 }
               >
@@ -274,7 +268,7 @@ function HomePage() {
                 <ul className="mt-5 space-y-2">
                   {p.features.map((f) => (
                     <li key={f} className="flex items-start gap-2 text-sm text-slate-700">
-                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                       {f}
                     </li>
                   ))}
@@ -301,11 +295,12 @@ function HomePage() {
                 Choose full school registration or a short Trial / Demo. Super admin reviews and activates you.
               </p>
             </div>
-            <div className="flex shrink-0 flex-col gap-3 sm:flex-row">
-              <Button size="lg" className="rounded-full px-6 font-semibold" asChild>
+            {/* Side-by-side on all widths */}
+            <div className="flex shrink-0 flex-row flex-nowrap items-center gap-2 sm:gap-3">
+              <Button size="lg" className="h-11 shrink-0 rounded-full px-4 text-sm font-semibold sm:h-12 sm:px-6 sm:text-base" asChild>
                 <Link to="/school-application">Apply — Full school</Link>
               </Button>
-              <Button size="lg" variant="outline" className="rounded-full px-6 font-semibold" asChild>
+              <Button size="lg" variant="outline" className="h-11 shrink-0 rounded-full px-4 text-sm font-semibold sm:h-12 sm:px-6 sm:text-base" asChild>
                 <Link to="/school-application?type=trial">Start Trial / Demo</Link>
               </Button>
             </div>

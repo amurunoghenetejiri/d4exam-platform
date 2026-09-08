@@ -42,6 +42,8 @@ function loadLeaflet(): Promise<any> {
   });
 }
 
+type NominatimHit = { display_name: string; lat: string; lon: string };
+
 type Props = {
   lat: number | null;
   lng: number | null;
@@ -52,11 +54,35 @@ type Props = {
   onError?: (msg: string) => void;
 };
 
+async function nominatimSearch(q: string): Promise<NominatimHit[]> {
+  const url =
+    "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=10&q=" +
+    encodeURIComponent(q);
+  const res = await fetch(url, {
+    headers: { Accept: "application/json", "Accept-Language": "en" },
+  });
+  const data = (await res.json()) as NominatimHit[];
+  return Array.isArray(data) ? data : [];
+}
+
+function dedupeHits(hits: NominatimHit[]): NominatimHit[] {
+  const seen = new Set<string>();
+  const out: NominatimHit[] = [];
+  for (const h of hits) {
+    const key = `${Number(h.lat).toFixed(5)},${Number(h.lon).toFixed(5)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(h);
+  }
+  return out;
+}
+
 export function MapPinPicker({ lat, lng, onChange, city = "", state = "", country = "", onError }: Props) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Array<{ display_name: string; lat: string; lon: string }>>([]);
+  const [results, setResults] = useState<NominatimHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [ready, setReady] = useState(false);
+  const [hint, setHint] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markerRef = useRef<any>(null);
@@ -124,30 +150,62 @@ export function MapPinPicker({ lat, lng, onChange, city = "", state = "", countr
     if (!q) return;
     setSearching(true);
     setResults([]);
+    setHint("");
+    onError?.("");
     try {
-      const parts = [q, city.trim(), state.trim(), country.trim() || "Nigeria"].filter(Boolean);
-      const url =
-        "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=8&q=" +
-        encodeURIComponent(parts.join(", "));
-      const res = await fetch(url, { headers: { Accept: "application/json", "Accept-Language": "en" } });
-      const data = (await res.json()) as Array<{ display_name: string; lat: string; lon: string }>;
-      setResults(Array.isArray(data) ? data : []);
-      if (!data?.length) onError?.("No places found. Zoom the map and click the exact school location.");
-      else onError?.("");
+      const c = city.trim();
+      const st = state.trim();
+      const co = country.trim() || "Nigeria";
+
+      // Progressive queries: exact → street+area → area only → free text
+      const attempts: string[] = [];
+      attempts.push([q, c, st, co].filter(Boolean).join(", "));
+      if (c || st) attempts.push([q, c || st, co].filter(Boolean).join(", "));
+      attempts.push([q, co].filter(Boolean).join(", "));
+      attempts.push(q);
+      if (c && st) attempts.push([c, st, co].filter(Boolean).join(", "));
+      if (c) attempts.push([c, co].filter(Boolean).join(", "));
+
+      let all: NominatimHit[] = [];
+      let usedFallback = false;
+      for (let i = 0; i < attempts.length; i++) {
+        const hits = await nominatimSearch(attempts[i]);
+        if (hits.length) {
+          all = dedupeHits([...all, ...hits]);
+          if (i > 0) usedFallback = true;
+          if (all.length >= 6) break;
+        }
+        // small pause to respect Nominatim usage policy
+        if (i < attempts.length - 1) await new Promise((r) => setTimeout(r, 350));
+      }
+
+      setResults(all.slice(0, 10));
+      if (!all.length) {
+        setHint("No exact match. Zoom the map and click the nearest street or landmark.");
+        onError?.("No places found. Zoom the map and click the exact school location.");
+      } else if (usedFallback) {
+        setHint("Showing nearest / similar places. Pick one, then fine-tune by clicking the map.");
+        onError?.("");
+      } else {
+        setHint("Select a result, or click the map for a more exact pin.");
+        onError?.("");
+      }
     } catch {
+      setHint("");
       onError?.("Search failed. Zoom and click the map to pin the school.");
     } finally {
       setSearching(false);
     }
   }
 
-  function pick(r: { display_name: string; lat: string; lon: string }) {
+  function pick(r: NominatimHit) {
     const clat = Number(r.lat);
     const clng = Number(r.lon);
     if (!Number.isFinite(clat) || !Number.isFinite(clng)) return;
     onChange(clat, clng);
     setResults([]);
     setQuery(r.display_name);
+    setHint("Pin placed. Zoom and click the map if you need a more exact point.");
     onError?.("");
   }
 
@@ -158,14 +216,15 @@ export function MapPinPicker({ lat, lng, onChange, city = "", state = "", countr
         Pin school on map (optional)
       </Label>
       <p className="text-[11px] text-slate-500">
-        Search a place, or zoom and <strong>click the exact school location</strong> on the map. Super admin will see this pin.
+        Search street, school or area (uses city / state / country you entered). If the exact spot is missing,
+        pick the nearest result, then <strong>click the map</strong> for the precise pin.
       </p>
       <div className="flex gap-2">
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="h-10"
-          placeholder="Search school, campus, street, city…"
+          placeholder="e.g. Akbar Road, school name, street…"
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -173,12 +232,19 @@ export function MapPinPicker({ lat, lng, onChange, city = "", state = "", countr
             }
           }}
         />
-        <Button type="button" variant="outline" className="shrink-0 font-semibold" disabled={searching} onClick={() => void search()}>
+        <Button
+          type="button"
+          variant="outline"
+          className="shrink-0 font-semibold"
+          disabled={searching}
+          onClick={() => void search()}
+        >
           {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
         </Button>
       </div>
+      {hint ? <p className="text-[11px] text-amber-700">{hint}</p> : null}
       {results.length > 0 ? (
-        <ul className="max-h-36 space-y-1 overflow-y-auto text-left">
+        <ul className="max-h-40 space-y-1 overflow-y-auto text-left">
           {results.map((r) => (
             <li key={r.lat + r.lon + r.display_name}>
               <button
@@ -195,7 +261,9 @@ export function MapPinPicker({ lat, lng, onChange, city = "", state = "", countr
       <div className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
         <div ref={containerRef} className="h-56 w-full cursor-crosshair" style={{ minHeight: 224 }} />
         {!ready ? (
-          <div className="absolute inset-0 grid place-items-center bg-slate-100 text-xs text-slate-500">Loading map…</div>
+          <div className="absolute inset-0 grid place-items-center bg-slate-100 text-xs text-slate-500">
+            Loading map…
+          </div>
         ) : null}
       </div>
       {lat != null && lng != null ? (
@@ -232,7 +300,7 @@ export function MapPinPicker({ lat, lng, onChange, city = "", state = "", countr
           </div>
         </div>
       ) : (
-        <p className="text-[11px] text-slate-500">No pin yet — click the map to drop one.</p>
+        <p className="text-[11px] text-slate-500">No pin yet — search above or click the map to drop one.</p>
       )}
       <p className="text-[10px] text-slate-400">Map data © OpenStreetMap</p>
     </div>
