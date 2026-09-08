@@ -18,6 +18,8 @@ import {
   Loader2,
   ChevronLeft,
   Monitor,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import { PageHeader, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -52,6 +54,11 @@ import {
   isLiveScreenFrameUsable,
   type LiveScreenFramePayload,
 } from "@/lib/live-video";
+import {
+  startLiveMicSubscriber,
+  playMicChunk,
+  type LiveMicChunkPayload,
+} from "@/lib/live-audio";
 
 export const Route = createFileRoute("/officer/live-monitor")({
   head: () => ({ meta: [{ title: "Live Monitoring — D4EXAM" }] }),
@@ -223,6 +230,12 @@ function Page() {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [feedMode, setFeedMode] = useState<"camera" | "screen" | "both">("both");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [audioMuted, setAudioMuted] = useState(true);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioMutedRef = useRef(true);
+  const selectedIdRef = useRef<string | null>(null);
+  audioMutedRef.current = audioMuted;
+  selectedIdRef.current = selectedId;
   const [readAlertIds, setReadAlertIds] = useState<Set<string>>(new Set());
   const [showAlertsMobile, setShowAlertsMobile] = useState(false);
   const [frames, setFrames] = useState<Record<string, FrameEntry>>({});
@@ -1249,7 +1262,9 @@ function Page() {
                 </button>
               ))}
             </div>
-            {view === "grid" ? (
+            
+              <Button type="button" variant={audioMuted ? "outline" : "default"} size="sm" className={cn("h-7 shrink-0 px-2 text-[10px] font-semibold sm:h-8 sm:text-xs", !audioMuted && "bg-emerald-600 text-white hover:bg-emerald-700")} onClick={() => { setAudioMuted((m) => { const next = !m; if (!next) { try { if (!audioCtxRef.current) { const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext; audioCtxRef.current = new AC(); } void audioCtxRef.current?.resume(); } catch { /* ignore */ } } return next; }); }} title={audioMuted ? "Unmute student microphones" : "Mute all"}>{audioMuted ? (<><MicOff className="mr-1 h-3.5 w-3.5" /> Muted</>) : (<><Mic className="mr-1 h-3.5 w-3.5" /> Listening</>)}</Button>
+{view === "grid" ? (
             <div className="grid grid-cols-2 gap-1.5 sm:gap-2 md:grid-cols-3 xl:grid-cols-4">
               {filtered.map((c) => (
                 <StudentCard
