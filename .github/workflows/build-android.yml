@@ -20,47 +20,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-apk:
     name: Build D4EXAM Debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.2.19"
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
       - name: Install dependencies
-        run: bun install
+        run: |
+          set -euo pipefail
+          bun install
 
       - name: Build local Capacitor SPA (no Vercel)
-        run: bun run build:app
+        run: |
+          set -euo pipefail
+          bun run build:app
+          test -f dist/index.html
+          test -d dist/assets
         env:
           NODE_ENV: production
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      - name: Verify local SPA
+      - name: Verify no remote server.url
         run: |
           set -euo pipefail
-          test -f dist/index.html
-          test -d dist/assets
           if grep -E 'url:\s*["'\'']https?://' capacitor.config.ts 2>/dev/null; then
             echo "ERROR: server.url must not point at a remote URL"
             exit 1
           fi
-          echo "OK: local SPA ready"
+          echo "OK: local SPA, no remote server.url"
 
-      - name: Generate fresh Android platform
+      # Proven path that produced working APKs before (platform 34 + cap add)
+      - name: Ensure complete Android platform
         run: |
           set -euo pipefail
           rm -rf android
@@ -68,16 +74,21 @@ jobs:
           test -f android/gradlew
           chmod +x android/gradlew
 
-      - name: Overlay native plugins (screen share + immersive/vibrate)
+      - name: Overlay native plugins (vibrate + screen share)
         run: |
           set -euo pipefail
           test -d native-android
-          # Only overlay Java + res we own — do not wipe Capacitor-generated gradle/resources
           mkdir -p android/app/src/main/java/com/d4exam/app
           cp -a native-android/app/src/main/java/com/d4exam/app/. \
             android/app/src/main/java/com/d4exam/app/
-          if [ -d native-android/app/src/main/res ]; then
-            cp -a native-android/app/src/main/res/. android/app/src/main/res/
+          if [ -d native-android/app/src/main/res/drawable ]; then
+            mkdir -p android/app/src/main/res/drawable
+            cp -a native-android/app/src/main/res/drawable/. android/app/src/main/res/drawable/ || true
+          fi
+          if [ -d native-android/app/src/main/res/values ]; then
+            mkdir -p android/app/src/main/res/values
+            # only copy colors if present; do not overwrite Capacitor styles wholesale
+            cp -f native-android/app/src/main/res/values/colors.xml android/app/src/main/res/values/ 2>/dev/null || true
           fi
 
           MAN="android/app/src/main/AndroidManifest.xml"
@@ -97,30 +108,24 @@ jobs:
             fi
           done
 
-          # Force SDK levels that CI installs (avoid compileSdk 36 without platform)
-          if [ -f android/variables.gradle ]; then
-            sed -i 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/' android/variables.gradle
-            sed -i 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/' android/variables.gradle
-          fi
-
+          test -f android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java
+          test -f android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
+          test -f android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'ScreenSharePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'android.permission.VIBRATE' "$MAN"
-          echo "OK: plugins + VIBRATE + compileSdk 35"
-          cat android/variables.gradle || true
+          echo "OK: native plugins + VIBRATE"
 
-      - name: Capacitor sync
+      - name: Pin compileSdk 34 (matches CI packages)
         run: |
           set -euo pipefail
-          bunx cap sync android
-          # Re-apply SDK pin after sync (cap can rewrite variables)
           if [ -f android/variables.gradle ]; then
-            sed -i 's/compileSdkVersion = [0-9]*/compileSdkVersion = 35/' android/variables.gradle
-            sed -i 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/' android/variables.gradle
+            sed -i 's/compileSdkVersion *= *[0-9]*/compileSdkVersion = 34/' android/variables.gradle
+            sed -i 's/targetSdkVersion *= *[0-9]*/targetSdkVersion = 34/' android/variables.gradle
+            cat android/variables.gradle
           fi
-          chmod +x android/gradlew
 
-      - name: Set up JDK 21
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -128,28 +133,48 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-34 build-tools;34.0.0
 
-      - name: Install SDK packages + licenses
+      - name: Accept Android licenses
         run: |
           set -euo pipefail
-          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+
+      - name: Capacitor sync Android
+        run: |
+          set -euo pipefail
+          bunx cap sync android
+          # Re-pin after sync (cap may rewrite variables)
+          if [ -f android/variables.gradle ]; then
+            sed -i 's/compileSdkVersion *= *[0-9]*/compileSdkVersion = 34/' android/variables.gradle
+            sed -i 's/targetSdkVersion *= *[0-9]*/targetSdkVersion = 34/' android/variables.gradle
+          fi
+          chmod +x android/gradlew
+          grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
+          grep -q 'android.permission.VIBRATE' android/app/src/main/AndroidManifest.xml
+          echo "OK: sync complete"
+
+      - name: Build debug APK
+        run: |
+          set -euo pipefail
+          # setup-android sets ANDROID_SDK_ROOT; ensure both vars + local.properties
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -z "${ANDROID_SDK_ROOT}" ]; then
+            for candidate in "$HOME/Android/Sdk" /usr/local/lib/android/sdk "$ANDROID_HOME"; do
+              if [ -n "$candidate" ] && [ -d "$candidate" ]; then
+                export ANDROID_SDK_ROOT="$candidate"
+                break
+              fi
+            done
+          fi
+          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           echo "ANDROID_HOME=$ANDROID_HOME"
-          yes | sdkmanager --licenses >/tmp/sdk-licenses.txt 2>&1 || true
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "platforms;android-34" \
-            "build-tools;35.0.0" \
-            "build-tools;34.0.0"
-          sdkmanager --list_installed | head -40
-
-      - name: Assemble debug APK
-        working-directory: android
-        run: |
-          set -euo pipefail
-          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          test -n "$ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+          cd android
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           cat local.properties
           cat variables.gradle || true
@@ -158,10 +183,11 @@ jobs:
           STATUS=${PIPESTATUS[0]}
           set -e
           if [ "$STATUS" -ne 0 ]; then
-            echo "===== GRADLE FAILURE (last 150 lines) ====="
-            tail -n 150 /tmp/gradle-assemble.log
+            echo "===== GRADLE FAILURE (last 200 lines) ====="
+            tail -n 200 /tmp/gradle-assemble.log
             exit "$STATUS"
           fi
+          ls -la app/build/outputs/apk/debug/ || true
 
       - name: Upload Gradle log
         if: always()
@@ -172,7 +198,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: d4exam-debug-apk
