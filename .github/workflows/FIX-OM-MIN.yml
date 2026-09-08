@@ -1,0 +1,75 @@
+name: FIX-OM-MIN
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/FIX-OM-MIN.yml"
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore and patch
+        run: |
+          set -euo pipefail
+          git show 6a2bc7fdf2f763b8efaa1810cfaac96382678a3c:src/routes/officer.live-monitor.tsx > src/routes/officer.live-monitor.tsx
+          wc -c src/routes/officer.live-monitor.tsx
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/routes/officer.live-monitor.tsx")
+          o = p.read_text()
+          print("loaded", len(o), "audioMuted", "audioMuted" in o)
+          if "startLiveMicSubscriber({" in o:
+              print("already has effect")
+          else:
+              marker = "startLiveScreenSubscriber({"
+              i = o.find(marker)
+              assert i > 0, "screen missing"
+              end = o.find("return () => sub.stop();", i)
+              end2 = o.find("}, [schoolId]);", end) + len("}, [schoolId]);")
+              lines = [
+                  "",
+                  "  useEffect(() => {",
+                  "    if (!schoolId) return;",
+                  "    const sub = startLiveMicSubscriber({",
+                  "      schoolId,",
+                  "      onChunk: (payload: LiveMicChunkPayload) => {",
+                  "        const focused = selectedIdRef.current;",
+                  "        const muted = audioMutedRef.current;",
+                  "        let play = false;",
+                  "        if (focused) play = payload.attemptId === focused;",
+                  "        else play = !muted;",
+                  "        if (!play) return;",
+                  "        try {",
+                  "          if (!audioCtxRef.current) {",
+                  "            const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;",
+                  "            audioCtxRef.current = new AC();",
+                  "          }",
+                  "          const ctx = audioCtxRef.current;",
+                  "          if (ctx.state === \"suspended\") void ctx.resume();",
+                  "          playMicChunk(ctx, payload, focused ? 1.15 : 0.55);",
+                  "        } catch { /* ignore */ }",
+                  "      },",
+                  "    });",
+                  "    return () => sub.stop();",
+                  "  }, [schoolId]);",
+                  "",
+              ]
+              effect = "\n".join(lines)
+              o = o[:end2] + effect + o[end2:]
+              p.write_text(o)
+              print("inserted effect, size", len(o))
+          print("verify", "startLiveMicSubscriber({" in p.read_text())
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/officer.live-monitor.tsx
+          git status
+          git commit -m "fix: restore officer live-monitor + insert live mic subscriber effect" || true
+          git push || true
