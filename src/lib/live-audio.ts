@@ -1,14 +1,15 @@
 /**
  * Live student microphone chunks over Supabase Realtime broadcast.
- * Matches the JPEG cam-frame pattern: low-rate PCM (8 kHz mono) base64 chunks.
- * Officer plays when unmuted / focused on a student.
+ * 16 kHz mono PCM with linear downsample + gapless playback for natural voice.
  */
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
 export const LIVE_MIC_EVENT = "mic-chunk";
-export const LIVE_MIC_INTERVAL_MS = 220;
+export const LIVE_MIC_INTERVAL_MS = 180;
 export const LIVE_MIC_STALE_MS = 3_500;
+/** Target capture/encode rate — 16 kHz is speech-intelligible without robotic aliasing. */
+export const LIVE_MIC_TARGET_RATE = 16_000;
 
 export type LiveMicChunkPayload = {
   attemptId: string;
@@ -29,19 +30,25 @@ function floatTo16BitPCM(input: Float32Array): Int16Array {
   const out = new Int16Array(input.length);
   for (let i = 0; i < input.length; i++) {
     const s = Math.max(-1, Math.min(1, input[i]));
-    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    out[i] = s < 0 ? (s * 0x8000) | 0 : (s * 0x7fff) | 0;
   }
   return out;
 }
 
-function downsample(buffer: Float32Array, fromRate: number, toRate: number): Float32Array {
+/** Linear-interpolation downsample (much less robotic than nearest-neighbor). */
+function downsampleLinear(buffer: Float32Array, fromRate: number, toRate: number): Float32Array {
   if (toRate >= fromRate) return buffer;
   const ratio = fromRate / toRate;
   const newLen = Math.floor(buffer.length / ratio);
+  if (newLen <= 0) return new Float32Array(0);
   const result = new Float32Array(newLen);
   for (let i = 0; i < newLen; i++) {
-    const idx = Math.floor(i * ratio);
-    result[i] = buffer[idx] ?? 0;
+    const pos = i * ratio;
+    const idx = Math.floor(pos);
+    const frac = pos - idx;
+    const a = buffer[idx] ?? 0;
+    const b = buffer[Math.min(idx + 1, buffer.length - 1)] ?? a;
+    result[i] = a + (b - a) * frac;
   }
   return result;
 }
@@ -86,13 +93,13 @@ export function startLiveMicPublisher(opts: {
   let pending: Float32Array[] = [];
   let inputRate = 48000;
 
-  const TARGET_RATE = 8000;
+  const TARGET_RATE = LIVE_MIC_TARGET_RATE;
 
   function flush() {
     if (stopped || !channel || !pending.length) return;
     let total = 0;
     for (const p of pending) total += p.length;
-    if (total < 200) return;
+    if (total < Math.max(320, Math.floor(inputRate * 0.04))) return;
     const merged = new Float32Array(total);
     let off = 0;
     for (const p of pending) {
@@ -100,11 +107,12 @@ export function startLiveMicPublisher(opts: {
       off += p.length;
     }
     pending = [];
-    const down = downsample(merged, inputRate, TARGET_RATE);
-    if (down.length < 80) return;
+    const down = downsampleLinear(merged, inputRate, TARGET_RATE);
+    if (down.length < 64) return;
     let sum = 0;
     for (let i = 0; i < down.length; i++) sum += down[i] * down[i];
     const rms = Math.sqrt(sum / down.length);
+    if (rms < 0.004) return;
     const pcm = floatTo16BitPCM(down);
     const b64 = abToBase64(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength));
     const payload: LiveMicChunkPayload = {
@@ -131,14 +139,14 @@ export function startLiveMicPublisher(opts: {
       audioCtx = new AC();
       inputRate = audioCtx.sampleRate || 48000;
       source = audioCtx.createMediaStreamSource(new MediaStream(tracks));
-      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processor = audioCtx.createScriptProcessor(2048, 1, 1);
       processor.onaudioprocess = (e) => {
         if (stopped) return;
         const input = e.inputBuffer.getChannelData(0);
         pending.push(new Float32Array(input));
         let len = 0;
         for (const p of pending) len += p.length;
-        while (len > inputRate * 0.6 && pending.length > 1) {
+        while (len > inputRate * 0.5 && pending.length > 1) {
           len -= pending[0].length;
           pending.shift();
         }
@@ -254,7 +262,13 @@ export function startLiveMicSubscriber(opts: {
   };
 }
 
-/** Play a PCM chunk. Returns false if AudioContext blocked. */
+/** Per-context gapless scheduler so chunks abut without clicks/gaps. */
+const nextPlayAt = new WeakMap<AudioContext, number>();
+
+/**
+ * Play a PCM chunk with gapless scheduling.
+ * Returns false if AudioContext blocked.
+ */
 export function playMicChunk(
   ctx: AudioContext,
   payload: LiveMicChunkPayload,
@@ -267,15 +281,24 @@ export function playMicChunk(
     if (!int16.length) return false;
     const float = new Float32Array(int16.length);
     for (let i = 0; i < int16.length; i++) float[i] = int16[i] / 0x8000;
-    const buffer = ctx.createBuffer(1, float.length, payload.sampleRate || 8000);
+    const rate = payload.sampleRate || LIVE_MIC_TARGET_RATE;
+    const buffer = ctx.createBuffer(1, float.length, rate);
     buffer.copyToChannel(float, 0);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     const gain = ctx.createGain();
-    gain.gain.value = Math.max(0, Math.min(1.5, volume));
+    const now = ctx.currentTime;
+    const startAt = Math.max(now + 0.005, nextPlayAt.get(ctx) ?? now);
+    const dur = buffer.duration;
+    const vol = Math.max(0, Math.min(1.4, volume));
+    gain.gain.setValueAtTime(0, startAt);
+    gain.gain.linearRampToValueAtTime(vol, startAt + 0.008);
+    gain.gain.setValueAtTime(vol, Math.max(startAt + 0.008, startAt + dur - 0.012));
+    gain.gain.linearRampToValueAtTime(0.0001, startAt + dur);
     src.connect(gain);
     gain.connect(ctx.destination);
-    src.start();
+    src.start(startAt);
+    nextPlayAt.set(ctx, startAt + dur);
     return true;
   } catch {
     return false;

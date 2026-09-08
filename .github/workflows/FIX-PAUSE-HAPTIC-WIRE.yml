@@ -1,0 +1,69 @@
+name: FIX-PAUSE-HAPTIC-WIRE
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/FIX-PAUSE-HAPTIC-WIRE.yml"
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch pause status + student haptic on officer cmds
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+          op = Path("src/routes/officer.live-monitor.tsx")
+          o = op.read_text()
+          o = o.replace(
+              'await supabase.from("exam_attempts").update({ metadata: meta, status: "paused", updated_at: nowIso } as never)',
+              'await supabase.from("exam_attempts").update({ metadata: meta, updated_at: nowIso } as never)',
+          )
+          o = o.replace(
+              '? { ...row, status: "paused", metadata: { ...(row.metadata || {}), officer_hold: true, officer_pause: true, officer_hold_at: nowIso } }',
+              '? { ...row, status: "in_progress", metadata: { ...(row.metadata || {}), officer_hold: true, officer_pause: true, officer_hold_at: nowIso } }',
+          )
+          op.write_text(o)
+          print("officer", op.stat().st_size)
+
+          cp = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          s = cp.read_text()
+          if 'haptic("officer_pause")' not in s:
+              s = s.replace(
+                  'setPauseReason("Paused by the examination officer");\n        setPaused(true);',
+                  'setPauseReason("Paused by the examination officer");\n        setPaused(true);\n        try { haptic("officer_pause"); } catch { /* ignore */ }',
+              )
+          if 'haptic("officer_submit")' not in s:
+              s = s.replace(
+                  '} else if (cmd === "terminate") {\n        setDoneTerminated(true);\n        setPaused(false);\n        void finishAttempt(true);',
+                  '} else if (cmd === "terminate") {\n        setDoneTerminated(true);\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(true);',
+              )
+              s = s.replace(
+                  '} else if (cmd === "submit") {\n        setDoneTerminated(false);\n        setPaused(false);\n        void finishAttempt(false);',
+                  '} else if (cmd === "submit") {\n        setDoneTerminated(false);\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(false);',
+              )
+          if "primeHaptics" not in s:
+              s = s.replace(
+                  'import { haptic } from "@/lib/haptic";',
+                  'import { haptic, primeHaptics } from "@/lib/haptic";',
+              )
+              s = s.replace(
+                  'try { haptic("start"); } catch { /* ignore */ }',
+                  'try { primeHaptics(); haptic("start"); } catch { /* ignore */ }',
+              )
+          cp.write_text(s)
+          print("cbt", cp.stat().st_size)
+          print("OK")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/officer.live-monitor.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --staged --quiet; then echo No changes; else
+            git commit -m "fix: pause keeps student visible so Resume shows; wire officer pause/submit haptics"
+            git push
+          fi

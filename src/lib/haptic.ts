@@ -1,13 +1,9 @@
 /**
  * CBT exam vibration (motor only — no sound).
  *
- * Android Chrome supports navigator.vibrate.
- * iOS Safari generally does not — calls are no-ops there.
- *
- * Intensity:
- *   light (none/unclear)  → short soft pulses
- *   multi / camera_blocked → strong repeated pulses
- *   officer_warning       → longest / strongest (multi-wave)
+ * Android Chrome: navigator.vibrate
+ * Capacitor native: @capacitor/haptics when available
+ * iOS Safari: generally no-op for vibrate; Capacitor path used in shell
  */
 
 export type HapticKind =
@@ -25,30 +21,18 @@ export type HapticKind =
 
 /** [on, off, on, off, …] milliseconds */
 const PATTERNS: Record<HapticKind, number[]> = {
-  // Short buzz when student taps Start Exam
   start: [120, 50, 160],
-
-  // Light warning — face not seen (soft, not aggressive)
   none: [40, 50, 45, 50, 50],
   unclear: [35, 45, 40, 45, 45],
   light: [40, 50, 45],
-
-  // Multiple faces — strong / loud haptic
   multi: [100, 50, 120, 50, 140, 60, 160],
   strong: [100, 50, 120, 50, 140, 60, 160],
   camera_blocked: [90, 45, 110, 45, 130, 55, 150],
-
   tab_switch: [60, 40, 80],
-
-  // Officer warning — longest and strongest
   officer_warning: [
     140, 60, 160, 60, 180, 70, 200, 80, 220, 90, 250, 100, 280,
   ],
-
-  // Officer forced pause / hold
   officer_pause: [100, 50, 120, 50, 160, 70, 180],
-
-  // Officer force-submit / terminate / auto-submit
   officer_submit: [160, 60, 200, 70, 240, 80, 280, 90, 320],
 };
 
@@ -88,12 +72,41 @@ function vibrateRaw(arg: number | number[]): boolean {
   }
 }
 
-/** Fallback when full pattern fails: sequential short pulses. */
+/** Optional Capacitor Haptics (native Android/iOS shell). */
+async function capacitorImpact(style: "light" | "medium" | "heavy") {
+  try {
+    const mod = await import("@capacitor/haptics").catch(() => null);
+    if (!mod?.Haptics) return false;
+    const ImpactStyle = mod.ImpactStyle ?? { Light: "LIGHT", Medium: "MEDIUM", Heavy: "HEAVY" };
+    const map = {
+      light: ImpactStyle.Light ?? "LIGHT",
+      medium: ImpactStyle.Medium ?? "MEDIUM",
+      heavy: ImpactStyle.Heavy ?? "HEAVY",
+    };
+    await mod.Haptics.impact({ style: map[style] as never });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function capacitorVibrate(durationMs: number) {
+  try {
+    const mod = await import("@capacitor/haptics").catch(() => null);
+    if (!mod?.Haptics?.vibrate) return false;
+    await mod.Haptics.vibrate({ duration: durationMs });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function pulseTrain(ons: number[], gap = 60) {
   let delay = 0;
   for (const ms of ons) {
     const id = window.setTimeout(() => {
       vibrateRaw(ms);
+      void capacitorVibrate(ms);
     }, delay);
     timers.push(id);
     delay += ms + gap;
@@ -108,25 +121,26 @@ function extractOns(pattern: number[]): number[] {
   return ons.length ? ons : [40, 45, 50];
 }
 
-/**
- * Unlock vibration on strict browsers and buzzes on start.
- */
+function kindImpact(kind: HapticKind): "light" | "medium" | "heavy" {
+  if (kind === "none" || kind === "unclear" || kind === "light" || kind === "tab_switch") return "light";
+  if (kind === "start" || kind === "officer_pause") return "medium";
+  return "heavy";
+}
+
 export function primeHaptics() {
   primed = true;
   clearTimers();
   vibrateRaw(0);
   const pattern = PATTERNS.start;
   const ok = vibrateRaw(pattern);
-  if (!ok) {
-    pulseTrain(extractOns(pattern), 60);
-  }
+  if (!ok) pulseTrain(extractOns(pattern), 60);
+  void capacitorImpact("medium");
   const id = window.setTimeout(() => {
     vibrateRaw(pattern);
   }, 100);
   timers.push(id);
 }
 
-/** Keep activation alive while the student taps the exam UI. */
 export function refreshHapticUnlock() {
   primed = true;
   vibrateRaw(1);
@@ -143,22 +157,19 @@ export function haptic(kind: HapticKind) {
   clearTimers();
   vibrateRaw(0);
 
-  // Primary full pattern
   let ok = vibrateRaw(pattern);
+  void capacitorImpact(kindImpact(kind));
 
-  // Immediate retry (some Android WebViews need a second call)
   const idRetry = window.setTimeout(() => {
     if (!ok) ok = vibrateRaw(pattern);
   }, 35);
   timers.push(idRetry);
 
-  // Fallback pulse train
   const idFb = window.setTimeout(() => {
     if (!ok) pulseTrain(ons, 70);
   }, 70);
   timers.push(idFb);
 
-  // Officer warning: extend the motor much longer (2–3 extra waves)
   if (kind === "officer_warning") {
     timers.push(
       window.setTimeout(() => vibrateRaw([180, 70, 200, 70, 240]), 900),
@@ -166,6 +177,7 @@ export function haptic(kind: HapticKind) {
       window.setTimeout(() => pulseTrain([180, 220, 260], 90), 80),
       window.setTimeout(() => vibrateRaw([220, 90, 280]), 4000),
     );
+    void capacitorVibrate(280);
   }
 
   if (kind === "officer_submit") {
@@ -174,6 +186,7 @@ export function haptic(kind: HapticKind) {
       window.setTimeout(() => vibrateRaw([200, 80, 280]), 1800),
       window.setTimeout(() => pulseTrain([160, 200, 240], 85), 70),
     );
+    void capacitorVibrate(320);
   }
 
   if (kind === "officer_pause") {
@@ -183,15 +196,13 @@ export function haptic(kind: HapticKind) {
     );
   }
 
-  // Multi-face: sustained strong
-  if (kind === "multi" || kind === "strong") {
+  if (kind === "multi" || kind === "strong" || kind === "camera_blocked") {
     timers.push(
       window.setTimeout(() => vibrateRaw([120, 50, 140, 50, 160]), 900),
       window.setTimeout(() => pulseTrain([100, 130, 150], 80), 70),
     );
   }
 
-  // No-face / light: short soft only (no long follow-up)
   if (kind === "none" || kind === "unclear" || kind === "light") {
     timers.push(window.setTimeout(() => pulseTrain([40, 45, 50], 55), 60));
   }
