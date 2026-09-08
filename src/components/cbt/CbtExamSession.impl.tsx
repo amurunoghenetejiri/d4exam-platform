@@ -22,7 +22,7 @@ import { logSecurityEvent } from "@/lib/cbt-security";
 import { mapFaceSecurityEvent } from "@/lib/live-monitor";
 import { openCameraStream, ensureMicrophonePermission } from "@/native/cameraService";
 import { enterExamImmersive, exitExamImmersive } from "@/native/statusBar";
-import { haptic } from "@/lib/haptic";
+import { haptic, primeHaptics } from "@/lib/haptic";
 import { startScreenShareStream, onScreenShareEnded, stopScreenShareStream, holdExamScreenShare } from "@/lib/screen-share";
 import { useLiveScreenPublish } from "@/lib/use-live-screen-publish";
 import { useLiveCamPublish } from "@/lib/use-live-cam-publish";
@@ -370,6 +370,7 @@ export function CbtExamPage() {
         setPauseRemainingSec(null);
         setPauseReason("Paused by the examination officer");
         setPaused(true);
+        try { haptic("officer_pause"); } catch { /* ignore */ }
         setWarnBanner("Your examination has been paused by the officer");
         window.setTimeout(() => setWarnBanner(null), 10000);
       } else if (cmd === "release" || cmd === "resume") {
@@ -385,10 +386,12 @@ export function CbtExamPage() {
       } else if (cmd === "terminate") {
         setDoneTerminated(true);
         setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
         void finishAttempt(true);
       } else if (cmd === "submit") {
         setDoneTerminated(false);
         setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
         void finishAttempt(false);
       }
     });
@@ -767,7 +770,7 @@ export function CbtExamPage() {
         });
         toast.success("Screen sharing active");
       }
-      try { haptic("start"); } catch { /* ignore */ }
+      try { primeHaptics(); haptic("start"); } catch { /* ignore */ }
       if (security.fullscreen) {
         const ok = await requestExamFullscreen();
         if (!ok) { toast.message("Please allow fullscreen to continue the exam"); setFsGate(true); }
