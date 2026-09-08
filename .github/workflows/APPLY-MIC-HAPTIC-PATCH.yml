@@ -1,0 +1,153 @@
+name: APPLY-MIC-HAPTIC-PATCH
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-MIC-HAPTIC-PATCH.yml"
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch CBT + officer monitor for live mic
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          s = p.read_text()
+          if "useLiveMicPublish" not in s:
+              s = s.replace(
+                  'import { useLiveCamPublish } from "@/lib/use-live-cam-publish";',
+                  'import { useLiveCamPublish } from "@/lib/use-live-cam-publish";\nimport { useLiveMicPublish } from "@/lib/use-live-mic-publish";',
+              )
+          s = s.replace(
+              "audio: Boolean(security.requireMicrophone)",
+              "audio: Boolean(security.requireMicrophone || security.requireCamera)",
+          )
+          s = s.replace(
+              "const needMic = Boolean(security.requireMicrophone);",
+              "const needMic = Boolean(security.requireMicrophone || security.requireCamera);",
+          )
+          if "useLiveMicPublish({" not in s:
+              idx = s.find("useLiveScreenPublish({")
+              if idx < 0:
+                  raise SystemExit("useLiveScreenPublish not found")
+              end = s.find("});", idx)
+              if end < 0:
+                  raise SystemExit("end of useLiveScreenPublish not found")
+              end += 3
+              hook = "\n  useLiveMicPublish({\n    enabled: started && !done && !previewMode,\n    schoolId: examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId,\n    studentId: student?.studentId,\n    examId: id,\n    attemptId: liveAttemptId || attemptIdRef.current,\n    getStream: () => mediaStreamRef.current || liveStream,\n  });\n"
+              s = s[:end] + hook + s[end:]
+          p.write_text(s)
+          print("cbt patched", p.stat().st_size)
+
+          op = Path("src/routes/officer.live-monitor.tsx")
+          o = op.read_text()
+          if "startLiveMicSubscriber" not in o:
+              if 'from "@/lib/live-audio"' not in o:
+                  o = o.replace(
+                      'from "@/lib/live-video";',
+                      'from "@/lib/live-video";\nimport {\n  startLiveMicSubscriber,\n  playMicChunk,\n  type LiveMicChunkPayload,\n} from "@/lib/live-audio";',
+                  )
+              if "MicOff" not in o:
+                  o = o.replace("Monitor,", "Monitor,\n  Mic,\n  MicOff,")
+              if "audioMuted" not in o:
+                  o = o.replace(
+                      "const [selectedId, setSelectedId] = useState<string | null>(null);",
+                      "const [selectedId, setSelectedId] = useState<string | null>(null);\n  const [audioMuted, setAudioMuted] = useState(true);\n  const audioCtxRef = useRef<AudioContext | null>(null);\n  const audioMutedRef = useRef(true);\n  const selectedIdRef = useRef<string | null>(null);\n  audioMutedRef.current = audioMuted;\n  selectedIdRef.current = selectedId;",
+                  )
+              if "startLiveMicSubscriber" not in o:
+                  insert_at = o.find("  const selected = cards.find((c) => c.a.id === selectedId)")
+                  if insert_at < 0:
+                      insert_at = o.find("const selected = cards.find")
+                  effect = """
+  useEffect(() => {
+    if (!schoolId) return;
+    const sub = startLiveMicSubscriber({
+      schoolId,
+      onChunk: (payload: LiveMicChunkPayload) => {
+        const focused = selectedIdRef.current;
+        const muted = audioMutedRef.current;
+        let play = false;
+        if (focused) {
+          play = payload.attemptId === focused;
+        } else {
+          play = !muted;
+        }
+        if (!play) return;
+        try {
+          if (!audioCtxRef.current) {
+            const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+            audioCtxRef.current = new AC();
+          }
+          const ctx = audioCtxRef.current;
+          if (ctx.state === "suspended") void ctx.resume();
+          playMicChunk(ctx, payload, focused ? 1.15 : 0.55);
+        } catch {
+          /* ignore */
+        }
+      },
+    });
+    return () => sub.stop();
+  }, [schoolId]);
+
+"""
+                  if insert_at > 0:
+                      o = o[:insert_at] + effect + o[insert_at:]
+              if "Listening" not in o:
+                  gi = o.find('{view === "grid"')
+                  if gi > 0:
+                      btn = """
+              <Button
+                type=\"button\"
+                variant={audioMuted ? \"outline\" : \"default\"}
+                size=\"sm\"
+                className={cn(
+                  \"h-7 shrink-0 px-2 text-[10px] font-semibold sm:h-8 sm:text-xs\",
+                  !audioMuted && \"bg-emerald-600 text-white hover:bg-emerald-700\",
+                )}
+                onClick={() => {
+                  setAudioMuted((m) => {
+                    const next = !m;
+                    if (!next) {
+                      try {
+                        if (!audioCtxRef.current) {
+                          const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+                          audioCtxRef.current = new AC();
+                        }
+                        void audioCtxRef.current?.resume();
+                      } catch { /* ignore */ }
+                    }
+                    return next;
+                  });
+                }}
+                title={audioMuted ? \"Unmute student microphones\" : \"Mute all\"}
+              >
+                {audioMuted ? (
+                  <><MicOff className=\"mr-1 h-3.5 w-3.5\" /> Muted</>
+                ) : (
+                  <><Mic className=\"mr-1 h-3.5 w-3.5\" /> Listening</>
+                )}
+              </Button>
+"""
+                      o = o[:gi] + btn + "\n            " + o[gi:]
+                      print("inserted mute button")
+              op.write_text(o)
+              print("olm patched", op.stat().st_size)
+          else:
+              print("olm already has live mic")
+          print("done")
+          PY
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx || true
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            git commit -m "feat: live student mic to officer + mute/focus listen"
+            git push
+          fi
