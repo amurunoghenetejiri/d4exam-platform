@@ -1,0 +1,88 @@
+name: PATCH-MIC-EFFECT
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/PATCH-MIC-EFFECT.yml"
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Insert mic subscriber effect if missing
+        run: |
+          set -euo pipefail
+          python3 -c '
+from pathlib import Path
+p = Path("src/routes/officer.live-monitor.tsx")
+o = p.read_text()
+# undo accidental PLACEHOLDER
+if o.strip() == "PLACEHOLDER" or len(o) < 1000:
+    import subprocess
+    sha = subprocess.check_output(["git","log","--all","--pretty=%H","--","src/routes/officer.live-monitor.tsx"], text=True).strip().splitlines()
+    for h in sha:
+        try:
+            blob = subprocess.check_output(["git","show",f"{h}:src/routes/officer.live-monitor.tsx"], text=True)
+        except Exception:
+            continue
+        if len(blob) > 50000 and "audioMuted" in blob:
+            o = blob
+            print("restored from", h, len(o))
+            break
+    else:
+        raise SystemExit("no good officer history")
+if "startLiveMicSubscriber({" not in o:
+    marker = "startLiveScreenSubscriber({"
+    i = o.find(marker)
+    if i < 0: raise SystemExit("no screen sub")
+    end = o.find("return () => sub.stop();", i)
+    end2 = o.find("}, [schoolId]);", end) + len("}, [schoolId]);")
+    effect = """
+  useEffect(() => {
+    if (!schoolId) return;
+    const sub = startLiveMicSubscriber({
+      schoolId,
+      onChunk: (payload: LiveMicChunkPayload) => {
+        const focused = selectedIdRef.current;
+        const muted = audioMutedRef.current;
+        let play = false;
+        if (focused) play = payload.attemptId === focused;
+        else play = !muted;
+        if (!play) return;
+        try {
+          if (!audioCtxRef.current) {
+            const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+            audioCtxRef.current = new AC();
+          }
+          const ctx = audioCtxRef.current;
+          if (ctx.state === "suspended") void ctx.resume();
+          playMicChunk(ctx, payload, focused ? 1.15 : 0.55);
+        } catch { /* ignore */ }
+      },
+    });
+    return () => sub.stop();
+  }, [schoolId]);
+"""
+    o = o[:end2] + "\n" + effect + o[end2:]
+    print("inserted effect")
+else:
+    print("effect already present")
+if "from \"@/lib/live-audio\"" not in o and "startLiveMicSubscriber" in o:
+    o = o.replace(
+        "from \"@/lib/live-video\";",
+        "from \"@/lib/live-video\";\nimport {\n  startLiveMicSubscriber,\n  playMicChunk,\n  type LiveMicChunkPayload,\n} from \"@/lib/live-audio\";",
+    )
+p.write_text(o)
+print("final size", p.stat().st_size, "has effect", "startLiveMicSubscriber({" in o)
+'
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then echo "No changes"; else
+            git commit -m "fix: insert live mic subscriber effect on officer monitor"
+            git push
+          fi
