@@ -110,8 +110,9 @@ jobs:
           cp -f native-android/app/src/main/res/values/colors.xml "$VALS/" 2>/dev/null || true
           cp -f native-android/app/src/main/res/values/styles.xml "$VALS/" 2>/dev/null || true
 
-          chmod +x scripts/android-apply-icons.sh
-          bash scripts/android-apply-icons.sh
+          # Icon generation must never fail the overlay step
+          chmod +x scripts/android-apply-icons.sh || true
+          bash scripts/android-apply-icons.sh || echo "WARN: icon script failed (non-fatal)"
 
           MAN="android/app/src/main/AndroidManifest.xml"
           if ! grep -q 'ScreenCaptureService' "$MAN"; then
