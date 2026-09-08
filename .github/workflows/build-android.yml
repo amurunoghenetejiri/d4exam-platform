@@ -5,17 +5,26 @@ on:
   push:
     paths:
       - "android/**"
+      - "native-android/**"
       - "capacitor.config.*"
       - "scripts/prepare-capacitor-dist.mjs"
       - "vite.capacitor.config.ts"
       - "src/capacitor-main.tsx"
+      - "src/lib/haptic.ts"
       - "package.json"
       - "bun.lock"
       - ".github/workflows/build-android.yml"
 
+concurrency:
+  group: build-android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Build D4EXAM Debug APK
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+
     steps:
       - uses: actions/checkout@v4
 
@@ -40,26 +49,60 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      - name: Verify local SPA (no server.url)
+      - name: Verify local SPA
         run: |
-          set -e
+          set -euo pipefail
           test -f dist/index.html
           test -d dist/assets
-          if grep -q '"url"' capacitor.config.json 2>/dev/null; then
-            echo "ERROR: server.url must not be set"
+          if grep -E 'url:\s*["'\'']https?://' capacitor.config.ts 2>/dev/null; then
+            echo "ERROR: server.url must not point at a remote URL"
             exit 1
           fi
-          echo "OK: local SPA present"
-          ls -la dist/assets/ | head -20
+          echo "OK: local SPA ready"
+
+      # Proven approach: regenerate a complete Android project (includes gradlew + resources)
+      - name: Generate fresh Android platform
+        run: |
+          set -euo pipefail
+          rm -rf android
+          bunx cap add android
+          test -f android/gradlew
+          chmod +x android/gradlew
+
+      - name: Overlay native plugins (screen share + immersive/vibrate)
+        run: |
+          set -euo pipefail
+          test -d native-android
+          cp -a native-android/. android/
+          echo "Native overlay applied:"
+          find android/app/src/main/java -type f | sort
+          MAN="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q 'ScreenCaptureService' "$MAN"; then
+            sed -i 's|</application>|        <service android:name=".ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />\n    </application>|' "$MAN"
+          fi
+          for perm in \
+            android.permission.CAMERA \
+            android.permission.RECORD_AUDIO \
+            android.permission.MODIFY_AUDIO_SETTINGS \
+            android.permission.POST_NOTIFICATIONS \
+            android.permission.VIBRATE \
+            android.permission.FOREGROUND_SERVICE \
+            android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION; do
+            if ! grep -q "$perm" "$MAN"; then
+              sed -i "s|</manifest>|    <uses-permission android:name=\"$perm\" />\n</manifest>|" "$MAN"
+            fi
+          done
+          grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
+          grep -q 'ScreenSharePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
+          grep -q 'android.permission.VIBRATE' "$MAN"
+          echo "OK: plugins + VIBRATE permission"
 
       - name: Capacitor sync
         run: |
-          set -e
+          set -euo pipefail
           bunx cap sync android
-          echo "--- capacitor.settings.gradle ---"
-          cat android/capacitor.settings.gradle || true
-          echo "--- settings.gradle ---"
-          cat android/settings.gradle || true
+          test -f android/gradlew
+          chmod +x android/gradlew
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -69,63 +112,21 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-35 platforms;android-34 build-tools;35.0.0 build-tools;34.0.0
 
-      - name: Install Android packages
+      - name: Accept licenses
         run: |
-          set -e
-          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          yes | sdkmanager --licenses >/tmp/sdk-licenses.txt 2>&1 || true
-          # Platform 36 required by variables.gradle; build-tools 35 is widely available
-          sdkmanager "platforms;android-36" "platforms;android-35" \
-            "build-tools;35.0.0" "build-tools;34.0.0" "platform-tools" || true
-          sdkmanager --list_installed | head -50
-
-      - name: Bootstrap Gradle wrapper if missing
-        working-directory: android
-        run: |
-          set -e
-          if [ ! -f gradlew ] || [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            echo "Generating Gradle 8.14.3 wrapper…"
-            curl -sL -o /tmp/gradle-8.14.3-bin.zip \
-              "https://services.gradle.org/distributions/gradle-8.14.3-bin.zip"
-            unzip -q -o /tmp/gradle-8.14.3-bin.zip -d /tmp
-            /tmp/gradle-8.14.3/bin/gradle wrapper \
-              --gradle-version 8.14.3 \
-              --distribution-type all
-          fi
-          chmod +x gradlew
-          ./gradlew --version
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
 
       - name: Assemble debug APK
         working-directory: android
         run: |
-          set -e
-          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
-          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          set -euo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          cat local.properties
-          # Capture full log so we can debug without signed-in log access
-          set +e
-          ./gradlew assembleDebug --no-daemon --stacktrace --info 2>&1 | tee /tmp/gradle-assemble.log
-          STATUS=${PIPESTATUS[0]}
-          set -e
-          echo "Gradle exit code: $STATUS"
-          if [ "$STATUS" -ne 0 ]; then
-            echo "===== GRADLE FAILURE (last 120 lines) ====="
-            tail -n 120 /tmp/gradle-assemble.log
-            exit $STATUS
-          fi
-
-      - name: Upload Gradle log (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-assemble-log
-          path: /tmp/gradle-assemble.log
-          if-no-files-found: ignore
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -133,3 +134,4 @@ jobs:
           name: d4exam-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+          retention-days: 14
