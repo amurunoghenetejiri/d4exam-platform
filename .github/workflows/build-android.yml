@@ -53,7 +53,6 @@ jobs:
           test -f dist/index.html
           test -d dist/assets
           test -f dist/assets/capacitor-app.js
-          # Prove offline shell — no Vercel URL in entry HTML
           if grep -E 'https?://[^"'\'' ]*vercel' dist/index.html; then
             echo "ERROR: dist/index.html still points at Vercel"
             exit 1
@@ -87,8 +86,7 @@ jobs:
           set -euo pipefail
           test -d native-android
           mkdir -p android/app/src/main/java/com/d4exam/app
-          cp -a native-android/app/src/main/java/com/d4exam/app/. \
-            android/app/src/main/java/com/d4exam/app/
+          cp -a native-android/app/src/main/java/com/d4exam/app/. android/app/src/main/java/com/d4exam/app/
 
           DRAW="android/app/src/main/res/drawable"
           VALS="android/app/src/main/res/values"
@@ -97,7 +95,6 @@ jobs:
           if [ -d native-android/app/src/main/res/drawable ]; then
             cp -a native-android/app/src/main/res/drawable/. "$DRAW/" || true
           fi
-          # Prefer splash.xml (navy) over Cap splash.png
           if [ -f "$DRAW/splash.xml" ]; then
             rm -f "$DRAW"/splash.png "$DRAW"/splash.jpg "$DRAW"/splash.webp "$DRAW"/splash.gif
           fi
@@ -109,11 +106,9 @@ jobs:
             done
           done
 
-          # Themes + colors (safe AppCompat launch theme — no Theme.SplashScreen crash)
           cp -f native-android/app/src/main/res/values/colors.xml "$VALS/" 2>/dev/null || true
           cp -f native-android/app/src/main/res/values/styles.xml "$VALS/" 2>/dev/null || true
 
-          # --- App icon: replace default Capacitor icon with public/icon-512.png (D4EXAM) ---
           ICON_SRC=""
           for candidate in public/icon-512.png public/logo.png public/apple-touch-icon.png public/favicon.png; do
             if [ -f "$candidate" ]; then ICON_SRC="$candidate"; break; fi
@@ -124,7 +119,6 @@ jobs:
             echo "Using icon source: $ICON_SRC"
             sudo apt-get update -qq
             sudo apt-get install -y -qq imagemagick
-            # density -> pixel size for legacy mipmap icons
             for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
               dens="${pair%%:*}"
               px="${pair##*:}"
@@ -132,22 +126,25 @@ jobs:
               mkdir -p "$dir"
               convert "$ICON_SRC" -resize "${px}x${px}" -background none -gravity center -extent "${px}x${px}" "$dir/ic_launcher.png"
               convert "$ICON_SRC" -resize "${px}x${px}" -background none -gravity center -extent "${px}x${px}" "$dir/ic_launcher_round.png"
-              # foreground slightly inset for adaptive icons
               fg=$(( px * 72 / 100 ))
               convert "$ICON_SRC" -resize "${fg}x${fg}" -background none -gravity center -extent "${px}x${px}" "$dir/ic_launcher_foreground.png"
             done
-            # anydpi adaptive icon XML (API 26+)
             ANY="android/app/src/main/res/mipmap-anydpi-v26"
             mkdir -p "$ANY"
-            cat > "$ANY/ic_launcher.xml" <<'XML'
-<?xml version="1.0" encoding="utf-8"?>
+            python3 - <<'PY'
+from pathlib import Path
+xml = '''<?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/splash_background"/>
     <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
 </adaptive-icon>
-XML
-            cp "$ANY/ic_launcher.xml" "$ANY/ic_launcher_round.xml"
-            # notification small icon (monochrome-ish fallback)
+'''
+base = Path("android/app/src/main/res/mipmap-anydpi-v26")
+base.mkdir(parents=True, exist_ok=True)
+(base / "ic_launcher.xml").write_text(xml)
+(base / "ic_launcher_round.xml").write_text(xml)
+print("OK: adaptive icon xml")
+PY
             convert "$ICON_SRC" -resize 48x48 -colorspace Gray "$DRAW/ic_stat_d4exam.png" || true
             echo "OK: D4EXAM launcher icons written"
             ls -la android/app/src/main/res/mipmap-xxxhdpi/ || true
@@ -170,7 +167,6 @@ XML
             fi
           done
 
-          # Ensure launcher uses @mipmap/ic_launcher
           if ! grep -q 'android:icon="@mipmap/ic_launcher"' "$MAN"; then
             sed -i 's|android:icon="[^"]*"|android:icon="@mipmap/ic_launcher"|' "$MAN" || true
           fi
@@ -178,7 +174,6 @@ XML
           test -f android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java
           test -f android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
           test -f android/app/src/main/java/com/d4exam/app/MainActivity.java
-          # MainActivity must NOT reference androidx SplashScreen (crash source)
           if grep -q 'androidx.core.splashscreen' android/app/src/main/java/com/d4exam/app/MainActivity.java; then
             echo "ERROR: MainActivity still imports SplashScreen API"
             exit 1
@@ -225,10 +220,7 @@ XML
             sed -i 's/targetSdkVersion *= *[0-9]*/targetSdkVersion = 36/' android/variables.gradle
             sed -i 's/minSdkVersion *= *[0-9]*/minSdkVersion = 24/' android/variables.gradle
           fi
-          # Re-apply native MainActivity (cap sync must not wipe plugins)
-          cp -a native-android/app/src/main/java/com/d4exam/app/. \
-            android/app/src/main/java/com/d4exam/app/
-          # Re-apply styles/colors + splash de-dupe
+          cp -a native-android/app/src/main/java/com/d4exam/app/. android/app/src/main/java/com/d4exam/app/
           VALS="android/app/src/main/res/values"
           DRAW="android/app/src/main/res/drawable"
           mkdir -p "$VALS" "$DRAW"
