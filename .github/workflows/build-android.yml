@@ -24,13 +24,11 @@ jobs:
         with:
           bun-version: "1.2.19"
 
-      - name: Setup Node (for Vite / cap CLI helpers)
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      # Do NOT use --frozen-lockfile: package.json and bun.lock can drift after
-      # restores / dependency bumps. Install resolves and continues.
       - name: Install dependencies
         run: bun install
 
@@ -38,8 +36,6 @@ jobs:
         run: bun run build:app
         env:
           NODE_ENV: production
-          # Same Supabase project as the Website (public client keys only).
-          # Prefer repo secrets; falls back to committed .env if present.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
@@ -65,15 +61,37 @@ jobs:
       - name: Capacitor sync
         run: bunx cap sync android
 
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Bootstrap Gradle wrapper (repo is missing gradlew)
+        working-directory: android
+        run: |
+          set -e
+          if [ ! -f gradlew ]; then
+            echo "gradlew missing — generating wrapper for Gradle 8.14.3"
+            curl -sL -o /tmp/gradle-8.14.3-bin.zip \
+              "https://services.gradle.org/distributions/gradle-8.14.3-bin.zip"
+            unzip -q -o /tmp/gradle-8.14.3-bin.zip -d /tmp
+            /tmp/gradle-8.14.3/bin/gradle wrapper \
+              --gradle-version 8.14.3 \
+              --distribution-type all
+          fi
+          chmod +x gradlew
+          test -f gradlew
+          test -f gradle/wrapper/gradle-wrapper.jar
+          echo "Gradle wrapper ready"
+          ./gradlew --version
+
       - name: Assemble debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
