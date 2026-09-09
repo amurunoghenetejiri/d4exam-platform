@@ -33,21 +33,18 @@ export type StudentContext = {
   courseIds: string[];
 };
 
+/**
+ * Students only see exams the officer has POSTed.
+ * approved / scheduled alone must NOT appear on the student list.
+ */
 export const STUDENT_VISIBLE_EXAM_STATUSES = [
-  "approved",
-  "scheduled",
   "published",
   "ongoing",
   "closed",
   "completed",
 ] as const;
 
-export const STUDENT_STARTABLE_STATUSES = [
-  "approved",
-  "scheduled",
-  "published",
-  "ongoing",
-] as const;
+export const STUDENT_STARTABLE_STATUSES = ["published", "ongoing"] as const;
 
 export function useStudentContext() {
   const { data: session } = useSessionUser();
@@ -166,7 +163,6 @@ export function useStudentContext() {
                 /* ignore */
               }
             }
-            // Students self-enrol from Courses page — do not auto-map dept courses as enrolled.
             const seen = new Set<string>();
             courses = courses.filter((c) => {
               if (seen.has(c.id)) return false;
@@ -222,7 +218,6 @@ export function useStudentRealtimeSync(enabled = true) {
   );
 }
 
-/** Course metadata as returned on examinations joins for eligibility checks. */
 export type ExamCourseRef = {
   code?: string | null;
   name?: string | null;
@@ -230,17 +225,6 @@ export type ExamCourseRef = {
   level_id?: string | null;
 } | null;
 
-/**
- * Whether this student is allowed to see/start an examination.
- *
- * Rules (strict):
- * 1. Exam must belong to the student's school.
- * 2. Exam must be linked to a course (course_id required).
- * 3. Prefer explicit enrollment: course_id in student.courseIds.
- * 4. Otherwise allow only if the course's department AND level both match the student
- *    (both sides must be non-null and equal).
- * 5. If the student has no courses and incomplete dept/level, deny (never show all school exams).
- */
 export function isStudentEligibleForExam(
   student: Pick<StudentContext, "schoolId" | "departmentId" | "levelId" | "courseIds"> | null | undefined,
   exam: {
@@ -294,10 +278,11 @@ export function canStartExam(
   const s = status.toLowerCase();
   if (s === "ongoing") return true;
   if (s === "closed" || s === "completed" || s === "cancelled") return false;
-  if (!["approved", "scheduled", "published"].includes(s)) return false;
+  // Only officer-posted exams are startable
+  if (s !== "published") return false;
   const now = Date.now();
   if (scheduledEnd && new Date(scheduledEnd).getTime() < now) return false;
-  if (!scheduledStart) return s === "approved" || s === "published";
+  if (!scheduledStart) return true;
   return new Date(scheduledStart).getTime() <= now;
 }
 
@@ -309,7 +294,8 @@ export function examAvailability(
   const s = status.toLowerCase();
   if (s === "closed" || s === "completed" || s === "cancelled") return "ended";
   if (s === "ongoing") return "available";
-  if (!["approved", "scheduled", "published"].includes(s)) return "blocked";
+  // approved / scheduled without post → blocked for students
+  if (s !== "published") return "blocked";
   const now = Date.now();
   if (scheduledEnd && new Date(scheduledEnd).getTime() < now) {
     return "missed";
@@ -318,7 +304,6 @@ export function examAvailability(
   return "available";
 }
 
-/** True when the student must not start this exam again (completed attempt or result). */
 export function isExamAttemptFinished(
   attemptStatus: string | null | undefined,
   hasResult?: boolean,
