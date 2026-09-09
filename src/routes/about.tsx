@@ -1,18 +1,36 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PublicLayout } from "@/components/layout/PublicLayout";
+
 const values = [
-  { title: "Academic first", body: "Workflows modelled on real faculty, department and examination officer structures so institutions keep the same academic hierarchy they already use on paper." },
-  { title: "Integrity always", body: "Every attempt is monitored and auditable - fullscreen exits, tab switches, face checks and officer actions - so results can be defended." },
-  { title: "Access everywhere", body: "Built for varied bandwidth, shared laboratories and personal devices alike. Students and staff only need a modern browser or the D4EXAM app." },
+  {
+    title: "Academic first",
+    body: "Workflows modelled on real faculty, department and examination officer structures so institutions keep the same academic hierarchy they already use on paper.",
+  },
+  {
+    title: "Integrity always",
+    body: "Every attempt is monitored and auditable - fullscreen exits, tab switches, face checks and officer actions - so results can be defended.",
+  },
+  {
+    title: "Access everywhere",
+    body: "Built for varied bandwidth, shared laboratories and personal devices alike. Students and staff only need a modern browser or the D4EXAM app.",
+  },
 ];
 
 export const Route = createFileRoute("/about")({
   head: () => ({
     meta: [
       { title: "About Us - D4EXAM" },
-      { name: "description", content: "D4EXAM builds professional examination infrastructure for schools, colleges and universities worldwide." },
+      {
+        name: "description",
+        content:
+          "D4EXAM builds professional examination infrastructure for schools, colleges and universities worldwide.",
+      },
       { property: "og:title", content: "About Us - D4EXAM" },
-      { property: "og:description", content: "D4EXAM builds professional examination infrastructure for schools, colleges and universities worldwide." },
+      {
+        property: "og:description",
+        content:
+          "D4EXAM builds professional examination infrastructure for schools, colleges and universities worldwide.",
+      },
     ],
   }),
   component: Page,
@@ -43,7 +61,12 @@ function Page() {
           ))}
         </div>
         <div className="surface-panel mt-12 grid grid-cols-2 gap-6 p-8 lg:grid-cols-4">
-          {[["182+","Institutions"],["84K+","Students"],["12K+","Examinations"],["98.5%","Success rate"]].map(([v,l]) => (
+          {[
+            ["182+", "Institutions"],
+            ["84K+", "Students"],
+            ["12K+", "Examinations"],
+            ["98.5%", "Success rate"],
+          ].map(([v, l]) => (
             <div key={l} className="text-center">
               <p className="font-display text-3xl font-extrabold text-primary">{v}</p>
               <p className="mt-1 text-sm text-muted-foreground">{l}</p>
@@ -58,7 +81,7 @@ function Page() {
             and security controls that officers actually use during live sessions.
           </p>
           <p className="mt-6 text-center text-xs text-slate-400">
-            {'\u00a9'} 2026 D4EXAM. All rights reserved. · Smart. Secure. Seamless.
+            © 2026 D4EXAM. All rights reserved. · Smart. Secure. Seamless.
           </p>
         </div>
       </div>
