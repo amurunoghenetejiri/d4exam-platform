@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Safe themes: no Theme.SplashScreen (avoids missing core-splashscreen crash) -->
+    <!-- Safe themes: no Theme.SplashScreen dependency (avoids missing core-splashscreen crash) -->
 
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
         <item name="colorPrimary">@color/colorPrimary</item>
@@ -18,12 +18,22 @@
         <item name="android:windowBackground">@color/splash_background</item>
     </style>
 
-    <!-- Launch theme: solid navy only — matches branded boot screen in index.html -->
+    <!--
+      Launch theme: solid navy only.
+      Android 12+ always draws a system splash with the adaptive icon unless we
+      override windowSplashScreen* — use a solid navy "icon" so the white logo
+      square never appears. Branded AnimatedSplash (web) takes over after load.
+    -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:windowBackground">@drawable/splash</item>
         <item name="android:statusBarColor">@color/splash_background</item>
         <item name="android:navigationBarColor">@color/splash_background</item>
+        <!-- API 31+ system splash: solid navy, no centered adaptive icon -->
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/splash_background</item>
+        <item name="android:windowSplashScreenBrandingImage">@null</item>
     </style>
 </resources>

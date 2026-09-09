@@ -8,11 +8,14 @@ import android.view.Window;
 import com.getcapacitor.BridgeActivity;
 
 /**
- * D4EXAM main activity — local bundled SPA only (no Vercel server.url).
+ * D4EXAM main activity — Capacitor WebView shell loading production Vercel URL.
  *
  * Do not use the AndroidX system splash install API here: it needs a matching
  * theme + dependency and caused instant cold-start crashes when CI regenerates
- * the Android project. Splash is handled by windowBackground + Cap plugin + web boot UI.
+ * the Android project. Splash is handled by:
+ *   1) AppTheme.NoActionBarLaunch (solid navy, no adaptive-icon flash on API 31+)
+ *   2) Capacitor SplashScreen plugin (kept until web hides it)
+ *   3) AnimatedSplash in the web app (branded D4EXAM screen)
  */
 public class MainActivity extends BridgeActivity {
   @Override
