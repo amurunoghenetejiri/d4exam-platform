@@ -1,12 +1,1 @@
-force production redeploy 2026-08-20T08:30Z
-
-CBT SUBMIT FIX:
-1. saveCbtResultServer (service role) — ownership check + upsert result + mark attempt submitted
-2. saveCbtResult client prefers server path (bypasses RLS permission error)
-3. Migration 20260820120000 — student results INSERT/UPDATE/SELECT policies
-4. View Results + no rewrite depend on successful save + attempt status submitted
-
-IMPORTANT: Run migration SQL in Supabase SQL Editor if policies not yet applied:
-  supabase/migrations/20260820120000_student_save_cbt_result_rpc.sql
-
-Ensure Vercel env has SUPABASE_SERVICE_ROLE_KEY (server save path).
+restore-push-2026-09-09T22:00Z
