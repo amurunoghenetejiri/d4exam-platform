@@ -1,10 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Menu, X } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { Watermark } from "@/components/brand/Watermark";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { isAppLikeShell } from "@/native/platform";
 
 const links = [
   { to: "/features", label: "Features" },
@@ -14,8 +15,41 @@ const links = [
   { to: "/support", label: "Support" },
 ];
 
+const menuGroups = [
+  {
+    title: "Platform",
+    items: [
+      { to: "/features", label: "Features" },
+      { to: "/pricing", label: "Pricing" },
+      { to: "/school-application", label: "For Schools" },
+    ],
+  },
+  {
+    title: "Company",
+    items: [
+      { to: "/about", label: "About Us" },
+      { to: "/support", label: "Support" },
+      { to: "/privacy", label: "Privacy Policy" },
+    ],
+  },
+  {
+    title: "Access",
+    items: [
+      { to: "/login", label: "Login" },
+      { to: "/forgot-password", label: "Forgot Password" },
+    ],
+  },
+];
+
 export function PublicLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const appShell = useMemo(() => {
+    try {
+      return isAppLikeShell();
+    } catch {
+      return false;
+    }
+  }, []);
 
   return (
     <div className="relative flex min-h-dvh flex-col bg-white">
@@ -68,25 +102,38 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                   <X className="h-5 w-5" />
                 </Button>
               </div>
-              <div className="flex flex-col gap-1 p-4">
-                {links.map((l) => (
-                  <Link
-                    key={l.label}
-                    to={l.to}
-                    onClick={() => setOpen(false)}
-                    className="rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                  >
-                    {l.label}
-                  </Link>
+              <div className="flex max-h-[calc(100dvh-3.5rem)] flex-col overflow-y-auto p-4">
+                {menuGroups.map((g) => (
+                  <div key={g.title} className="mb-4">
+                    <p className="mb-1.5 px-3 text-[11px] font-bold uppercase tracking-wide text-primary">
+                      {g.title}
+                    </p>
+                    <div className="flex flex-col gap-0.5">
+                      {g.items.map((l) => (
+                        <Link
+                          key={l.label}
+                          to={l.to}
+                          onClick={() => setOpen(false)}
+                          className="rounded-lg px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          {l.label}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
                 ))}
-                <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
-                  <Button variant="outline" className="w-full" asChild>
-                    <Link to="/login" onClick={() => setOpen(false)}>Login</Link>
-                  </Button>
+                <div className="mt-2 space-y-2 border-t border-slate-100 pt-4">
                   <Button className="w-full" asChild>
-                    <Link to="/school-application" onClick={() => setOpen(false)}>Apply Now</Link>
+                    <Link to="/school-application" onClick={() => setOpen(false)}>
+                      Apply Now
+                    </Link>
                   </Button>
                 </div>
+                {appShell && (
+                  <p className="mt-6 px-3 text-center text-[11px] text-slate-400">
+                    © 2026 D4EXAM. All rights reserved.
+                  </p>
+                )}
               </div>
             </SheetContent>
           </Sheet>
@@ -96,45 +143,48 @@ export function PublicLayout({ children }: { children: ReactNode }) {
 
       <main className="relative z-10 flex-1">{children}</main>
 
-      <footer className="relative z-10 border-t border-slate-200 bg-slate-50/95">
-        <div className="mx-auto grid w-full max-w-[1180px] gap-8 px-4 py-12 sm:px-6 md:grid-cols-[1.4fr_repeat(3,1fr)]">
-          <div>
-            <Logo size="md" showTagline />
-            <p className="mt-4 max-w-xs text-sm text-slate-600">
-              Professional examination management for schools, colleges and universities worldwide.
-            </p>
+      {/* Website keeps the full marketing footer; native/PWA app does not */}
+      {!appShell && (
+        <footer className="relative z-10 border-t border-slate-200 bg-slate-50/95">
+          <div className="mx-auto grid w-full max-w-[1180px] gap-8 px-4 py-12 sm:px-6 md:grid-cols-[1.4fr_repeat(3,1fr)]">
+            <div>
+              <Logo size="md" showTagline />
+              <p className="mt-4 max-w-xs text-sm text-slate-600">
+                Professional examination management for schools, colleges and universities worldwide.
+              </p>
+            </div>
+            <FooterCol
+              title="Platform"
+              items={[
+                { to: "/features", label: "Features" },
+                { to: "/pricing", label: "Pricing" },
+                { to: "/school-application", label: "For Schools" },
+              ]}
+            />
+            <FooterCol
+              title="Company"
+              items={[
+                { to: "/about", label: "About Us" },
+                { to: "/support", label: "Support" },
+                { to: "/privacy", label: "Privacy Policy" },
+              ]}
+            />
+            <FooterCol
+              title="Access"
+              items={[
+                { to: "/login", label: "Login" },
+                { to: "/forgot-password", label: "Forgot Password" },
+              ]}
+            />
           </div>
-          <FooterCol
-            title="Platform"
-            items={[
-              { to: "/features", label: "Features" },
-              { to: "/pricing", label: "Pricing" },
-              { to: "/school-application", label: "For Schools" },
-            ]}
-          />
-          <FooterCol
-            title="Company"
-            items={[
-              { to: "/about", label: "About Us" },
-              { to: "/support", label: "Support" },
-              { to: "/privacy", label: "Privacy Policy" },
-            ]}
-          />
-          <FooterCol
-            title="Access"
-            items={[
-              { to: "/login", label: "Login" },
-              { to: "/forgot-password", label: "Forgot Password" },
-            ]}
-          />
-        </div>
-        <div className="border-t border-slate-200">
-          <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-2 px-4 py-5 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <p>© 2026 D4EXAM. All rights reserved.</p>
-            <p>Smart. Secure. Seamless.</p>
+          <div className="border-t border-slate-200">
+            <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-1 px-4 py-5 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+              <p>© 2026 D4EXAM. All rights reserved.</p>
+              <p>Smart. Secure. Seamless.</p>
+            </div>
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
     </div>
   );
 }
@@ -142,12 +192,12 @@ export function PublicLayout({ children }: { children: ReactNode }) {
 function FooterCol({ title, items }: { title: string; items: { to: string; label: string }[] }) {
   return (
     <div>
-      <h3 className="text-sm font-bold text-primary">{title}</h3>
-      <ul className="mt-4 space-y-2.5">
-        {items.map((i) => (
-          <li key={i.to + i.label}>
-            <Link to={i.to} className="text-sm text-slate-600 transition-colors hover:text-primary">
-              {i.label}
+      <p className="text-sm font-bold text-primary">{title}</p>
+      <ul className="mt-3 space-y-2">
+        {items.map((it) => (
+          <li key={it.to}>
+            <Link to={it.to} className="text-sm text-slate-600 hover:text-primary">
+              {it.label}
             </Link>
           </li>
         ))}
