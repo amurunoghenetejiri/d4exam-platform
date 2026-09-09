@@ -129,7 +129,10 @@ export function haptic(kind: HapticKind) {
     kind === "officer_pause" ||
     kind === "multi" ||
     kind === "strong" ||
-    kind === "camera_blocked"
+    kind === "camera_blocked" ||
+    kind === "tab_switch" ||
+    kind === "none" ||
+    kind === "unclear"
   ) {
     timers.push(
       window.setTimeout(() => vibrateFireAndForget(pattern), 80),
