@@ -1,0 +1,66 @@
+name: EMERGENCY-RESTORE-CBT
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/EMERGENCY-RESTORE-CBT.yml"
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore CbtExamSession from good commit
+        run: |
+          set -euo pipefail
+          # Prefer a known good commit that still had the full session
+          for SHA in f0ba2a4 0525805 ab58e86 e5b0c19 bf6435e; do
+            if git cat-file -e "${SHA}:src/components/cbt/CbtExamSession.impl.tsx" 2>/dev/null; then
+              SIZE=$(git show "${SHA}:src/components/cbt/CbtExamSession.impl.tsx" | wc -c)
+              echo "candidate $SHA size=$SIZE"
+              if [ "$SIZE" -gt 20000 ]; then
+                git show "${SHA}:src/components/cbt/CbtExamSession.impl.tsx" > src/components/cbt/CbtExamSession.impl.tsx
+                echo "RESTORED from $SHA"
+                head -3 src/components/cbt/CbtExamSession.impl.tsx
+                break
+              fi
+            fi
+          done
+          # Verify not the broken stub
+          if grep -q "TEST_PART_ONLY" src/components/cbt/CbtExamSession.impl.tsx; then
+            echo "Still broken"
+            exit 1
+          fi
+          # Soft terminate mode patch
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          ct = p.read_text()
+          if 'mode: "submit" | "terminate"' not in ct:
+              ct = ct.replace(
+                  "async function finishAttempt(auto = false) {",
+                  'async function finishAttempt(auto = false, mode: "submit" | "terminate" | "auto_submit" = auto ? "terminate" : "submit") {',
+              )
+              p.write_text(ct)
+              print("finishAttempt signature updated")
+          # java amp
+          for jp in [Path("android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java"), Path("native-android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java")]:
+              if jp.exists():
+                  jt = jp.read_text().replace("VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)", "VibrationEffect.createOneShot(ms, 255)")
+                  jp.write_text(jt)
+          Path("DEPLOY_TRIGGER.txt").write_text("redeploy 20260909025000 emergency-cbt-restore-haptics\n")
+          print("ok")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else
+            git commit -m "fix: emergency restore full CbtExamSession + max amp + redeploy"
+            git push
+          fi
