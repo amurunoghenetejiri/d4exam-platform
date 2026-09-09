@@ -625,6 +625,14 @@ export function CbtExamPage() {
     if (!schoolId || !studentId || !id) return;
     const isViolation = ev.kind === "none" || ev.kind === "multi" || ev.kind === "camera_blocked";
     if (isViolation) faceWarnCountRef.current += 1;
+    // Vibration on every face integrity violation (native ExamImmersive on APK)
+    if (isViolation) {
+      try {
+        if (ev.kind === "multi") haptic("multi");
+        else if (ev.kind === "camera_blocked") haptic("camera_blocked");
+        else haptic("none"); // no face / unclear
+      } catch { /* ignore */ }
+    }
     void logSecurityEvent({
       schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
       eventType: mapped.eventType, severity: mapped.severity, description: mapped.description,
@@ -642,8 +650,10 @@ export function CbtExamPage() {
       setWarnBanner(mapped.description || "Face integrity threshold reached");
       window.setTimeout(() => setWarnBanner(null), 6000);
     } else if (action === "pause") {
+      try { haptic("officer_pause"); } catch { /* ignore */ }
       beginTimedPause(mapped.description || "Face integrity violation");
     } else if (action === "terminate") {
+      try { haptic("officer_submit"); } catch { /* ignore */ }
       setDoneTerminated(true);
       void finishAttempt(true);
     }
@@ -662,6 +672,7 @@ export function CbtExamPage() {
   async function finishAttempt(auto = false) {
     if (done || finishingRef.current) return;
     finishingRef.current = true;
+    try { haptic("officer_submit"); } catch { /* ignore */ }
     doneRef.current = true;
     setFsGate(false);
     setPaused(false);
