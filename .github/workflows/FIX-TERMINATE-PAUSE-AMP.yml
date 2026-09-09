@@ -1,0 +1,136 @@
+name: FIX-TERMINATE-PAUSE-AMP
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/FIX-TERMINATE-PAUSE-AMP.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Surgical fixes
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("src/lib/live-audio.ts")
+          if p.exists():
+              t = p.read_text()
+              t = t.replace("LIVE_MIC_INTERVAL_MS = 180", "LIVE_MIC_INTERVAL_MS = 100")
+              t = t.replace("createScriptProcessor(2048, 1, 1)", "createScriptProcessor(1024, 1, 1)")
+              old = "const startAt = Math.max(now + 0.005, nextPlayAt.get(ctx) ?? now);"
+              new = "let planned = nextPlayAt.get(ctx) ?? now;\n    if (planned < now - 0.35) planned = now;\n    const startAt = Math.max(now + 0.005, planned);"
+              if old in t:
+                  t = t.replace(old, new)
+              p.write_text(t)
+              print("live-audio ok")
+
+          for jp in [Path("android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java"), Path("native-android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java")]:
+              if jp.exists():
+                  jt = jp.read_text().replace("VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)", "VibrationEffect.createOneShot(ms, 255)")
+                  jp.write_text(jt)
+                  print("java", jp)
+
+          op = Path("src/routes/officer.live-monitor.tsx")
+          if op.exists():
+              ot = op.read_text()
+              ot = ot.replace(
+                  'update({ metadata: meta, updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId)',
+                  'update({ metadata: meta, status: "paused", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId)',
+                  1,
+              )
+              ot = ot.replace(
+                  '? { ...row, status: "in_progress", metadata: { ...(row.metadata || {}), officer_hold: true, officer_pause: true, officer_hold_at: nowIso } }',
+                  '? { ...row, status: "paused", metadata: { ...(row.metadata || {}), officer_hold: true, officer_pause: true, officer_hold_at: nowIso } }',
+              )
+              op.write_text(ot)
+              print("officer ok")
+
+          cpath = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          ct = cpath.read_text()
+
+          if 'mode: "submit" | "terminate"' not in ct:
+              ct = ct.replace(
+                  "async function finishAttempt(auto = false) {",
+                  'async function finishAttempt(auto = false, mode: "submit" | "terminate" | "auto_submit" = auto ? "terminate" : "submit") {',
+              )
+              old_save = """        const saved = await saveCbtResult({
+            examId: id, studentId: student.studentId, schoolId, attemptId,
+            questions: questions.map((qq) => ({
+              id: qq.id, marks: qq.marks ?? 1, correct_answer: qq.correct_answer,
+              options: qq.options ?? [],
+              originalOptions: (qq as { originalOptions?: string[] }).originalOptions ?? [],
+              correctOptionText: (qq as { correctOptionText?: string | null }).correctOptionText ?? null,
+            })),
+            answers, terminated: auto, resultVisibility: security.resultVisibility,
+          });"""
+              new_save = """        if (mode === "terminate") {
+          if (attemptId) {
+            await supabase.from("exam_attempts").update({
+              status: "terminated",
+              ended_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              answers,
+            } as never).eq("id", attemptId);
+          }
+          try {
+            await logSecurityEvent({
+              schoolId, examId: id, attemptId, studentId: student.studentId,
+              eventType: "EXAM_TERMINATED", severity: "high",
+              description: "Examination terminated — no result recorded",
+            });
+          } catch { /* ignore */ }
+          toast.error("Your examination was terminated. No result was recorded.");
+        } else {
+        const saved = await saveCbtResult({
+            examId: id, studentId: student.studentId, schoolId, attemptId,
+            questions: questions.map((qq) => ({
+              id: qq.id, marks: qq.marks ?? 1, correct_answer: qq.correct_answer,
+              options: qq.options ?? [],
+              originalOptions: (qq as { originalOptions?: string[] }).originalOptions ?? [],
+              correctOptionText: (qq as { correctOptionText?: string | null }).correctOptionText ?? null,
+            })),
+            answers, terminated: false, resultVisibility: security.resultVisibility,
+          });"""
+              if old_save in ct:
+                  ct = ct.replace(old_save, new_save, 1)
+                  ct = ct.replace(
+                      "setDoneTerminated(auto);",
+                      '} // end non-terminate save\n    setDoneTerminated(mode === "terminate");',
+                      1,
+                  )
+                  print("saveCbtResult wrapped for terminate")
+              else:
+                  print("WARN: saveCbtResult block not found exactly")
+
+              ct = ct.replace(
+                  '} else if (cmd === "terminate") {\n        officerPauseRef.current = false;\n        setIsOfficerPause(false);\n        setPaused(false);\n        void finishAttempt(true);',
+                  '} else if (cmd === "terminate") {\n        officerPauseRef.current = false;\n        setIsOfficerPause(false);\n        setPaused(false);\n        void finishAttempt(true, "terminate");',
+              )
+              ct = ct.replace(
+                  '} else if (cmd === "submit") {\n        officerPauseRef.current = false;\n        setIsOfficerPause(false);\n        setPaused(false);\n        void finishAttempt(false);',
+                  '} else if (cmd === "submit") {\n        officerPauseRef.current = false;\n        setIsOfficerPause(false);\n        setPaused(false);\n        void finishAttempt(false, "auto_submit");',
+              )
+              cpath.write_text(ct)
+              print("cbt surgical done")
+          else:
+              print("cbt already has mode")
+
+          Path("DEPLOY_TRIGGER.txt").write_text("redeploy 20260909024000 terminate-pause-mic-amp-haptics\n")
+          print("done")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then echo No changes; else
+            git commit -m "fix: terminate without result, officer paused status, mic latency, max amp, force Vercel redeploy"
+            git push
+          fi
