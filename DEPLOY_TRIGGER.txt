@@ -1,1 +1,1 @@
-redeploy 20260909024000 terminate-pause-mic-amp-haptics
+redeploy 20260909025000 emergency-cbt-restore-haptics

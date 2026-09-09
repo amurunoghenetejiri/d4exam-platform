@@ -139,7 +139,7 @@ public class ExamImmersivePlugin extends Plugin {
               for (long x : p) total += x;
               long ms = Math.max(80, Math.min(total > 0 ? total : 220, 1200));
               vibrator.vibrate(
-                VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE)
+                VibrationEffect.createOneShot(ms, 255)
               );
             } catch (Exception e2) {
               //noinspection deprecation
