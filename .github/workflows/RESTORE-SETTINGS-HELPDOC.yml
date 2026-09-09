@@ -1,0 +1,17 @@
+name: RESTORE-SETTINGS-HELPDOC
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/RESTORE-SETTINGS-HELPDOC.yml'
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Placeholder then real decode in next commit
+        run: echo waiting
