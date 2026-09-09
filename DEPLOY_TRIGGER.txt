@@ -1,1 +1,1 @@
-redeploy 20260909104500 app-like shell footer hide swipe tabs settings legal
+redeploy 20260909110000 app-like footer hide swipe tabs settings about pricing legal
