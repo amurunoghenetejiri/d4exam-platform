@@ -41,6 +41,25 @@ const menuGroups = [
   },
 ];
 
+const appMenuGroups = [
+  {
+    title: "Account",
+    items: [
+      { to: "/login", label: "Login" },
+      { to: "/forgot-password", label: "Forgot Password" },
+    ],
+  },
+  {
+    title: "Help & legal",
+    items: [
+      { to: "/about", label: "About Us" },
+      { to: "/support", label: "Support" },
+      { to: "/privacy", label: "Privacy Policy" },
+      { to: "/pricing", label: "Pricing" },
+    ],
+  },
+];
+
 export function PublicLayout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const appShell = useMemo(() => {
@@ -50,6 +69,8 @@ export function PublicLayout({ children }: { children: ReactNode }) {
       return false;
     }
   }, []);
+
+  const groups = appShell ? appMenuGroups : menuGroups;
 
   return (
     <div className="relative flex min-h-dvh flex-col bg-white">
@@ -103,7 +124,7 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                 </Button>
               </div>
               <div className="flex max-h-[calc(100dvh-3.5rem)] flex-col overflow-y-auto p-4">
-                {menuGroups.map((g) => (
+                {groups.map((g) => (
                   <div key={g.title} className="mb-4">
                     <p className="mb-1.5 px-3 text-[11px] font-bold uppercase tracking-wide text-primary">
                       {g.title}
@@ -122,13 +143,15 @@ export function PublicLayout({ children }: { children: ReactNode }) {
                     </div>
                   </div>
                 ))}
-                <div className="mt-2 space-y-2 border-t border-slate-100 pt-4">
-                  <Button className="w-full" asChild>
-                    <Link to="/school-application" onClick={() => setOpen(false)}>
-                      Apply Now
-                    </Link>
-                  </Button>
-                </div>
+                {!appShell && (
+                  <div className="mt-2 space-y-2 border-t border-slate-100 pt-4">
+                    <Button className="w-full" asChild>
+                      <Link to="/school-application" onClick={() => setOpen(false)}>
+                        Apply Now
+                      </Link>
+                    </Button>
+                  </div>
+                )}
                 {appShell && (
                   <p className="mt-6 px-3 text-center text-[11px] text-slate-400">
                     © 2026 D4EXAM. All rights reserved.
