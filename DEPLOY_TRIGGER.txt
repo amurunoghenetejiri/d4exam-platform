@@ -1,1 +1,1 @@
-redeploy 20260909113000 app chrome footer hide settings legal swipe tabs
+redeploy 20260909114000 app menu footer hide settings help legal links
