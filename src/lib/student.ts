@@ -249,10 +249,15 @@ export function isStudentEligibleForExam(
   const stuDept = student.departmentId ? String(student.departmentId) : null;
   const stuLevel = student.levelId ? String(student.levelId) : null;
 
+  // Prefer strict dept+level when both sides have it
   if (stuDept && stuLevel && courseDept && courseLevel) {
     return stuDept === courseDept && stuLevel === courseLevel;
   }
-
+  // If student has no enrollments yet, still allow dept-only or level-only match
+  if (enrolled.length === 0) {
+    if (stuDept && courseDept && stuDept === courseDept) return true;
+    if (stuLevel && courseLevel && stuLevel === courseLevel) return true;
+  }
   return false;
 }
 
