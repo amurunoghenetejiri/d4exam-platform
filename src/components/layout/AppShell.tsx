@@ -35,6 +35,7 @@ import { useSchoolIdentity } from "@/lib/school-identity";
 import { useUnreadNotificationCount } from "@/lib/queries";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import type { RoleConfig } from "@/components/navigation/navConfig";
+import { useBottomNavSwipe } from "@/hooks/useBottomNavSwipe";
 
 export interface AppUser {
   name: string;
@@ -194,7 +195,6 @@ function NotificationBell({ to, unread }: { to: string; unread: number }) {
   );
 }
 
-
 const SCHOOL_BRAND_KEY = "d4exam_school_brand_v1";
 function readSeededSchoolBrand(schoolId?: string | null): { name: string | null; logoUrl: string | null } {
   if (typeof window === "undefined") return { name: null, logoUrl: null };
@@ -263,6 +263,9 @@ export function AppShell({
   }
   const avatarLetters = user.avatar || initials(user.name || "U");
   const role = session?.role ?? null;
+
+  // App-like: swipe between bottom-nav tabs on mobile
+  useBottomNavSwipe(config.bottomNav, config.home, true);
 
   return (
     <div className="relative min-h-dvh bg-slate-50">
@@ -407,11 +410,7 @@ export function AppShell({
             <NotificationBell to={notifPath} unread={unreadCount} />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className="gap-2 px-1.5 sm:px-2"
-                  aria-label="Account menu"
-                >
+                <Button variant="ghost" className="gap-2 px-1.5 sm:px-2" aria-label="Account menu">
                   <span className="grid h-8 w-8 place-items-center rounded-full bg-slate-800 text-[11px] font-semibold text-white ring-1 ring-slate-200">
                     {avatarLetters.slice(0, 2)}
                   </span>
@@ -444,20 +443,14 @@ export function AppShell({
                 </div>
                 <div className="p-1">
                   <DropdownMenuItem asChild>
-                    <Link
-                      to={`${config.home}/profile` as never}
-                      className="cursor-pointer rounded-lg px-2.5 py-2"
-                    >
+                    <Link to={`${config.home}/profile` as never} className="cursor-pointer rounded-lg px-2.5 py-2">
                       <UserRound className="mr-2.5 h-4 w-4 text-slate-500" />
                       <span className="text-sm font-medium text-slate-800">Profile</span>
                       <ChevronRight className="ml-auto h-4 w-4 text-slate-300" aria-hidden />
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link
-                      to={`${config.home}/settings` as never}
-                      className="cursor-pointer rounded-lg px-2.5 py-2"
-                    >
+                    <Link to={`${config.home}/settings` as never} className="cursor-pointer rounded-lg px-2.5 py-2">
                       <Settings className="mr-2.5 h-4 w-4 text-slate-500" />
                       <span className="text-sm font-medium text-slate-800">Settings</span>
                       <ChevronRight className="ml-auto h-4 w-4 text-slate-300" aria-hidden />
@@ -506,7 +499,7 @@ export function AppShell({
                     to={item.to}
                     preload="intent"
                     className={cn(
-                      "pressable flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors",
+                      "pressable flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors active:scale-[0.96]",
                       active ? "text-white" : "text-slate-400 hover:text-white",
                     )}
                     aria-current={active ? "page" : undefined}
