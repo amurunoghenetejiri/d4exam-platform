@@ -6,7 +6,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
 export const LIVE_MIC_EVENT = "mic-chunk";
-export const LIVE_MIC_INTERVAL_MS = 180;
+export const LIVE_MIC_INTERVAL_MS = 100;
 export const LIVE_MIC_STALE_MS = 3_500;
 /** Target capture/encode rate — 16 kHz is speech-intelligible without robotic aliasing. */
 export const LIVE_MIC_TARGET_RATE = 16_000;
@@ -139,7 +139,7 @@ export function startLiveMicPublisher(opts: {
       audioCtx = new AC();
       inputRate = audioCtx.sampleRate || 48000;
       source = audioCtx.createMediaStreamSource(new MediaStream(tracks));
-      processor = audioCtx.createScriptProcessor(2048, 1, 1);
+      processor = audioCtx.createScriptProcessor(1024, 1, 1);
       processor.onaudioprocess = (e) => {
         if (stopped) return;
         const input = e.inputBuffer.getChannelData(0);
@@ -288,7 +288,10 @@ export function playMicChunk(
     src.buffer = buffer;
     const gain = ctx.createGain();
     const now = ctx.currentTime;
-    const startAt = Math.max(now + 0.005, nextPlayAt.get(ctx) ?? now);
+    let planned = nextPlayAt.get(ctx) ?? now;
+    // If we fell more than ~350ms behind, reset schedule to avoid growing lag
+    if (planned < now - 0.35) planned = now;
+    const startAt = Math.max(now + 0.005, planned);
     const dur = buffer.duration;
     const vol = Math.max(0, Math.min(1.4, volume));
     gain.gain.setValueAtTime(0, startAt);
