@@ -432,7 +432,8 @@ export function CbtExamPage() {
           void finishAttempt(true);
           return;
         }
-        if (st === "paused" || meta.officer_hold || meta.officer_pause) {
+        const officerHold = meta.officer_hold === true || meta.officer_pause === true || String(meta.officer_hold || "").toLowerCase() === "true" || String(meta.officer_pause || "").toLowerCase() === "true";
+        if (st === "paused" || officerHold) {
           if (!pausedRef.current) {
             officerPauseRef.current = true;
             setIsOfficerPause(true);
@@ -774,8 +775,10 @@ export function CbtExamPage() {
         setScreenStream(share.stream);
         onScreenShareEnded(share.stream, () => {
           toast.error("Screen sharing stopped. Re-enable to continue the exam.");
+          officerPauseRef.current = false;
+          setIsOfficerPause(false);
           setPaused(true);
-          setPauseReason("Screen sharing stopped");
+          setPauseReason("Screen sharing stopped — re-enable to continue");
           setScreenStream(null);
           screenStreamRef.current = null;
         });
@@ -804,7 +807,18 @@ export function CbtExamPage() {
             orderedIdsRef.current = qo.map(String);
           }
           if (existingFull.answers && typeof existingFull.answers === "object") {
-            setAnswers(existingFull.answers as Record<string, number>);
+            const prev = existingFull.answers as Record<string, number>;
+            setAnswers(prev);
+            try {
+              const ordered = orderedIdsRef.current || [];
+              let idx = 0;
+              for (let i = 0; i < ordered.length; i++) {
+                const qid = ordered[i];
+                if (prev[qid] === undefined || prev[qid] === null) { idx = i; break; }
+                if (i === ordered.length - 1) idx = i;
+              }
+              setIndex(idx);
+            } catch {}
           }
         }
         // Build paper now so we can lock order
