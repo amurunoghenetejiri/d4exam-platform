@@ -1,0 +1,54 @@
+name: SIMPLE-APPLY-PATCHES
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/SIMPLE-APPLY-PATCHES.yml'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply full remaining patches via Python
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('src/routes/student.examinations.tsx')
+          t = p.read_text()
+          if 'continueMode' not in t:
+              t = t.replace('function StartExamButton({ examId }: { examId: string }) {', 'function StartExamButton({ examId, continueMode }: { examId: string; continueMode?: boolean }) {')
+              t = t.replace('className="h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"', 'className={continueMode ? "h-9 w-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 sm:h-8 sm:w-auto" : "h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"}')
+              t = t.replace('>\n      Start exam\n    </Button>', '>\n      {continueMode ? "Continue exam" : "Start exam"}\n    </Button>')
+              old = 'function StartOrCountdownButton({\n  examId,\n  scheduledStart,\n  canStartNow,\n}: {\n  examId: string;\n  scheduledStart: string | null;\n  canStartNow: boolean;\n}) {\n  const { remainingMs, ready } = useCountdown(scheduledStart);\n\n  if (canStartNow || ready) {'
+              new = 'function StartOrCountdownButton({\n  examId,\n  scheduledStart,\n  canStartNow,\n  continueMode,\n}: {\n  examId: string;\n  scheduledStart: string | null;\n  canStartNow: boolean;\n  continueMode?: boolean;\n}) {\n  const { remainingMs, ready } = useCountdown(scheduledStart);\n\n  if (continueMode) {\n    return <StartExamButton examId={examId} continueMode />;\n  }\n\n  if (canStartNow || ready) {'
+              t = t.replace(old, new)
+              old2 = 'const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);\n      if (avail === "available") {'
+              new2 = 'if (String(attempt?.status || "").toLowerCase() === "in_progress") {\n        liveList.push(e);\n        continue;\n      }\n\n      const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);\n      if (avail === "available" || String(e.status).toLowerCase() === "ongoing") {'
+              t = t.replace(old2, new2)
+              t = t.replace('scheduledStart={e.scheduled_start}\n                  canStartNow\n                />', 'scheduledStart={e.scheduled_start}\n                  canStartNow\n                  continueMode={String(attempt?.status || "").toLowerCase() === "in_progress"}\n                />')
+              p.write_text(t)
+              print('exams patched', len(t))
+          else:
+              print('exams already ok')
+
+          p = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          t = p.read_text()
+          if 'const officerHold =' not in t:
+              t = t.replace('if (st === "paused" || meta.officer_hold || meta.officer_pause) {', 'const officerHold = meta.officer_hold === true || meta.officer_pause === true || String(meta.officer_hold || "").toLowerCase() === "true" || String(meta.officer_pause || "").toLowerCase() === "true";\n        if (st === "paused" || officerHold) {')
+              t = t.replace('toast.error("Screen sharing stopped. Re-enable to continue the exam.");\n          setPaused(true);\n          setPauseReason("Screen sharing stopped");', 'toast.error("Screen sharing stopped. Re-enable to continue the exam.");\n          officerPauseRef.current = false;\n          setIsOfficerPause(false);\n          setPaused(true);\n          setPauseReason("Screen sharing stopped — re-enable to continue");')
+              t = t.replace('setAnswers(existingFull.answers as Record<string, number>);', 'const prev = existingFull.answers as Record<string, number>;\n            setAnswers(prev);\n            try {\n              const ordered = orderedIdsRef.current || [];\n              let idx = 0;\n              for (let i = 0; i < ordered.length; i++) {\n                const qid = ordered[i];\n                if (prev[qid] === undefined || prev[qid] === null) { idx = i; break; }\n                if (i === ordered.length - 1) idx = i;\n              }\n              setIndex(idx);\n            } catch {}')
+              p.write_text(t)
+              print('cbt patched', len(t))
+          else:
+              print('cbt already ok')
+          PY
+      - name: Commit and push
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email github-actions[bot]@users.noreply.github.com
+          git add src/routes/student.examinations.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then echo no changes; else git commit -m "fix: Continue exam + officer-only pause + resume unanswered" && git push; fi
