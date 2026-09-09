@@ -49,8 +49,6 @@ type AttemptRow = {
   submitted_at: string | null;
 };
 
-const DONE_ATTEMPT_STATUSES = ["submitted", "terminated", "flagged"];
-
 function formatCountdown(ms: number): string {
   if (ms <= 0) return "00:00:00";
   const totalSec = Math.floor(ms / 1000);
@@ -77,13 +75,17 @@ function useCountdown(targetIso: string | null | undefined) {
   return { remainingMs, ready: remainingMs <= 0 };
 }
 
-function StartExamButton({ examId }: { examId: string }) {
+function StartExamButton({ examId, continueMode }: { examId: string; continueMode?: boolean }) {
   const navigate = useNavigate();
   return (
     <Button
       type="button"
       size="sm"
-      className="h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"
+      className={
+        continueMode
+          ? "h-9 w-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 sm:h-8 sm:w-auto"
+          : "h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"
+      }
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -94,7 +96,7 @@ function StartExamButton({ examId }: { examId: string }) {
         void navigate({ to: "/student/exam/$id", params: { id: examId } });
       }}
     >
-      Start exam
+      {continueMode ? "Continue exam" : "Start exam"}
     </Button>
   );
 }
@@ -103,12 +105,18 @@ function StartOrCountdownButton({
   examId,
   scheduledStart,
   canStartNow,
+  continueMode,
 }: {
   examId: string;
   scheduledStart: string | null;
   canStartNow: boolean;
+  continueMode?: boolean;
 }) {
   const { remainingMs, ready } = useCountdown(scheduledStart);
+
+  if (continueMode) {
+    return <StartExamButton examId={examId} continueMode />;
+  }
 
   if (canStartNow || ready) {
     return <StartExamButton examId={examId} />;
@@ -178,8 +186,6 @@ function Page() {
     refetchOnWindowFocus: true,
     queryFn: async () => {
       if (!schoolId || !student) return [] as ExamRow[];
-      // School-scoped fetch, then strict eligibility filter (course enrollment or dept+level match).
-      // Never return all school exams when the student has no enrollments.
       const { data, error } = await supabase
         .from("examinations")
         .select(
@@ -227,7 +233,7 @@ function Page() {
         .eq("student_id", student.studentId);
       if (student.schoolId) q = q.eq("school_id", student.schoolId);
       const { data, error } = await q;
-      if (error) { console.warn("[offline]", error); return []; }
+      if (error) { console.warn("[offline]", error); return {}; }
       const map: Record<string, string> = {};
       for (const r of data ?? []) {
         map[(r as { exam_id: string }).exam_id] = (r as { id: string }).id;
@@ -267,8 +273,13 @@ function Page() {
         continue;
       }
 
+      if (String(attempt?.status || "").toLowerCase() === "in_progress") {
+        liveList.push(e);
+        continue;
+      }
+
       const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
-      if (avail === "available") {
+      if (avail === "available" || String(e.status).toLowerCase() === "ongoing") {
         liveList.push(e);
       } else if (avail === "missed" || avail === "ended") {
         doneList.push(e);
@@ -301,8 +312,8 @@ function Page() {
         title="My Examinations"
         description={
           termLine
-            ? `${termLine} · Only officer-approved exams for your department and level appear here.`
-            : "You only see exams for your department and level after the Examination Officer has approved them."
+            ? `${termLine} · Only officer-posted exams for your department and level appear here.`
+            : "You only see exams for your department and level after the Examination Officer has posted them."
         }
       />
 
@@ -311,7 +322,7 @@ function Page() {
       ) : exams.length === 0 ? (
         <EmptyState
           title="No examinations available"
-          description="When your lecturers submit exams for your courses (or department and level) and the officer approves them, they will appear here."
+          description="When your lecturers submit exams for your courses (or department and level) and the officer posts them, they will appear here."
         />
       ) : (
         <div className="space-y-4 sm:space-y-6">
@@ -450,6 +461,7 @@ function ExamList({
                   examId={e.id}
                   scheduledStart={e.scheduled_start}
                   canStartNow
+                  continueMode={String(attempt?.status || "").toLowerCase() === "in_progress"}
                 />
               )}
               {showCountdown && !studentFinished && (
