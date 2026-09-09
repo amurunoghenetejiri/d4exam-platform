@@ -1,0 +1,55 @@
+name: APPLY strong vibes + pause/terminate/mic/tab fixes
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-STRONG-VIBES-PAUSE.yml"
+      - "scripts/payloads/**"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Assemble and write fixed files
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import base64, pathlib, os
+          mapping = {
+            "ExamImmersivePlugin.java": [
+              "native-android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java",
+              "android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java",
+            ],
+            "live-audio.ts": ["src/lib/live-audio.ts"],
+            "CbtExamSession.impl.tsx": ["src/components/cbt/CbtExamSession.impl.tsx"],
+            "officer.live-monitor.tsx": ["src/routes/officer.live-monitor.tsx"],
+          }
+          root = pathlib.Path("scripts/payloads")
+          for name, dests in mapping.items():
+            parts = sorted(root.glob(f"{name}.part*"))
+            if not parts:
+              print("SKIP missing", name)
+              continue
+            data = "".join(p.read_text().strip() for p in parts)
+            raw = base64.b64decode(data)
+            for dest in dests:
+              pathlib.Path(dest).parent.mkdir(parents=True, exist_ok=True)
+              pathlib.Path(dest).write_bytes(raw)
+              print("wrote", dest, len(raw))
+          PY
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix: strong haptics native, stable pause/resume, terminate without result, live tab, mic latency"
+            git push
+          fi
