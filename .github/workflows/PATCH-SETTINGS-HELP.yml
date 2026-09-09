@@ -1,0 +1,108 @@
+name: PATCH-SETTINGS-HELP
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/PATCH-SETTINGS-HELP.yml'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Replace marketing Links with in-app helpDoc sheet
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('src/components/pages/SettingsPage.tsx')
+          t = p.read_text()
+          if 'setHelpDoc' in t or 'helpDoc' in t:
+              print('already has helpDoc')
+          else:
+              # Ensure useState import has helpDoc state near other useState
+              if 'const [helpDoc' not in t:
+                  t = t.replace(
+                      'const [saving, setSaving] = useState(false);',
+                      'const [saving, setSaving] = useState(false);\n  const [helpDoc, setHelpDoc] = useState<null | "about" | "support" | "privacy" | "pricing">(null);',
+                  )
+              # Replace the four Link blocks under Help & legal with buttons + sheet
+              import re
+              # Find Help & legal section links
+              pattern = r'(<SectionCard[^>]*title="Help & legal"[^>]*>)(.*?)(</SectionCard>)'
+              m = re.search(pattern, t, re.S)
+              if not m:
+                  # try alternate title
+                  pattern = r'(<SectionCard[^>]*title=\{[\'"]Help[^\}'"]*[\'"]\}[^>]*>)(.*?)(</SectionCard>)'
+                  m = re.search(pattern, t, re.S)
+              new_body = '''
+            {(
+              [
+                { key: "about" as const, label: "About Us", icon: Info },
+                { key: "support" as const, label: "Support", icon: LifeBuoy },
+                { key: "privacy" as const, label: "Privacy Policy", icon: Shield },
+                { key: "pricing" as const, label: "Pricing", icon: CreditCard },
+              ] as const
+            ).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setHelpDoc(item.key)}
+                className="flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]"
+              >
+                <item.icon className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                <span className="flex-1">{item.label}</span>
+                <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+              </button>
+            ))}
+'''
+              if m:
+                  t = t[:m.start(2)] + new_body + t[m.end(2):]
+              else:
+                  # Fallback: replace individual Links
+                  t = t.replace('to="/about"', 'to="#" onClick={(e)=>{e.preventDefault();setHelpDoc("about")}')
+                  t = t.replace('to="/support"', 'to="#" onClick={(e)=>{e.preventDefault();setHelpDoc("support")}')
+                  t = t.replace('to="/privacy"', 'to="#" onClick={(e)=>{e.preventDefault();setHelpDoc("privacy")}')
+                  t = t.replace('to="/pricing"', 'to="#" onClick={(e)=>{e.preventDefault();setHelpDoc("pricing")}')
+              # Ensure icons imported
+              if 'LifeBuoy' not in t:
+                  t = t.replace('Info,', 'Info, LifeBuoy,')
+                  if 'LifeBuoy' not in t:
+                      t = t.replace('from "lucide-react"', 'LifeBuoy, Info, Shield, CreditCard, ChevronRight } from "lucide-react"; //')
+              # Append help sheet before final closing of component return
+              sheet = '''
+        {helpDoc ? (
+          <div className="fixed inset-0 z-[80] flex flex-col bg-white">
+            <div className="flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 px-3 pt-[env(safe-area-inset-top,0px)]">
+              <Button type="button" variant="ghost" size="sm" className="font-semibold" onClick={() => setHelpDoc(null)}>
+                ← Back
+              </Button>
+              <p className="text-sm font-extrabold text-slate-900">
+                {helpDoc === "about" ? "About Us" : helpDoc === "support" ? "Support" : helpDoc === "privacy" ? "Privacy Policy" : "Pricing"}
+              </p>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 text-sm leading-relaxed text-slate-700">
+              {helpDoc === "about" && (<p>D4EXAM is a secure computer-based examination platform for schools and institutions. It provides integrity monitoring, officer controls, and real-time exam delivery.</p>)}
+              {helpDoc === "support" && (<p>For support, contact your school administrator or email support through your institution channel. In-app notifications also carry operational updates.</p>)}
+              {helpDoc === "privacy" && (<p>We process exam session data (answers, integrity signals, device metadata) to run secure assessments. Data is scoped to your school and retained per institutional policy.</p>)}
+              {helpDoc === "pricing" && (<p>Pricing is institution-based. Contact your school admin or D4EXAM sales for plan details. Student access is provided through your enrolled school.</p>)}
+            </div>
+          </div>
+        ) : null}
+'''
+              if '{helpDoc ?' not in t:
+                  # insert before last closing fragment
+                  idx = t.rfind('</>')
+                  if idx != -1:
+                      t = t[:idx] + sheet + t[idx:]
+              p.write_text(t)
+              print('patched settings', len(t))
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email github-actions[bot]@users.noreply.github.com
+          git add src/components/pages/SettingsPage.tsx
+          git diff --cached --quiet || (git commit -m "fix: Settings Help & legal opens in-app with Back" && git push)
