@@ -33,8 +33,14 @@ export function getRuntimePlatform(): RuntimePlatform {
   // Heuristic: Capacitor Android WebView user agent
   try {
     const ua = navigator.userAgent || "";
-    if (/; wv\)/i.test(ua) && /Android/i.test(ua) && /Capacitor/i.test(ua)) {
+    if (/; wv\)/i.test(ua) && /Android/i.test(ua)) {
       return "android";
+    }
+    if (/Capacitor/i.test(ua) && /Android/i.test(ua)) {
+      return "android";
+    }
+    if (/Capacitor/i.test(ua) && /iPhone|iPad|iPod/i.test(ua)) {
+      return "ios";
     }
   } catch {
     /* ignore */
@@ -47,6 +53,14 @@ export function isNativeShell(): boolean {
   const w = window as CapWindow;
   try {
     if (w.Capacitor?.isNativePlatform?.()) return true;
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (w.Capacitor && typeof w.Capacitor.getPlatform === "function") {
+      const p = w.Capacitor.getPlatform();
+      if (p === "android" || p === "ios") return true;
+    }
   } catch {
     /* ignore */
   }
@@ -63,6 +77,7 @@ export function isStandalonePwa(): boolean {
   return mq || ios;
 }
 
+/** True for native APK/iOS shell or installed PWA — use app chrome, hide marketing footer */
 export function isAppLikeShell(): boolean {
   return isNativeShell() || isStandalonePwa();
 }
