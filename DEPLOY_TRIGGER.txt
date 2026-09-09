@@ -1,1 +1,1 @@
-redeploy 20260909114000 app menu footer hide settings help legal links
+redeploy 20260909104100 app-like shell footer hide swipe tabs settings legal

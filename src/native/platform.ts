@@ -10,6 +10,7 @@ type CapWindow = Window & {
     isNativePlatform?: () => boolean;
     isPluginAvailable?: (name: string) => boolean;
   };
+  __D4EXAM_NATIVE__?: boolean;
 };
 
 export function getRuntimePlatform(): RuntimePlatform {
@@ -39,12 +40,13 @@ export function getRuntimePlatform(): RuntimePlatform {
     if (/Capacitor/i.test(ua) && /Android/i.test(ua)) {
       return "android";
     }
-    if (/Capacitor/i.test(ua) && /iPhone|iPad|iPod/i.test(ua)) {
+    if (/Capacitor/i.test(ua) && /iPhone|iPad|iOS/i.test(ua)) {
       return "ios";
     }
   } catch {
     /* ignore */
   }
+  if (w.__D4EXAM_NATIVE__) return "android";
   return "web";
 }
 
@@ -77,7 +79,7 @@ export function isStandalonePwa(): boolean {
   return mq || ios;
 }
 
-/** True for native APK/iOS shell or installed PWA — use app chrome, hide marketing footer */
+/** True when running inside the Capacitor APK/iOS shell or installed PWA. */
 export function isAppLikeShell(): boolean {
   return isNativeShell() || isStandalonePwa();
 }
