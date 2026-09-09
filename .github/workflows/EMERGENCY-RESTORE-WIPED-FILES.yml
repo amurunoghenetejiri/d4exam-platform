@@ -1,0 +1,33 @@
+name: EMERGENCY-RESTORE-WIPED-FILES
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/EMERGENCY-RESTORE-WIPED-FILES.yml'
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore three files from good commit 91d6857
+        run: |
+          set -euo pipefail
+          GOOD=91d6857
+          git show ${GOOD}:src/routes/student.examinations.tsx > src/routes/student.examinations.tsx
+          git show ${GOOD}:src/components/pages/SettingsPage.tsx > src/components/pages/SettingsPage.tsx
+          git show ${GOOD}:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
+          wc -c src/routes/student.examinations.tsx src/components/pages/SettingsPage.tsx src/components/cbt/CbtExamSession.impl.tsx
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/student.examinations.tsx src/components/pages/SettingsPage.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix: emergency restore wiped exam session, settings, examinations files from 91d6857"
+            git push
+          fi
