@@ -1,22 +1,25 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
- * D4EXAM Capacitor config — native Android app
+ * D4EXAM Capacitor config
  *
- * The App loads a bundled client SPA from webDir (no Vercel / server.url).
- * Built by: node scripts/prepare-capacitor-dist.mjs → dist/
- * Supabase and other backends are reached directly from the client.
- * offline.html is shown only if a navigated remote resource fails.
+ * Live server.url is REQUIRED: TanStack Start is SSR + server functions.
+ * A pure local SPA stubs every .functions/.server module to no-ops, which
+ * breaks login, session, menus, and navigation.
+ * The working product loads the production Vercel app inside the native shell
+ * (push, camera, status bar still work). Offline network errors use offline.html.
  */
 const config: CapacitorConfig = {
   appId: "com.d4exam.app",
   appName: "D4EXAM",
   webDir: "dist",
   server: {
-    // Local bundled assets only — do NOT set server.url (that would load the Website).
+    url: "https://d4exam-platform.vercel.app",
     androidScheme: "https",
     errorPath: "offline.html",
     allowNavigation: [
+      "d4exam-platform.vercel.app",
+      "*.vercel.app",
       "*.supabase.co",
       "*.googleapis.com",
       "*.gstatic.com",

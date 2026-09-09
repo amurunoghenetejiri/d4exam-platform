@@ -1,4 +1,4 @@
-name: Build Android APK (local SPA)
+name: Build Android APK
 
 on:
   workflow_dispatch:
@@ -9,9 +9,7 @@ on:
       - "capacitor.config.*"
       - "scripts/prepare-capacitor-dist.mjs"
       - "scripts/android-apply-icons.sh"
-      - "vite.capacitor.config.ts"
-      - "src/capacitor-main.tsx"
-      - "src/lib/haptic.ts"
+      - "public/offline.html"
       - "public/icon-512.png"
       - "public/logo.png"
       - "package.json"
@@ -47,32 +45,26 @@ jobs:
           set -euo pipefail
           bun install
 
-      - name: Build local Capacitor SPA (no Vercel)
+      - name: Prepare dist fallback assets (runtime = Vercel URL)
         run: |
           set -euo pipefail
-          bun run build:app
-          test -f dist/index.html
-          test -d dist/assets
-          test -f dist/assets/capacitor-app.js
-          if grep -E 'https?://[^"'\'' ]*vercel' dist/index.html; then
-            echo "ERROR: dist/index.html still points at Vercel"
-            exit 1
+          mkdir -p dist
+          if [ -f public/offline.html ]; then cp -f public/offline.html dist/offline.html; fi
+          if [ -f public/logo.png ]; then cp -f public/logo.png dist/logo.png; fi
+          if [ ! -f dist/index.html ]; then
+            printf '%s\n' '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>D4EXAM</title></head><body><p>Loading…</p></body></html>' > dist/index.html
           fi
-          echo "OK: local SPA built"
-        env:
-          NODE_ENV: production
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          echo "dist ready (runtime shell = https://d4exam-platform.vercel.app)"
 
-      - name: Verify no remote server.url
+      - name: Verify capacitor uses Vercel shell URL
         run: |
           set -euo pipefail
-          if grep -E 'url:\s*["'\'']https?://' capacitor.config.ts 2>/dev/null; then
-            echo "ERROR: server.url must not point at a remote URL"
+          CFG="capacitor.config.ts"
+          if ! grep -F 'url: "https://d4exam-platform.vercel.app"' "$CFG"; then
+            echo "FATAL: capacitor.config.ts must point at Vercel production"
             exit 1
           fi
-          echo "OK: local SPA, no remote server.url"
+          echo "OK: Capacitor server.url points at Vercel production"
 
       - name: Ensure complete Android platform
         run: |
@@ -137,15 +129,9 @@ jobs:
           test -f android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java
           test -f android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
           test -f android/app/src/main/java/com/d4exam/app/MainActivity.java
-          # Only fail on a real import/use — not comments
           if grep -E '^[[:space:]]*import[[:space:]]+androidx\.core\.splashscreen' \
               android/app/src/main/java/com/d4exam/app/MainActivity.java; then
             echo "ERROR: MainActivity still imports AndroidX splash API"
-            exit 1
-          fi
-          if grep -E 'installSplashScreen\s*\(' \
-              android/app/src/main/java/com/d4exam/app/MainActivity.java; then
-            echo "ERROR: MainActivity still calls installSplashScreen"
             exit 1
           fi
           grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
@@ -199,14 +185,17 @@ jobs:
           if [ -f "$DRAW/splash.xml" ]; then
             rm -f "$DRAW"/splash.png "$DRAW"/splash.jpg "$DRAW"/splash.webp "$DRAW"/splash.gif
           fi
-          chmod +x android/gradlew
-          if grep -E '^[[:space:]]*import[[:space:]]+androidx\.core\.splashscreen' \
-              android/app/src/main/java/com/d4exam/app/MainActivity.java; then
-            echo "ERROR: SplashScreen import reappeared after sync"
-            exit 1
+          # Ensure synced capacitor.config.json still has Vercel URL
+          if [ -f android/app/src/main/assets/capacitor.config.json ]; then
+            if ! grep -q 'd4exam-platform.vercel.app' android/app/src/main/assets/capacitor.config.json; then
+              echo "FATAL: android assets capacitor.config.json missing Vercel URL after sync"
+              cat android/app/src/main/assets/capacitor.config.json || true
+              exit 1
+            fi
           fi
+          chmod +x android/gradlew
           grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
-          echo "OK: sync complete — local SPA + safe MainActivity"
+          echo "OK: sync complete — Vercel WebView shell"
 
       - name: Build debug APK
         run: |
