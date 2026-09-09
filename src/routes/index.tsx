@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { PublicLayout } from "@/components/layout/PublicLayout";
 import { Button } from "@/components/ui/button";
-import { fetchSessionUser, roleHome, readLastPath } from "@/lib/session";
+import { fetchSessionUser, roleHome, readLastPath, readLastRole, type AppRole } from "@/lib/session";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -33,14 +33,24 @@ export const Route = createFileRoute("/")({
   }),
   beforeLoad: async () => {
     try {
-      const session = await fetchSessionUser();
-      if (session?.user) {
-        const last = readLastPath();
-        if (last && last !== "/" && !last.startsWith("/login")) {
-          throw redirect({ to: last as "/" });
+      // Prefer cached role/path so Capacitor relaunch does not flash marketing home
+      const lastRole = readLastRole();
+      const last = readLastPath();
+      if (lastRole && roleHome[lastRole as AppRole]) {
+        const home = roleHome[lastRole as AppRole];
+        // Always land on role dashboard home (not a deep exam page) on cold start
+        throw redirect({ to: home as never });
+      }
+      if (last && last !== "/" && !last.startsWith("/login") && !last.startsWith("/about") && !last.startsWith("/pricing") && !last.startsWith("/privacy") && !last.startsWith("/support") && !last.startsWith("/features")) {
+        const rolePrefix = ["student", "teacher", "officer", "admin", "super-admin"].find((r) => last.startsWith(`/${r}`));
+        if (rolePrefix) {
+          const home = rolePrefix === "officer" ? "/officer" : rolePrefix === "admin" ? "/admin" : rolePrefix === "super-admin" ? "/super-admin" : `/${rolePrefix}`;
+          throw redirect({ to: home as never });
         }
-        const home = roleHome(session.role);
-        if (home && home !== "/") throw redirect({ to: home as "/" });
+      }
+      const session = await fetchSessionUser();
+      if (session?.role && session.role in roleHome) {
+        throw redirect({ to: roleHome[session.role as AppRole] as never });
       }
     } catch (e) {
       if (e && typeof e === "object" && "to" in e) throw e;
@@ -115,7 +125,6 @@ const plans = [
 function HomePage() {
   return (
     <PublicLayout>
-      {/* Original hero: student exam background + dark navy overlay */}
       <section className="relative min-h-[min(88vh,720px)] w-full overflow-hidden">
         <img
           src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1920&q=85"
@@ -136,7 +145,6 @@ function HomePage() {
               Conduct exams, manage students, create questions, automate marking and publish results
               seamlessly — for universities, polytechnics, colleges and technical schools.
             </p>
-            {/* Always side-by-side CTAs; smaller padding on narrow screens so they stay in one row */}
             <div className="mt-8 flex flex-row flex-nowrap items-center gap-2 sm:gap-3">
               <Button
                 size="lg"
@@ -295,7 +303,6 @@ function HomePage() {
                 Choose full school registration or a short Trial / Demo. Super admin reviews and activates you.
               </p>
             </div>
-            {/* Side-by-side on all widths */}
             <div className="flex shrink-0 flex-row flex-nowrap items-center gap-2 sm:gap-3">
               <Button size="lg" className="h-11 shrink-0 rounded-full px-4 text-sm font-semibold sm:h-12 sm:px-6 sm:text-base" asChild>
                 <Link to="/school-application">Apply — Full school</Link>
