@@ -1,10 +1,20 @@
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
+function schoolInitials(name?: string | null): string {
+  const n = (name || "").trim();
+  if (!n) return "SC";
+  const parts = n.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase().slice(0, 2);
+  }
+  return n.slice(0, 2).toUpperCase();
+}
+
 /**
- * Displays a school logo from the database URL, or D4EXAM fallback.
- * Transparent background is preserved (no white fill behind the image).
- * Never shows a broken image icon.
+ * School logo from DB URL only.
+ * Never uses the D4EXAM app logo as the school mark — that stays for "Powered by" only.
+ * Missing/broken logo → school initials badge.
  */
 export function SchoolLogo({
   logoUrl,
@@ -19,7 +29,6 @@ export function SchoolLogo({
   className?: string;
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   rounded?: boolean;
-  /** When true, load immediately (header / critical UI). */
   priority?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
@@ -30,19 +39,31 @@ export function SchoolLogo({
     lg: "h-14 w-14",
     xl: "h-20 w-20",
   }[size];
+  const textSize = {
+    xs: "text-[9px]",
+    sm: "text-[10px]",
+    md: "text-xs",
+    lg: "text-sm",
+    xl: "text-base",
+  }[size];
 
   const showFallback = !logoUrl || failed;
 
   if (showFallback) {
     return (
-      <img
-        src="/logo.png"
-        alt={schoolName ? `${schoolName} (D4EXAM)` : "D4EXAM"}
-        className={cn(dims, "shrink-0 object-contain bg-transparent", rounded && "rounded-lg", className)}
-        loading={priority ? "eager" : "lazy"}
-        decoding="async"
-        fetchPriority={priority ? "high" : undefined}
-      />
+      <span
+        className={cn(
+          dims,
+          "inline-grid shrink-0 place-items-center bg-primary/10 font-extrabold text-primary",
+          rounded && "rounded-lg",
+          textSize,
+          className,
+        )}
+        title={schoolName || "School"}
+        aria-label={schoolName ? `${schoolName} logo` : "School"}
+      >
+        {schoolInitials(schoolName)}
+      </span>
     );
   }
 
@@ -65,8 +86,7 @@ export function SchoolLogo({
 }
 
 /**
- * School identity first (logo + name), optional small D4EXAM mark.
- * Use on school portal headers, dashboards, exam screens.
+ * School identity first (logo + name). Platform mark is separate and optional.
  */
 export function DualBrand({
   logoUrl,
