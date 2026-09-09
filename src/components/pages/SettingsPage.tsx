@@ -35,7 +35,7 @@ import {
   validateLogoFile,
 } from "@/lib/school-identity";
 import { SchoolLogo } from "@/components/brand/SchoolLogo";
-import { Loader2, Upload, Building2, Info, LifeBuoy, Shield, ChevronRight } from "lucide-react";
+import { Loader2, Upload, Building2, Info, LifeBuoy, Shield, ChevronRight, CreditCard } from "lucide-react";
 import { PushSettingsCard } from "@/components/settings/PushSettingsCard";
 import { SwitchAccountCard } from "@/components/settings/SwitchAccountCard";
 import { RoleSwitchCard } from "@/components/settings/RoleSwitchCard";
@@ -44,12 +44,8 @@ import { signOutThisAccount, signOutAllAccounts, listSavedAccounts } from "@/lib
 export function SettingsPage({ scope }: { scope: string }) {
   const { data: session } = useSessionUser();
   const [saving, setSaving] = useState(false);
-  const [pwdBusy, setPwdBusy] = useState(false);
   const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({ ...DEFAULT_NOTIFICATION_PREFS });
   const [displayPrefs, setDisplayPrefs] = useState<DisplayPrefs>({ ...DEFAULT_DISPLAY_PREFS });
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const scopeLower = (scope || "").toLowerCase();
   const isSuperAdmin = scopeLower.includes("super") || session?.role === "super_admin" || (session?.roles ?? []).includes("super_admin");
   const isSchoolAdmin = !isSuperAdmin && (scopeLower.includes("school admin") || (scopeLower.includes("admin") && !scopeLower.includes("super")) || scopeLower === "school" || session?.role === "school_admin");
@@ -138,7 +134,7 @@ export function SettingsPage({ scope }: { scope: string }) {
             ) : null}
           </div>
         </SectionCard>
-        <SectionCard title="Help & legal" description="About D4EXAM, support and privacy">
+        <SectionCard title="Help & legal" description="About, support, privacy and pricing">
           <div className="flex flex-col gap-1">
             <Link to="/about" className="flex items-center gap-3 rounded-lg px-2 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
               <Info className="h-4 w-4 shrink-0 text-primary" aria-hidden />
@@ -153,6 +149,11 @@ export function SettingsPage({ scope }: { scope: string }) {
             <Link to="/privacy" className="flex items-center gap-3 rounded-lg px-2 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
               <Shield className="h-4 w-4 shrink-0 text-primary" aria-hidden />
               <span className="flex-1">Privacy Policy</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </Link>
+            <Link to="/pricing" className="flex items-center gap-3 rounded-lg px-2 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <CreditCard className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">Pricing</span>
               <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
             </Link>
             <p className="mt-3 px-2 text-center text-[11px] text-slate-400">© 2026 D4EXAM. All rights reserved. · Smart. Secure. Seamless.</p>
@@ -259,7 +260,7 @@ function SchoolIdentityCard() {
               <Button type="button" variant="outline" className="gap-2 font-semibold" onClick={() => inputRef.current?.click()} disabled={busy}><Upload className="h-4 w-4" />{school?.logoUrl ? "Change logo" : "Upload logo"}</Button>
               {file && (<><Button type="button" className="font-semibold" disabled={busy} onClick={() => void saveLogo()}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save logo</Button><Button type="button" variant="ghost" disabled={busy} onClick={cancelLogo}>Cancel</Button></>)}
             </div>
-            {!school?.logoUrl && !preview && (<p className="text-xs text-amber-700">No logo yet — D4EXAM mark is shown until you upload one.</p>}
+            {!school?.logoUrl && !preview && <p className="text-xs text-amber-700">No logo yet — D4EXAM mark is shown until you upload one.</p>}
           </div>
         </div>
       </div>
