@@ -1,0 +1,175 @@
+name: APPLY-REMAINING-PATCHES
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/APPLY-REMAINING-PATCHES.yml'
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply remaining patches
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          # --- examinations: Continue mode ---
+          p = Path('src/routes/student.examinations.tsx')
+          t = p.read_text()
+          if 'continueMode' not in t:
+              t = t.replace(
+                  'function StartExamButton({ examId }: { examId: string }) {',
+                  'function StartExamButton({ examId, continueMode }: { examId: string; continueMode?: boolean }) {',
+              )
+              t = t.replace(
+                  'className="h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"',
+                  'className={\n        continueMode\n          ? "h-9 w-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 sm:h-8 sm:w-auto"\n          : "h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"\n      }',
+              )
+              t = t.replace('      Start exam\n', '      {continueMode ? "Continue exam" : "Start exam"}\n')
+              old = '''function StartOrCountdownButton({
+  examId,
+  scheduledStart,
+  canStartNow,
+}: {
+  examId: string;
+  scheduledStart: string | null;
+  canStartNow: boolean;
+}) {
+  const { remainingMs, ready } = useCountdown(scheduledStart);
+
+  if (canStartNow || ready) {'''
+              new = '''function StartOrCountdownButton({
+  examId,
+  scheduledStart,
+  canStartNow,
+  continueMode,
+}: {
+  examId: string;
+  scheduledStart: string | null;
+  canStartNow: boolean;
+  continueMode?: boolean;
+}) {
+  const { remainingMs, ready } = useCountdown(scheduledStart);
+
+  if (continueMode) {
+    return <StartExamButton examId={examId} continueMode />;
+  }
+
+  if (canStartNow || ready) {'''
+              if old in t:
+                  t = t.replace(old, new)
+              old2 = '''      if (studentFinished || ["completed", "closed", "cancelled"].includes(String(e.status).toLowerCase())) {
+        doneList.push(e);
+        continue;
+      }
+
+      const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
+      if (avail === "available") {'''
+              new2 = '''      if (studentFinished || ["completed", "closed", "cancelled"].includes(String(e.status).toLowerCase())) {
+        doneList.push(e);
+        continue;
+      }
+
+      if (String(attempt?.status || "").toLowerCase() === "in_progress") {
+        liveList.push(e);
+        continue;
+      }
+
+      const avail = examAvailability(e.status, e.scheduled_start, e.scheduled_end);
+      if (avail === "available" || String(e.status).toLowerCase() === "ongoing") {'''
+              if old2 in t:
+                  t = t.replace(old2, new2)
+              t = t.replace(
+                  '''                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow
+                />''',
+                  '''                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow
+                  continueMode={String(attempt?.status || "").toLowerCase() === "in_progress"}
+                />''',
+              )
+              p.write_text(t)
+              print('OK examinations')
+          else:
+              print('SKIP examinations')
+
+          # --- CbtExamSession: officerHold + resume + screen share ---
+          p = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          t = p.read_text()
+          changed = False
+          if 'const officerHold =' not in t:
+              t = t.replace(
+                  'if (st === "paused" || meta.officer_hold || meta.officer_pause) {',
+                  '''const officerHold =
+          meta.officer_hold === true ||
+          meta.officer_pause === true ||
+          String(meta.officer_hold || "").toLowerCase() === "true" ||
+          String(meta.officer_pause || "").toLowerCase() === "true";
+        if (st === "paused" || officerHold) {''',
+              )
+              changed = True
+          if 'Integrity hold' not in t:
+              t = t.replace(
+                  '''onScreenShareEnded(share.stream, () => {
+          toast.error("Screen sharing stopped. Re-enable to continue the exam.");
+          setPaused(true);
+          setPauseReason("Screen sharing stopped");''',
+                  '''onScreenShareEnded(share.stream, () => {
+          toast.error("Screen sharing stopped. Re-enable to continue the exam.");
+          // Integrity hold — not an officer pause
+          officerPauseRef.current = false;
+          setIsOfficerPause(false);
+          setPaused(true);
+          setPauseReason("Screen sharing stopped — re-enable to continue");''',
+              )
+              changed = True
+          if 'Resume at first unanswered' not in t:
+              t = t.replace(
+                  'setAnswers(existingFull.answers as Record<string, number>);',
+                  '''const prev = existingFull.answers as Record<string, number>;
+            setAnswers(prev);
+            // Resume at first unanswered question
+            try {
+              const ordered = orderedIdsRef.current || [];
+              let idx = 0;
+              for (let i = 0; i < ordered.length; i++) {
+                const qid = ordered[i];
+                if (prev[qid] === undefined || prev[qid] === null) { idx = i; break; }
+                if (i === ordered.length - 1) idx = i;
+              }
+              setIndex(idx);
+            } catch {}''',
+              )
+              changed = True
+          if changed:
+              p.write_text(t)
+              print('OK CbtExamSession')
+          else:
+              print('SKIP CbtExamSession')
+
+          # --- Settings: in-app helpDoc ---
+          # Copy from a minimal inline if missing - full Settings is complex; leave for next step if needed
+          p = Path('src/components/pages/SettingsPage.tsx')
+          t = p.read_text()
+          if 'setHelpDoc' not in t:
+              print('Settings still needs full in-app help rewrite (size=%d)' % len(t))
+          else:
+              print('OK Settings already has helpDoc')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo No changes
+          else
+            git commit -m "fix: Continue exam, officer-only pause, resume first unanswered"
+            git push
+          fi
