@@ -238,7 +238,6 @@ export function isStudentEligibleForExam(
     return false;
   }
   const courseId = exam.course_id ? String(exam.course_id) : null;
-  if (!courseId) return false;
 
   const enrolled = (student.courseIds ?? []).map(String);
   if (enrolled.length > 0 && enrolled.includes(courseId)) return true;
@@ -249,14 +248,21 @@ export function isStudentEligibleForExam(
   const stuDept = student.departmentId ? String(student.departmentId) : null;
   const stuLevel = student.levelId ? String(student.levelId) : null;
 
-  // Prefer strict dept+level when both sides have it
   if (stuDept && stuLevel && courseDept && courseLevel) {
-    return stuDept === courseDept && stuLevel === courseLevel;
+    if (stuDept === courseDept && stuLevel === courseLevel) return true;
   }
-  // If student has no enrollments yet, still allow dept-only or level-only match
+  if (stuDept && courseDept && stuDept === courseDept) {
+    if (!courseLevel || !stuLevel || courseLevel === stuLevel) return true;
+  }
+  if (stuLevel && courseLevel && stuLevel === courseLevel && (!courseDept || !stuDept)) {
+    return true;
+  }
+  if (!courseId) return true;
+  if (!courseDept && !courseLevel) return true;
   if (enrolled.length === 0) {
     if (stuDept && courseDept && stuDept === courseDept) return true;
     if (stuLevel && courseLevel && stuLevel === courseLevel) return true;
+    if (student.schoolId && exam.school_id && String(student.schoolId) === String(exam.school_id)) return true;
   }
   return false;
 }
