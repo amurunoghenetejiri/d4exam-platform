@@ -14,7 +14,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-      - name: Restore Cbt from 69cea64 and grey-lock
+      - name: Restore Cbt + grey + push with rebase
         run: |
           set -euo pipefail
           git show 69cea64b9b5d0b64eb6ef6975ace64218897312d:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
@@ -36,10 +36,6 @@ jobs:
           print("size", len(t))
           '
           wc -c src/components/cbt/CbtExamSession.impl.tsx
-          grep -c "line-through\|setDone(true)\|resumeIndexRef" src/components/cbt/CbtExamSession.impl.tsx || true
-      - name: Commit
-        run: |
-          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/components/cbt/CbtExamSession.impl.tsx
@@ -47,5 +43,6 @@ jobs:
             echo "No changes"
           else
             git commit -m "fix: restore full CbtExamSession + grey locked answers + instant submit"
-            git push
+            git pull --rebase origin main || true
+            git push origin main
           fi
