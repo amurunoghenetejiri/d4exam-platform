@@ -708,11 +708,11 @@ export function CbtExamPage() {
     doneRef.current = true;
     setFsGate(false);
     setPaused(false);
+    setDone(true); // immediate UI exit — no camera reconnect flash
     shutdownMedia();
     void leaveExamFullscreen();
     if (previewMode) {
       toast.message("Preview ended — nothing was saved");
-      setDone(true);
       finishingRef.current = false;
       return;
     }
