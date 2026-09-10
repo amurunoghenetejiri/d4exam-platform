@@ -2,7 +2,7 @@ import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchSessionUser, roleHome, seedPendingLoginRole, readLastPath, type AppRole } from "@/lib/session";
+import { fetchSessionUser, roleHome, seedPendingLoginRole, setPreferredRole, rememberLastPath, readLastPath, type AppRole } from "@/lib/session";
 import { signInWithSchoolCode } from "@/lib/auth.functions";
 import { ensureLoginAccount } from "@/lib/ensure-login.functions";
 import { saveCurrentAccountToVault, consumeAddAccountFlow, listSavedAccounts } from "@/lib/account-switcher";
@@ -94,6 +94,10 @@ function friendlyLoginError(err: unknown): string {
 /** Full page load so Capacitor WebView always applies the new session. */
 async function goToRoleHome(role: string, rememberDevice = true) {
   const home = roleHome[role as AppRole];
+  try {
+    setPreferredRole(role as AppRole);
+    rememberLastPath(home, role);
+  } catch { /* ignore */ }
   if (!home) return false;
   const last = readLastPath();
   const prefix = home;

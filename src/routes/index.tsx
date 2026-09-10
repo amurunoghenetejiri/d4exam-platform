@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { PublicLayout } from "@/components/layout/PublicLayout";
 import { Button } from "@/components/ui/button";
-import { fetchSessionUser, roleHome, readLastPath, readLastRole, type AppRole } from "@/lib/session";
+import { fetchSessionUser, roleHome, readLastPath, readLastRole, readPreferredRole, type AppRole } from "@/lib/session";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/")({
   beforeLoad: async () => {
     try {
       // Prefer cached role/path so Capacitor relaunch does not flash marketing home
-      const lastRole = readLastRole();
+      const lastRole = readLastRole() || readPreferredRole();
       const last = readLastPath();
       if (lastRole && roleHome[lastRole as AppRole]) {
         const home = roleHome[lastRole as AppRole];

@@ -317,7 +317,7 @@ function Page() {
       }
       toast.success(
         mode === "post"
-          ? "Exam posted — students can see it now"
+          ? "Pushed to students — exam is now live on student examinations"
           : "Exam released — hidden from students until you post again",
       );
       await qc.invalidateQueries({ queryKey: ["officer-approvals"] });
@@ -505,7 +505,7 @@ function Page() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <SectionCard
           title="Awaiting your decision"
-          description={listQ.isFetching ? "Refreshing…" : "Teachers submit → you approve → post to students"}
+          description={listQ.isFetching ? "Refreshing…" : "Teachers submit → you approve → Push to students (makes exam live)"}
         >
           {listQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading examinations…</p>
@@ -592,7 +592,7 @@ function Page() {
 
         <SectionCard
           title="Recent decisions"
-          description="Post so students see the exam. Release hides it until you post again."
+          description="After you approve, click Push to students so the exam appears live for eligible students. Release hides it again."
         >
           {history.length === 0 ? (
             <EmptyState title="No decisions yet" description="Processed examinations will show here." />
@@ -626,7 +626,7 @@ function Page() {
                             onClick={() => void setExamVisibility(item, "post")}
                           >
                             <Send className="mr-1.5 h-3.5 w-3.5" />
-                            Post to students
+                            Push to students
                           </Button>
                         )}
                         {canRelease && (
