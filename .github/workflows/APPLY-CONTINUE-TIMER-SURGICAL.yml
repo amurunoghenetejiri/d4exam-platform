@@ -12,12 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 100
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Restore kit and patch
         run: |
           set -eux
-          git show b6d2db7:src/components/dashboard/kit.tsx > src/components/dashboard/kit.tsx
+          git show b6d2db709d92b9eb5a15c72737b9e81ec3b0e521:src/components/dashboard/kit.tsx > src/components/dashboard/kit.tsx
           python3 -c "
 from pathlib import Path
 p=Path('src/components/dashboard/kit.tsx')
