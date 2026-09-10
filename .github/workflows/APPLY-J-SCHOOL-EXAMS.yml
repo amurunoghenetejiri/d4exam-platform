@@ -1,0 +1,99 @@
+name: APPLY-J-SCHOOL-EXAMS
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-J-SCHOOL-EXAMS.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - name: Replace eligibility by anchors
+        run: |
+          python3 -c '
+from pathlib import Path
+p = Path("src/lib/student.ts")
+t = p.read_text()
+a = t.find("export function isStudentEligibleForExam")
+b = t.find("export function filterExamsForStudent")
+assert a > 0 and b > a, (a, b)
+new = """export function isStudentEligibleForExam(
+  student: Pick<StudentContext, "schoolId" | "departmentId" | "levelId" | "courseIds"> | null | undefined,
+  exam: {
+    school_id?: string | null;
+    course_id?: string | null;
+    courses?: ExamCourseRef;
+  } | null | undefined,
+): boolean {
+  if (!student || !exam) return false;
+  if (exam.school_id && student.schoolId && String(exam.school_id) !== String(student.schoolId)) {
+    return false;
+  }
+  if (student.schoolId && exam.school_id && String(student.schoolId) === String(exam.school_id)) {
+    return true;
+  }
+  if (student.schoolId && !exam.school_id) return true;
+  return false;
+}
+
+"""
+p.write_text(t[:a] + new + t[b:])
+print("ok", len(p.read_text()))
+'
+      - name: Officer push notify
+        run: |
+          python3 -c '
+from pathlib import Path
+p = Path("src/routes/officer.approvals.tsx")
+t = p.read_text()
+needle = "await qc.invalidateQueries({ queryKey: [\"officer-approvals\"] });\n      await listQ.refetch();"
+if "student-dashboard-exams" in t:
+    print("notify already")
+elif needle in t and "Pushed to students" in t:
+    insert = """if (mode === "post" && schoolId) {
+        try {
+          const payload = {
+            schoolId,
+            examId: item.id,
+            examTitle: item.title,
+            courseId: item.course_id,
+            courseCode: courseCode(item) !== "—" ? courseCode(item) : undefined,
+            courseTitle: courseName(item) !== "Course" ? courseName(item) : undefined,
+            start: item.scheduled_start || undefined,
+            end: item.scheduled_end || undefined,
+            scheduledStart: item.scheduled_start || undefined,
+            scheduledEnd: item.scheduled_end || undefined,
+          };
+          try {
+            await serverNotifyStudentsExamApproved({ data: payload });
+          } catch (se) {
+            try { await notifyStudentsExamApproved(payload); } catch (ce) { console.warn(ce); }
+          }
+        } catch (e) { console.warn(e); }
+      }
+      await qc.invalidateQueries({ queryKey: ["officer-approvals"] });
+      await qc.invalidateQueries({ queryKey: ["student-exams"] });
+      await qc.invalidateQueries({ queryKey: ["student-dashboard-exams"] });
+      await listQ.refetch();"""
+    t = t.replace(needle, insert, 1)
+    p.write_text(t)
+    print("notify injected")
+else:
+    print("needle missing", needle in t)
+'
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/lib/student.ts src/routes/officer.approvals.tsx
+          git status
+          git diff --cached --stat
+          git diff --cached --quiet && echo no-changes && exit 0
+          git commit -m "fix: school-wide live exams + notify on Push to students"
+          git push
