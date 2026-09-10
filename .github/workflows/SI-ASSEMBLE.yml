@@ -1,0 +1,30 @@
+name: SI-ASSEMBLE
+on:
+  push:
+    paths:
+      - "scripts/payloads/si.q*"
+      - ".github/workflows/SI-ASSEMBLE.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import base64, pathlib
+          parts = [pathlib.Path(f'scripts/payloads/si.q{i}').read_text().strip() for i in range(4)]
+          raw = base64.b64decode(''.join(parts))
+          pathlib.Path('src/routes/student.index.tsx').write_bytes(raw)
+          print(len(raw))
+          assert b'createFileRoute' in raw
+          assert b'started_at' in raw
+          "
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/student.index.tsx
+          git commit -m "fix: restore student.index with Continue countdown fallback" || true
+          git push
