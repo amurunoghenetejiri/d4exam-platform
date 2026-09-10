@@ -1,0 +1,121 @@
+name: APPLY continue countdown + locked greys
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-CONTINUE-WAVE-HAPTIC.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch student.index + CbtExamSession
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("src/routes/student.index.tsx")
+          t = p.read_text()
+          t2 = t.replace(
+              '.select("exam_id, status, ends_at")',
+              '.select("exam_id, status, ends_at, started_at")',
+              1,
+          )
+          if t2 == t:
+              print("WARN: select already patched or missing")
+          else:
+              t = t2
+              print("patched select started_at")
+
+          old = """  const endsAtByExam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const a of attemptsQ.data ?? []) {
+      const row = a as { exam_id: string; ends_at?: string | null };
+      m.set(row.exam_id, row.ends_at ?? null);
+    }
+    return m;
+  }, [attemptsQ.data]);"""
+
+          new = """  const endsAtByExam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    const examById = new Map((examsQ.data ?? []).map((e) => [e.id, e]));
+    for (const a of attemptsQ.data ?? []) {
+      const row = a as { exam_id: string; ends_at?: string | null; started_at?: string | null };
+      let ea = row.ends_at ?? null;
+      if (!ea && row.started_at) {
+        const exam = examById.get(row.exam_id);
+        const mins = Number(exam?.duration_minutes) || 0;
+        if (mins > 0) {
+          const startMs = new Date(row.started_at).getTime();
+          if (!Number.isNaN(startMs)) {
+            ea = new Date(startMs + mins * 60_000).toISOString();
+          }
+        }
+      }
+      m.set(row.exam_id, ea);
+    }
+    return m;
+  }, [attemptsQ.data, examsQ.data]);"""
+
+          if old in t:
+              t = t.replace(old, new, 1)
+              print("patched endsAtByExam fallback")
+          else:
+              print("WARN: endsAtByExam block not found (maybe already patched)")
+
+          p.write_text(t)
+          assert "started_at" in t
+          print("student.index.tsx OK", len(t))
+
+          p2 = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p2.read_text()
+          old_opt = '''                    className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
+                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
+                    <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
+                      selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500")}>{String.fromCharCode(65 + oi)}</span>
+                    <span>{opt}</span>'''
+
+          new_opt = '''                    className={cn(
+                      "flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
+                      locked && selected && "border-slate-300 bg-slate-100 opacity-80 cursor-not-allowed",
+                      locked && !selected && "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through decoration-slate-400",
+                      !locked && selected && "border-primary bg-primary/5 ring-2 ring-primary/20",
+                      !locked && !selected && "border-slate-200 hover:border-primary/40",
+                    )}>
+                    <span className={cn(
+                      "mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
+                      locked && selected && "border-slate-400 bg-slate-400 text-white",
+                      locked && !selected && "border-slate-300 text-slate-400",
+                      !locked && selected && "border-primary bg-primary text-white",
+                      !locked && !selected && "border-slate-300 text-slate-500",
+                    )}>{String.fromCharCode(65 + oi)}</span>
+                    <span className={cn(locked && !selected && "text-slate-400")}>{opt}</span>'''
+
+          if old_opt in t:
+              t = t.replace(old_opt, new_opt, 1)
+              print("patched locked option greys")
+          else:
+              if "line-through decoration-slate-400" in t:
+                  print("locked greys already present")
+              else:
+                  print("WARN: option className block not found")
+          p2.write_text(t)
+          print("CbtExamSession.impl.tsx OK", len(t))
+          PY
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/student.index.tsx src/components/cbt/CbtExamSession.impl.tsx
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix: Continue live countdown (ends_at or started_at+duration) + grey locked answers"
+            git push
+          fi
