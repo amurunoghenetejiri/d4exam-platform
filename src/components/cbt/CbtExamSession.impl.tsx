@@ -1106,7 +1106,7 @@ export function CbtExamPage() {
                       setAnswers((a) => ({ ...a, [q.id]: oi }));
                     }}
                     className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
-                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
+                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40", locked && !selected && "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through decoration-slate-400", locked && selected && "opacity-90 cursor-not-allowed")}>
                     <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
                       selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500")}>{String.fromCharCode(65 + oi)}</span>
                     <span>{opt}</span>
