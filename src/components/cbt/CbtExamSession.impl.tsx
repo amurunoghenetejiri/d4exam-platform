@@ -1098,7 +1098,7 @@ export function CbtExamPage() {
               const locked = q ? answers[q.id] != null : false;
               return (
                 <li key={oi}>
-                  <button type="button" disabled={locked && !selected}
+                  <button type="button" disabled={locked}
                     onClick={() => {
                       if (!q || answers[q.id] != null) return;
                       setAnswers((a) => ({ ...a, [q.id]: oi }));
