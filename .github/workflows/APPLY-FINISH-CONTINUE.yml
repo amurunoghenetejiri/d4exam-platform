@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - "scripts/patch_continue_remaining.py"
       - ".github/workflows/APPLY-FINISH-CONTINUE.yml"
 permissions:
   contents: write
@@ -14,95 +15,9 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Patch Continue countdown and instant submit
-        run: |
-          set -eux
-          python3 << 'PY'
-          from pathlib import Path
-
-          # Dashboard Continue timer
-          idx = Path("src/routes/student.index.tsx")
-          t = idx.read_text()
-          if "endsAtByExam" not in t:
-              marker = "  const attemptsByExam = useMemo(() => {\n    const m = new Map<string, string>();\n    for (const a of attemptsQ.data ?? []) m.set(a.exam_id, a.status);\n    return m;\n  }, [attemptsQ.data]);\n\n  const finishedByResult"
-              block = """  const attemptsByExam = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const a of attemptsQ.data ?? []) m.set(a.exam_id, a.status);
-    return m;
-  }, [attemptsQ.data]);
-
-  const endsAtByExam = useMemo(() => {
-    const m = new Map<string, string | null>();
-    for (const a of attemptsQ.data ?? []) {
-      const row = a as { exam_id: string; ends_at?: string | null };
-      m.set(row.exam_id, row.ends_at ?? null);
-    }
-    return m;
-  }, [attemptsQ.data]);
-
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    const hasLive = [...endsAtByExam.values()].some((ea) => ea);
-    if (!hasLive) return;
-    const tmr = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(tmr);
-  }, [endsAtByExam]);
-
-  function formatLeft(ms: number): string {
-    if (ms <= 0) return "00:00:00";
-    const totalSec = Math.floor(ms / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${pad(h)}:${pad(m)}:${pad(s)}`;
-  }
-
-  const finishedByResult"""
-              if marker not in t:
-                  raise SystemExit("marker missing")
-              t = t.replace(marker, block, 1)
-              print("endsAtByExam")
-          if "Continue ·" not in t:
-              old = "                        Continue\n                      </Button>\n                    ) : canStart ? ("
-              new = """                        {(() => {
-                          const ea = endsAtByExam.get(e.id);
-                          if (!ea) return "Continue";
-                          const left = Math.max(0, new Date(ea).getTime() - nowTick);
-                          if (left <= 0) return "Continue";
-                          return `Continue · ${formatLeft(left)}`;
-                        })()}
-                      </Button>
-                    ) : canStart ? ("""
-              if old not in t:
-                  raise SystemExit("Continue btn missing")
-              t = t.replace(old, new, 1)
-              print("Continue timer")
-          idx.write_text(t)
-          print("index", len(t))
-
-          # CBT instant submit
-          cbt = Path("src/components/cbt/CbtExamSession.impl.tsx")
-          ct = cbt.read_text()
-          if "setDone(true);\n    shutdownMedia" not in ct and "immediate UI exit" not in ct:
-              old = "    doneRef.current = true;\n    setFsGate(false);\n    setPaused(false);\n    shutdownMedia();\n    void leaveExamFullscreen();\n    if (previewMode) {\n      toast.message(\"Preview ended — nothing was saved\");\n      setDone(true);\n      finishingRef.current = false;\n      return;\n    }"
-              new = "    doneRef.current = true;\n    setFsGate(false);\n    setPaused(false);\n    setDone(true);\n    shutdownMedia();\n    void leaveExamFullscreen();\n    if (previewMode) {\n      toast.message(\"Preview ended — nothing was saved\");\n      finishingRef.current = false;\n      return;\n    }"
-              if old in ct:
-                  ct = ct.replace(old, new, 1)
-                  print("instant done")
-              else:
-                  print("finishAttempt pattern not found")
-          if "resumeIndexRef" not in ct:
-              ct = ct.replace("const finishingRef = useRef(false);", "const finishingRef = useRef(false);\n  const resumeIndexRef = useRef<number | null>(null);", 1)
-              print("resumeIndexRef")
-          if "resumeIndexRef.current = idx;" not in ct:
-              ct = ct.replace("              setIndex(idx);\n            } catch {}", "              resumeIndexRef.current = idx;\n              setIndex(idx);\n            } catch {}", 1)
-              print("resume store")
-          cbt.write_text(ct)
-          print("cbt", len(ct))
-          print("ALL OK")
-          PY
-      - name: Commit
+      - name: Run patch script
+        run: python3 scripts/patch_continue_remaining.py
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
