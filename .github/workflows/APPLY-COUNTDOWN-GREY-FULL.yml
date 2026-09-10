@@ -1,0 +1,52 @@
+name: APPLY-COUNTDOWN-GREY-FULL
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-COUNTDOWN-GREY-FULL.yml"
+      - "scripts/payloads/student.index.tsx.part*"
+      - "scripts/payloads/CbtExamSession.impl.tsx.part*"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble and write
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import base64, pathlib
+          root = pathlib.Path("scripts/payloads")
+          mapping = {
+            "student.index.tsx": "src/routes/student.index.tsx",
+            "CbtExamSession.impl.tsx": "src/components/cbt/CbtExamSession.impl.tsx",
+          }
+          for name, dest in mapping.items():
+            parts = sorted(root.glob(f"{name}.part*"))
+            if not parts:
+              print("skip missing", name)
+              continue
+            data = "".join(p.read_text().strip() for p in parts)
+            raw = base64.b64decode(data)
+            pathlib.Path(dest).write_bytes(raw)
+            print("wrote", dest, len(raw))
+            text = raw.decode()
+            assert "PLACEHOLDER" not in text
+            if "student.index" in dest:
+              assert "started_at" in text
+              assert "examById" in text
+            if "CbtExamSession" in dest:
+              assert "line-through" in text
+              assert "setDone(true)" in text
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/student.index.tsx src/components/cbt/CbtExamSession.impl.tsx || true
+          if git diff --staged --quiet; then echo No changes; else
+            git commit -m "fix: Continue live countdown + grey locked answers (full files)"
+            git push
+          fi
