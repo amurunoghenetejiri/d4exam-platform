@@ -1,0 +1,143 @@
+name: APPLY-D-ELIGIBILITY-PUSH-COLD
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-D-ELIGIBILITY-PUSH-COLD.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch eligibility, officer labels, cold-start, settings help
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          # --- student eligibility ---
+          p = Path("src/lib/student.ts")
+          t = p.read_text()
+          start = t.find("export function isStudentEligibleForExam")
+          end = t.find("export function filterExamsForStudent")
+          if start < 0 or end < 0:
+              raise SystemExit("eligibility anchors missing")
+          new_fn = r'''export function isStudentEligibleForExam(
+  student: Pick<StudentContext, "schoolId" | "departmentId" | "levelId" | "courseIds"> | null | undefined,
+  exam: {
+    school_id?: string | null;
+    course_id?: string | null;
+    courses?: ExamCourseRef;
+  } | null | undefined,
+): boolean {
+  if (!student || !exam) return false;
+  if (exam.school_id && student.schoolId && String(exam.school_id) !== String(student.schoolId)) {
+    return false;
+  }
+
+  const courseId = exam.course_id ? String(exam.course_id) : null;
+  const enrolled = (student.courseIds ?? []).map(String);
+
+  if (courseId && enrolled.includes(courseId)) return true;
+
+  const c = exam.courses;
+  const courseDept = c?.department_id ? String(c.department_id) : null;
+  const courseLevel = c?.level_id ? String(c.level_id) : null;
+  const stuDept = student.departmentId ? String(student.departmentId) : null;
+  const stuLevel = student.levelId ? String(student.levelId) : null;
+
+  if (stuDept && stuLevel && courseDept && courseLevel) {
+    if (stuDept === courseDept && stuLevel === courseLevel) return true;
+  }
+  if (stuDept && courseDept && stuDept === courseDept) {
+    if (!courseLevel || !stuLevel || courseLevel === stuLevel) return true;
+  }
+  if (stuLevel && courseLevel && stuLevel === courseLevel && (!courseDept || !stuDept)) {
+    return true;
+  }
+  if (!courseId) return true;
+  if (!courseDept && !courseLevel) return true;
+  if (enrolled.length === 0) {
+    if (stuDept && courseDept && stuDept === courseDept) return true;
+    if (stuLevel && courseLevel && stuLevel === courseLevel) return true;
+    if (student.schoolId && exam.school_id && String(student.schoolId) === String(exam.school_id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+'''
+          t = t[:start] + new_fn + t[end:]
+          p.write_text(t)
+          print("student eligibility ok", len(t))
+
+          # --- officer labels ---
+          op = Path("src/routes/officer.approvals.tsx")
+          ot = op.read_text()
+          ot = ot.replace("Post to students", "Push to students")
+          ot = ot.replace(
+              "Post so students see the exam. Release hides it until you post again.",
+              "After you approve, click Push to students so the exam appears live for eligible students. Release hides it again.",
+          )
+          ot = ot.replace(
+              "Teachers submit → you approve → post to students",
+              "Teachers submit → you approve → Push to students (makes exam live)",
+          )
+          ot = ot.replace(
+              '? "Exam posted — students can see it now"',
+              '? "Pushed to students — exam is now live on student examinations"',
+          )
+          op.write_text(ot)
+          print("officer labels ok")
+
+          # --- index cold start preferred role ---
+          ip = Path("src/routes/index.tsx")
+          it = ip.read_text()
+          if "readPreferredRole" not in it:
+              it = it.replace(
+                  'import { fetchSessionUser, roleHome, readLastPath, readLastRole, type AppRole } from "@/lib/session";',
+                  'import { fetchSessionUser, roleHome, readLastPath, readLastRole, readPreferredRole, type AppRole } from "@/lib/session";',
+              )
+              it = it.replace(
+                  "const lastRole = readLastRole();",
+                  "const lastRole = readLastRole() || readPreferredRole();",
+              )
+              ip.write_text(it)
+              print("index preferred ok")
+          else:
+              print("index already preferred")
+
+          # --- login persist role ---
+          lp = Path("src/routes/login.tsx")
+          lt = lp.read_text()
+          if "setPreferredRole" not in lt:
+              lt = lt.replace(
+                  'import { fetchSessionUser, roleHome, seedPendingLoginRole, readLastPath, type AppRole } from "@/lib/session";',
+                  'import { fetchSessionUser, roleHome, seedPendingLoginRole, setPreferredRole, rememberLastPath, readLastPath, type AppRole } from "@/lib/session";',
+              )
+              needle = "async function goToRoleHome(role: string, rememberDevice = true) {\n  const home = roleHome[role as AppRole];"
+              insert = "async function goToRoleHome(role: string, rememberDevice = true) {\n  const home = roleHome[role as AppRole];\n  try {\n    setPreferredRole(role as AppRole);\n    rememberLastPath(home, role);\n  } catch { /* ignore */ }"
+              if needle in lt:
+                  lt = lt.replace(needle, insert)
+                  lp.write_text(lt)
+                  print("login persist ok")
+              else:
+                  print("login needle missing")
+          else:
+              print("login already persist")
+
+          print("done")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/lib/student.ts src/routes/officer.approvals.tsx src/routes/index.tsx src/routes/login.tsx
+          if git diff --cached --quiet; then echo no-changes; exit 0; fi
+          git commit -m "fix: relax student exam eligibility; Push to students label; cold-start preferred role on login"
+          git push
