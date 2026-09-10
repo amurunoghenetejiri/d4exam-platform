@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - "scripts/patch_instant_submit.py"
       - "scripts/patch_continue_remaining.py"
       - ".github/workflows/APPLY-FINISH-CONTINUE.yml"
 permissions:
@@ -15,18 +16,18 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Run patch script
-        run: python3 scripts/patch_continue_remaining.py
+      - name: Apply instant submit
+        run: python3 scripts/patch_instant_submit.py
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/routes/student.index.tsx src/components/cbt/CbtExamSession.impl.tsx
+          git add src/components/cbt/CbtExamSession.impl.tsx
           git status
           if git diff --staged --quiet; then
             echo No changes
           else
-            git commit -m "fix: Continue remaining time on dashboard + instant exam submit + resume index"
+            git commit -m "fix: instant exam submit — setDone before media shutdown (no camera reconnect flash)"
             git pull --rebase origin main
             git push origin main
           fi
