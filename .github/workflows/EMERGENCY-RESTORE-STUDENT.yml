@@ -1,0 +1,115 @@
+name: EMERGENCY-RESTORE-STUDENT
+on:
+  push:
+    paths:
+      - ".github/workflows/EMERGENCY-RESTORE-STUDENT.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore from history
+        run: |
+          set -euo pipefail
+          # Find any commit with full student.index (>10k)
+          for sha in 69cea64 fdb0d62 63e1f5e 76ac642 cb9a98f; do
+            if git cat-file -e ${sha}:src/routes/student.index.tsx 2>/dev/null; then
+              sz=$(git cat-file -s ${sha}:src/routes/student.index.tsx || echo 0)
+              echo "try $sha size $sz"
+              if [ "$sz" -gt 10000 ]; then
+                git show ${sha}:src/routes/student.index.tsx > src/routes/student.index.tsx
+                echo "restored from $sha"
+                break
+              fi
+            fi
+          done
+          wc -c src/routes/student.index.tsx
+          grep -q createFileRoute src/routes/student.index.tsx
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("src/routes/student.index.tsx")
+          t = p.read_text()
+          if 'started_at' not in t or 'examById' not in t:
+              t = t.replace('.select("exam_id, status, ends_at")', '.select("exam_id, status, ends_at, started_at")', 1)
+              old = """  const endsAtByExam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const a of attemptsQ.data ?? []) {
+      const row = a as { exam_id: string; ends_at?: string | null };
+      m.set(row.exam_id, row.ends_at ?? null);
+    }
+    return m;
+  }, [attemptsQ.data]);"""
+              new = """  const endsAtByExam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    const examById = new Map((examsQ.data ?? []).map((e) => [e.id, e]));
+    for (const a of attemptsQ.data ?? []) {
+      const row = a as { exam_id: string; ends_at?: string | null; started_at?: string | null };
+      let ea = row.ends_at ?? null;
+      if (!ea && row.started_at) {
+        const exam = examById.get(row.exam_id);
+        const mins = Number(exam?.duration_minutes) || 0;
+        if (mins > 0) {
+          const startMs = new Date(row.started_at).getTime();
+          if (!Number.isNaN(startMs)) {
+            ea = new Date(startMs + mins * 60_000).toISOString();
+          }
+        }
+      }
+      m.set(row.exam_id, ea);
+    }
+    return m;
+  }, [attemptsQ.data, examsQ.data]);"""
+              if old in t:
+                  t = t.replace(old, new, 1)
+              p.write_text(t)
+              print("patched countdown")
+          else:
+              print("already has countdown")
+          print("final", len(t))
+          PY
+          # greys
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          if "line-through decoration-slate-400" not in t:
+              old = '''                    className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
+                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
+                    <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
+                      selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500")}>{String.fromCharCode(65 + oi)}</span>
+                    <span>{opt}</span>'''
+              new = '''                    className={cn(
+                      "flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
+                      locked && selected && "border-slate-300 bg-slate-100 opacity-80 cursor-not-allowed",
+                      locked && !selected && "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through decoration-slate-400",
+                      !locked && selected && "border-primary bg-primary/5 ring-2 ring-primary/20",
+                      !locked && !selected && "border-slate-200 hover:border-primary/40",
+                    )}>
+                    <span className={cn(
+                      "mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
+                      locked && selected && "border-slate-400 bg-slate-400 text-white",
+                      locked && !selected && "border-slate-300 text-slate-400",
+                      !locked && selected && "border-primary bg-primary text-white",
+                      !locked && !selected && "border-slate-300 text-slate-500",
+                    )}>{String.fromCharCode(65 + oi)}</span>
+                    <span className={cn(locked && !selected && "text-slate-400")}>{opt}</span>'''
+              if old in t:
+                  t = t.replace(old, new, 1)
+                  p.write_text(t)
+                  print("greys ok")
+              else:
+                  print("option block missing")
+          else:
+              print("greys present")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: emergency restore student.index + Continue countdown + grey locks" || true
+          git push
