@@ -1,0 +1,558 @@
+name: APPLY-CONTINUE-V2
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-CONTINUE-V2.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 5
+      - name: Apply continue timer + locked answers + Settings help
+        run: |
+          set -euo pipefail
+          python3 << 'PY'
+          from pathlib import Path
+
+          # ---- CBT ----
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          if "PLACEHOLDER" in t and len(t) < 100:
+              raise SystemExit("CBT is PLACEHOLDER — abort")
+
+          t = t.replace(
+              '.select("id, status, question_order, tab_switch_count, fullscreen_exit_count, answers")',
+              '.select("id, status, question_order, tab_switch_count, fullscreen_exit_count, answers, ends_at, started_at")',
+              1,
+          )
+
+          needle = '''          if (existingFull.answers && typeof existingFull.answers === "object") {
+            const prev = existingFull.answers as Record<string, number>;
+            setAnswers(prev);
+            try {
+              const ordered = orderedIdsRef.current || [];
+              let idx = 0;
+              for (let i = 0; i < ordered.length; i++) {
+                const qid = ordered[i];
+                if (prev[qid] === undefined || prev[qid] === null) { idx = i; break; }
+                if (i === ordered.length - 1) idx = i;
+              }
+              setIndex(idx);
+            } catch {}
+          }
+        }'''
+          insert = '''          if (existingFull.answers && typeof existingFull.answers === "object") {
+            const prev = existingFull.answers as Record<string, number>;
+            setAnswers(prev);
+            try {
+              const ordered = orderedIdsRef.current || [];
+              let idx = 0;
+              for (let i = 0; i < ordered.length; i++) {
+                const qid = ordered[i];
+                if (prev[qid] === undefined || prev[qid] === null) { idx = i; break; }
+                if (i === ordered.length - 1) idx = i;
+              }
+              setIndex(idx);
+            } catch {}
+          }
+          try {
+            const rawEnds = (existingFull as { ends_at?: string | null }).ends_at;
+            if (rawEnds) {
+              const endsMs = new Date(String(rawEnds)).getTime();
+              if (!Number.isNaN(endsMs) && endsMs > Date.now()) {
+                endsAtRef.current = endsMs;
+                setSeconds(Math.max(0, Math.ceil((endsMs - Date.now()) / 1000)));
+              }
+            }
+          } catch {}
+        }'''
+          if needle in t:
+              t = t.replace(needle, insert, 1)
+              print("cbt: ends_at restore")
+          else:
+              print("cbt: ends restore skip")
+
+          old_timer = '''      {
+        const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
+        const now = Date.now();
+        let ends = now + durationSec * 1000;
+        const schedEnd = examQ.data?.scheduled_end ? new Date(String(examQ.data.scheduled_end)).getTime() : NaN;
+        if (!Number.isNaN(schedEnd) && schedEnd > now) {
+          ends = Math.min(ends, schedEnd);
+        }
+        endsAtRef.current = ends;
+        setSeconds(Math.max(0, Math.ceil((ends - now) / 1000)));
+      }
+      setStarted(true);
+      setIndex(0);'''
+          new_timer = '''      {
+        if (endsAtRef.current == null) {
+          const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
+          const now = Date.now();
+          let ends = now + durationSec * 1000;
+          const schedEnd = examQ.data?.scheduled_end ? new Date(String(examQ.data.scheduled_end)).getTime() : NaN;
+          if (!Number.isNaN(schedEnd) && schedEnd > now) {
+            ends = Math.min(ends, schedEnd);
+          }
+          endsAtRef.current = ends;
+          setSeconds(Math.max(0, Math.ceil((ends - now) / 1000)));
+          if (attemptIdRef.current) {
+            void supabase.from("exam_attempts").update({
+              ends_at: new Date(ends).toISOString(),
+              status: "in_progress",
+            } as never).eq("id", attemptIdRef.current);
+          }
+        } else {
+          const ends = endsAtRef.current;
+          setSeconds(Math.max(0, Math.ceil((ends - Date.now()) / 1000)));
+        }
+      }
+      setStarted(true);'''
+          if old_timer in t:
+              t = t.replace(old_timer, new_timer, 1)
+              print("cbt: timer")
+          else:
+              print("cbt: timer skip")
+
+          old_opt = '''            {(q?.options ?? []).map((opt, oi) => {
+              const selected = q ? answers[q.id] === oi : false;
+              return (
+                <li key={oi}>
+                  <button type="button" onClick={() => {
+                    if (q) setAnswers((a) => ({ ...a, [q.id]: oi }));
+                  }}
+                    className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
+                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
+                    <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
+                      selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500")}>{String.fromCharCode(65 + oi)}</span>
+                    <span>{opt}</span>
+                  </button>
+                </li>
+              );
+            })}'''
+          new_opt = '''            {(q?.options ?? []).map((opt, oi) => {
+              const selected = q ? answers[q.id] === oi : false;
+              const locked = q ? answers[q.id] != null : false;
+              return (
+                <li key={oi}>
+                  <button type="button" disabled={locked && !selected}
+                    onClick={() => {
+                      if (!q || answers[q.id] != null) return;
+                      setAnswers((a) => ({ ...a, [q.id]: oi }));
+                    }}
+                    className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
+                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40",
+                      locked && !selected && "cursor-not-allowed opacity-50 bg-slate-50")}>
+                    <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
+                      selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500")}>{String.fromCharCode(65 + oi)}</span>
+                    <span>{opt}</span>
+                  </button>
+                </li>
+              );
+            })}'''
+          if old_opt in t:
+              t = t.replace(old_opt, new_opt, 1)
+              print("cbt: lock options")
+          else:
+              print("cbt: lock skip")
+
+          if "Persist answers + ends_at" not in t:
+              anchor = '''  useEffect(() => {
+    // Absolute end clock — continues during officer/integrity pause and backgrounding
+    if (!started || done) return;
+    const tick = () => {
+      const ends = endsAtRef.current;
+      if (ends == null) return;
+      const left = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
+      setSeconds(left);
+      if (left <= 0 && !finishingRef.current && !doneRef.current) {
+        void finishAttempt(true);
+      }
+    };
+    tick();
+    const t = window.setInterval(tick, 1000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done]);'''
+              autosave = anchor + '''
+
+  useEffect(() => {
+    if (!started || done || previewMode || !attemptIdRef.current) return;
+    const aid = attemptIdRef.current;
+    const save = () => {
+      if (finishingRef.current || doneRef.current) return;
+      void supabase.from("exam_attempts").update({
+        answers,
+        ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
+        status: "in_progress",
+        updated_at: new Date().toISOString(),
+      } as never).eq("id", aid);
+    };
+    const t = window.setInterval(save, 8000);
+    save();
+    return () => window.clearInterval(t);
+  }, [started, done, previewMode, answers]);'''
+              if anchor in t:
+                  t = t.replace(anchor, autosave, 1)
+                  print("cbt: autosave")
+              else:
+                  print("cbt: autosave skip")
+
+          p.write_text(t)
+          print("cbt size", len(t))
+
+          # ---- student.examinations ----
+          p = Path("src/routes/student.examinations.tsx")
+          t = p.read_text()
+          t = t.replace(
+          '''type AttemptRow = {
+  exam_id: string;
+  status: string;
+  submitted_at: string | null;
+};''',
+          '''type AttemptRow = {
+  exam_id: string;
+  status: string;
+  submitted_at: string | null;
+  ends_at?: string | null;
+};''', 1)
+          t = t.replace('.select("exam_id, status, submitted_at")', '.select("exam_id, status, submitted_at, ends_at")', 1)
+
+          old_btn = '''function StartExamButton({ examId, continueMode }: { examId: string; continueMode?: boolean }) {
+  const navigate = useNavigate();
+  return (
+    <Button
+      type="button"
+      size="sm"
+      className={continueMode ? "h-9 w-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 sm:h-8 sm:w-auto" : "h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof navigator !== "undefined" && navigator.onLine === false) {
+          window.alert("Connect to the internet to write this exam.");
+          return;
+        }
+        void navigate({ to: "/student/exam/$id", params: { id: examId } });
+      }}
+    >
+      {continueMode ? "Continue exam" : "Start exam"}
+    </Button>
+  );
+}
+
+function StartOrCountdownButton({
+  examId,
+  scheduledStart,
+  canStartNow,
+  continueMode,
+}: {
+  examId: string;
+  scheduledStart: string | null;
+  canStartNow: boolean;
+  continueMode?: boolean;
+}) {
+  const { remainingMs, ready } = useCountdown(scheduledStart);
+
+  if (continueMode) {
+    return <StartExamButton examId={examId} continueMode />;
+  }
+
+  if (canStartNow || ready) {
+    return <StartExamButton examId={examId} />;
+  }
+
+  if (remainingMs == null) {
+    return (
+      <Button size="sm" variant="outline" className="h-9 w-full font-semibold sm:h-8 sm:w-auto" disabled>
+        Schedule TBC
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled
+      className={cn(
+        "h-9 w-full font-mono text-[11px] font-bold tabular-nums sm:h-8 sm:w-auto sm:min-w-[9.5rem] sm:text-xs",
+        remainingMs < 5 * 60_000 && "border-amber-300 text-amber-800",
+        remainingMs < 60_000 && "border-red-300 text-red-700",
+      )}
+    >
+      <Clock className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+      Starts in {formatCountdown(remainingMs)}
+    </Button>
+  );
+}'''
+          new_btn = '''function StartExamButton({
+  examId,
+  continueMode,
+  remainingLabel,
+}: {
+  examId: string;
+  continueMode?: boolean;
+  remainingLabel?: string | null;
+}) {
+  const navigate = useNavigate();
+  return (
+    <Button
+      type="button"
+      size="sm"
+      className={continueMode ? "h-9 w-full bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 sm:h-8 sm:w-auto" : "h-9 w-full bg-primary px-4 text-sm font-bold text-primary-foreground hover:bg-primary/90 sm:h-8 sm:w-auto"}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof navigator !== "undefined" && navigator.onLine === false) {
+          window.alert("Connect to the internet to write this exam.");
+          return;
+        }
+        void navigate({ to: "/student/exam/$id", params: { id: examId } });
+      }}
+    >
+      {continueMode
+        ? remainingLabel
+          ? `Continue · ${remainingLabel}`
+          : "Continue exam"
+        : "Start exam"}
+    </Button>
+  );
+}
+
+function StartOrCountdownButton({
+  examId,
+  scheduledStart,
+  canStartNow,
+  continueMode,
+  attemptEndsAt,
+}: {
+  examId: string;
+  scheduledStart: string | null;
+  canStartNow: boolean;
+  continueMode?: boolean;
+  attemptEndsAt?: string | null;
+}) {
+  const { remainingMs: startMs, ready } = useCountdown(scheduledStart);
+  const { remainingMs: attemptMs } = useCountdown(continueMode ? attemptEndsAt : null);
+
+  if (continueMode) {
+    const label =
+      attemptMs != null && attemptMs > 0 ? formatCountdown(attemptMs) : null;
+    return (
+      <StartExamButton
+        examId={examId}
+        continueMode
+        remainingLabel={label}
+      />
+    );
+  }
+
+  if (canStartNow || ready) {
+    return <StartExamButton examId={examId} />;
+  }
+
+  if (startMs == null) {
+    return (
+      <Button size="sm" variant="outline" className="h-9 w-full font-semibold sm:h-8 sm:w-auto" disabled>
+        Schedule TBC
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled
+      className={cn(
+        "h-9 w-full font-mono text-[11px] font-bold tabular-nums sm:h-8 sm:w-auto sm:min-w-[9.5rem] sm:text-xs",
+        startMs < 5 * 60_000 && "border-amber-300 text-amber-800",
+        startMs < 60_000 && "border-red-300 text-red-700",
+      )}
+    >
+      <Clock className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+      Starts in {formatCountdown(startMs)}
+    </Button>
+  );
+}'''
+          if old_btn in t:
+              t = t.replace(old_btn, new_btn, 1)
+              print("exam: buttons")
+          else:
+              print("exam: buttons skip")
+
+          old_call = '''                <StartOrCountdownButton
+                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow
+                  continueMode={String(attempt?.status || "").toLowerCase() === "in_progress"}
+                />'''
+          new_call = '''                <StartOrCountdownButton
+                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow
+                  continueMode={String(attempt?.status || "").toLowerCase() === "in_progress"}
+                  attemptEndsAt={attempt?.ends_at ?? null}
+                />'''
+          if old_call in t:
+              t = t.replace(old_call, new_call, 1)
+              print("exam: attemptEndsAt")
+          else:
+              print("exam: call skip")
+          p.write_text(t)
+          print("exam size", len(t))
+
+          # ---- Settings ----
+          p = Path("src/components/pages/SettingsPage.tsx")
+          t = p.read_text()
+          if "ArrowLeft" not in t:
+              t = t.replace(
+                  "Loader2, Upload, Building2, Info, LifeBuoy, Shield, ChevronRight, CreditCard",
+                  "Loader2, Upload, Building2, Info, LifeBuoy, Shield, ChevronRight, CreditCard, ArrowLeft",
+                  1,
+              )
+          if "helpDoc" not in t:
+              t = t.replace(
+                  '''  const [saving, setSaving] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({ ...DEFAULT_NOTIFICATION_PREFS });
+  const [displayPrefs, setDisplayPrefs] = useState<DisplayPrefs>({ ...DEFAULT_DISPLAY_PREFS });''',
+                  '''  const [saving, setSaving] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({ ...DEFAULT_NOTIFICATION_PREFS });
+  const [displayPrefs, setDisplayPrefs] = useState<DisplayPrefs>({ ...DEFAULT_DISPLAY_PREFS });
+  const [helpDoc, setHelpDoc] = useState<"about" | "support" | "privacy" | "pricing" | null>(null);''',
+                  1,
+              )
+          old_help = '''        <SectionCard title="Help & legal" description="About, support, privacy and pricing">
+          <div className="flex flex-col gap-1">
+            <Link to="/about" className="flex items-center gap-3 rounded-lg px-2 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <Info className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">About Us</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </Link>
+            <Link to="/support" className="flex items-center gap-3 rounded-lg px-2 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <LifeBuoy className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">Support</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </Link>
+            <Link to="/privacy" className="flex items-center gap-3 rounded-lg px-2 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <Shield className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">Privacy Policy</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </Link>
+            <Link to="/pricing" className="flex items-center gap-3 rounded-lg px-2 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <CreditCard className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">Pricing</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </Link>
+            <p className="mt-3 px-2 text-center text-[11px] text-slate-400">© 2026 D4EXAM. All rights reserved. · Smart. Secure. Seamless.</p>
+          </div>
+        </SectionCard>'''
+          new_help = '''        <SectionCard title="Help & legal" description="About, support, privacy and pricing">
+          <div className="flex flex-col gap-1">
+            <button type="button" onClick={() => setHelpDoc("about")} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <Info className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">About Us</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </button>
+            <button type="button" onClick={() => setHelpDoc("support")} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <LifeBuoy className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">Support</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </button>
+            <button type="button" onClick={() => setHelpDoc("privacy")} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <Shield className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">Privacy Policy</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </button>
+            <button type="button" onClick={() => setHelpDoc("pricing")} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <CreditCard className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">Pricing</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </button>
+            <p className="mt-3 px-2 text-center text-[11px] text-slate-400">© 2026 D4EXAM. All rights reserved. · Smart. Secure. Seamless.</p>
+          </div>
+        </SectionCard>
+        {helpDoc ? (
+          <div className="fixed inset-0 z-[200] flex flex-col bg-white">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-3">
+              <Button type="button" variant="ghost" size="sm" className="gap-1.5 font-semibold" onClick={() => setHelpDoc(null)}>
+                <ArrowLeft className="h-4 w-4" /> Back
+              </Button>
+              <p className="text-sm font-bold text-slate-900">
+                {helpDoc === "about" ? "About Us" : helpDoc === "support" ? "Support" : helpDoc === "privacy" ? "Privacy Policy" : "Pricing"}
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-5 text-sm leading-relaxed text-slate-700">
+              {helpDoc === "about" && (
+                <div className="space-y-3">
+                  <p className="text-base font-bold text-slate-900">D4EXAM</p>
+                  <p>Smart. Secure. Seamless online examinations for schools worldwide.</p>
+                  <p>D4EXAM is a professional computer-based testing (CBT) platform for schools, with role-based portals for students, teachers, examination officers, school admins, and super admins.</p>
+                  <p>Integrity features include camera monitoring, face detection, tab monitoring, and officer live supervision.</p>
+                </div>
+              )}
+              {helpDoc === "support" && (
+                <div className="space-y-3">
+                  <p className="text-base font-bold text-slate-900">Support</p>
+                  <p>Need help with your school account, examinations, or the mobile app?</p>
+                  <ul className="list-disc space-y-1 pl-5">
+                    <li>Contact your School Admin for enrolment, courses, and roles.</li>
+                    <li>Contact your Examination Officer for exam schedules and results.</li>
+                    <li>For platform issues, use the in-app Support channel or email your school's D4EXAM contact.</li>
+                  </ul>
+                  <p className="text-xs text-slate-500">Stay online during examinations. Push notifications require notification permission on your device.</p>
+                </div>
+              )}
+              {helpDoc === "privacy" && (
+                <div className="space-y-3">
+                  <p className="text-base font-bold text-slate-900">Privacy Policy</p>
+                  <p>D4EXAM processes account, examination, and integrity data only to deliver secure CBT services for your school.</p>
+                  <ul className="list-disc space-y-1 pl-5">
+                    <li>Camera and microphone are used only when required by exam security settings.</li>
+                    <li>Results and attempts are visible according to your school's policies and roles.</li>
+                    <li>Push notification tokens are stored to deliver exam alerts on your devices.</li>
+                  </ul>
+                  <p className="text-xs text-slate-500">For the full policy, your school admin or the public website privacy page can provide additional detail.</p>
+                </div>
+              )}
+              {helpDoc === "pricing" && (
+                <div className="space-y-3">
+                  <p className="text-base font-bold text-slate-900">Pricing</p>
+                  <p>D4EXAM is licensed per school. Plans typically cover student seats, examinations, monitoring, and support.</p>
+                  <p>Contact your school administrator or the D4EXAM sales team for the plan that applies to your institution.</p>
+                  <p className="text-xs text-slate-500">Trial schools have time-limited access until the trial ends or is upgraded.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}'''
+          if old_help in t:
+              t = t.replace(old_help, new_help, 1)
+              print("settings: help sheet")
+          else:
+              print("settings: help skip", "helpDoc" in t)
+          p.write_text(t)
+          print("settings size", len(t))
+
+          Path("FORCE_DEPLOY.txt").write_text("continue-v2-timer-lock-settings 2026-09-10\n")
+          print("done")
+          PY
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/student.examinations.tsx src/components/pages/SettingsPage.tsx FORCE_DEPLOY.txt
+          git status
+          git diff --cached --stat
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git commit -m "fix: continue exam remaining timer, locked answers, Settings help in-app Back"
+          git push origin HEAD:main
