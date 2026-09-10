@@ -1,0 +1,54 @@
+name: APPLY-H-SED-PUSH
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-H-SED-PUSH.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: sed patches
+        run: |
+          set -euo pipefail
+          sed -i 's/Post to students/Push to students/g' src/routes/officer.approvals.tsx
+          sed -i 's/Exam posted — students can see it now/Pushed to students — exam is now live on student examinations/g' src/routes/officer.approvals.tsx
+          sed -i 's/Post so students see the exam. Release hides it until you post again./After you approve, click Push to students so the exam appears live for eligible students. Release hides it again./g' src/routes/officer.approvals.tsx
+          sed -i 's/Teachers submit → you approve → post to students/Teachers submit → you approve → Push to students (makes exam live)/g' src/routes/officer.approvals.tsx
+          if ! grep -q readPreferredRole src/routes/index.tsx; then
+            sed -i 's/readLastPath, readLastRole, type AppRole/readLastPath, readLastRole, readPreferredRole, type AppRole/' src/routes/index.tsx
+            sed -i 's/const lastRole = readLastRole();/const lastRole = readLastRole() || readPreferredRole();/' src/routes/index.tsx
+          fi
+          if ! grep -q setPreferredRole src/routes/login.tsx; then
+            sed -i 's/seedPendingLoginRole, readLastPath, type AppRole/seedPendingLoginRole, setPreferredRole, rememberLastPath, readLastPath, type AppRole/' src/routes/login.tsx
+            python3 -c "
+from pathlib import Path
+p=Path('src/routes/login.tsx')
+t=p.read_text()
+needle='async function goToRoleHome(role: string, rememberDevice = true):\n  const home = roleHome[role as AppRole];'
+# fix wrong
+needle='async function goToRoleHome(role: string, rememberDevice = true) {\n  const home = roleHome[role as AppRole];'
+insert=needle + '\n  try {\n    setPreferredRole(role as AppRole);\n    rememberLastPath(home, role);\n  } catch { /* ignore */ }'
+if needle in t and 'setPreferredRole(role' not in t:
+  t=t.replace(needle, insert, 1)
+  p.write_text(t)
+  print('login patched')
+else:
+  print('login skip', needle in t)
+"
+          fi
+          grep -n 'Push to students' src/routes/officer.approvals.tsx | head
+          grep -n preferred\|Preferred\|setPreferredRole src/routes/index.tsx src/routes/login.tsx | head
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/officer.approvals.tsx src/routes/index.tsx src/routes/login.tsx
+          git diff --cached --quiet && echo no-changes && exit 0
+          git commit -m "fix: Push to students label; cold-start preferred role on login"
+          git push
