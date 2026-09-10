@@ -1,0 +1,28 @@
+name: APPLY-CBT-PATCH-SCRIPT
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-CBT-PATCH-SCRIPT.yml"
+      - "scripts/patch_cbt_ends_lock.py"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run patch
+        run: python3 scripts/patch_cbt_ends_lock.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx FORCE_DEPLOY.txt
+          git status
+          git diff --cached --stat
+          if git diff --cached --quiet; then echo nothing; exit 0; fi
+          git commit -m "fix: CBT ends_at resume, locked answers, autosave"
+          git push origin HEAD:main
