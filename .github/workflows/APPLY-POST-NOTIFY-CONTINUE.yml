@@ -1,0 +1,142 @@
+name: APPLY-POST-NOTIFY-CONTINUE
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-POST-NOTIFY-CONTINUE.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 30
+      - name: Restore officer.approvals if wiped then apply patches
+        run: |
+          set -euo pipefail
+          if [ "$(wc -c < src/routes/officer.approvals.tsx)" -lt 500 ]; then
+            echo "officer.approvals wiped — restoring"
+            git show 8176ddd:src/routes/officer.approvals.tsx > src/routes/officer.approvals.tsx || \
+            git show 6e56b95:src/routes/officer.approvals.tsx > src/routes/officer.approvals.tsx || true
+          fi
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/routes/officer.approvals.tsx')
+          t = p.read_text()
+          t = t.replace('Push to students', 'Post to students')
+          t = t.replace('Pushed to students', 'Posted to students')
+          t = t.replace('click Push to students', 'click Post to students')
+          t = t.replace('Teachers submit \u2192 you approve \u2192 Push to students', 'Teachers submit \u2192 you approve \u2192 Post to students')
+          t = t.replace('Teachers submit → you approve → Push to students', 'Teachers submit → you approve → Post to students')
+          if 'availableNow: true' not in t:
+              for old_toast in [
+                  'Posted to students — exam is now live on student examinations',
+                  'Pushed to students — exam is now live on student examinations',
+              ]:
+                  needle = (
+                      '      toast.success(\n'
+                      '        mode === "post"\n'
+                      f'          ? "{old_toast}"\n'
+                      '          : "Exam released — hidden from students until you post again",\n'
+                      '      );\n'
+                      '      await qc.invalidateQueries({ queryKey: ["officer-approvals"] });\n'
+                      '      await listQ.refetch();'
+                  )
+                  if needle in t:
+                      insert = (
+                          '      toast.success(\n'
+                          '        mode === "post"\n'
+                          '          ? "Posted to students — exam is now live on student examinations"\n'
+                          '          : "Exam released — hidden from students until you post again",\n'
+                          '      );\n'
+                          '      if (mode === "post" && schoolId) {\n'
+                          '        try {\n'
+                          '          const payload = {\n'
+                          '            schoolId,\n'
+                          '            examId: item.id,\n'
+                          '            examTitle: item.title,\n'
+                          '            courseId: item.course_id,\n'
+                          '            courseCode: courseCode(item) !== "—" ? courseCode(item) : undefined,\n'
+                          '            courseTitle: courseName(item) !== "Course" ? courseName(item) : undefined,\n'
+                          '            start: item.scheduled_start || undefined,\n'
+                          '            end: item.scheduled_end || undefined,\n'
+                          '            scheduledStart: item.scheduled_start || undefined,\n'
+                          '            scheduledEnd: item.scheduled_end || undefined,\n'
+                          '            availableNow: true,\n'
+                          '          };\n'
+                          '          try {\n'
+                          '            await serverNotifyStudentsExamApproved({ data: payload });\n'
+                          '          } catch (se) {\n'
+                          '            console.warn("[officer.approvals] server student notify failed, client fallback", se);\n'
+                          '            try { await notifyStudentsExamApproved(payload); } catch (ce) { console.warn(ce); }\n'
+                          '          }\n'
+                          '        } catch (e) { console.warn("[officer.approvals] notify students on post failed:", e); }\n'
+                          '      }\n'
+                          '      await qc.invalidateQueries({ queryKey: ["officer-approvals"] });\n'
+                          '      await qc.invalidateQueries({ queryKey: ["student-exams"] });\n'
+                          '      await qc.invalidateQueries({ queryKey: ["student-dashboard-exams"] });\n'
+                          '      await listQ.refetch();'
+                      )
+                      t = t.replace(needle, insert, 1)
+                      print('injected notify on post')
+                      break
+              else:
+                  print('WARN toast block not found')
+          pattern = r'if \(action === "approve" && schoolId\) \{\s*try \{\s*const startIso = scheduleStart[\s\S]*?console\.warn\(\"\[officer\.approvals\] notify students failed:\", e\);\s*\}\s*\}'
+          t2, n = re.subn(pattern, '', t, count=1)
+          if n:
+              t = t2
+              print('removed approve student notify')
+          p.write_text(t)
+          print('officer.approvals', len(t))
+
+          p = Path('src/lib/notify.ts')
+          t = p.read_text()
+          t = t.replace(
+              '      actionLabel: copy.action?.label ?? null,\n      actionLabel: copy.action?.label ?? "START EXAM",',
+              '      actionLabel: copy.action?.label ?? "START EXAM",',
+          )
+          if 'availableNow?: boolean' not in t:
+              t = t.replace(
+                  '  /** @deprecated alias for end */\n  scheduledEnd?: string | null;\n}): Promise<void> {\n  try {\n    const startIso = opts.start ?? opts.scheduledStart ?? null;',
+                  '  /** @deprecated alias for end */\n  scheduledEnd?: string | null;\n  /** When true (officer Post to students), use "exam available" template */\n  availableNow?: boolean;\n}): Promise<void> {\n  try {\n    const startIso = opts.start ?? opts.scheduledStart ?? null;',
+                  1,
+              )
+          if 'studentExamAvailableDetailed' not in t:
+              old_copy = '''    const link = "/student/examinations";\n    const names = await authUserDisplayNames(authIds);\n    await notifyMany(\n      authIds.map((uid) => {\n        const studentName = names.get(uid) || "Student";\n        const copy = Msg.studentExamScheduled({\n          studentName,\n          examTitle: opts.examTitle,\n          courseCode,\n          courseTitle,\n          start: startIso,\n          end: endIso,\n          link,\n        });\n        return {\n          recipientUserId: uid,\n          schoolId: opts.schoolId,\n          title: copy.title,\n          message: copy.message,\n          type: "exam_scheduled" as NotifyType,\n          link: templateLink(copy, link),\n          actionLabel: copy.action?.label ?? "VIEW EXAM",\n          entityType: "examination",\n          entityId: opts.examId,\n          dedupeMinutes: 30,\n        };\n      }),\n    );'''
+              new_copy = '''    const link = "/student/examinations";\n    const names = await authUserDisplayNames(authIds);\n    const availableNow = Boolean((opts as { availableNow?: boolean }).availableNow);\n    await notifyMany(\n      authIds.map((uid) => {\n        const studentName = names.get(uid) || "Student";\n        const copy = availableNow\n          ? (Msg as any).studentExamAvailableDetailed({\n              studentName,\n              examTitle: opts.examTitle,\n              courseCode,\n              courseTitle,\n              start: startIso,\n              end: endIso,\n              link,\n            })\n          : Msg.studentExamScheduled({\n              studentName,\n              examTitle: opts.examTitle,\n              courseCode,\n              courseTitle,\n              start: startIso,\n              end: endIso,\n              link,\n            });\n        return {\n          recipientUserId: uid,\n          schoolId: opts.schoolId,\n          title: copy.title,\n          message: copy.message,\n          type: (availableNow ? "exam_available" : "exam_scheduled") as NotifyType,\n          link: templateLink(copy, link),\n          actionLabel: copy.action?.label ?? (availableNow ? "START EXAM" : "VIEW EXAM"),\n          entityType: "examination",\n          entityId: opts.examId,\n          dedupeMinutes: 30,\n        };\n      }),\n    );'''
+              if old_copy in t:
+                  t = t.replace(old_copy, new_copy, 1)
+                  print('notifyStudentsExamApproved updated')
+          p.write_text(t)
+
+          p = Path('src/lib/notify-messages.ts')
+          t = p.read_text()
+          old_o = 'title: `📝 Exam Awaiting Approval — ${officer}`'
+          if old_o in t:
+              t = t.replace(
+                  'title: `📝 Exam Awaiting Approval — ${officer}`,\n    message:\n      `📝 ${officer}\\n\\n` +\n      `${teacher} has submitted an examination for approval.\\n\\n` +\n      `👨‍🏫 Teacher: ${teacher}\\n` +\n      `📝 Examination: ${exam}\\n\\n` +\n      `The examination is ready for your review and approval.`,',
+                  'title: `📝 Exam Ready for Review — ${teacher}`,\n    message:\n      `📝 Exam ready for review\\n\\n` +\n      `${teacher} has submitted an examination for your approval.\\n\\n` +\n      `👨‍🏫 Teacher: ${teacher}\\n` +\n      `📝 Examination: ${exam}\\n\\n` +\n      `Please review and approve, then Post to students when it should go live.`,',
+                  1,
+              )
+              print('officer template enhanced')
+          if 'studentExamAvailableDetailed' not in t:
+              insert_fn = '''\nexport function studentExamAvailableDetailed(opts: {\n  studentName: string;\n  username?: string | null;\n  examTitle: string;\n  courseCode?: string | null;\n  courseTitle?: string | null;\n  start?: string | null;\n  end?: string | null;\n  link?: string | null;\n}): NotificationTemplate {\n  const name = personName(opts.studentName, "Student");\n  const exam = examDisplay(opts.courseCode, opts.examTitle, opts.courseTitle);\n  const date = fmtDate(opts.start);\n  const startT = fmtTime(opts.start);\n  const endT = fmtTime(opts.end);\n  let message =\n    `🚀 ${name}\\n\\n` +\n    `Your examination is now available.\\n\\n` +\n    `📝 Examination: ${exam}`;\n  if (date) message += `\\n📅 Date: ${date}`;\n  if (startT) message += `\\n🕐 Starts: ${startT}`;\n  if (endT) message += `\\n⏰ Ends: ${endT}`;\n  message +=\n    `\\n\\nYou can enter the examination from your Examinations page.` +\n    `\\n\\nPlease follow all examination rules. Good luck!`;\n  return {\n    title: `🚀 Exam Available — ${name}`,\n    message,\n    action: action("START EXAM", opts.link),\n  };\n}\n\n'''
+              t = t.replace('export function studentExamAvailable(opts: {', insert_fn + 'export function studentExamAvailable(opts: {', 1)
+              print('inserted studentExamAvailableDetailed')
+          p.write_text(t)
+          print('DONE')
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git status
+          git commit -m "fix: Post to students notifies students with exam available details; officer ready-for-review" || echo nochange
+          git push
