@@ -1,0 +1,42 @@
+name: APPLY-E-STUDENT-TS
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-E-STUDENT-TS.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Relax eligibility with inline python
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path('src/lib/student.ts')
+          t = p.read_text()
+          old = '''  // Prefer strict dept+level when both sides have it\n  if (stuDept && stuLevel && courseDept && courseLevel) {\n    return stuDept === courseDept && stuLevel === courseLevel;\n  }\n  // If student has no enrollments yet, still allow dept-only or level-only match\n  if (enrolled.length === 0) {\n    if (stuDept && courseDept && stuDept === courseDept) return true;\n    if (stuLevel && courseLevel && stuLevel === courseLevel) return true;\n  }\n  return false;\n}'''
+          new = '''  if (stuDept && stuLevel && courseDept && courseLevel) {\n    if (stuDept === courseDept && stuLevel === courseLevel) return true;\n  }\n  if (stuDept && courseDept && stuDept === courseDept) {\n    if (!courseLevel || !stuLevel || courseLevel === stuLevel) return true;\n  }\n  if (stuLevel && courseLevel && stuLevel === courseLevel && (!courseDept || !stuDept)) {\n    return true;\n  }\n  if (!courseId) return true;\n  if (!courseDept && !courseLevel) return true;\n  if (enrolled.length === 0) {\n    if (stuDept && courseDept && stuDept === courseDept) return true;\n    if (stuLevel && courseLevel && stuLevel === courseLevel) return true;\n    if (student.schoolId && exam.school_id && String(student.schoolId) === String(exam.school_id)) return true;\n  }\n  return false;\n}'''
+          if old not in t:
+              # try without requiring courseId early return false path
+              if 'return false;\n}' in t[t.find('isStudentEligibleForExam'):t.find('filterExamsForStudent')]:
+                  print('partial match zone')
+              raise SystemExit('old block not found')
+          # also fix: courseId required was blocking
+          t2 = t.replace('  const courseId = exam.course_id ? String(exam.course_id) : null;\n  if (!courseId) return false;\n\n  const enrolled', '  const courseId = exam.course_id ? String(exam.course_id) : null;\n\n  const enrolled')
+          t2 = t2.replace(old, new)
+          p.write_text(t2)
+          print('patched', len(t2))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/lib/student.ts
+          git diff --cached --quiet && echo no-changes && exit 0
+          git commit -m "fix: relax student exam eligibility for officer-pushed exams"
+          git push
