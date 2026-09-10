@@ -3,8 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "scripts/patch_instant_submit.py"
-      - "scripts/patch_continue_remaining.py"
+      - "scripts/patch_wave_haptic_continue.py"
       - ".github/workflows/APPLY-FINISH-CONTINUE.yml"
 permissions:
   contents: write
@@ -16,18 +15,16 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Apply instant submit
-        run: python3 scripts/patch_instant_submit.py
+      - name: Apply wave loader, hard haptics, Continue countdown, grey answers
+        run: python3 scripts/patch_wave_haptic_continue.py
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add src/components/cbt/CbtExamSession.impl.tsx
+          git add src/lib/haptic.ts src/components/brand/BrandLoader.tsx src/routes/student.index.tsx src/components/cbt/CbtExamSession.impl.tsx
           git status
-          if git diff --staged --quiet; then
-            echo No changes
-          else
-            git commit -m "fix: instant exam submit — setDone before media shutdown (no camera reconnect flash)"
+          if git diff --staged --quiet; then echo No changes; else
+            git commit -m "fix: Continue countdown with fallback, hard violation haptics, wave loader, grey locked answers"
             git pull --rebase origin main
             git push origin main
           fi
