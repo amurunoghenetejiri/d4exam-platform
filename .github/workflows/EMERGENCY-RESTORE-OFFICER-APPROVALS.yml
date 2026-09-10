@@ -1,0 +1,74 @@
+name: EMERGENCY-RESTORE-OFFICER-APPROVALS
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/EMERGENCY-RESTORE-OFFICER-APPROVALS.yml"
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - name: Restore officer.approvals from good commit and inject notify
+        run: |
+          set -euo pipefail
+          git show 6e56b95b85ecf10ad8921c3dbc4817c17ae829d9:src/routes/officer.approvals.tsx > src/routes/officer.approvals.tsx
+          wc -c src/routes/officer.approvals.tsx
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/routes/officer.approvals.tsx")
+          t = p.read_text()
+          if "student-dashboard-exams" in t:
+              print("notify already present")
+          else:
+              i = t.find("Pushed to students")
+              if i < 0:
+                  raise SystemExit("Pushed toast missing")
+              j = t.find('await qc.invalidateQueries({ queryKey: ["officer-approvals"] });', i)
+              k = t.find("await listQ.refetch();", j)
+              if j < 0 or k < 0:
+                  raise SystemExit("invalidate block missing")
+              end = k + len("await listQ.refetch();")
+              insert = '''if (mode === "post" && schoolId) {
+        try {
+          const payload = {
+            schoolId,
+            examId: item.id,
+            examTitle: item.title,
+            courseId: item.course_id,
+            courseCode: courseCode(item) !== "—" ? courseCode(item) : undefined,
+            courseTitle: courseName(item) !== "Course" ? courseName(item) : undefined,
+            start: item.scheduled_start || undefined,
+            end: item.scheduled_end || undefined,
+            scheduledStart: item.scheduled_start || undefined,
+            scheduledEnd: item.scheduled_end || undefined,
+          };
+          try {
+            await serverNotifyStudentsExamApproved({ data: payload });
+          } catch (se) {
+            try { await notifyStudentsExamApproved(payload); } catch (ce) { console.warn(ce); }
+          }
+        } catch (e) { console.warn(e); }
+      }
+      await qc.invalidateQueries({ queryKey: ["officer-approvals"] });
+      await qc.invalidateQueries({ queryKey: ["student-exams"] });
+      await qc.invalidateQueries({ queryKey: ["student-dashboard-exams"] });
+      await listQ.refetch();'''
+              t = t[:j] + insert + t[end:]
+              p.write_text(t)
+              print("notify injected", len(t))
+          print("size", p.stat().st_size)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/officer.approvals.tsx
+          git status
+          git commit -m "fix: restore officer.approvals + notify on Push to students"
+          git push
