@@ -804,13 +804,13 @@ export function officerExamSubmittedForReview(opts: {
   );
 
   return {
-    title: `📝 Exam Awaiting Approval — ${officer}`,
+    title: `📝 Exam Ready for Review — ${teacher}`,
     message:
-      `📝 ${officer}\n\n` +
-      `${teacher} has submitted an examination for approval.\n\n` +
+      `📝 Exam ready for review\n\n` +
+      `${teacher} has submitted an examination for your approval.\n\n` +
       `👨‍🏫 Teacher: ${teacher}\n` +
       `📝 Examination: ${exam}\n\n` +
-      `The examination is ready for your review and approval.`,
+      `Please review and approve, then Post to students when it should go live.`,
     action: action("REVIEW EXAM", opts.link),
   };
 }
@@ -1438,6 +1438,39 @@ export function studentExamApproved(opts: {
     end: opts.end,
     link: opts.link,
   });
+}
+
+
+export function studentExamAvailableDetailed(opts: {
+  studentName: string;
+  username?: string | null;
+  examTitle: string;
+  courseCode?: string | null;
+  courseTitle?: string | null;
+  start?: string | null;
+  end?: string | null;
+  link?: string | null;
+}): NotificationTemplate {
+  const name = personName(opts.studentName, "Student");
+  const exam = examDisplay(opts.courseCode, opts.examTitle, opts.courseTitle);
+  const date = fmtDate(opts.start);
+  const startT = fmtTime(opts.start);
+  const endT = fmtTime(opts.end);
+  let message =
+    `🚀 ${name}\n\n` +
+    `Your examination is now available.\n\n` +
+    `📝 Examination: ${exam}`;
+  if (date) message += `\n📅 Date: ${date}`;
+  if (startT) message += `\n🕐 Starts: ${startT}`;
+  if (endT) message += `\n⏰ Ends: ${endT}`;
+  message +=
+    `\n\nYou can enter the examination from your Examinations page.` +
+    `\n\nPlease follow all examination rules. Good luck!`;
+  return {
+    title: `🚀 Exam Available — ${name}`,
+    message,
+    action: action("START EXAM", opts.link),
+  };
 }
 
 export function studentExamAvailable(opts: {

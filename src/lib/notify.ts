@@ -957,6 +957,8 @@ export async function notifyStudentsExamApproved(opts: {
   scheduledStart?: string | null;
   /** @deprecated alias for end */
   scheduledEnd?: string | null;
+  /** When true (officer Post to students), use "exam available" template */
+  availableNow?: boolean;
 }): Promise<void> {
   try {
     const startIso = opts.start ?? opts.scheduledStart ?? null;
@@ -998,26 +1000,37 @@ export async function notifyStudentsExamApproved(opts: {
 
     const link = "/student/examinations";
     const names = await authUserDisplayNames(authIds);
+    const availableNow = Boolean((opts as { availableNow?: boolean }).availableNow);
     await notifyMany(
       authIds.map((uid) => {
         const studentName = names.get(uid) || "Student";
-        const copy = Msg.studentExamScheduled({
-          studentName,
-          examTitle: opts.examTitle,
-          courseCode,
-          courseTitle,
-          start: startIso,
-          end: endIso,
-          link,
-        });
+        const copy = availableNow
+          ? (Msg as any).studentExamAvailableDetailed({
+              studentName,
+              examTitle: opts.examTitle,
+              courseCode,
+              courseTitle,
+              start: startIso,
+              end: endIso,
+              link,
+            })
+          : Msg.studentExamScheduled({
+              studentName,
+              examTitle: opts.examTitle,
+              courseCode,
+              courseTitle,
+              start: startIso,
+              end: endIso,
+              link,
+            });
         return {
           recipientUserId: uid,
           schoolId: opts.schoolId,
           title: copy.title,
           message: copy.message,
-          type: "exam_scheduled" as NotifyType,
+          type: (availableNow ? "exam_available" : "exam_scheduled") as NotifyType,
           link: templateLink(copy, link),
-          actionLabel: copy.action?.label ?? "VIEW EXAM",
+          actionLabel: copy.action?.label ?? (availableNow ? "START EXAM" : "VIEW EXAM"),
           entityType: "examination",
           entityId: opts.examId,
           dedupeMinutes: 30,
@@ -1065,7 +1078,6 @@ export async function notifyStudentExamAvailable(opts: {
       message: copy.message,
       type: "exam_available",
       link: templateLink(copy, link),
-      actionLabel: copy.action?.label ?? null,
       actionLabel: copy.action?.label ?? "START EXAM",
       entityType: "examination",
       entityId: opts.examId,
