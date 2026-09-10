@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - ".github/workflows/APPLY-CONTINUE-TIMER-SURGICAL.yml"
+      - "FORCE_DEPLOY.txt"
 permissions:
   contents: write
 jobs:
@@ -17,31 +18,22 @@ jobs:
       - name: Restore kit from last good commit and apply patches
         run: |
           set -e
-          # Restore full kit from commit before PLACEHOLDER
           git show b6d2db7:src/components/dashboard/kit.tsx > src/components/dashboard/kit.tsx
-          python3 - <<'PY'
+          python3 scripts/run_continue_timer_patch_inline.py || python3 - <<'PY'
           from pathlib import Path
           import re
-
-          # kit badges
           kit = Path("src/components/dashboard/kit.tsx")
           t = kit.read_text()
           old = '  terminated: "bg-red-50 text-red-700 border-red-200",\n  closed: "bg-slate-100 text-slate-600 border-slate-200",\n};'
           new = '  terminated: "bg-red-50 text-red-700 border-red-200",\n  closed: "bg-slate-100 text-slate-600 border-slate-200",\n  released: "bg-emerald-50 text-emerald-700 border-emerald-200",\n  held: "bg-red-50 text-red-700 border-red-200",\n};'
           if old in t:
-              t = t.replace(old, new, 1)
-              kit.write_text(t)
-              print("kit badges ok")
+              kit.write_text(t.replace(old, new, 1)); print("kit badges ok")
           elif "released:" in t:
               print("kit badges already")
           else:
               raise SystemExit("kit styles missing")
-
-          # student.index ends_at + timer
           idx = Path("src/routes/student.index.tsx")
           t = idx.read_text()
-          if t.strip() == "PLACEHOLDER":
-              raise SystemExit("student.index placeholder")
           if '.select("exam_id, status, ends_at")' not in t:
               t = t.replace('.select("exam_id, status")', '.select("exam_id, status, ends_at")', 1)
           if "endsAtByExam" not in t:
@@ -50,11 +42,7 @@ jobs:
     for (const a of attemptsQ.data ?? []) m.set(a.exam_id, a.status);
     return m;
   }, [attemptsQ.data]);"""
-              new = """  const attemptsByExam = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const a of attemptsQ.data ?? []) m.set(a.exam_id, a.status);
-    return m;
-  }, [attemptsQ.data]);
+              new = old + """
 
   const endsAtByExam = useMemo(() => {
     const m = new Map<string, string | null>();
@@ -82,8 +70,7 @@ jobs:
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${pad(h)}:${pad(m)}:${pad(s)}`;
   }"""
-              if old not in t:
-                  raise SystemExit("attemptsByExam missing")
+              if old not in t: raise SystemExit("attemptsByExam missing")
               t = t.replace(old, new, 1)
           if "Continue ·" not in t:
               old = """                      >
@@ -100,13 +87,9 @@ jobs:
                         })()}
                       </Button>
                     ) : canStart ? ("""
-              if old not in t:
-                  raise SystemExit("Continue btn missing")
+              if old not in t: raise SystemExit("Continue btn missing")
               t = t.replace(old, new, 1)
-          idx.write_text(t)
-          print("student.index ok", len(t))
-
-          # CBT option lock + instant submit + resume
+          idx.write_text(t); print("student.index ok", len(t))
           cbt = Path("src/components/cbt/CbtExamSession.impl.tsx")
           ct = cbt.read_text()
           if 'locked && selected && "cursor-not-allowed' not in ct:
@@ -158,10 +141,8 @@ jobs:
                 </li>
               );
             })}"""
-              if old not in ct:
-                  raise SystemExit("options block missing")
-              ct = ct.replace(old, new, 1)
-              print("options lock")
+              if old not in ct: raise SystemExit("options block missing")
+              ct = ct.replace(old, new, 1); print("options lock")
           old_f = """    doneRef.current = true;
     setFsGate(false);
     setPaused(false);
@@ -184,9 +165,7 @@ jobs:
       finishingRef.current = false;
       return;
     }"""
-          if old_f in ct:
-              ct = ct.replace(old_f, new_f, 1)
-              print("instant done")
+          if old_f in ct: ct = ct.replace(old_f, new_f, 1); print("instant done")
           if "resumeIndexRef" not in ct:
               ct = ct.replace("const finishingRef = useRef(false);", "const finishingRef = useRef(false);\n  const resumeIndexRef = useRef<number | null>(null);", 1)
           old_r = """            try {
@@ -210,8 +189,7 @@ jobs:
               resumeIndexRef.current = idx;
               setIndex(idx);
             } catch {}"""
-          if old_r in ct:
-              ct = ct.replace(old_r, new_r, 1)
+          if old_r in ct: ct = ct.replace(old_r, new_r, 1)
           if "Resume at first unanswered once paper order is known" not in ct:
               effect = """
   // Resume at first unanswered once paper order is known
@@ -233,11 +211,8 @@ jobs:
   }, [started, done, previewMode, questions.length]);
 """
               anchor = "  }, [started, done, previewMode, student?.studentId, id, liveAttemptId]);"
-              if anchor in ct:
-                  ct = ct.replace(anchor, anchor + "\n" + effect, 1)
-          cbt.write_text(ct)
-          print("cbt ok", len(ct))
-
+              if anchor in ct: ct = ct.replace(anchor, anchor + "\n" + effect, 1)
+          cbt.write_text(ct); print("cbt ok", len(ct))
           pip = Path("src/components/cbt/ExamCameraPip.tsx")
           pt = pip.read_text()
           if "if (!enabled) return;" not in pt:
@@ -252,9 +227,7 @@ jobs:
   }, [enabled]);
 """
               pt = pt[:m.end()] + "\n" + insert + pt[m.end():]
-          pip.write_text(pt)
-          print("pip ok")
-          print("ALL OK")
+          pip.write_text(pt); print("pip ok"); print("ALL OK")
           PY
       - name: Commit and push
         run: |
