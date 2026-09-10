@@ -1,0 +1,76 @@
+name: APPLY-F-OFFICER-COLDSTART
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-F-OFFICER-COLDSTART.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch officer + index + login
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          op = Path('src/routes/officer.approvals.tsx')
+          ot = op.read_text()
+          ot = ot.replace('Post to students', 'Push to students')
+          ot = ot.replace(
+              'Post so students see the exam. Release hides it until you post again.',
+              'After you approve, click Push to students so the exam appears live for eligible students. Release hides it again.',
+          )
+          ot = ot.replace(
+              'Teachers submit → you approve → post to students',
+              'Teachers submit → you approve → Push to students (makes exam live)',
+          )
+          ot = ot.replace(
+              '? "Exam posted — students can see it now"',
+              '? "Pushed to students — exam is now live on student examinations"',
+          )
+          op.write_text(ot)
+          print('officer', ot.count('Push to students'))
+
+          ip = Path('src/routes/index.tsx')
+          it = ip.read_text()
+          if 'readPreferredRole' not in it:
+              it = it.replace(
+                  'import { fetchSessionUser, roleHome, readLastPath, readLastRole, type AppRole } from "@/lib/session";',
+                  'import { fetchSessionUser, roleHome, readLastPath, readLastRole, readPreferredRole, type AppRole } from "@/lib/session";',
+              )
+              it = it.replace('const lastRole = readLastRole();', 'const lastRole = readLastRole() || readPreferredRole();')
+              ip.write_text(it)
+              print('index ok')
+          else:
+              print('index already')
+
+          lp = Path('src/routes/login.tsx')
+          lt = lp.read_text()
+          if 'setPreferredRole' not in lt:
+              lt = lt.replace(
+                  'import { fetchSessionUser, roleHome, seedPendingLoginRole, readLastPath, type AppRole } from "@/lib/session";',
+                  'import { fetchSessionUser, roleHome, seedPendingLoginRole, setPreferredRole, rememberLastPath, readLastPath, type AppRole } from "@/lib/session";',
+              )
+              needle = 'async function goToRoleHome(role: string, rememberDevice = true) {\n  const home = roleHome[role as AppRole];'
+              insert = 'async function goToRoleHome(role: string, rememberDevice = true) {\n  const home = roleHome[role as AppRole];\n  try {\n    setPreferredRole(role as AppRole);\n    rememberLastPath(home, role);\n  } catch { /* ignore */ }'
+              if needle in lt:
+                  lt = lt.replace(needle, insert)
+                  lp.write_text(lt)
+                  print('login ok')
+              else:
+                  print('login needle missing')
+          else:
+              print('login already')
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/officer.approvals.tsx src/routes/index.tsx src/routes/login.tsx
+          git diff --cached --quiet && echo no-changes && exit 0
+          git commit -m "fix: Push to students label; persist role on login; cold-start preferred role"
+          git push
