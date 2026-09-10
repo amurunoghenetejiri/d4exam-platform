@@ -1,0 +1,26 @@
+name: ZZ-RESTORE-OFFICER
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/ZZ-RESTORE-OFFICER.yml"
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - run: |
+          set -eux
+          git show 6e56b95b85ecf10ad8921c3dbc4817c17ae829d9:src/routes/officer.approvals.tsx > src/routes/officer.approvals.tsx
+          wc -c src/routes/officer.approvals.tsx
+          test $(wc -c < src/routes/officer.approvals.tsx) -gt 20000
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/officer.approvals.tsx
+          git commit -m "fix: restore wiped officer.approvals.tsx from 6e56b95"
+          git push
