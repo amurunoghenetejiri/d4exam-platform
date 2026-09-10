@@ -19,7 +19,7 @@ import { LocalDbBootstrap } from "@/components/LocalDbBootstrap";
 import { OfflineStatusPill } from "@/components/OfflineStatusPill";
 import { NotificationLiveListener } from "@/components/NotificationLiveListener";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
-import { useSessionUser, rememberLastPath } from "@/lib/session";
+import { useSessionUser, rememberLastPath, readLastRole, readPreferredRole, roleHome, roleFromPath, type AppRole } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
 import { applyNativeStatusBar } from "@/native/statusBar";
@@ -28,12 +28,19 @@ import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
 
 function NativeBootstrap() {
   const { data: session } = useSessionUser();
+  const router = useRouter();
   const pathForPersist = useRouterState({ select: (s) => s.location.pathname });
   useEffect(() => {
-    if (session?.role && pathForPersist) {
-      rememberLastPath(pathForPersist, session.role);
-    }
+    if (!pathForPersist) return;
+    rememberLastPath(pathForPersist, session?.role ?? roleFromPath(pathForPersist));
   }, [pathForPersist, session?.role]);
+  useEffect(() => {
+    if (pathForPersist !== "/") return;
+    const role = (readLastRole() || readPreferredRole() || session?.role) as AppRole | null;
+    if (role && roleHome[role]) {
+      void router.navigate({ to: roleHome[role] as never, replace: true });
+    }
+  }, [pathForPersist, session?.role, router]);
   useEffect(() => {
     if (!isNativeShell()) return;
     let cancelled = false;

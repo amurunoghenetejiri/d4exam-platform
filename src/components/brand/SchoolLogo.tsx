@@ -47,7 +47,7 @@ export function SchoolLogo({
     xl: "text-base",
   }[size];
 
-  const showFallback = !logoUrl || failed;
+  const showFallback = !(logoUrl && String(logoUrl).trim()) || failed;
 
   if (showFallback) {
     return (
@@ -80,6 +80,7 @@ export function SchoolLogo({
       loading={priority ? "eager" : "lazy"}
       decoding="async"
       fetchPriority={priority ? "high" : undefined}
+      referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
     />
   );

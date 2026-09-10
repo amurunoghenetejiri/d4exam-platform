@@ -283,6 +283,7 @@ export function ExamSecurityGate({
           <SchoolLogo
             logoUrl={schoolLogoUrl}
             schoolName={schoolName}
+            priority
             size="xl"
             className="ring-1 ring-slate-200"
           />

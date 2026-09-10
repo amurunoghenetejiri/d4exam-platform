@@ -30,14 +30,43 @@ const LAST_PATH_KEY = "d4exam_last_path_v1";
 const LAST_ROLE_KEY = "d4exam_last_role_v1";
 const PREFERRED_ROLE_KEY = "d4exam_preferred_role_v1";
 
+/** Map an in-app pathname to AppRole when possible. */
+export function roleFromPath(path: string | null | undefined): AppRole | null {
+  const p = String(path || "").split("?")[0];
+  if (p.startsWith("/student")) return "student";
+  if (p.startsWith("/teacher")) return "teacher";
+  if (p.startsWith("/officer")) return "examination_officer";
+  if (p.startsWith("/admin")) return "school_admin";
+  if (p.startsWith("/super-admin")) return "super_admin";
+  return null;
+}
+
 /** Remember last in-app path so Capacitor relaunch restores role route. */
 export function rememberLastPath(path: string, role?: string | null): void {
   if (typeof window === "undefined") return;
   try {
     const p = (path || "").split("?")[0];
-    if (!p || p === "/" || p === "/login" || p.startsWith("/auth")) return;
+    if (
+      !p ||
+      p === "/" ||
+      p === "/login" ||
+      p.startsWith("/auth") ||
+      p.startsWith("/about") ||
+      p.startsWith("/pricing") ||
+      p.startsWith("/privacy") ||
+      p.startsWith("/support") ||
+      p.startsWith("/features")
+    ) {
+      return;
+    }
     window.localStorage.setItem(LAST_PATH_KEY, p);
-    if (role) window.localStorage.setItem(LAST_ROLE_KEY, role);
+    const known = ["student", "teacher", "school_admin", "examination_officer", "super_admin"];
+    const fromArg = role && known.includes(String(role)) ? String(role) : null;
+    const r = fromArg || roleFromPath(p);
+    if (r) {
+      window.localStorage.setItem(LAST_ROLE_KEY, r);
+      window.localStorage.setItem(PREFERRED_ROLE_KEY, r);
+    }
   } catch { /* ignore */ }
 }
 
@@ -153,6 +182,21 @@ function seedSchoolBrandFromSession(schoolId?: string | null, name?: string | nu
   try {
     window.localStorage.setItem(SCHOOL_BRAND_KEY, JSON.stringify({ id: schoolId, name: name || null, logoUrl: logoUrl || null, ts: Date.now() }));
   } catch {}
+}
+
+/** Cached school logo/name for offline / exam gate when live query is slow. */
+export function readCachedSchoolBrand(schoolId?: string | null): { id?: string; name?: string | null; logoUrl?: string | null } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SCHOOL_BRAND_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { id?: string; name?: string | null; logoUrl?: string | null; ts?: number };
+    if (schoolId && parsed.id && parsed.id !== schoolId) return null;
+    if (parsed.ts && Date.now() - parsed.ts > 30 * 24 * 60 * 60 * 1000) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 export interface SessionUser {

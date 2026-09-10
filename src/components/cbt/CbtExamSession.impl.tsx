@@ -9,7 +9,7 @@ import { ExamSecurityGate } from "@/components/cbt/ExamSecurityGate";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useStudentContext, formatExamWindow } from "@/lib/student";
-import { useSessionUser } from "@/lib/session";
+import { useSessionUser, readCachedSchoolBrand } from "@/lib/session";
 import { friendlyError } from "@/lib/friendly-error";
 import { fromExamSettingsRow, type ExamSettingsRow } from "@/lib/exam-security";
 import { parseExamMeta } from "@/lib/exam-meta";
@@ -79,7 +79,20 @@ export function CbtExamPage() {
   const previewMode = isPreviewPath();
   const { data: student } = useStudentContext();
   const { data: session } = useSessionUser();
-  const { data: schoolBrand } = useSchoolIdentity(student?.schoolId ?? session?.schoolId);
+  const schoolIdForBrand = student?.schoolId ?? session?.schoolId ?? null;
+  const { data: schoolBrand } = useSchoolIdentity(schoolIdForBrand);
+  const cachedBrand = typeof window !== "undefined" ? readCachedSchoolBrand(schoolIdForBrand) : null;
+  const resolvedLogoUrl =
+    schoolBrand?.logoUrl ||
+    session?.schoolLogoUrl ||
+    cachedBrand?.logoUrl ||
+    null;
+  const resolvedSchoolName =
+    schoolBrand?.name ||
+    student?.schoolName ||
+    session?.schoolName ||
+    cachedBrand?.name ||
+    null;
   const [started, setStarted] = useState(false);
   const [done, setDone] = useState(false);
   const [doneTerminated, setDoneTerminated] = useState(false);
@@ -954,7 +967,7 @@ export function CbtExamPage() {
     return (
       <div className="grid min-h-dvh place-items-center bg-slate-50 p-4">
         <div className="w-full max-w-lg rounded-2xl border bg-white p-6 text-center shadow-sm">
-          <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? session?.schoolName} size="lg" className="mx-auto" />
+          <SchoolLogo logoUrl={resolvedLogoUrl} schoolName={resolvedSchoolName} size="lg" className="mx-auto" />
           <h1 className="mt-4 text-2xl font-extrabold">
             {previewMode
               ? "Preview ended"
@@ -983,7 +996,7 @@ export function CbtExamPage() {
     return (
       <div className="grid min-h-dvh place-items-center bg-slate-50 p-4">
         <div className="w-full max-w-lg rounded-2xl border bg-white p-6 text-center shadow-sm">
-          <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? session?.schoolName} size="lg" className="mx-auto" />
+          <SchoolLogo logoUrl={resolvedLogoUrl} schoolName={resolvedSchoolName} size="lg" className="mx-auto" />
           <h1 className="mt-4 text-2xl font-extrabold">Examination already completed</h1>
           <p className="mt-2 text-sm text-slate-600">
             You have already submitted or finished this examination. Retakes are not allowed.
@@ -1007,8 +1020,8 @@ export function CbtExamPage() {
         totalQuestions={TOTAL}
         security={security}
         busy={mediaBusy}
-        schoolLogoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl}
-        schoolName={schoolBrand?.name ?? student?.schoolName ?? session?.schoolName}
+        schoolLogoUrl={resolvedLogoUrl}
+        schoolName={resolvedSchoolName}
         windowLabel={previewMode ? "Officer interactive preview" : formatExamWindow(exam.scheduled_start, exam.scheduled_end)}
         cancelTo={previewMode ? "/officer/approvals" : "/student/examinations"}
         onStart={(opts) => void beginWithMedia(opts)}
@@ -1035,7 +1048,7 @@ export function CbtExamPage() {
       <header className="d4-cbt-header z-40 shrink-0 border-b border-slate-200 bg-[#0b1b3a] text-white">
         <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between gap-3 px-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <SchoolLogo logoUrl={schoolBrand?.logoUrl ?? session?.schoolLogoUrl} schoolName={schoolBrand?.name ?? student?.schoolName ?? session?.schoolName} size="md" className="bg-transparent" />
+            <SchoolLogo logoUrl={resolvedLogoUrl} schoolName={resolvedSchoolName} size="md" className="bg-transparent" />
             <p className="hidden truncate text-sm font-bold sm:block">{(exam as { courses?: { code?: string } }).courses?.code ?? "EXAM"} — {exam.title}</p>
           </div>
           <div className="flex items-center gap-2">

@@ -1,4 +1,4 @@
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, isRedirect } from "@tanstack/react-router";
 import {
   ShieldCheck,
   Gauge,
@@ -53,7 +53,8 @@ export const Route = createFileRoute("/")({
         throw redirect({ to: roleHome[session.role as AppRole] as never });
       }
     } catch (e) {
-      if (e && typeof e === "object" && "to" in e) throw e;
+      if (isRedirect(e)) throw e;
+      if (e && typeof e === "object" && ("to" in e || "isRedirect" in e)) throw e;
     }
   },
   component: HomePage,
