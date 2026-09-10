@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - "scripts/run_continue_timer_patch.b64"
       - "scripts/run_continue_timer_patch.py"
       - ".github/workflows/APPLY-CONTINUE-TIMER-SURGICAL.yml"
 permissions:
@@ -15,9 +16,10 @@ jobs:
         with:
           fetch-depth: 80
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Patch
+      - name: Decode and run patch
         run: |
           set -e
+          python3 -c "import base64,pathlib; p=pathlib.Path('scripts/run_continue_timer_patch.b64'); pathlib.Path('scripts/run_continue_timer_patch.py').write_bytes(base64.b64decode(p.read_text().strip()))"
           git show b6d2db7:src/components/dashboard/kit.tsx > src/components/dashboard/kit.tsx
           python3 scripts/run_continue_timer_patch.py
       - name: Commit
