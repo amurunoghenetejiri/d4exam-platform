@@ -1,0 +1,244 @@
+name: APPLY-SETTINGS-CBT-FINAL
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-SETTINGS-CBT-FINAL.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 80
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch
+        run: |
+          set -euo pipefail
+          python3 <<'ENDPY'
+          from pathlib import Path
+          import subprocess
+
+          def show(c, p):
+              return subprocess.check_output(["git", "show", f"{c}:{p}"], text=True)
+
+          # Settings
+          settings = None
+          for c in ["71f378f", "08dbddc", "9fd1399"]:
+              try:
+                  t = show(c, "src/components/pages/SettingsPage.tsx")
+                  if len(t) > 12000 and "PLACEHOLDER" not in t and "SectionCard" in t:
+                      settings = t
+                      print("settings from", c, len(t))
+                      break
+              except Exception as e:
+                  print("skip settings", c, e)
+          if not settings:
+              raise SystemExit("no settings base")
+
+          if "ArrowLeft" not in settings:
+              settings = settings.replace(
+                  'ChevronRight, CreditCard } from "lucide-react";',
+                  'ChevronRight, CreditCard, ArrowLeft } from "lucide-react";',
+              )
+          if "helpDoc" not in settings:
+              settings = settings.replace(
+                  "const [saving, setSaving] = useState(false);",
+                  'const [saving, setSaving] = useState(false);\n  const [helpDoc, setHelpDoc] = useState<null | "about" | "support" | "privacy" | "pricing">(null);',
+              )
+
+          if 'Link to="/about"' in settings and "{helpDoc ?" not in settings:
+              start = settings.find('<SectionCard title="Help & legal"')
+              end = settings.find("</SectionCard>", start)
+              if start > 0 and end > start:
+                  block_end = end + len("</SectionCard>")
+                  new_block = '''<SectionCard title="Help & legal" description="About, support, privacy and pricing">
+          {helpDoc ? (
+            <div className="space-y-4">
+              <button type="button" onClick={() => setHelpDoc(null)} className="inline-flex items-center gap-2 rounded-lg px-2 py-2 text-sm font-semibold text-primary hover:bg-slate-50">
+                <ArrowLeft className="h-4 w-4" /> Back
+              </button>
+              <h3 className="text-base font-bold text-slate-900">
+                {helpDoc === "about" ? "About Us" : helpDoc === "support" ? "Support" : helpDoc === "privacy" ? "Privacy Policy" : "Pricing"}
+              </h3>
+              <div className="space-y-3 text-sm leading-relaxed text-slate-600">
+                {helpDoc === "about" && (<><p>D4EXAM is a professional online examination / CBT platform for schools.</p><p>Students, teachers, officers and admins share one secure system.</p></>)}
+                {helpDoc === "support" && (<><p>Contact your school administrator for account or exam access help.</p><p>Include your role, school name, and a short description when reporting issues.</p></>)}
+                {helpDoc === "privacy" && (<><p>Account, exam and integrity data are processed to run secure assessments.</p><p>Camera and mic are used only when exam security settings require them.</p></>)}
+                {helpDoc === "pricing" && (<><p>Pricing is managed per school by your administrator or Super Admin.</p></>)}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              <button type="button" onClick={() => setHelpDoc("about")} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 hover:bg-slate-50"><Info className="h-4 w-4 shrink-0 text-primary" /><span className="flex-1">About Us</span><ChevronRight className="h-4 w-4 text-slate-300" /></button>
+              <button type="button" onClick={() => setHelpDoc("support")} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 hover:bg-slate-50"><LifeBuoy className="h-4 w-4 shrink-0 text-primary" /><span className="flex-1">Support</span><ChevronRight className="h-4 w-4 text-slate-300" /></button>
+              <button type="button" onClick={() => setHelpDoc("privacy")} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 hover:bg-slate-50"><Shield className="h-4 w-4 shrink-0 text-primary" /><span className="flex-1">Privacy Policy</span><ChevronRight className="h-4 w-4 text-slate-300" /></button>
+              <button type="button" onClick={() => setHelpDoc("pricing")} className="flex items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 hover:bg-slate-50"><CreditCard className="h-4 w-4 shrink-0 text-primary" /><span className="flex-1">Pricing</span><ChevronRight className="h-4 w-4 text-slate-300" /></button>
+              <p className="mt-3 px-2 text-center text-[11px] text-slate-400">D4EXAM. Smart. Secure. Seamless.</p>
+            </div>
+          )}
+        </SectionCard>'''
+                  settings = settings[:start] + new_block + settings[block_end:]
+                  print("settings help replaced")
+              else:
+                  print("WARN no help section markers")
+          else:
+              print("settings help already ok or partial")
+
+          Path("src/components/pages/SettingsPage.tsx").write_text(settings)
+          print("Settings final", len(settings))
+
+          # CBT
+          cbt = Path("src/components/cbt/CbtExamSession.impl.tsx").read_text()
+          if len(cbt) < 20000 or "PLACEHOLDER" in cbt:
+              for c in ["71f378f", "77a19c6"]:
+                  try:
+                      t = show(c, "src/components/cbt/CbtExamSession.impl.tsx")
+                      if len(t) > 40000:
+                          cbt = t
+                          print("cbt restored", c, len(cbt))
+                          break
+                  except Exception as e:
+                      print(e)
+
+          if "ends_at, started_at" not in cbt:
+              cbt = cbt.replace(
+                  '.select("id, status, question_order, tab_switch_count, fullscreen_exit_count, answers")',
+                  '.select("id, status, question_order, tab_switch_count, fullscreen_exit_count, answers, ends_at, started_at")',
+              )
+              print("cbt select")
+
+          if "Restore absolute end clock" not in cbt:
+              m = "// Build paper now so we can lock order"
+              ins = '''
+        // Restore absolute end clock from attempt (do not reset timer on Continue)
+        try {
+          const ea = (existingFull as { ends_at?: string | null }).ends_at;
+          if (ea) {
+            const ends = new Date(String(ea)).getTime();
+            if (!Number.isNaN(ends) && ends > Date.now()) {
+              endsAtRef.current = ends;
+              setSeconds(Math.max(0, Math.ceil((ends - Date.now()) / 1000)));
+            }
+          }
+        } catch { /* ignore */ }
+'''
+              if m in cbt:
+                  cbt = cbt.replace(m, ins + m, 1)
+                  print("cbt ends restore")
+
+          needle = '''      {
+        const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
+        const now = Date.now();
+        let ends = now + durationSec * 1000;
+        const schedEnd = examQ.data?.scheduled_end ? new Date(String(examQ.data.scheduled_end)).getTime() : NaN;
+        if (!Number.isNaN(schedEnd) && schedEnd > now) {
+          ends = Math.min(ends, schedEnd);
+        }
+        endsAtRef.current = ends;
+        setSeconds(Math.max(0, Math.ceil((ends - now) / 1000)));
+      }
+      setStarted(true);
+      setIndex(0);'''
+          repl = '''      {
+        const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
+        const now = Date.now();
+        if (endsAtRef.current != null && endsAtRef.current > now) {
+          setSeconds(Math.max(0, Math.ceil((endsAtRef.current - now) / 1000)));
+        } else {
+          let ends = now + durationSec * 1000;
+          const schedEnd = examQ.data?.scheduled_end ? new Date(String(examQ.data.scheduled_end)).getTime() : NaN;
+          if (!Number.isNaN(schedEnd) && schedEnd > now) {
+            ends = Math.min(ends, schedEnd);
+          }
+          endsAtRef.current = ends;
+          setSeconds(Math.max(0, Math.ceil((ends - now) / 1000)));
+          if (attemptIdRef.current) {
+            void supabase.from("exam_attempts").update({
+              ends_at: new Date(ends).toISOString(),
+              status: "in_progress",
+            } as never).eq("id", attemptIdRef.current);
+          }
+        }
+      }
+      setStarted(true);
+      if (!(orderedIdsRef.current && orderedIdsRef.current.length)) {
+        setIndex(0);
+      }'''
+          if needle in cbt:
+              cbt = cbt.replace(needle, repl)
+              print("cbt timer")
+
+          if "const locked = q ? answers[q.id] != null" not in cbt:
+              cbt = cbt.replace(
+                  "const selected = q ? answers[q.id] === oi : false;",
+                  'const selected = q ? answers[q.id] === oi : false;\n              const locked = q ? answers[q.id] != null : false;',
+                  1,
+              )
+              cbt = cbt.replace(
+                  '''<button type="button" onClick={() => {
+                    if (q) setAnswers((a) => ({ ...a, [q.id]: oi }));
+                  }}''',
+                  '''<button type="button" disabled={locked && !selected}
+                    onClick={() => {
+                      if (!q || answers[q.id] != null) return;
+                      setAnswers((a) => ({ ...a, [q.id]: oi }));
+                    }}''',
+                  1,
+              )
+              print("cbt lock")
+
+          if "Persist answers + ends_at" not in cbt:
+              ac = cbt.find("const answeredCount = Object.keys(answers).length;")
+              if ac > 0:
+                  le = cbt.find("\n", ac)
+                  auto = '''
+
+  // Persist answers + ends_at while in progress (resume safety)
+  useEffect(() => {
+    if (!started || done || previewMode || !attemptIdRef.current) return;
+    if (!Object.keys(answers).length) return;
+    const aid = attemptIdRef.current;
+    const tId = window.setTimeout(() => {
+      void supabase.from("exam_attempts").update({
+        answers,
+        ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
+        status: "in_progress",
+        updated_at: new Date().toISOString(),
+      } as never).eq("id", aid);
+    }, 1200);
+    return () => window.clearTimeout(tId);
+  }, [answers, started, done, previewMode]);
+'''
+                  cbt = cbt[: le + 1] + auto + cbt[le + 1 :]
+                  print("cbt autosave")
+
+          Path("src/components/cbt/CbtExamSession.impl.tsx").write_text(cbt)
+          print("CBT final", len(cbt))
+
+          for path, mn in [
+              ("src/components/pages/SettingsPage.tsx", 12000),
+              ("src/components/cbt/CbtExamSession.impl.tsx", 40000),
+              ("src/routes/student.examinations.tsx", 10000),
+          ]:
+              p = Path(path)
+              sz = p.stat().st_size
+              txt = p.read_text()
+              if sz < mn or "PLACEHOLDER" in txt:
+                  raise SystemExit(f"REFUSE {path} size={sz}")
+              print("OK", path, sz)
+
+          Path("FORCE_DEPLOY.txt").write_text("settings-cbt-final 2026-09-10\n")
+          ENDPY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/pages/SettingsPage.tsx src/components/cbt/CbtExamSession.impl.tsx FORCE_DEPLOY.txt
+          git status
+          git diff --cached --stat
+          if git diff --cached --quiet; then echo "nothing"; exit 0; fi
+          git commit -m "fix: Settings in-app Help with Back; CBT ends_at resume, locked answers, autosave"
+          git push origin HEAD:main
