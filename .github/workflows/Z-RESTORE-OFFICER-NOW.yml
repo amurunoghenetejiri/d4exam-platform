@@ -1,0 +1,66 @@
+name: Z-RESTORE-OFFICER-NOW
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/Z-RESTORE-OFFICER-NOW.yml"
+      - "FORCE_DEPLOY.txt"
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - name: Restore from 6e56b95 and inject notify
+        run: |
+          set -euo pipefail
+          git show 6e56b95b85ecf10ad8921c3dbc4817c17ae829d9:src/routes/officer.approvals.tsx > src/routes/officer.approvals.tsx
+          test $(wc -c < src/routes/officer.approvals.tsx) -gt 10000
+          python3 -c '
+from pathlib import Path
+p=Path("src/routes/officer.approvals.tsx")
+t=p.read_text()
+if "student-dashboard-exams" not in t:
+  i=t.find("Pushed to students")
+  j=t.find("await qc.invalidateQueries({ queryKey: [\"officer-approvals\"] });", i)
+  k=t.find("await listQ.refetch();", j)
+  end=k+len("await listQ.refetch();")
+  insert="""if (mode === \"post\" && schoolId) {
+        try {
+          const payload = {
+            schoolId,
+            examId: item.id,
+            examTitle: item.title,
+            courseId: item.course_id,
+            courseCode: courseCode(item) !== \"—\" ? courseCode(item) : undefined,
+            courseTitle: courseName(item) !== \"Course\" ? courseName(item) : undefined,
+            start: item.scheduled_start || undefined,
+            end: item.scheduled_end || undefined,
+            scheduledStart: item.scheduled_start || undefined,
+            scheduledEnd: item.scheduled_end || undefined,
+          };
+          try { await serverNotifyStudentsExamApproved({ data: payload }); }
+          catch (se) {
+            try { await notifyStudentsExamApproved(payload); } catch (ce) { console.warn(ce); }
+          }
+        } catch (e) { console.warn(e); }
+      }
+      await qc.invalidateQueries({ queryKey: [\"officer-approvals\"] });
+      await qc.invalidateQueries({ queryKey: [\"student-exams\"] });
+      await qc.invalidateQueries({ queryKey: [\"student-dashboard-exams\"] });
+      await listQ.refetch();"""
+  t=t[:j]+insert+t[end:]
+  p.write_text(t)
+  print("injected", len(t))
+else:
+  print("already", len(t))
+'
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/officer.approvals.tsx
+          git commit -m "fix: restore officer.approvals + notify on Push to students" || exit 0
+          git push
