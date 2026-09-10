@@ -1,0 +1,163 @@
+name: APPLY-FIX-SETTINGS-INLINE
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-FIX-SETTINGS-INLINE.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Inline Settings helpDoc sheet
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/components/pages/SettingsPage.tsx")
+          t = p.read_text()
+          if "setHelpDoc" in t:
+              print("already has helpDoc", len(t))
+              raise SystemExit(0)
+          # ensure useState import
+          if "useState" not in t:
+              if 'from "react"' in t:
+                  t = t.replace('from "react"', 'from "react"; // react')
+              # add import
+              t = "import { useState } from \"react\";\n" + t
+          # inject state near start of component export function SettingsPage
+          marker = "export function SettingsPage"
+          if marker not in t:
+              raise SystemExit("SettingsPage export missing")
+          # Find first const [ inside SettingsPage and inject helpDoc after opening of function
+          idx = t.find(marker)
+          brace = t.find("{", idx)
+          inject = "\n  const [helpDoc, setHelpDoc] = useState<null | \"about\" | \"support\" | \"privacy\" | \"pricing\">(null);\n"
+          t = t[: brace + 1] + inject + t[brace + 1 :]
+          # Replace Link blocks for about/support/privacy/pricing
+          import re
+          # simpler: replace href destinations by converting Links to buttons via regex
+          for key, label in [("about", "About Us"), ("support", "Support"), ("privacy", "Privacy Policy"), ("pricing", "Pricing")]:
+              # match Link to=\"/key\" ... </Link>
+              pat = rf'<Link to="/{key}"[^>]*>.*?</Link>'
+              # we need multiline
+              pass
+          # Brute force replace common patterns
+          replacements = [
+            ('to="/about"', 'data-help="about"'),
+            ('to="/support"', 'data-help="support"'),
+            ('to="/privacy"', 'data-help="privacy"'),
+            ('to="/pricing"', 'data-help="pricing"'),
+          ]
+          for a,b in replacements:
+              t = t.replace(a, b)
+          # Change Link with data-help into button - crude
+          t2 = t
+          # Convert <Link data-help="X" className="..."> to <button type="button" onClick={() => setHelpDoc("X")} className="...">
+          def repl_link(m):
+              key = m.group(1)
+              rest = m.group(2)
+              return f'<button type="button" onClick={{() => setHelpDoc("{key}")}} {rest}'
+          t2 = re.sub(r'<Link data-help="(about|support|privacy|pricing)"([^>]*)>', repl_link, t2)
+          t2 = t2.replace("</Link>", "</button>")  # too broad - only if we changed all Links
+          # Safer: only replace closing if we had marketing links section - actually too broad damages DualBrand links
+          # Revert too-broad close tags by only writing help overlay and leaving Link→button for data-help only
+          t = p.read_text()  # restart cleaner
+          if "useState" not in t:
+              t = "import { useState, type ReactNode } from \"react\";\n" + t
+          elif "useState" not in t.split("export function SettingsPage")[0]:
+              t = t.replace("from \"react\"", "from \"react\";\nimport { useState } from \"react\"", 1)
+          idx = t.find("export function SettingsPage")
+          brace = t.find("{", idx)
+          if "helpDoc" not in t:
+              t = t[: brace + 1] + "\n  const [helpDoc, setHelpDoc] = useState<null | \"about\" | \"support\" | \"privacy\" | \"pricing\">(null);\n" + t[brace + 1 :]
+          # Replace the four marketing Link rows with button rows
+          block_old_patterns = [
+            ("/about", "about", "About Us"),
+            ("/support", "support", "Support"),
+            ("/privacy", "privacy", "Privacy Policy"),
+            ("/pricing", "pricing", "Pricing"),
+          ]
+          # Use a simple approach: if Link to=\"/about\" exists, replace whole Help section
+          help_start = t.find('to="/about"')
+          if help_start < 0:
+              print("no about link; writing overlay only")
+          else:
+              # find section start - go back to previous <Link or <div
+              section = t.rfind("<", 0, help_start)
+              # Find end after pricing link
+              price = t.find('to="/pricing"')
+              if price > 0:
+                  end = t.find("</Link>", price) + len("</Link>")
+                  buttons = '''
+            {(
+              [
+                { key: "about" as const, label: "About Us" },
+                { key: "support" as const, label: "Support" },
+                { key: "privacy" as const, label: "Privacy Policy" },
+                { key: "pricing" as const, label: "Pricing" },
+              ] as const
+            ).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setHelpDoc(item.key)}
+                className="flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]"
+              >
+                <span className="flex-1">{item.label}</span>
+              </button>
+            ))}
+'''
+                  # find the start of the first Link in this group
+                  first = t.rfind("<Link", 0, help_start)
+                  if first > 0:
+                      t = t[:first] + buttons + t[end:]
+                      print("replaced link group")
+          overlay = '''
+        {helpDoc ? (
+          <div className="fixed inset-0 z-[80] flex flex-col bg-white">
+            <div className="flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 px-3 pt-[env(safe-area-inset-top,0px)]">
+              <button type="button" className="px-2 py-1 text-sm font-semibold" onClick={() => setHelpDoc(null)}>← Back</button>
+              <p className="text-sm font-extrabold text-slate-900">
+                {helpDoc === "about" ? "About Us" : helpDoc === "support" ? "Support" : helpDoc === "privacy" ? "Privacy Policy" : "Pricing"}
+              </p>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 text-sm leading-relaxed text-slate-700">
+              {helpDoc === "about" && (<p>D4EXAM is a secure online examination platform for schools. Smart Examination Security Abbey.</p>)}
+              {helpDoc === "support" && (<p>Need help? Contact your school admin or email support via your institution channel.</p>)}
+              {helpDoc === "privacy" && (<p>We protect exam integrity and student data. Your school controls accounts and results access.</p>)}
+              {helpDoc === "pricing" && (<p>Pricing is set per school plan. Contact your administrator for subscription details.</p>)}
+            </div>
+          </div>
+        ) : null}
+'''
+          if "helpDoc ?" not in t:
+              # insert before final closing of component - last return's closing
+              # append before last export or end of function - insert before last \n}\n of file if SettingsPage is last
+              last_return = t.rfind("return (")
+              # insert overlay just before the final closing fragment of return - search for </>; near end of Help section
+              # Place overlay after buttons area
+              if "setHelpDoc(item.key)" in t:
+                  pos = t.find("setHelpDoc(item.key)")
+                  # after the map closing
+                  close = t.find("))}", pos)
+                  if close > 0:
+                      t = t[: close + 3] + overlay + t[close + 3 :]
+                      print("overlay after buttons")
+              else:
+                  t = t + "\n"  # fallback
+                  print("overlay skip")
+          p.write_text(t)
+          print("done", len(t), "helpDoc" in t)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/pages/SettingsPage.tsx
+          git diff --cached --quiet && echo no-changes && exit 0
+          git commit -m "fix: Settings Help & legal open in-app with Back"
+          git push
