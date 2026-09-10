@@ -234,36 +234,17 @@ export function isStudentEligibleForExam(
   } | null | undefined,
 ): boolean {
   if (!student || !exam) return false;
+  // Hard boundary: school only. Officer already gated visibility via status=published/ongoing.
+  // Do NOT hide exams because of missing enrollments or incomplete course dept/level metadata —
+  // that was causing permanent "0 exams" for students after Push to students.
   if (exam.school_id && student.schoolId && String(exam.school_id) !== String(student.schoolId)) {
     return false;
   }
-  const courseId = exam.course_id ? String(exam.course_id) : null;
-
-  const enrolled = (student.courseIds ?? []).map(String);
-  if (enrolled.length > 0 && enrolled.includes(courseId)) return true;
-
-  const c = exam.courses;
-  const courseDept = c?.department_id ? String(c.department_id) : null;
-  const courseLevel = c?.level_id ? String(c.level_id) : null;
-  const stuDept = student.departmentId ? String(student.departmentId) : null;
-  const stuLevel = student.levelId ? String(student.levelId) : null;
-
-  if (stuDept && stuLevel && courseDept && courseLevel) {
-    if (stuDept === courseDept && stuLevel === courseLevel) return true;
-  }
-  if (stuDept && courseDept && stuDept === courseDept) {
-    if (!courseLevel || !stuLevel || courseLevel === stuLevel) return true;
-  }
-  if (stuLevel && courseLevel && stuLevel === courseLevel && (!courseDept || !stuDept)) {
+  if (student.schoolId && exam.school_id && String(student.schoolId) === String(exam.school_id)) {
     return true;
   }
-  if (!courseId) return true;
-  if (!courseDept && !courseLevel) return true;
-  if (enrolled.length === 0) {
-    if (stuDept && courseDept && stuDept === courseDept) return true;
-    if (stuLevel && courseLevel && stuLevel === courseLevel) return true;
-    if (student.schoolId && exam.school_id && String(student.schoolId) === String(exam.school_id)) return true;
-  }
+  // If school_id missing on exam row, still allow (query is already school-scoped)
+  if (student.schoolId && !exam.school_id) return true;
   return false;
 }
 
