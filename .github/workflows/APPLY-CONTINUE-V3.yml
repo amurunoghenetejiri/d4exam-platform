@@ -1,0 +1,275 @@
+name: APPLY-CONTINUE-V3
+on:
+  push:
+    paths:
+      - ".github/workflows/APPLY-CONTINUE-V3.yml"
+  workflow_dispatch:
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 40
+      - name: Restore and patch
+        run: |
+          set -euo pipefail
+          # Restore wiped student.examinations from last good commit before placeholder
+          git show a0711cc:src/routes/student.examinations.tsx > src/routes/student.examinations.tsx
+          wc -c src/routes/student.examinations.tsx
+          test $(wc -c < src/routes/student.examinations.tsx) -gt 5000
+
+          python3 << 'PY'
+          from pathlib import Path
+
+          # student.examinations
+          p = Path("src/routes/student.examinations.tsx")
+          t = p.read_text()
+          t = t.replace(
+          '''type AttemptRow = {
+  exam_id: string;
+  status: string;
+  submitted_at: string | null;
+};''',
+          '''type AttemptRow = {
+  exam_id: string;
+  status: string;
+  submitted_at: string | null;
+  ends_at?: string | null;
+};''', 1)
+          t = t.replace('.select("exam_id, status, submitted_at")', '.select("exam_id, status, submitted_at, ends_at")', 1)
+          t = t.replace(
+              'function StartExamButton({ examId, continueMode }: { examId: string; continueMode?: boolean })',
+              'function StartExamButton({ examId, continueMode, remainingLabel }: { examId: string; continueMode?: boolean; remainingLabel?: string | null })',
+              1,
+          )
+          t = t.replace(
+              '{continueMode ? "Continue exam" : "Start exam"}',
+              '{continueMode ? (remainingLabel ? `Continue · ${remainingLabel}` : "Continue exam") : "Start exam"}',
+              1,
+          )
+          t = t.replace(
+          '''function StartOrCountdownButton({
+  examId,
+  scheduledStart,
+  canStartNow,
+  continueMode,
+}: {
+  examId: string;
+  scheduledStart: string | null;
+  canStartNow: boolean;
+  continueMode?: boolean;
+}) {
+  const { remainingMs, ready } = useCountdown(scheduledStart);
+
+  if (continueMode) {
+    return <StartExamButton examId={examId} continueMode />;
+  }''',
+          '''function StartOrCountdownButton({
+  examId,
+  scheduledStart,
+  canStartNow,
+  continueMode,
+  attemptEndsAt,
+}: {
+  examId: string;
+  scheduledStart: string | null;
+  canStartNow: boolean;
+  continueMode?: boolean;
+  attemptEndsAt?: string | null;
+}) {
+  const { remainingMs, ready } = useCountdown(scheduledStart);
+  const { remainingMs: attemptMs } = useCountdown(continueMode ? attemptEndsAt : null);
+
+  if (continueMode) {
+    const label = attemptMs != null && attemptMs > 0 ? formatCountdown(attemptMs) : null;
+    return <StartExamButton examId={examId} continueMode remainingLabel={label} />;
+  }''',
+          1,
+          )
+          t = t.replace(
+          '''                <StartOrCountdownButton
+                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow
+                  continueMode={String(attempt?.status || "").toLowerCase() === "in_progress"}
+                />''',
+          '''                <StartOrCountdownButton
+                  examId={e.id}
+                  scheduledStart={e.scheduled_start}
+                  canStartNow
+                  continueMode={String(attempt?.status || "").toLowerCase() === "in_progress"}
+                  attemptEndsAt={attempt?.ends_at ?? null}
+                />''',
+          1,
+          )
+          p.write_text(t)
+          print("exam", len(t), "attemptEndsAt" in t)
+
+          # Settings help
+          p = Path("src/components/pages/SettingsPage.tsx")
+          t = p.read_text()
+          if "ArrowLeft" not in t:
+              t = t.replace(
+                  "Loader2, Upload, Building2, Info, LifeBuoy, Shield, ChevronRight, CreditCard",
+                  "Loader2, Upload, Building2, Info, LifeBuoy, Shield, ChevronRight, CreditCard, ArrowLeft",
+                  1,
+              )
+          if "helpDoc" not in t:
+              t = t.replace(
+                  '''  const [saving, setSaving] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({ ...DEFAULT_NOTIFICATION_PREFS });
+  const [displayPrefs, setDisplayPrefs] = useState<DisplayPrefs>({ ...DEFAULT_DISPLAY_PREFS });''',
+                  '''  const [saving, setSaving] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({ ...DEFAULT_NOTIFICATION_PREFS });
+  const [displayPrefs, setDisplayPrefs] = useState<DisplayPrefs>({ ...DEFAULT_DISPLAY_PREFS });
+  const [helpDoc, setHelpDoc] = useState<"about" | "support" | "privacy" | "pricing" | null>(null);''',
+                  1,
+              )
+          if 'Link to="/about"' in t and "setHelpDoc" in t:
+              # replace links section if still present
+              import re
+              pass
+          old = '''            <Link to="/about" className="flex items-center gap-3 rounded-lg px-2 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 active:scale-[0.99]">
+              <Info className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1">About Us</span>
+              <ChevronRight className="h-4 w-4 text-slate-300" aria-hidden />
+            </Link>'''
+          if old in t:
+              t = t.replace('Link to="/about"', 'button type="button" onClick={() => setHelpDoc("about")}', 1)
+              t = t.replace('Link to="/support"', 'button type="button" onClick={() => setHelpDoc("support")}', 1)
+              t = t.replace('Link to="/privacy"', 'button type="button" onClick={() => setHelpDoc("privacy")}', 1)
+              t = t.replace('Link to="/pricing"', 'button type="button" onClick={() => setHelpDoc("pricing")}', 1)
+              t = t.replace('</Link>', '</button>', 4)
+              # insert sheet before closing of grid - after last SectionCard of help
+              sheet = '''
+        {helpDoc ? (
+          <div className="fixed inset-0 z-[200] flex flex-col bg-white">
+            <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-3">
+              <Button type="button" variant="ghost" size="sm" className="gap-1.5 font-semibold" onClick={() => setHelpDoc(null)}>
+                <ArrowLeft className="h-4 w-4" /> Back
+              </Button>
+              <p className="text-sm font-bold text-slate-900">{helpDoc === "about" ? "About Us" : helpDoc === "support" ? "Support" : helpDoc === "privacy" ? "Privacy Policy" : "Pricing"}</p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-5 text-sm leading-relaxed text-slate-700">
+              {helpDoc === "about" && (<div className="space-y-3"><p className="text-base font-bold text-slate-900">D4EXAM</p><p>Smart. Secure. Seamless online examinations for schools worldwide.</p><p>Professional CBT platform with role-based portals and integrity monitoring.</p></div>)}
+              {helpDoc === "support" && (<div className="space-y-3"><p className="text-base font-bold text-slate-900">Support</p><p>Contact School Admin for enrolment. Contact Examination Officer for schedules and results.</p></div>)}
+              {helpDoc === "privacy" && (<div className="space-y-3"><p className="text-base font-bold text-slate-900">Privacy Policy</p><p>Account, exam, and integrity data are processed to deliver secure CBT for your school.</p></div>)}
+              {helpDoc === "pricing" && (<div className="space-y-3"><p className="text-base font-bold text-slate-900">Pricing</p><p>Licensed per school. Contact your administrator for plan details.</p></div>)}
+            </div>
+          </div>
+        ) : null}'''
+              marker = '        </SectionCard>\n      </div>\n    </>\n  );\n}\n\nfunction SchoolIdentityCard'
+              if marker in t and '{helpDoc ?' not in t:
+                  t = t.replace(marker, '        </SectionCard>' + sheet + '\n      </div>\n    </>\n  );\n}\n\nfunction SchoolIdentityCard', 1)
+              print("settings patched")
+          p.write_text(t)
+          print("settings", len(t), "helpDoc" in t)
+
+          # CBT - only if not placeholder
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          if len(t) < 1000 or t.strip() == "PLACEHOLDER":
+              print("cbt skip placeholder")
+          else:
+              t = t.replace(
+                  '.select("id, status, question_order, tab_switch_count, fullscreen_exit_count, answers")',
+                  '.select("id, status, question_order, tab_switch_count, fullscreen_exit_count, answers, ends_at, started_at")',
+                  1,
+              )
+              if 'endsAtRef.current = endsMs' not in t:
+                  needle = '''              setIndex(idx);
+            } catch {}
+          }
+        }'''
+                  ins = '''              setIndex(idx);
+            } catch {}
+          }
+          try {
+            const rawEnds = (existingFull as { ends_at?: string | null }).ends_at;
+            if (rawEnds) {
+              const endsMs = new Date(String(rawEnds)).getTime();
+              if (!Number.isNaN(endsMs) && endsMs > Date.now()) {
+                endsAtRef.current = endsMs;
+                setSeconds(Math.max(0, Math.ceil((endsMs - Date.now()) / 1000)));
+              }
+            }
+          } catch {}
+        }'''
+                  if needle in t:
+                      t = t.replace(needle, ins, 1)
+                      print("cbt ends restore")
+              if 'if (endsAtRef.current == null)' not in t:
+                  old_timer = '''      {
+        const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
+        const now = Date.now();
+        let ends = now + durationSec * 1000;
+        const schedEnd = examQ.data?.scheduled_end ? new Date(String(examQ.data.scheduled_end)).getTime() : NaN;
+        if (!Number.isNaN(schedEnd) && schedEnd > now) {
+          ends = Math.min(ends, schedEnd);
+        }
+        endsAtRef.current = ends;
+        setSeconds(Math.max(0, Math.ceil((ends - now) / 1000)));
+      }
+      setStarted(true);
+      setIndex(0);'''
+                  new_timer = '''      {
+        if (endsAtRef.current == null) {
+          const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
+          const now = Date.now();
+          let ends = now + durationSec * 1000;
+          const schedEnd = examQ.data?.scheduled_end ? new Date(String(examQ.data.scheduled_end)).getTime() : NaN;
+          if (!Number.isNaN(schedEnd) && schedEnd > now) {
+            ends = Math.min(ends, schedEnd);
+          }
+          endsAtRef.current = ends;
+          setSeconds(Math.max(0, Math.ceil((ends - now) / 1000)));
+          if (attemptIdRef.current) {
+            void supabase.from("exam_attempts").update({
+              ends_at: new Date(ends).toISOString(),
+              status: "in_progress",
+            } as never).eq("id", attemptIdRef.current);
+          }
+        } else {
+          setSeconds(Math.max(0, Math.ceil((endsAtRef.current - Date.now()) / 1000)));
+        }
+      }
+      setStarted(true);'''
+                  if old_timer in t:
+                      t = t.replace(old_timer, new_timer, 1)
+                      print("cbt timer")
+              if 'locked && !selected' not in t:
+                  t = t.replace(
+                      'if (q) setAnswers((a) => ({ ...a, [q.id]: oi }));',
+                      'if (!q || answers[q.id] != null) return; setAnswers((a) => ({ ...a, [q.id]: oi }));',
+                      1,
+                  )
+                  t = t.replace(
+                      'const selected = q ? answers[q.id] === oi : false;',
+                      'const selected = q ? answers[q.id] === oi : false; const locked = q ? answers[q.id] != null : false;',
+                      1,
+                  )
+                  t = t.replace(
+                      '<button type="button" onClick={() => {',
+                      '<button type="button" disabled={locked && !selected} onClick={() => {',
+                      1,
+                  )
+                  print("cbt lock")
+              p.write_text(t)
+              print("cbt", len(t))
+
+          Path("FORCE_DEPLOY.txt").write_text("continue-v3-restore-apply 2026-09-10\n")
+          print("done")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git status
+          git diff --cached --stat
+          git commit -m "fix: restore student.examinations; continue timer; Settings help; CBT ends_at lock" || exit 0
+          git push origin HEAD:main
