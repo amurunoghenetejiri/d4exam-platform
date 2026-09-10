@@ -616,6 +616,23 @@ export function CbtExamPage() {
   const q = questions[index];
   const answeredCount = Object.keys(answers).length;
 
+
+  // Persist answers + ends_at while in progress (resume safety)
+  useEffect(() => {
+    if (!started || done || previewMode || !attemptIdRef.current) return;
+    if (!Object.keys(answers).length) return;
+    const aid = attemptIdRef.current;
+    const tId = window.setTimeout(() => {
+      void supabase.from("exam_attempts").update({
+        answers,
+        ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
+        status: "in_progress",
+        updated_at: new Date().toISOString(),
+      } as never).eq("id", aid);
+    }, 1200);
+    return () => window.clearTimeout(tId);
+  }, [answers, started, done, previewMode]);
+
   const faceWarnCountRef = useRef(0);
   const onFaceSecurityEvent = useCallback((ev: FaceSecurityEvent) => {
     faceStatusForLiveRef.current = ev.kind === "ok" ? "ok" : ev.kind;
@@ -793,7 +810,7 @@ export function CbtExamPage() {
         // Load existing attempt for stable question set
         const { data: existingFull } = await supabase
           .from("exam_attempts")
-          .select("id, status, question_order, tab_switch_count, fullscreen_exit_count, answers")
+          .select("id, status, question_order, tab_switch_count, fullscreen_exit_count, answers, ends_at, started_at")
           .eq("exam_id", id)
           .eq("student_id", student.studentId)
           .maybeSingle();
@@ -821,7 +838,19 @@ export function CbtExamPage() {
             } catch {}
           }
         }
-        // Build paper now so we can lock order
+        
+        // Restore absolute end clock from attempt (do not reset timer on Continue)
+        try {
+          const ea = (existingFull as { ends_at?: string | null }).ends_at;
+          if (ea) {
+            const ends = new Date(String(ea)).getTime();
+            if (!Number.isNaN(ends) && ends > Date.now()) {
+              endsAtRef.current = ends;
+              setSeconds(Math.max(0, Math.ceil((ends - Date.now()) / 1000)));
+            }
+          }
+        } catch { /* ignore */ }
+// Build paper now so we can lock order
         const key = student.studentId;
         const paper = prepareStudentPaper((questionsQ.data ?? []) as never, {
           questionsToAnswer,
@@ -864,16 +893,28 @@ export function CbtExamPage() {
       {
         const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
         const now = Date.now();
-        let ends = now + durationSec * 1000;
-        const schedEnd = examQ.data?.scheduled_end ? new Date(String(examQ.data.scheduled_end)).getTime() : NaN;
-        if (!Number.isNaN(schedEnd) && schedEnd > now) {
-          ends = Math.min(ends, schedEnd);
+        if (endsAtRef.current != null && endsAtRef.current > now) {
+          setSeconds(Math.max(0, Math.ceil((endsAtRef.current - now) / 1000)));
+        } else {
+          let ends = now + durationSec * 1000;
+          const schedEnd = examQ.data?.scheduled_end ? new Date(String(examQ.data.scheduled_end)).getTime() : NaN;
+          if (!Number.isNaN(schedEnd) && schedEnd > now) {
+            ends = Math.min(ends, schedEnd);
+          }
+          endsAtRef.current = ends;
+          setSeconds(Math.max(0, Math.ceil((ends - now) / 1000)));
+          if (attemptIdRef.current) {
+            void supabase.from("exam_attempts").update({
+              ends_at: new Date(ends).toISOString(),
+              status: "in_progress",
+            } as never).eq("id", attemptIdRef.current);
+          }
         }
-        endsAtRef.current = ends;
-        setSeconds(Math.max(0, Math.ceil((ends - now) / 1000)));
       }
       setStarted(true);
-      setIndex(0);
+      if (!(orderedIdsRef.current && orderedIdsRef.current.length)) {
+        setIndex(0);
+      }
     } finally { setMediaBusy(false); }
   }
 
@@ -1041,11 +1082,14 @@ export function CbtExamPage() {
           <ul className="mt-6 space-y-3">
             {(q?.options ?? []).map((opt, oi) => {
               const selected = q ? answers[q.id] === oi : false;
+              const locked = q ? answers[q.id] != null : false;
               return (
                 <li key={oi}>
-                  <button type="button" onClick={() => {
-                    if (q) setAnswers((a) => ({ ...a, [q.id]: oi }));
-                  }}
+                  <button type="button" disabled={locked && !selected}
+                    onClick={() => {
+                      if (!q || answers[q.id] != null) return;
+                      setAnswers((a) => ({ ...a, [q.id]: oi }));
+                    }}
                     className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
                       selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
                     <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
