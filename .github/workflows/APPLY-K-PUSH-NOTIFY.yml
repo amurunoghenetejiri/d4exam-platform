@@ -1,0 +1,68 @@
+name: APPLY-K-PUSH-NOTIFY
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-K-PUSH-NOTIFY.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          python3 -c "
+          from pathlib import Path
+          p=Path('src/routes/officer.approvals.tsx')
+          t=p.read_text()
+          if 'student-dashboard-exams' in t:
+              print('already')
+          else:
+              needle='await qc.invalidateQueries({ queryKey: [\"officer-approvals\"] });\\n      await listQ.refetch();'
+              # find after Pushed toast
+              i=t.find('Pushed to students')
+              assert i>0
+              j=t.find('await qc.invalidateQueries({ queryKey: [\"officer-approvals\"] });', i)
+              assert j>0
+              k=t.find('await listQ.refetch();', j)
+              assert k>0
+              end=k+len('await listQ.refetch();')
+              insert='''if (mode === \"post\" && schoolId) {
+        try {
+          const payload = {
+            schoolId,
+            examId: item.id,
+            examTitle: item.title,
+            courseId: item.course_id,
+            courseCode: courseCode(item) !== \"—\" ? courseCode(item) : undefined,
+            courseTitle: courseName(item) !== \"Course\" ? courseName(item) : undefined,
+            start: item.scheduled_start || undefined,
+            end: item.scheduled_end || undefined,
+            scheduledStart: item.scheduled_start || undefined,
+            scheduledEnd: item.scheduled_end || undefined,
+          };
+          try {
+            await serverNotifyStudentsExamApproved({ data: payload });
+          } catch (se) {
+            try { await notifyStudentsExamApproved(payload); } catch (ce) { console.warn(ce); }
+          }
+        } catch (e) { console.warn(e); }
+      }
+      await qc.invalidateQueries({ queryKey: [\"officer-approvals\"] });
+      await qc.invalidateQueries({ queryKey: [\"student-exams\"] });
+      await qc.invalidateQueries({ queryKey: [\"student-dashboard-exams\"] });
+      await listQ.refetch();'''
+              t=t[:j]+insert+t[end:]
+              p.write_text(t)
+              print('injected', len(t))
+          "
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/officer.approvals.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: notify students when officer Push to students"
+          git push
