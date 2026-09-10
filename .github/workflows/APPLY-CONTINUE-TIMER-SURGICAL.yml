@@ -1,0 +1,267 @@
+name: APPLY-CONTINUE-TIMER-SURGICAL
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-CONTINUE-TIMER-SURGICAL.yml"
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 80
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore kit from last good commit and apply patches
+        run: |
+          set -e
+          # Restore full kit from commit before PLACEHOLDER
+          git show b6d2db7:src/components/dashboard/kit.tsx > src/components/dashboard/kit.tsx
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # kit badges
+          kit = Path("src/components/dashboard/kit.tsx")
+          t = kit.read_text()
+          old = '  terminated: "bg-red-50 text-red-700 border-red-200",\n  closed: "bg-slate-100 text-slate-600 border-slate-200",\n};'
+          new = '  terminated: "bg-red-50 text-red-700 border-red-200",\n  closed: "bg-slate-100 text-slate-600 border-slate-200",\n  released: "bg-emerald-50 text-emerald-700 border-emerald-200",\n  held: "bg-red-50 text-red-700 border-red-200",\n};'
+          if old in t:
+              t = t.replace(old, new, 1)
+              kit.write_text(t)
+              print("kit badges ok")
+          elif "released:" in t:
+              print("kit badges already")
+          else:
+              raise SystemExit("kit styles missing")
+
+          # student.index ends_at + timer
+          idx = Path("src/routes/student.index.tsx")
+          t = idx.read_text()
+          if t.strip() == "PLACEHOLDER":
+              raise SystemExit("student.index placeholder")
+          if '.select("exam_id, status, ends_at")' not in t:
+              t = t.replace('.select("exam_id, status")', '.select("exam_id, status, ends_at")', 1)
+          if "endsAtByExam" not in t:
+              old = """  const attemptsByExam = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of attemptsQ.data ?? []) m.set(a.exam_id, a.status);
+    return m;
+  }, [attemptsQ.data]);"""
+              new = """  const attemptsByExam = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of attemptsQ.data ?? []) m.set(a.exam_id, a.status);
+    return m;
+  }, [attemptsQ.data]);
+
+  const endsAtByExam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const a of attemptsQ.data ?? []) {
+      const row = a as { exam_id: string; ends_at?: string | null };
+      m.set(row.exam_id, row.ends_at ?? null);
+    }
+    return m;
+  }, [attemptsQ.data]);
+
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const hasLive = [...endsAtByExam.values()].some((ea) => ea);
+    if (!hasLive) return;
+    const tmr = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(tmr);
+  }, [endsAtByExam]);
+
+  function formatLeft(ms: number): string {
+    if (ms <= 0) return "00:00:00";
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  }"""
+              if old not in t:
+                  raise SystemExit("attemptsByExam missing")
+              t = t.replace(old, new, 1)
+          if "Continue ·" not in t:
+              old = """                      >
+                        Continue
+                      </Button>
+                    ) : canStart ? ("""
+              new = """                      >
+                        {(() => {
+                          const ea = endsAtByExam.get(e.id);
+                          if (!ea) return "Continue";
+                          const left = Math.max(0, new Date(ea).getTime() - nowTick);
+                          if (left <= 0) return "Continue";
+                          return `Continue · ${formatLeft(left)}`;
+                        })()}
+                      </Button>
+                    ) : canStart ? ("""
+              if old not in t:
+                  raise SystemExit("Continue btn missing")
+              t = t.replace(old, new, 1)
+          idx.write_text(t)
+          print("student.index ok", len(t))
+
+          # CBT option lock + instant submit + resume
+          cbt = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          ct = cbt.read_text()
+          if 'locked && selected && "cursor-not-allowed' not in ct:
+              old = """            {(q?.options ?? []).map((opt, oi) => {
+              const selected = q ? answers[q.id] === oi : false;
+              const locked = q ? answers[q.id] != null : false;
+              return (
+                <li key={oi}>
+                  <button type="button" disabled={locked && !selected}
+                    onClick={() => {
+                      if (!q || answers[q.id] != null) return;
+                      setAnswers((a) => ({ ...a, [q.id]: oi }));
+                    }}
+                    className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
+                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
+                    <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
+                      selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500")}>{String.fromCharCode(65 + oi)}</span>
+                    <span>{opt}</span>
+                  </button>
+                </li>
+              );
+            })}"""
+              new = """            {(q?.options ?? []).map((opt, oi) => {
+              const selected = q ? answers[q.id] === oi : false;
+              const locked = q ? answers[q.id] != null : false;
+              return (
+                <li key={oi}>
+                  <button type="button" disabled={locked}
+                    onClick={() => {
+                      if (!q || answers[q.id] != null) return;
+                      setAnswers((a) => ({ ...a, [q.id]: oi }));
+                    }}
+                    className={cn(
+                      "flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
+                      locked && selected && "cursor-not-allowed border-primary/60 bg-primary/10 ring-2 ring-primary/15 opacity-90",
+                      locked && !selected && "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-400 opacity-70",
+                      !locked && selected && "border-primary bg-primary/5 ring-2 ring-primary/20",
+                      !locked && !selected && "border-slate-200 hover:border-primary/40",
+                    )}>
+                    <span className={cn(
+                      "mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
+                      locked && selected && "border-primary bg-primary text-white",
+                      locked && !selected && "border-slate-200 bg-slate-200 text-slate-400",
+                      !locked && selected && "border-primary bg-primary text-white",
+                      !locked && !selected && "border-slate-300 text-slate-500",
+                    )}>{String.fromCharCode(65 + oi)}</span>
+                    <span className={cn(locked && !selected && "line-through decoration-slate-300")}>{opt}</span>
+                  </button>
+                </li>
+              );
+            })}"""
+              if old not in ct:
+                  raise SystemExit("options block missing")
+              ct = ct.replace(old, new, 1)
+              print("options lock")
+          old_f = """    doneRef.current = true;
+    setFsGate(false);
+    setPaused(false);
+    shutdownMedia();
+    void leaveExamFullscreen();
+    if (previewMode) {
+      toast.message("Preview ended — nothing was saved");
+      setDone(true);
+      finishingRef.current = false;
+      return;
+    }"""
+          new_f = """    doneRef.current = true;
+    setFsGate(false);
+    setPaused(false);
+    setDone(true); // immediate UI exit — no camera reconnect flash
+    shutdownMedia();
+    void leaveExamFullscreen();
+    if (previewMode) {
+      toast.message("Preview ended — nothing was saved");
+      finishingRef.current = false;
+      return;
+    }"""
+          if old_f in ct:
+              ct = ct.replace(old_f, new_f, 1)
+              print("instant done")
+          if "resumeIndexRef" not in ct:
+              ct = ct.replace("const finishingRef = useRef(false);", "const finishingRef = useRef(false);\n  const resumeIndexRef = useRef<number | null>(null);", 1)
+          old_r = """            try {
+              const ordered = orderedIdsRef.current || [];
+              let idx = 0;
+              for (let i = 0; i < ordered.length; i++) {
+                const qid = ordered[i];
+                if (prev[qid] === undefined || prev[qid] === null) { idx = i; break; }
+                if (i === ordered.length - 1) idx = i;
+              }
+              setIndex(idx);
+            } catch {}"""
+          new_r = """            try {
+              const ordered = orderedIdsRef.current || [];
+              let idx = 0;
+              for (let i = 0; i < ordered.length; i++) {
+                const qid = ordered[i];
+                if (prev[qid] === undefined || prev[qid] === null) { idx = i; break; }
+                if (i === ordered.length - 1) idx = i;
+              }
+              resumeIndexRef.current = idx;
+              setIndex(idx);
+            } catch {}"""
+          if old_r in ct:
+              ct = ct.replace(old_r, new_r, 1)
+          if "Resume at first unanswered once paper order is known" not in ct:
+              effect = """
+  // Resume at first unanswered once paper order is known
+  useEffect(() => {
+    if (!started || done || previewMode) return;
+    const ordered = orderedIdsRef.current;
+    if (!ordered || !ordered.length) return;
+    const ans = answers;
+    let idx = 0;
+    for (let i = 0; i < ordered.length; i++) {
+      const qid = ordered[i];
+      if (ans[qid] === undefined || ans[qid] === null) { idx = i; break; }
+      if (i === ordered.length - 1) idx = i;
+    }
+    if (resumeIndexRef.current != null || Object.keys(ans).length > 0) {
+      setIndex(idx);
+      resumeIndexRef.current = null;
+    }
+  }, [started, done, previewMode, questions.length]);
+"""
+              anchor = "  }, [started, done, previewMode, student?.studentId, id, liveAttemptId]);"
+              if anchor in ct:
+                  ct = ct.replace(anchor, anchor + "\n" + effect, 1)
+          cbt.write_text(ct)
+          print("cbt ok", len(ct))
+
+          pip = Path("src/components/cbt/ExamCameraPip.tsx")
+          pt = pip.read_text()
+          if "if (!enabled) return;" not in pt:
+              pt = pt.replace("const tryReconnect = () => {", "const tryReconnect = () => {\n      if (!enabled) return;", 1)
+          m = re.search(r"const \[camConn, setCamConn\] = useState[^\n]+", pt)
+          if m and "if (!enabled)" not in pt[m.end():m.end()+120]:
+              insert = """
+  useEffect(() => {
+    if (!enabled) {
+      setCamConn("unavailable");
+    }
+  }, [enabled]);
+"""
+              pt = pt[:m.end()] + "\n" + insert + pt[m.end():]
+          pip.write_text(pt)
+          print("pip ok")
+          print("ALL OK")
+          PY
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/dashboard/kit.tsx src/routes/student.index.tsx src/components/cbt/CbtExamSession.impl.tsx src/components/cbt/ExamCameraPip.tsx
+          git status
+          git diff --staged --stat
+          git diff --staged --quiet || git commit -m "fix: Continue remaining time, lock answered options, instant submit, Released/Held colors"
+          git push
