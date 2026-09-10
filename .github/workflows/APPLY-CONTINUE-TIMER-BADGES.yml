@@ -1,0 +1,26 @@
+name: APPLY-CONTINUE-TIMER-BADGES
+on:
+  push:
+    paths:
+      - "scripts/continue_timer_patch/**"
+      - "scripts/apply_continue_timer_patch.py"
+      - ".github/workflows/APPLY-CONTINUE-TIMER-BADGES.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply continue timer + badge + lock patches
+        run: python3 scripts/apply_continue_timer_patch.py
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/components/dashboard/kit.tsx src/routes/student.index.tsx src/components/cbt/CbtExamSession.impl.tsx src/components/cbt/ExamCameraPip.tsx
+          git diff --staged --quiet || git commit -m "fix: Continue remaining time, lock answered options, instant submit, Released/Held colors"
+          git push || true
