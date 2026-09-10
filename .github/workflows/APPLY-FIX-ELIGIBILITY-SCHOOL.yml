@@ -1,0 +1,80 @@
+name: APPLY-FIX-ELIGIBILITY-SCHOOL
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-FIX-ELIGIBILITY-SCHOOL.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: School-wide eligibility + cold-start redirect
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/lib/student.ts")
+          t = p.read_text()
+          start = t.find("export function isStudentEligibleForExam")
+          end = t.find("export function filterExamsForStudent")
+          if start < 0 or end < 0:
+              raise SystemExit("anchors missing")
+          new_fn = '''export function isStudentEligibleForExam(
+  student: Pick<StudentContext, "schoolId" | "departmentId" | "levelId" | "courseIds"> | null | undefined,
+  exam: {
+    school_id?: string | null;
+    course_id?: string | null;
+    courses?: ExamCourseRef;
+  } | null | undefined,
+): boolean {
+  if (!student || !exam) return false;
+  // Hard boundary: school only. Officer gates visibility via status=published/ongoing.
+  if (exam.school_id && student.schoolId && String(exam.school_id) !== String(student.schoolId)) {
+    return false;
+  }
+  if (student.schoolId && exam.school_id && String(student.schoolId) === String(exam.school_id)) {
+    return true;
+  }
+  if (student.schoolId && !exam.school_id) return true;
+  return false;
+}
+
+'''
+          t = t[:start] + new_fn + t[end:]
+          p.write_text(t)
+          print("eligibility", len(t))
+
+          ip = Path("src/routes/index.tsx")
+          it = ip.read_text()
+          if "isRedirect" not in it:
+              old = '''    } catch (e) {
+      if (e && typeof e === "object" && "to" in e) throw e;
+    }'''
+              new = '''    } catch (e) {
+      if (e && typeof e === "object") {
+        const any = e as { to?: unknown; href?: unknown; options?: { to?: unknown }; isRedirect?: boolean };
+        if (any.isRedirect || any.to != null || any.href != null || any.options?.to != null) throw e;
+      }
+      if (e) throw e;
+    }'''
+              if old in it:
+                  it = it.replace(old, new)
+                  ip.write_text(it)
+                  print("index catch ok")
+              else:
+                  print("index catch skip")
+          else:
+              print("index already")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/lib/student.ts src/routes/index.tsx
+          git diff --cached --quiet && echo no-changes && exit 0
+          git commit -m "fix: school-wide student exam list after Push to students; cold-start redirect"
+          git push

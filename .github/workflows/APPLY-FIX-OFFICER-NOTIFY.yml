@@ -1,0 +1,84 @@
+name: APPLY-FIX-OFFICER-NOTIFY
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-FIX-OFFICER-NOTIFY.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Inject notify on Push to students
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/routes/officer.approvals.tsx")
+          t = p.read_text()
+          if 'mode === "post" && schoolId' in t and 'student-exams' in t:
+              print("already has post notify")
+          elif 'Pushed to students — exam is now live on student examinations' in t:
+              old = '''      toast.success(
+        mode === "post"
+          ? "Pushed to students — exam is now live on student examinations"
+          : "Exam released — hidden from students until you post again",
+      );
+      await qc.invalidateQueries({ queryKey: ["officer-approvals"] });
+      await listQ.refetch();'''
+              new = '''      toast.success(
+        mode === "post"
+          ? "Pushed to students — exam is now live on student examinations"
+          : "Exam released — hidden from students until you post again",
+      );
+      if (mode === "post" && schoolId) {
+        try {
+          const payload = {
+            schoolId,
+            examId: item.id,
+            examTitle: item.title,
+            courseId: item.course_id,
+            courseCode: courseCode(item) !== "—" ? courseCode(item) : undefined,
+            courseTitle: courseName(item) !== "Course" ? courseName(item) : undefined,
+            start: item.scheduled_start || undefined,
+            end: item.scheduled_end || undefined,
+            scheduledStart: item.scheduled_start || undefined,
+            scheduledEnd: item.scheduled_end || undefined,
+          };
+          try {
+            await serverNotifyStudentsExamApproved({ data: payload });
+          } catch (se) {
+            console.warn("[officer.approvals] server push notify failed", se);
+            try {
+              await notifyStudentsExamApproved(payload);
+            } catch (ce) {
+              console.warn("[officer.approvals] client push notify failed", ce);
+            }
+          }
+        } catch (e) {
+          console.warn("[officer.approvals] notify on push failed", e);
+        }
+      }
+      await qc.invalidateQueries({ queryKey: ["officer-approvals"] });
+      await qc.invalidateQueries({ queryKey: ["student-exams"] });
+      await qc.invalidateQueries({ queryKey: ["student-dashboard-exams"] });
+      await listQ.refetch();'''
+              if old not in t:
+                  raise SystemExit("toast block not found for notify inject")
+              t = t.replace(old, new)
+              p.write_text(t)
+              print("injected post notify")
+          else:
+              raise SystemExit("push toast string missing")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/routes/officer.approvals.tsx
+          git diff --cached --quiet && echo no-changes && exit 0
+          git commit -m "fix: notify all students when officer Push to students"
+          git push
