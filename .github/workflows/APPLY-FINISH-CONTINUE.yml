@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "scripts/patch_wave_haptic_continue.py"
+      - "scripts/wave_parts/**"
       - ".github/workflows/APPLY-FINISH-CONTINUE.yml"
 permissions:
   contents: write
@@ -15,9 +15,12 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Apply wave loader, hard haptics, Continue countdown, grey answers
-        run: python3 scripts/patch_wave_haptic_continue.py
-      - name: Commit and push
+      - name: Assemble and run
+        run: |
+          set -e
+          python3 -c "import base64,pathlib; ps=sorted(pathlib.Path('scripts/wave_parts').glob('p*.b64')); pathlib.Path('scripts/patch_wave_haptic_continue.py').write_bytes(base64.b64decode(''.join(p.read_text().strip() for p in ps))); print('assembled', pathlib.Path('scripts/patch_wave_haptic_continue.py').stat().st_size)"
+          python3 scripts/patch_wave_haptic_continue.py
+      - name: Commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
