@@ -14,70 +14,158 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Restore kit and patch
+      - name: Restore kit and patch sources
         run: |
           set -eux
-          git show b6d2db709d92b9eb5a15c72737b9e81ec3b0e521:src/components/dashboard/kit.tsx > src/components/dashboard/kit.tsx
-          python3 -c "
-from pathlib import Path
-p=Path('src/components/dashboard/kit.tsx')
-t=p.read_text()
-old='  terminated: \"bg-red-50 text-red-700 border-red-200\",\n  closed: \"bg-slate-100 text-slate-600 border-slate-200\",\n};'
-new='  terminated: \"bg-red-50 text-red-700 border-red-200\",\n  closed: \"bg-slate-100 text-slate-600 border-slate-200\",\n  released: \"bg-emerald-50 text-emerald-700 border-emerald-200\",\n  held: \"bg-red-50 text-red-700 border-red-200\",\n};'
-assert old in t, 'styles missing'
-p.write_text(t.replace(old,new,1))
-print('kit ok', p.stat().st_size)
-"
-          python3 -c "
-from pathlib import Path
-p=Path('src/routes/student.index.tsx')
-t=p.read_text()
-if '.select(\"exam_id, status, ends_at\")' not in t:
-    t=t.replace('.select(\"exam_id, status\")','.select(\"exam_id, status, ends_at\")',1)
-if 'endsAtByExam' not in t:
-    a='  }, [attemptsQ.data]);\n\n  const finishedByResult'
-    b='''  }, [attemptsQ.data]);\n\n  const endsAtByExam = useMemo(() => {\n    const m = new Map<string, string | null>();\n    for (const a of attemptsQ.data ?? []) {\n      const row = a as { exam_id: string; ends_at?: string | null };\n      m.set(row.exam_id, row.ends_at ?? null);\n    }\n    return m;\n  }, [attemptsQ.data]);\n\n  const [nowTick, setNowTick] = useState(() => Date.now());\n  useEffect(() => {\n    const hasLive = [...endsAtByExam.values()].some((ea) => ea);\n    if (!hasLive) return;\n    const tmr = setInterval(() => setNowTick(Date.now()), 1000);\n    return () => clearInterval(tmr);\n  }, [endsAtByExam]);\n\n  function formatLeft(ms: number): string {\n    if (ms <= 0) return \"00:00:00\";\n    const totalSec = Math.floor(ms / 1000);\n    const h = Math.floor(totalSec / 3600);\n    const m = Math.floor((totalSec % 3600) / 60);\n    const s = totalSec % 60;\n    const pad = (n: number) => String(n).padStart(2, \"0\");\n    return \`\${pad(h)}:\${pad(m)}:\${pad(s)}\`;\n  }\n\n  const finishedByResult'''
-    assert a in t
-    t=t.replace(a,b,1)
-if 'Continue ·' not in t:
-    a='                        Continue\n                      </Button>\n                    ) : canStart ? ('
-    b='''                        {(() => {\n                          const ea = endsAtByExam.get(e.id);\n                          if (!ea) return \"Continue\";\n                          const left = Math.max(0, new Date(ea).getTime() - nowTick);\n                          if (left <= 0) return \"Continue\";\n                          return \`Continue · \${formatLeft(left)}\`;\n                        })()}\n                      </Button>\n                    ) : canStart ? ('''
-    assert a in t
-    t=t.replace(a,b,1)
-p.write_text(t)
-print('index', len(t))
-"
-          python3 -c "
-from pathlib import Path
-p=Path('src/components/cbt/CbtExamSession.impl.tsx')
-ct=p.read_text()
-if 'disabled={locked && !selected}' in ct:
-    ct=ct.replace('disabled={locked && !selected}','disabled={locked}',1)
-    ct=ct.replace('selected ? \"border-primary bg-primary/5 ring-2 ring-primary/20\" : \"border-slate-200 hover:border-primary/40\"','locked ? (selected ? \"cursor-not-allowed border-primary/60 bg-primary/10 opacity-90\" : \"cursor-not-allowed border-slate-100 bg-slate-100 text-slate-400 opacity-70\") : (selected ? \"border-primary bg-primary/5 ring-2 ring-primary/20\" : \"border-slate-200 hover:border-primary/40\")',1)
-    print('lock')
-if 'immediate UI exit' not in ct:
-    old='    doneRef.current = true;\n    setFsGate(false);\n    setPaused(false);\n    shutdownMedia();\n    void leaveExamFullscreen();\n    if (previewMode) {\n      toast.message(\"Preview ended — nothing was saved\");\n      setDone(true);\n      finishingRef.current = false;\n      return;\n    }'
-    new='    doneRef.current = true;\n    setFsGate(false);\n    setPaused(false);\n    setDone(true); // immediate UI exit — no camera reconnect flash\n    shutdownMedia();\n    void leaveExamFullscreen();\n    if (previewMode) {\n      toast.message(\"Preview ended — nothing was saved\");\n      finishingRef.current = false;\n      return;\n    }'
-    if old in ct:
-        ct=ct.replace(old,new,1); print('instant')
-if 'resumeIndexRef' not in ct:
-    ct=ct.replace('const finishingRef = useRef(false);','const finishingRef = useRef(false);\n  const resumeIndexRef = useRef<number | null>(null);',1)
-if 'resumeIndexRef.current = idx;' not in ct:
-    ct=ct.replace('              setIndex(idx);\n            } catch {}','              resumeIndexRef.current = idx;\n              setIndex(idx);\n            } catch {}',1)
-p.write_text(ct); print('cbt', len(ct))
-"
-          python3 -c "
-from pathlib import Path
-import re
-p=Path('src/components/cbt/ExamCameraPip.tsx')
-pt=p.read_text()
-if 'if (!enabled) return;' not in pt:
-    pt=pt.replace('const tryReconnect = () => {','const tryReconnect = () => {\n      if (!enabled) return;',1)
-m=re.search(r'const \[camConn, setCamConn\] = useState[^\n]+', pt)
-if m and 'if (!enabled)' not in pt[m.end():m.end()+120]:
-    pt=pt[:m.end()]+'\n  useEffect(() => {\n    if (!enabled) {\n      setCamConn(\"unavailable\");\n    }\n  }, [enabled]);\n'+pt[m.end():]
-p.write_text(pt); print('pip ok')
-"
+          git show 004f669:src/components/dashboard/kit.tsx > src/components/dashboard/kit.tsx
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          # kit badges
+          p = Path("src/components/dashboard/kit.tsx")
+          t = p.read_text()
+          old = '  terminated: "bg-red-50 text-red-700 border-red-200",\n  closed: "bg-slate-100 text-slate-600 border-slate-200",\n};'
+          new = '  terminated: "bg-red-50 text-red-700 border-red-200",\n  closed: "bg-slate-100 text-slate-600 border-slate-200",\n  released: "bg-emerald-50 text-emerald-700 border-emerald-200",\n  held: "bg-red-50 text-red-700 border-red-200",\n};'
+          if old not in t:
+              raise SystemExit("kit styles missing")
+          p.write_text(t.replace(old, new, 1))
+          print("kit", p.stat().st_size)
+
+          # student.index continue timer
+          p = Path("src/routes/student.index.tsx")
+          t = p.read_text()
+          if '.select("exam_id, status, ends_at")' not in t:
+              t = t.replace('.select("exam_id, status")', '.select("exam_id, status, ends_at")', 1)
+          if "endsAtByExam" not in t:
+              a = "  }, [attemptsQ.data]);\n\n  const finishedByResult"
+              b = """  }, [attemptsQ.data]);
+
+  const endsAtByExam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const a of attemptsQ.data ?? []) {
+      const row = a as { exam_id: string; ends_at?: string | null };
+      m.set(row.exam_id, row.ends_at ?? null);
+    }
+    return m;
+  }, [attemptsQ.data]);
+
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const hasLive = [...endsAtByExam.values()].some((ea) => ea);
+    if (!hasLive) return;
+    const tmr = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(tmr);
+  }, [endsAtByExam]);
+
+  function formatLeft(ms: number): string {
+    if (ms <= 0) return "00:00:00";
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return f"{pad(h)}:{pad(m)}:{pad(s)}".replace("f", "")  # placeholder fixed below
+  }
+
+  const finishedByResult"""
+              # fix formatLeft return to use template correctly
+              b = b.replace(
+                  'return f"{pad(h)}:{pad(m)}:{pad(s)}".replace("f", "")  # placeholder fixed below',
+                  'return `${pad(h)}:${pad(m)}:${pad(s)}`;',
+              )
+              if a not in t:
+                  raise SystemExit("index insert missing")
+              t = t.replace(a, b, 1)
+          if "Continue ·" not in t:
+              a = "                        Continue\n                      </Button>\n                    ) : canStart ? ("
+              b = """                        {(() => {
+                          const ea = endsAtByExam.get(e.id);
+                          if (!ea) return "Continue";
+                          const left = Math.max(0, new Date(ea).getTime() - nowTick);
+                          if (left <= 0) return "Continue";
+                          return `Continue · ${formatLeft(left)}`;
+                        })()}
+                      </Button>
+                    ) : canStart ? ("""
+              if a not in t:
+                  raise SystemExit("Continue label missing")
+              t = t.replace(a, b, 1)
+          p.write_text(t)
+          print("index", len(t))
+
+          # CBT
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          ct = p.read_text()
+          if "disabled={locked && !selected}" in ct:
+              ct = ct.replace("disabled={locked && !selected}", "disabled={locked}", 1)
+              ct = ct.replace(
+                  'selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40"',
+                  'locked ? (selected ? "cursor-not-allowed border-primary/60 bg-primary/10 opacity-90" : "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-400 opacity-70") : (selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")',
+                  1,
+              )
+              print("lock")
+          if "immediate UI exit" not in ct:
+              old = """    doneRef.current = true;
+    setFsGate(false);
+    setPaused(false);
+    shutdownMedia();
+    void leaveExamFullscreen();
+    if (previewMode) {
+      toast.message("Preview ended — nothing was saved");
+      setDone(true);
+      finishingRef.current = false;
+      return;
+    }"""
+              new = """    doneRef.current = true;
+    setFsGate(false);
+    setPaused(false);
+    setDone(true); // immediate UI exit — no camera reconnect flash
+    shutdownMedia();
+    void leaveExamFullscreen();
+    if (previewMode) {
+      toast.message("Preview ended — nothing was saved");
+      finishingRef.current = false;
+      return;
+    }"""
+              if old in ct:
+                  ct = ct.replace(old, new, 1)
+                  print("instant")
+          if "resumeIndexRef" not in ct:
+              ct = ct.replace(
+                  "const finishingRef = useRef(false);",
+                  "const finishingRef = useRef(false);\n  const resumeIndexRef = useRef<number | null>(null);",
+                  1,
+              )
+          if "resumeIndexRef.current = idx;" not in ct:
+              ct = ct.replace(
+                  "              setIndex(idx);\n            } catch {}",
+                  "              resumeIndexRef.current = idx;\n              setIndex(idx);\n            } catch {}",
+                  1,
+              )
+          p.write_text(ct)
+          print("cbt", len(ct))
+
+          # camera pip
+          p = Path("src/components/cbt/ExamCameraPip.tsx")
+          pt = p.read_text()
+          if "if (!enabled) return;" not in pt:
+              pt = pt.replace(
+                  "const tryReconnect = () => {",
+                  "const tryReconnect = () => {\n      if (!enabled) return;",
+                  1,
+              )
+          m = re.search(r"const \[camConn, setCamConn\] = useState[^\n]+", pt)
+          if m and "if (!enabled)" not in pt[m.end() : m.end() + 120]:
+              pt = (
+                  pt[: m.end()]
+                  + "\n  useEffect(() => {\n    if (!enabled) {\n      setCamConn(\"unavailable\");\n    }\n  }, [enabled]);\n"
+                  + pt[m.end() :]
+              )
+          p.write_text(pt)
+          print("pip ok")
+          print("ALL OK")
+          PY
       - name: Commit
         run: |
           git config user.name "github-actions[bot]"
