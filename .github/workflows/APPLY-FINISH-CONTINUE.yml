@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - "scripts/finish_parts/**"
-      - "scripts/apply_finish_continue_fixes.py"
       - ".github/workflows/APPLY-FINISH-CONTINUE.yml"
 permissions:
   contents: write
@@ -16,18 +15,10 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Assemble and run patch script
+      - name: Assemble script and apply
         run: |
           set -e
-          python3 - <<'PY'
-          import base64, pathlib
-          parts = sorted(pathlib.Path("scripts/finish_parts").glob("p*.b64"))
-          if not parts:
-              raise SystemExit("no parts")
-          data = base64.b64decode("".join(p.read_text().strip() for p in parts))
-          pathlib.Path("scripts/apply_finish_continue_fixes.py").write_bytes(data)
-          print("assembled", len(data))
-          PY
+          python3 -c "import base64,pathlib; ps=sorted(pathlib.Path('scripts/finish_parts').glob('p*.b64')); pathlib.Path('scripts/apply_finish_continue_fixes.py').write_bytes(base64.b64decode(''.join(p.read_text().strip() for p in ps))); print('ok', pathlib.Path('scripts/apply_finish_continue_fixes.py').stat().st_size)"
           python3 scripts/apply_finish_continue_fixes.py
       - name: Commit
         run: |
@@ -36,9 +27,7 @@ jobs:
           git add src/components/dashboard/kit.tsx src/routes/student.index.tsx src/components/cbt/CbtExamSession.impl.tsx src/components/cbt/ExamCameraPip.tsx
           git status
           git diff --staged --stat || true
-          if git diff --staged --quiet; then
-            echo "No changes"
-          else
+          if git diff --staged --quiet; then echo "No changes"; else
             git commit -m "fix: Continue remaining time, Released/Held colors, lock answers, instant submit, resume unanswered"
             git push
           fi
