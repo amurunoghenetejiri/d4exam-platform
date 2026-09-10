@@ -127,6 +127,7 @@ export function CbtExamPage() {
   const screenStreamRef = useRef<MediaStream | null>(null);
   const [liveAttemptId, setLiveAttemptId] = useState<string | null>(null);
   const finishingRef = useRef(false);
+  const resumeIndexRef = useRef<number | null>(null);
   const startedRef = useRef(false);
   const doneRef = useRef(false);
   const pausedRef = useRef(false);
@@ -847,6 +848,7 @@ export function CbtExamPage() {
                 if (prev[qid] === undefined || prev[qid] === null) { idx = i; break; }
                 if (i === ordered.length - 1) idx = i;
               }
+              resumeIndexRef.current = idx;
               setIndex(idx);
             } catch {}
           }

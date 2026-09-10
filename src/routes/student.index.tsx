@@ -241,6 +241,33 @@ function Page() {
     return m;
   }, [attemptsQ.data]);
 
+  const endsAtByExam = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const a of attemptsQ.data ?? []) {
+      const row = a as { exam_id: string; ends_at?: string | null };
+      m.set(row.exam_id, row.ends_at ?? null);
+    }
+    return m;
+  }, [attemptsQ.data]);
+
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const hasLive = [...endsAtByExam.values()].some((ea) => ea);
+    if (!hasLive) return;
+    const tmr = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(tmr);
+  }, [endsAtByExam]);
+
+  function formatLeft(ms: number): string {
+    if (ms <= 0) return "00:00:00";
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  }
+
   const finishedByResult = useMemo(() => {
     const s = new Set<string>();
     for (const r of resultsQ.data ?? []) s.add(r.exam_id);
@@ -433,7 +460,13 @@ function Page() {
                           });
                         }}
                       >
-                        Continue
+                        {(() => {
+                          const ea = endsAtByExam.get(e.id);
+                          if (!ea) return "Continue";
+                          const left = Math.max(0, new Date(ea).getTime() - nowTick);
+                          if (left <= 0) return "Continue";
+                          return `Continue · ${formatLeft(left)}`;
+                        })()}
                       </Button>
                     ) : canStart ? (
                       <Button
