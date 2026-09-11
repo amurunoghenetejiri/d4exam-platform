@@ -101,6 +101,21 @@ export function CbtExamPage() {
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const answersRef = useRef<Record<string, number>>({});
   answersRef.current = answers;
+  const flushAttemptProgress = useCallback(async () => {
+    const aid = attemptIdRef.current;
+    if (!aid) return;
+    try {
+      await supabase.from("exam_attempts").update({
+        answers: answersRef.current,
+        ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
+        tab_switch_count: tabSwitchCountRef.current,
+        status: "in_progress",
+        updated_at: new Date().toISOString(),
+      } as never).eq("id", aid);
+    } catch (e) {
+      console.warn("[cbt] flushAttemptProgress", e);
+    }
+  }, []);
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
   const [seconds, setSeconds] = useState<number | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
@@ -133,6 +148,8 @@ export function CbtExamPage() {
   const resumeIndexRef = useRef<number | null>(null);
   /** Lock answers only after leave+continue (not while continuously writing). */
   const [lockedAnswerIds, setLockedAnswerIds] = useState<Set<string>>(() => new Set());
+  /** True after student left exam (tab/app) — on return, lock already-answered questions. */
+  const leftExamSessionRef = useRef(false);
   const startedRef = useRef(false);
   const doneRef = useRef(false);
   const pausedRef = useRef(false);
@@ -493,19 +510,19 @@ export function CbtExamPage() {
 
   // Integrity: fullscreen exit + app background / tab switch
   useEffect(() => {
-    if (!started || done || previewMode || paused) return;
+    if (!started || done || previewMode) return;
     const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
     const studentId = student?.studentId;
     if (!schoolId || !studentId || !id) return;
 
-    const DEBOUNCE_MS = 2500;
+    const DEBOUNCE_MS = 1200;
 
     const applyConsequence = async (eventType: string, description: string) => {
       const now = Date.now();
       if (now - lastViolationAtRef.current < DEBOUNCE_MS) return;
       lastViolationAtRef.current = now;
 
-      const action = security.thresholdAction || "flag";
+      const action = String(security.thresholdAction || "flag").toLowerCase();
       void logSecurityEvent({
         schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
         eventType, severity: action === "terminate" ? "high" : "medium",
@@ -517,16 +534,100 @@ export function CbtExamPage() {
         },
       });
 
+      try { haptic("tab_switch"); } catch { /* ignore */ }
+
       if (action === "warn" || action === "flag") {
         setWarnBanner(description);
-        try { haptic("tab_switch"); } catch { /* ignore */ }
         window.setTimeout(() => setWarnBanner(null), 6000);
       } else if (action === "pause") {
         beginTimedPause(description);
-      } else if (action === "terminate") {
-        setDoneTerminated(true);
+      } else if (action === "terminate" || action === "auto_submit" || action === "submit") {
+        setDoneTerminated(action === "terminate");
         await finishAttempt(true);
       }
+    };
+
+    const recordTabLeave = () => {
+      if (finishingRef.current || doneRef.current) return;
+      if (!security.tabMonitoring) {
+        leftExamSessionRef.current = true;
+        void flushAttemptProgress();
+        return;
+      }
+      if (pausedRef.current) {
+        leftExamSessionRef.current = true;
+        void flushAttemptProgress();
+        return;
+      }
+      const now = Date.now();
+      if (now - lastTabHiddenAtRef.current < 600) return;
+      lastTabHiddenAtRef.current = now;
+      leftExamSessionRef.current = true;
+      tabSwitchCountRef.current += 1;
+      setTabSwitchCount(tabSwitchCountRef.current);
+      void flushAttemptProgress();
+      if (attemptIdRef.current) {
+        void (async () => {
+          try {
+            const aid = attemptIdRef.current!;
+            const { data: prevRow } = await supabase.from("exam_attempts").select("metadata").eq("id", aid).maybeSingle();
+            const prevMeta = prevRow?.metadata && typeof prevRow.metadata === "object" && !Array.isArray(prevRow.metadata)
+              ? (prevRow.metadata as Record<string, unknown>)
+              : {};
+            await supabase.from("exam_attempts").update({
+              tab_switch_count: tabSwitchCountRef.current,
+              answers: answersRef.current,
+              ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
+              metadata: {
+                ...prevMeta,
+                tabSwitchCount: tabSwitchCountRef.current,
+                lastSeenAt: new Date().toISOString(),
+                lastTabLeaveAt: new Date().toISOString(),
+              },
+              updated_at: new Date().toISOString(),
+            } as never).eq("id", aid);
+          } catch (e) {
+            console.warn("[cbt] tab_switch persist", e);
+          }
+        })();
+      }
+      const max = Math.max(1, Number(security.maxTabSwitches) || 5);
+      if (tabSwitchCountRef.current >= max) {
+        void applyConsequence(
+          "TAB_SWITCH",
+          `Left the exam window (switch ${tabSwitchCountRef.current}/${max}). Threshold reached.`,
+        );
+      } else {
+        void logSecurityEvent({
+          schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+          eventType: "TAB_SWITCH", severity: "low",
+          description: `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`,
+          questionIndex: index,
+        });
+        setWarnBanner(`Stay on the exam screen. Switches: ${tabSwitchCountRef.current}/${max}`);
+        try { haptic("tab_switch"); } catch { /* ignore */ }
+        window.setTimeout(() => setWarnBanner(null), 4000);
+      }
+    };
+
+    const onReturnToExam = () => {
+      if (leftExamSessionRef.current) {
+        const ids = new Set(
+          Object.keys(answersRef.current).filter(
+            (k) => answersRef.current[k] !== undefined && answersRef.current[k] !== null,
+          ),
+        );
+        if (ids.size) {
+          setLockedAnswerIds((prev) => {
+            const next = new Set(prev);
+            ids.forEach((id) => next.add(id));
+            return next;
+          });
+        }
+        leftExamSessionRef.current = false;
+      }
+      void flushAttemptProgress();
+      void reconnectCamera();
     };
 
     const onFsChange = () => {
@@ -536,8 +637,6 @@ export function CbtExamPage() {
         setFsGate(false);
         return;
       }
-      // On native we rely on StatusBar immersive; document fullscreen may be unavailable.
-      // Still record exit when browser fullscreen was previously active.
       fullscreenExitCountRef.current += 1;
       setFsGate(true);
       void applyConsequence("FULLSCREEN_EXIT", "Fullscreen was exited during the examination.");
@@ -549,65 +648,35 @@ export function CbtExamPage() {
     };
 
     const onVis = () => {
-      if (!security.tabMonitoring) return;
-      if (document.visibilityState === "visible") {
-        void reconnectCamera();
-        return;
+      if (document.visibilityState === "hidden") {
+        recordTabLeave();
+      } else if (document.visibilityState === "visible") {
+        onReturnToExam();
       }
-      if (document.visibilityState !== "hidden") return;
-      const now = Date.now();
-      if (now - lastTabHiddenAtRef.current < 800) return;
-      lastTabHiddenAtRef.current = now;
-      tabSwitchCountRef.current += 1;
-      setTabSwitchCount(tabSwitchCountRef.current);
-      if (attemptIdRef.current) {
-        void (async () => {
-          try {
-            const aid = attemptIdRef.current!;
-            const { data: prevRow } = await supabase.from("exam_attempts").select("metadata").eq("id", aid).maybeSingle();
-            const prevMeta = prevRow?.metadata && typeof prevRow.metadata === "object" && !Array.isArray(prevRow.metadata)
-              ? (prevRow.metadata as Record<string, unknown>)
-              : {};
-            await supabase.from("exam_attempts").update({
-              tab_switch_count: tabSwitchCountRef.current,
-              metadata: {
-                ...prevMeta,
-                tabSwitchCount: tabSwitchCountRef.current,
-                lastSeenAt: new Date().toISOString(),
-                studentName: String((student as { fullName?: string } | null)?.fullName || session?.fullName || prevMeta.studentName || "").trim() || prevMeta.studentName,
-                matricNumber: String((student as { matric?: string | null } | null)?.matric || session?.identifier || prevMeta.matricNumber || "").trim() || prevMeta.matricNumber,
-              },
-              updated_at: new Date().toISOString(),
-            } as never).eq("id", aid);
-          } catch (e) {
-            console.warn("[cbt] tab_switch persist", e);
-          }
-        })();
-      }
-      const max = security.maxTabSwitches ?? 5;
-      if (tabSwitchCountRef.current >= max) {
-        void applyConsequence("TAB_SWITCH", `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`);
-      } else {
-        void logSecurityEvent({
-          schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
-          eventType: "TAB_SWITCH", severity: "low",
-          description: `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`,
-          questionIndex: index,
-        });
-        setWarnBanner(`Stay on the exam screen. Switches: ${tabSwitchCountRef.current}/${max}`);
-        window.setTimeout(() => setWarnBanner(null), 4000);
-      }
+    };
+
+    const onPageHide = () => {
+      recordTabLeave();
+    };
+
+    const onWindowBlur = () => {
+      if (document.visibilityState === "hidden") return;
+      recordTabLeave();
     };
 
     document.addEventListener("fullscreenchange", onFsChange);
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("blur", onWindowBlur);
     return () => {
       document.removeEventListener("fullscreenchange", onFsChange);
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("blur", onWindowBlur);
     };
-    // finishAttempt is stable enough via refs for this monitoring effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, done, previewMode, paused, security.fullscreen, security.tabMonitoring, security.maxTabSwitches, security.thresholdAction, id, index, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId]);
+  }, [started, done, previewMode, student?.studentId, id, liveAttemptId, security.tabMonitoring, security.maxTabSwitches, security.thresholdAction, security.fullscreen, flushAttemptProgress]);
+
 
   const questionsToAnswer = useMemo(() => {
     const fromExam = (examQ.data as { questions_to_answer?: number | null } | null)?.questions_to_answer;
