@@ -25,6 +25,8 @@ jobs:
     name: Build D4EXAM Debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -185,7 +187,6 @@ jobs:
           if [ -f "$DRAW/splash.xml" ]; then
             rm -f "$DRAW"/splash.png "$DRAW"/splash.jpg "$DRAW"/splash.webp "$DRAW"/splash.gif
           fi
-          # Ensure synced capacitor.config.json still has Vercel URL
           if [ -f android/app/src/main/assets/capacitor.config.json ]; then
             if ! grep -q 'd4exam-platform.vercel.app' android/app/src/main/assets/capacitor.config.json; then
               echo "FATAL: android assets capacitor.config.json missing Vercel URL after sync"
@@ -226,6 +227,14 @@ jobs:
           fi
           ls -la app/build/outputs/apk/debug/ || true
 
+      - name: Prepare d4exam.apk for release
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/apk-out
+          SRC=$(ls android/app/build/outputs/apk/debug/*.apk | head -1)
+          cp -f "$SRC" /tmp/apk-out/d4exam.apk
+          ls -la /tmp/apk-out/d4exam.apk
+
       - name: Upload Gradle log
         if: always()
         uses: actions/upload-artifact@v4
@@ -239,6 +248,25 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: d4exam-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: /tmp/apk-out/d4exam.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish GitHub Release apk-latest
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: D4EXAM Android APK (latest)
+          body: |
+            Sideload install for D4EXAM (not Play Store).
+
+            **Install / Update URL**
+            https://github.com/amurunoghenetejiri/d4exam-platform/releases/download/apk-latest/d4exam.apk
+
+            Built from commit ${{ github.sha }}
+          files: /tmp/apk-out/d4exam.apk
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
