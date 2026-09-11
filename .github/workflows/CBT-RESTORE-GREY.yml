@@ -2,7 +2,7 @@ name: CBT-RESTORE-GREY
 on:
   workflow_dispatch:
 jobs:
-  disabled:
+  apply:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Disabled — do not auto-restore grey lock behavior"
+      - run: echo "CBT-RESTORE-GREY disabled"
