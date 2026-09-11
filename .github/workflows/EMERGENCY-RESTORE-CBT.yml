@@ -1,9 +1,9 @@
 name: EMERGENCY-RESTORE-CBT
 on:
+  workflow_dispatch:
   push:
     paths:
       - ".github/workflows/EMERGENCY-RESTORE-CBT.yml"
-  workflow_dispatch:
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -12,46 +12,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 50
+          fetch-depth: 80
       - name: Restore and patch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git show d5fbd9141713ada5f32f64b07074955e0fbd8aef:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
           test -s src/components/cbt/CbtExamSession.impl.tsx
+          grep -q "export function CbtExamPage" src/components/cbt/CbtExamSession.impl.tsx
           wc -c src/components/cbt/CbtExamSession.impl.tsx
-          python3 - <<'PY'
+          python3 << 'PY'
           from pathlib import Path
-          p = Path('src/components/cbt/CbtExamSession.impl.tsx')
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
           t = p.read_text()
-          assert 'export function CbtExamPage' in t
-          if 'doneEndReason' not in t:
-            t = t.replace(
-              '  const [doneForceSubmit, setDoneForceSubmit] = useState(false);',
-              '  const [doneForceSubmit, setDoneForceSubmit] = useState(false);\n  const [doneEndReason, setDoneEndReason] = useState<string>("");\n  const officerResumeAtRef = useRef(0);\n  const lastOfficerCmdTsRef = useRef(0);',
+          if "doneEndReason" not in t:
+              t = t.replace(
+                  "  const [doneForceSubmit, setDoneForceSubmit] = useState(false);",
+                  "  const [doneForceSubmit, setDoneForceSubmit] = useState(false);\n  const [doneEndReason, setDoneEndReason] = useState<string>(\"\");\n  const officerResumeAtRef = useRef(0);\n  const lastOfficerCmdTsRef = useRef(0);",
+                  1,
+              )
+          t = t.replace(
+              "const p = payload as { command?: string; examId?: string; attemptId?: string };\n      if (!p?.command) return;\n      if (p.examId && id && String(p.examId) !== String(id)) return;\n      if (doneRef.current || finishingRef.current) return;\n      const cmd = String(p.command).toLowerCase();",
+              "const p = payload as { command?: string; examId?: string; attemptId?: string; ts?: number };\n      if (!p?.command) return;\n      if (p.examId && id && String(p.examId) !== String(id)) return;\n      if (doneRef.current || finishingRef.current) return;\n      const cmdTs = Number(p.ts) || Date.now();\n      if (cmdTs > 0 && cmdTs < lastOfficerCmdTsRef.current) return;\n      lastOfficerCmdTsRef.current = cmdTs;\n      const cmd = String(p.command).toLowerCase();",
               1,
-            )
-          # stale command guard + resume mark
-          t = t.replace(
-            'const p = payload as { command?: string; examId?: string; attemptId?: string };\n      if (!p?.command) return;\n      if (p.examId && id && String(p.examId) !== String(id)) return;\n      if (doneRef.current || finishingRef.current) return;\n      const cmd = String(p.command).toLowerCase();',
-            'const p = payload as { command?: string; examId?: string; attemptId?: string; ts?: number };\n      if (!p?.command) return;\n      if (p.examId && id && String(p.examId) !== String(id)) return;\n      if (doneRef.current || finishingRef.current) return;\n      const cmdTs = Number(p.ts) || Date.now();\n      if (cmdTs > 0 && cmdTs < lastOfficerCmdTsRef.current) return;\n      lastOfficerCmdTsRef.current = cmdTs;\n      const cmd = String(p.command).toLowerCase();',
-            1,
           )
           t = t.replace(
-            '} else if (cmd === "release" || cmd === "resume") {\n        officerPauseRef.current = false;',
-            '} else if (cmd === "release" || cmd === "resume") {\n        officerResumeAtRef.current = Date.now();\n        officerPauseRef.current = false;',
-            1,
+              '} else if (cmd === "release" || cmd === "resume") {\n        officerPauseRef.current = false;',
+              '} else if (cmd === "release" || cmd === "resume") {\n        officerResumeAtRef.current = Date.now();\n        officerPauseRef.current = false;',
+              1,
           )
           t = t.replace(
-            'setDoneForceSubmit(false);\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(true, "terminate");',
-            'setDoneForceSubmit(false);\n        setDoneEndReason("Your examination has been terminated by the officer for an examination violation. No result is available for this attempt.");\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(true, "terminate");',
-            1,
+              'setDoneForceSubmit(false);\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(true, "terminate");',
+              'setDoneForceSubmit(false);\n        setDoneEndReason("Your examination has been terminated by the officer for an examination violation. No result is available for this attempt.");\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(true, "terminate");',
+              1,
           )
           t = t.replace(
-            'setDoneForceSubmit(true);\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(false, "auto_submit");',
-            'setDoneForceSubmit(true);\n        setDoneEndReason("Your examination was auto-submitted by the examination officer.");\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(false, "auto_submit");',
-            1,
+              'setDoneForceSubmit(true);\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(false, "auto_submit");',
+              'setDoneForceSubmit(true);\n        setDoneEndReason("Your examination was auto-submitted by the examination officer.");\n        setPaused(false);\n        try { haptic("officer_submit"); } catch { /* ignore */ }\n        void finishAttempt(false, "auto_submit");',
+              1,
           )
-          old = '''        const officerHold = meta.officer_hold === true || meta.officer_pause === true || String(meta.officer_hold || "").toLowerCase() === "true" || String(meta.officer_pause || "").toLowerCase() === "true";
+          old = """        const officerHold = meta.officer_hold === true || meta.officer_pause === true || String(meta.officer_hold || "").toLowerCase() === "true" || String(meta.officer_pause || "").toLowerCase() === "true";
         if (st === "paused" || officerHold) {
           if (!pausedRef.current) {
             officerPauseRef.current = true;
@@ -71,7 +72,22 @@ jobs:
             setPauseReason("");
             void reconnectCamera();
           }
-        }'''
+        }"""
+          new = """        const officerHold = meta.officer_hold === true || meta.officer_pause === true || String(meta.officer_hold || "").toLowerCase() === "true" || String(meta.officer_pause || "").toLowerCase() === "true";
+        const holdAtRaw = meta.officer_hold_at ? Date.parse(String(meta.officer_hold_at)) : 0;
+        const holdAt = Number.isFinite(holdAtRaw) ? holdAtRaw : 0;
+        if (officerHold && holdAt >= officerResumeAtRef.current) {
+          if (!pausedRef.current || !officerPauseRef.current) {
+            officerPauseRef.current = true;
+            setIsOfficerPause(true);
+            pauseUntilRef.current = null;
+            setPauseRemainingSec(null);
+            setPauseReason("Paused by the examination officer");
+            setPaused(true);
+          }
+        } else if (!officerHold and (st == "in_progress" or st == "active" or st == "started" or st == "paused")):
+            pass"""
+          # fix accidental python in new string - rewrite properly
           new = '''        const officerHold = meta.officer_hold === true || meta.officer_pause === true || String(meta.officer_hold || "").toLowerCase() === "true" || String(meta.officer_pause || "").toLowerCase() === "true";
         const holdAtRaw = meta.officer_hold_at ? Date.parse(String(meta.officer_hold_at)) : 0;
         const holdAt = Number.isFinite(holdAtRaw) ? holdAtRaw : 0;
@@ -97,43 +113,40 @@ jobs:
           }
         }'''
           if old in t:
-            t = t.replace(old, new)
-            print('poll patched')
+              t = t.replace(old, new)
+              print("poll patched")
           else:
-            print('poll pattern missing')
+              print("poll pattern missing")
           t = t.replace(
-            'Your examination has been terminated for an examination violation.\n              No result was recorded for this attempt.',
-            '{doneEndReason || "Your examination has been terminated for an examination violation. No result was recorded for this attempt."}',
+              "Your examination has been terminated for an examination violation.\n              No result was recorded for this attempt.",
+              '{doneEndReason || "Your examination has been terminated for an examination violation. No result was recorded for this attempt."}',
           )
           t = t.replace(
-            ': "Your examination has been submitted. Your examination is no longer active."}',
-            ': doneForceSubmit\n                ? (doneEndReason || "Your examination was auto-submitted by the examination officer.")\n                : doneEndReason\n                  ? doneEndReason\n                  : "Your examination has been submitted. Your examination is no longer active."}',
+              ': "Your examination has been submitted. Your examination is no longer active."}',
+              ': doneForceSubmit\n                ? (doneEndReason || "Your examination was auto-submitted by the examination officer.")\n                : doneEndReason\n                  ? doneEndReason\n                  : "Your examination has been submitted. Your examination is no longer active."}',
           )
-          # tab violation messages
           t = t.replace(
-            '} else if (action === "terminate") {\n        doneTerminatedRef.current = true;\n        setDoneTerminated(true);\n        await finishAttempt(true, "terminate");\n      } else if (action === "auto_submit" || action === "submit") {\n        doneTerminatedRef.current = false;\n        setDoneTerminated(false);\n        await finishAttempt(true, "auto_submit");\n      }',
-            '} else if (action === "terminate") {\n        doneTerminatedRef.current = true;\n        setDoneTerminated(true);\n        setDoneEndReason(description || "Your examination has been terminated for exceeding the allowed integrity violations. No result is available for this attempt.");\n        await finishAttempt(true, "terminate");\n      } else if (action === "auto_submit" || action === "submit") {\n        doneTerminatedRef.current = false;\n        setDoneTerminated(false);\n        setDoneForceSubmit(true);\n        setDoneEndReason(description || "Your examination was auto-submitted due to an integrity violation (tab / policy limit).");\n        await finishAttempt(true, "auto_submit");\n      }',
+              '} else if (action === "terminate") {\n        doneTerminatedRef.current = true;\n        setDoneTerminated(true);\n        await finishAttempt(true, "terminate");\n      } else if (action === "auto_submit" || action === "submit") {\n        doneTerminatedRef.current = false;\n        setDoneTerminated(false);\n        await finishAttempt(true, "auto_submit");\n      }',
+              '} else if (action === "terminate") {\n        doneTerminatedRef.current = true;\n        setDoneTerminated(true);\n        setDoneEndReason(description || "Your examination has been terminated for exceeding the allowed integrity violations. No result is available for this attempt.");\n        await finishAttempt(true, "terminate");\n      } else if (action === "auto_submit" || action === "submit") {\n        doneTerminatedRef.current = false;\n        setDoneTerminated(false);\n        setDoneForceSubmit(true);\n        setDoneEndReason(description || "Your examination was auto-submitted due to an integrity violation (tab / policy limit).");\n        await finishAttempt(true, "auto_submit");\n      }',
           )
           p.write_text(t)
-          print('ok', len(t))
+          print("ok", len(t))
           PY
-          # Officer: drop delayed pause/release rebroadcast
-          python3 - <<'PY'
+          python3 << 'PY'
           from pathlib import Path
           import re
-          p = Path('src/routes/officer.live-monitor.tsx')
+          p = Path("src/routes/officer.live-monitor.tsx")
           t = p.read_text()
           t2, n = re.subn(
-            r'\n\s*window\.setTimeout\(\(\) => \{ void broadcastOfficerCommand\("(?:pause|release)", attemptId, studentId, examId\); \}, 800\);',
-            '',
-            t,
+              r"\n\s*window\.setTimeout\(\(\) => \{ void broadcastOfficerCommand\(\"(?:pause|release)\", attemptId, studentId, examId\); \}, 800\);",
+              "",
+              t,
           )
-          print('officer timeouts removed', n)
+          print("officer timeouts removed", n)
           p.write_text(t2)
           PY
           git config user.name d4exam-bot
           git config user.email bot@d4exam.local
           git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
-          git status
           git commit -m "fix: restore CBT; pause/resume stick; terminate messages" || true
           git push origin HEAD:main
