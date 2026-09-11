@@ -397,7 +397,7 @@ function Page() {
           .from("exam_attempts")
           .select(sel)
           .eq("school_id", schoolId)
-          .in("status", ["in_progress"])
+          .in("status", ["in_progress", "paused", "held"])
           .order("started_at", { ascending: false })
           .limit(120);
         if (!error) return (data ?? []) as unknown as AttemptRow[];
@@ -1031,7 +1031,7 @@ function Page() {
       const nowIso = new Date().toISOString();
       if (cmd === "hold" || cmd === "pause") {
         const meta = { ...(selected.a.metadata || {}), officer_hold: true, officer_pause: true, officer_hold_at: nowIso };
-        const { error } = await supabase.from("exam_attempts").update({ metadata: meta, updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
+        const { error } = await supabase.from("exam_attempts").update({ metadata: meta, status: "paused", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
         if (error) throw error;
         await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_PAUSE", severity: "medium", description: "Examination paused by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
         await broadcastOfficerCommand("pause", attemptId, studentId, examId);

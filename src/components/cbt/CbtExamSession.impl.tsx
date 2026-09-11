@@ -98,6 +98,8 @@ export function CbtExamPage() {
   const [doneTerminated, setDoneTerminated] = useState(false);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
+  const answersRef = useRef<Record<string, number>>({});
+  answersRef.current = answers;
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
   const [seconds, setSeconds] = useState<number | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
@@ -128,6 +130,8 @@ export function CbtExamPage() {
   const [liveAttemptId, setLiveAttemptId] = useState<string | null>(null);
   const finishingRef = useRef(false);
   const resumeIndexRef = useRef<number | null>(null);
+  /** Lock answers only after leave+continue (not while continuously writing). */
+  const [lockedAnswerIds, setLockedAnswerIds] = useState<Set<string>>(() => new Set());
   const startedRef = useRef(false);
   const doneRef = useRef(false);
   const pausedRef = useRef(false);
@@ -638,12 +642,12 @@ export function CbtExamPage() {
     const aid = attemptIdRef.current;
     const tId = window.setTimeout(() => {
       void supabase.from("exam_attempts").update({
-        answers,
+        answers: answersRef.current,
         ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
         status: "in_progress",
         updated_at: new Date().toISOString(),
       } as never).eq("id", aid);
-    }, 1200);
+    }, 400);
     return () => window.clearTimeout(tId);
   }, [answers, started, done, previewMode]);
 
@@ -1097,16 +1101,16 @@ export function CbtExamPage() {
           <ul className="mt-6 space-y-3">
             {(q?.options ?? []).map((opt, oi) => {
               const selected = q ? answers[q.id] === oi : false;
-              const locked = q ? answers[q.id] != null : false;
+              const locked = q ? lockedAnswerIds.has(q.id) : false;
               return (
                 <li key={oi}>
                   <button type="button" disabled={locked}
                     onClick={() => {
-                      if (!q || answers[q.id] != null) return;
+                      if (!q || lockedAnswerIds.has(q.id)) return;
                       setAnswers((a) => ({ ...a, [q.id]: oi }));
                     }}
                     className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
-                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
+                      locked ? "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through" : selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
                     <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
                       selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500")}>{String.fromCharCode(65 + oi)}</span>
                     <span>{opt}</span>
