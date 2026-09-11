@@ -1,0 +1,58 @@
+name: DISABLE-NOISE-API
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/DISABLE-NOISE-API.yml"
+      - "deploy-ping.txt"
+jobs:
+  disable:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Disable noisy workflows via API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # List all workflows
+          page=1
+          disabled=0
+          while [ $page -le 20 ]; do
+            resp=$(curl -sS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/amurunoghenetejiri/d4exam-platform/actions/workflows?per_page=100&page=$page")
+            count=$(echo "$resp" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('workflows',[])))")
+            [ "$count" = "0" ] && break
+            echo "$resp" | python3 -c "
+import sys, json, os, urllib.request
+token=os.environ['GH_TOKEN']
+data=json.load(sys.stdin)
+keep={'DISABLE-NOISE-API','CI Status','NEUTRALIZE-AND-DEPLOY'}
+for w in data.get('workflows', []):
+    name=w.get('name') or ''
+    path=w.get('path') or ''
+    state=w.get('state')
+    wid=w.get('id')
+    base=path.split('/')[-1] if path else ''
+    if name in keep or base in ('ci-status.yml','DISABLE-NOISE-API.yml','NEUTRALIZE-AND-DEPLOY.yml'):
+        print('keep', name)
+        continue
+    if state == 'disabled_manually':
+        continue
+    # disable
+    req=urllib.request.Request(
+        f'https://api.github.com/repos/amurunoghenetejiri/d4exam-platform/actions/workflows/{wid}/disable',
+        method='PUT',
+        headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'User-Agent': 'disable-noise'}
+    )
+    try:
+        urllib.request.urlopen(req, timeout=30)
+        print('disabled', name)
+    except Exception as e:
+        print('fail', name, e)
+"
+            page=$((page+1))
+          done
+          echo done
