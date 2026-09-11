@@ -1,0 +1,57 @@
+name: APPLY-TIMEUP-TERMINATE
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/APPLY-TIMEUP-TERMINATE.yml"
+      - "scripts/patch_timeup_terminate.py"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore Cbt from last good + apply patches
+        run: |
+          set -euo pipefail
+          # Prefer recent good SHAs that still have lock/tab/pause fixes
+          for sha in 72c3ca82 58cbd768 88528bb6 69cea64; do
+            if git cat-file -e ${sha}:src/components/cbt/CbtExamSession.impl.tsx 2>/dev/null; then
+              sz=$(git cat-file -s ${sha}:src/components/cbt/CbtExamSession.impl.tsx || echo 0)
+              echo try $sha $sz
+              if [ "$sz" -gt 50000 ]; then
+                git show ${sha}:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
+                echo restored_cbt $sha
+                break
+              fi
+            fi
+          done
+          for sha in 72c3ca82 58cbd768; do
+            if git cat-file -e ${sha}:src/routes/officer.live-monitor.tsx 2>/dev/null; then
+              sz=$(git cat-file -s ${sha}:src/routes/officer.live-monitor.tsx || echo 0)
+              if [ "$sz" -gt 40000 ]; then
+                git show ${sha}:src/routes/officer.live-monitor.tsx > src/routes/officer.live-monitor.tsx
+                echo restored_officer $sha
+                break
+              fi
+            fi
+          done
+          python3 scripts/patch_lock_tab.py || true
+          python3 scripts/patch_officer_pause_toast.py || true
+          python3 scripts/patch_timeup_terminate.py
+          wc -c src/components/cbt/CbtExamSession.impl.tsx src/routes/student.index.tsx src/routes/student.examinations.tsx
+          grep -n "Time up" src/routes/student.index.tsx | head -3
+          grep -n "doneTerminatedRef\|Examination terminated\|auto_submit" src/components/cbt/CbtExamSession.impl.tsx | head -10
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/student.index.tsx src/routes/student.examinations.tsx src/routes/officer.live-monitor.tsx
+          if git diff --cached --quiet; then echo "No changes"; else
+            git commit -m "fix(cbt+student): Time up CTA; terminate danger no-result; restore lock/tab/pause"
+            git pull --rebase origin main || true
+            git push origin HEAD:main
+          fi
