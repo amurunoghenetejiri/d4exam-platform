@@ -3,7 +3,7 @@
  * Not Play Store — update downloads the APK from apkUrl (site or GitHub Release).
  * Version config is always fetched from production so native shell sees live minVersion.
  */
-import { isNativeShell, getRuntimePlatform } from "@/native/platform";
+import { isNativeShell } from "@/native/platform";
 
 export type AppVersionConfig = {
   minVersion: string;
@@ -32,6 +32,21 @@ const DEFAULT_CONFIG: AppVersionConfig = {
 
 let cachedConfig: { at: number; value: AppVersionConfig } | null = null;
 const CACHE_MS = 60_000;
+
+function isRealCapacitorNative(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const Cap = (window as unknown as {
+      Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
+    }).Capacitor;
+    if (Cap?.isNativePlatform?.()) return true;
+    const p = Cap?.getPlatform?.();
+    if (p === "android" || p === "ios") return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
 
 export function parseVersionParts(v: string): number[] {
   return String(v || "0")
@@ -94,7 +109,7 @@ export type NativeAppInfo = {
 
 export async function getNativeAppInfo(): Promise<NativeAppInfo | null> {
   if (typeof window === "undefined") return null;
-  if (!isNativeShell()) return null;
+  if (!isNativeShell() && !isRealCapacitorNative()) return null;
   try {
     const { App } = await import("@capacitor/app");
     const info = await App.getInfo();
@@ -148,15 +163,19 @@ export function openApkDownload(apkUrl: string) {
   }
 }
 
-/** Mobile Android browser (not Capacitor shell, not iOS). */
+/**
+ * Android Chrome/browser (not real Capacitor APK).
+ * Does NOT use isNativeShell() — that flag can stick in localStorage and hide the banner on the website.
+ */
 export function isAndroidWebBrowser(): boolean {
   if (typeof window === "undefined") return false;
-  if (isNativeShell()) return false;
-  if (getRuntimePlatform() === "android") return false;
+  if (isRealCapacitorNative()) return false;
   try {
     const ua = navigator.userAgent || "";
     if (/iPhone|iPad|iPod/i.test(ua)) return false;
     if (!/Android/i.test(ua)) return false;
+    // Capacitor WebView often includes "; wv)" — still treat as native if Capacitor object exists
+    if (/; wv\)/i.test(ua) && isRealCapacitorNative()) return false;
     return true;
   } catch {
     return false;
