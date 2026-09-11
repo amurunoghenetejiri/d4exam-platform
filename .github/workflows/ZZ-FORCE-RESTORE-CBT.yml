@@ -1,0 +1,31 @@
+name: ZZ-FORCE-RESTORE-CBT
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/ZZ-FORCE-RESTORE-CBT.yml"]
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 100
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore file from history
+        run: |
+          set -euo pipefail
+          git fetch --depth=100 origin main || true
+          git show d5fbd9141713ada5f32f64b07074955e0fbd8aef:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
+          SIZE=$(wc -c < src/components/cbt/CbtExamSession.impl.tsx)
+          echo "restored bytes=$SIZE"
+          test "$SIZE" -gt 50000
+          grep -q "export function CbtExamPage" src/components/cbt/CbtExamSession.impl.tsx
+          # remove officer delayed pause/release rebroadcast
+          python3 -c "import pathlib,re; p=pathlib.Path('src/routes/officer.live-monitor.tsx'); t=p.read_text(); t2,n=re.subn(r'\\n\\s*window\\.setTimeout\\(\\(\\) => \\{ void broadcastOfficerCommand\\(\\\"(?:pause|release)\\\", attemptId, studentId, examId\\); \\}, 800\\);','',t); print('removed',n); p.write_text(t2)"
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
+          git commit -m 'fix: restore CbtExamSession from d5fbd914; remove pause rebroadcast' || echo none
+          git push origin HEAD:main
