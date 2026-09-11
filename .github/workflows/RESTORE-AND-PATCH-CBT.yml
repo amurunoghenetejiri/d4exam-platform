@@ -1,0 +1,98 @@
+name: RESTORE-AND-PATCH-CBT
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/RESTORE-AND-PATCH-CBT.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore CbtExamSession from known good blob and patch
+        run: |
+          set -e
+          # Restore full file from commit that had 60k implementation
+          git show 6986841b6df07157dd04466b4e7fcbb2beee8902:src/components/cbt/CbtExamSession.impl.tsx > /tmp/cbt.tsx || \
+          git show f1066d904a38d640befc9afae3c4d404dcc3fd0e:src/components/cbt/CbtExamSession.impl.tsx > /tmp/cbt.tsx
+          wc -c /tmp/cbt.tsx
+          # If still tiny, try another known SHA from history
+          SZ=$(wc -c < /tmp/cbt.tsx)
+          if [ "$SZ" -lt 10000 ]; then
+            echo "Blob too small, searching history..."
+            for c in $(git log --oneline -- src/components/cbt/CbtExamSession.impl.tsx | awk '{print $1}' | head -20); do
+              git show $c:src/components/cbt/CbtExamSession.impl.tsx > /tmp/cbt.tsx 2>/dev/null || true
+              SZ=$(wc -c < /tmp/cbt.tsx)
+              echo "try $c size $SZ"
+              if [ "$SZ" -gt 40000 ]; then break; fi
+            done
+          fi
+          SZ=$(wc -c < /tmp/cbt.tsx)
+          if [ "$SZ" -lt 40000 ]; then
+            echo "FATAL: could not restore CbtExamSession"
+            exit 1
+          fi
+          python3 << 'PY'
+          from pathlib import Path
+          t = Path("/tmp/cbt.tsx").read_text()
+          if "answersRef" not in t:
+              t = t.replace(
+                  'const [answers, setAnswers] = useState<Record<string, number>>({});',
+                  'const [answers, setAnswers] = useState<Record<string, number>>({});\n  const answersRef = useRef<Record<string, number>>({});\n  answersRef.current = answers;'
+              )
+              print("added answersRef")
+          needle = 'selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40"'
+          repl = 'locked ? "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through" : selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40"'
+          if needle in t and "opacity-50 cursor-not-allowed" not in t:
+              t = t.replace(needle, repl)
+              print("locked styles")
+          if ", 1200)" in t:
+              t = t.replace(", 1200)", ", 400)")
+              print("debounce 400")
+          old_ans = "        answers,\n        ends_at:"
+          new_ans = "        answers: answersRef.current,\n        ends_at:"
+          if old_ans in t and "answersRef" in t:
+              t = t.replace(old_ans, new_ans)
+              print("answersRef in persist")
+          Path("src/components/cbt/CbtExamSession.impl.tsx").write_text(t)
+          print("wrote Cbt", len(t))
+          PY
+
+          # Officer patch on current file (do not wipe)
+          python3 << 'PY'
+          from pathlib import Path
+          op = Path("src/routes/officer.live-monitor.tsx")
+          ot = op.read_text()
+          if len(ot) < 10000:
+              print("officer file too small, skip")
+          else:
+              if '.in("status", ["in_progress"])' in ot and '"paused"' not in ot[ot.find('.in("status"'):ot.find('.in("status"')+100]:
+                  ot = ot.replace('.in("status", ["in_progress"])', '.in("status", ["in_progress", "paused", "held"])', 1)
+                  print("attempts include paused")
+              old_p = 'await supabase.from("exam_attempts").update({ metadata: meta, updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);'
+              new_p = 'await supabase.from("exam_attempts").update({ metadata: meta, status: "paused", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);'
+              idx = ot.find("officer_hold: true, officer_pause: true")
+              if idx > 0:
+                  sub = ot[idx:idx+900]
+                  if 'status: "paused"' not in sub and old_p in sub:
+                      ot = ot[:idx] + sub.replace(old_p, new_p, 1) + ot[idx+900:]
+                      print("pause sets status paused")
+              op.write_text(ot)
+              print("officer", len(ot))
+          PY
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(cbt+officer): restore session, persist answers on leave, grey on resume, officer pause works"
+            git pull --rebase origin main || true
+            git push origin HEAD:main
+          fi
