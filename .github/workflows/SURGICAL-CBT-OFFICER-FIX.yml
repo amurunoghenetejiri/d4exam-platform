@@ -1,0 +1,93 @@
+name: SURGICAL-CBT-OFFICER-FIX
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/SURGICAL-CBT-OFFICER-FIX.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply surgical patches
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          changed = False
+
+          if "answersRef" not in t:
+              t = t.replace(
+                  'const [answers, setAnswers] = useState<Record<string, number>>({});',
+                  'const [answers, setAnswers] = useState<Record<string, number>>({});\n  const answersRef = useRef<Record<string, number>>({});\n  answersRef.current = answers;'
+              )
+              changed = True
+              print("added answersRef")
+
+          needle = 'selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40"'
+          repl = 'locked ? "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through" : selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40"'
+          if needle in t and "opacity-50 cursor-not-allowed" not in t:
+              t = t.replace(needle, repl)
+              changed = True
+              print("locked styles")
+
+          if ", 1200)" in t and "answersRef" in t:
+              t = t.replace(", 1200)", ", 400)")
+              changed = True
+              print("debounce 400")
+
+          old_ans = "        answers,\n        ends_at:"
+          new_ans = "        answers: answersRef.current,\n        ends_at:"
+          if old_ans in t:
+              t = t.replace(old_ans, new_ans)
+              changed = True
+              print("answersRef in persist blocks")
+
+          if changed:
+              p.write_text(t)
+              print("CbtExamSession updated", len(t))
+          else:
+              print("CbtExamSession already ok")
+
+          op = Path("src/routes/officer.live-monitor.tsx")
+          ot = op.read_text()
+          ochanged = False
+
+          if '.in("status", ["in_progress"])' in ot:
+              ot = ot.replace('.in("status", ["in_progress"])', '.in("status", ["in_progress", "paused", "held"])', 1)
+              ochanged = True
+              print("attempts include paused")
+
+          old_p = 'await supabase.from("exam_attempts").update({ metadata: meta, updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);'
+          new_p = 'await supabase.from("exam_attempts").update({ metadata: meta, status: "paused", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);'
+          idx = ot.find("officer_hold: true, officer_pause: true")
+          if idx > 0:
+              sub = ot[idx:idx+800]
+              if 'status: "paused"' not in sub and old_p in sub:
+                  ot = ot[:idx] + sub.replace(old_p, new_p, 1) + ot[idx+800:]
+                  ochanged = True
+                  print("pause sets status paused")
+
+          if ochanged:
+              op.write_text(ot)
+              print("officer updated", len(ot))
+          else:
+              print("officer already ok")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(cbt+officer): answers persist on leave, grey on resume only, officer pause includes paused status"
+            git pull --rebase origin main || true
+            git push origin HEAD:main
+          fi
