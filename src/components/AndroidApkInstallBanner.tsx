@@ -10,49 +10,94 @@ import {
 } from "@/lib/app-update";
 import { isNativeShell } from "@/native/platform";
 
-const DISMISS_KEY = "d4exam_apk_install_dismiss_v1";
+const DISMISS_KEY = "d4exam_apk_install_dismiss_v2";
+
+const FALLBACK_CFG: AppVersionConfig = {
+  minVersion: "1.0.0",
+  latestVersion: "1.0.0",
+  minBuild: 1,
+  latestBuild: 1,
+  apkUrl:
+    "https://github.com/amurunoghenetejiri/d4exam-platform/releases/download/apk-latest/d4exam.apk",
+  forceUpdate: true,
+  message: "A new version of D4EXAM is required. Please update to continue.",
+  installMessage:
+    "Install the D4EXAM Android app for the full exam experience (camera, mic, screen share).",
+};
+
+function shouldShowInstallPrompt(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("install") === "1" || q.get("apk") === "1") return true;
+  } catch {
+    /* ignore */
+  }
+  // Never inside Capacitor / native WebView
+  try {
+    const Cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+    if (Cap?.isNativePlatform?.()) return false;
+  } catch {
+    /* ignore */
+  }
+  if (isIosWebBrowser()) return false;
+  if (isAndroidWebBrowser()) return true;
+  // Fallback: Android UA without requiring isAndroidWebBrowser edge cases
+  try {
+    const ua = navigator.userAgent || "";
+    if (/Android/i.test(ua) && !/iPhone|iPad|iPod/i.test(ua)) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
 
 /**
  * Website only, Android phones: prompt to install the real APK (not PWA).
- * Hidden on iOS, desktop, and inside the Capacitor shell.
+ * Hidden on iOS and inside the Capacitor shell.
+ * Tip: open https://d4exam-platform.vercel.app/?install=1 to force-show.
  */
 export function AndroidApkInstallBanner() {
-  const [cfg, setCfg] = useState<AppVersionConfig | null>(null);
+  const [cfg, setCfg] = useState<AppVersionConfig>(FALLBACK_CFG);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (isNativeShell()) return;
-    if (isIosWebBrowser()) return;
-    if (!isAndroidWebBrowser()) return;
+    if (!shouldShowInstallPrompt()) return;
 
     try {
-      if (localStorage.getItem(DISMISS_KEY) === "1") return;
+      if (localStorage.getItem(DISMISS_KEY) === "1") {
+        // still allow forced ?install=1
+        const q = new URLSearchParams(window.location.search);
+        if (q.get("install") !== "1" && q.get("apk") !== "1") return;
+      }
     } catch {
       /* ignore */
     }
+
+    // Show immediately (don't wait for network)
+    setVisible(true);
 
     let cancelled = false;
     void fetchAppVersionConfig().then((c) => {
       if (cancelled) return;
       setCfg(c);
-      setVisible(true);
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  if (!visible || !cfg) return null;
+  if (!visible) return null;
 
   return (
     <div
-      className="fixed inset-x-0 bottom-0 z-[2147482000] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4"
+      className="fixed inset-x-0 bottom-0 z-[2147483645] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4 pointer-events-none"
       role="region"
       aria-label="Install Android app"
     >
-      <div className="mx-auto flex max-w-lg items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl sm:p-4">
-        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+      <div className="pointer-events-auto mx-auto flex max-w-lg items-start gap-3 rounded-2xl border-2 border-primary/30 bg-white p-3 shadow-2xl ring-2 ring-primary/20 sm:p-4">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary text-white">
           <Download className="h-5 w-5" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
