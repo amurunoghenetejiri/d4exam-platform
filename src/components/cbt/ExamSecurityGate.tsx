@@ -6,6 +6,7 @@ import {
   Camera,
   CameraOff,
   Loader2,
+  Mic,
   Monitor,
   ShieldCheck,
   Smartphone,
@@ -212,11 +213,13 @@ export function ExamSecurityGate({
   const willRequestScreen =
     screenSupported && (shareMode === "required" || shareMode === "optional");
   const cameraBlocked = needCam && previewState !== "live";
+  const micBlocked = needMic && !micGranted;
 
   const buttonLabel = (() => {
     if (busy) return null;
     if (hardBlock) return "Cannot start on this device";
     if (cameraBlocked) return "Camera preview required — tap Enable camera";
+    if (micBlocked) return "Microphone required — tap Enable microphone";
     if (!acknowledgedNotice) return "Accept the monitoring notice to continue";
     if (willRequestScreen && shareMode === "required") return "Share Screen & Continue";
     if (willRequestScreen && shareMode === "optional") return "Continue (screen optional)";
@@ -423,6 +426,37 @@ export function ExamSecurityGate({
           </div>
         )}
 
+        {needMic && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+            <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
+              <Mic className="h-4 w-4 text-primary" />
+              Microphone check
+            </p>
+            <p className="mt-2 text-xs text-slate-600">
+              This examination requires your microphone. Allow microphone access so the examination officer can hear live audio during the exam.
+            </p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className={"text-xs font-semibold " + (micGranted ? "text-emerald-600" : "text-amber-700")}>
+                {micGranted ? "✓ Microphone allowed" : "Microphone not enabled yet"}
+              </p>
+              <Button type="button" size="sm" variant="outline" disabled={permBusy}
+                onClick={() => {
+                  void (async () => {
+                    setPermBusy(true);
+                    try {
+                      const r = await ensureMicrophonePermission();
+                      setMicGranted(Boolean(r.granted));
+                      if (!r.granted) setPermHint(r.error || "Allow Microphone for D4EXAM in App Settings.");
+                      else if (needCam) await startPreview();
+                    } finally { setPermBusy(false); }
+                  })();
+                }}>
+                {micGranted ? "Recheck mic" : "Enable microphone"}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <ul className="mt-4 space-y-1 text-sm text-slate-600">
           <li>
             Duration: <strong>{durationMinutes} minutes</strong>
@@ -490,7 +524,7 @@ export function ExamSecurityGate({
         ) : (
           <Button
             className="mt-6 w-full font-semibold"
-            disabled={busy || hardBlock || cameraBlocked || !acknowledgedNotice}
+            disabled={busy || hardBlock || cameraBlocked || micBlocked || !acknowledgedNotice}
             onClick={() => {
               primeHaptics();
               stopPreview();

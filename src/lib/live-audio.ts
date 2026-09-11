@@ -6,7 +6,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
 export const LIVE_MIC_EVENT = "mic-chunk";
-export const LIVE_MIC_INTERVAL_MS = 100;
+export const LIVE_MIC_INTERVAL_MS = 80;
 export const LIVE_MIC_STALE_MS = 3_500;
 /** Target capture/encode rate — 16 kHz is speech-intelligible without robotic aliasing. */
 export const LIVE_MIC_TARGET_RATE = 16_000;
@@ -112,7 +112,7 @@ export function startLiveMicPublisher(opts: {
     let sum = 0;
     for (let i = 0; i < down.length; i++) sum += down[i] * down[i];
     const rms = Math.sqrt(sum / down.length);
-    if (rms < 0.004) return;
+    if (rms < 0.0012) return;
     const pcm = floatTo16BitPCM(down);
     const b64 = abToBase64(pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength));
     const payload: LiveMicChunkPayload = {
