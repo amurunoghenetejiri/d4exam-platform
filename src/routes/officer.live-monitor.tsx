@@ -1035,7 +1035,6 @@ function Page() {
         if (error) throw error;
         await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_PAUSE", severity: "medium", description: "Examination paused by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
         await broadcastOfficerCommand("pause", attemptId, studentId, examId);
-        window.setTimeout(() => { void broadcastOfficerCommand("pause", attemptId, studentId, examId); }, 800);
         qc.setQueryData(["officer-live-attempts", schoolId], (prev: unknown) => {
           if (!Array.isArray(prev)) return prev;
           return prev.map((row: { id?: string; metadata?: Record<string, unknown> }) =>
@@ -1053,7 +1052,6 @@ function Page() {
         if (error) throw error;
         await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_RELEASE", severity: "low", description: "Examination released by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
         await broadcastOfficerCommand("release", attemptId, studentId, examId);
-        window.setTimeout(() => { void broadcastOfficerCommand("release", attemptId, studentId, examId); }, 800);
         qc.setQueryData(["officer-live-attempts", schoolId], (prev: unknown) => {
           if (!Array.isArray(prev)) return prev;
           return prev.map((row: { id?: string; metadata?: Record<string, unknown> }) => {
