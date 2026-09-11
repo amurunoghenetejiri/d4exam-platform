@@ -1,48 +1,8 @@
 name: CBT-RESTORE-GREY
 on:
-  push:
-    paths:
-      - ".github/workflows/CBT-RESTORE-GREY.yml"
   workflow_dispatch:
 jobs:
-  go:
+  disabled:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-      - name: Restore Cbt + grey + push with rebase
-        run: |
-          set -euo pipefail
-          git show 69cea64b9b5d0b64eb6ef6975ace64218897312d:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
-          python3 -c '
-          from pathlib import Path
-          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
-          t = p.read_text()
-          assert "setDone(true)" in t and "resumeIndexRef" in t
-          old = "selected ? \"border-primary bg-primary/5 ring-2 ring-primary/20\" : \"border-slate-200 hover:border-primary/40\")}"
-          new = "selected ? \"border-primary bg-primary/5 ring-2 ring-primary/20\" : \"border-slate-200 hover:border-primary/40\", locked && !selected && \"border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through decoration-slate-400\", locked && selected && \"opacity-90 cursor-not-allowed\")}"
-          if old in t and "line-through" not in t:
-            t = t.replace(old, new, 1)
-            print("grey styles applied")
-          elif "line-through" in t:
-            print("grey already present")
-          else:
-            print("WARN: pattern not found")
-          p.write_text(t)
-          print("size", len(t))
-          '
-          wc -c src/components/cbt/CbtExamSession.impl.tsx
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/components/cbt/CbtExamSession.impl.tsx
-          if git diff --staged --quiet; then
-            echo "No changes"
-          else
-            git commit -m "fix: restore full CbtExamSession + grey locked answers + instant submit"
-            git pull --rebase origin main || true
-            git push origin main
-          fi
+      - run: echo "Disabled — do not auto-restore grey lock behavior"
