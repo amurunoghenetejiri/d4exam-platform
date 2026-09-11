@@ -1072,8 +1072,10 @@ function Page() {
       } else if (cmd === "terminate") {
         const { error } = await supabase.from("exam_attempts").update({ status: "terminated", terminated_at: nowIso, submitted_at: nowIso, security_review_status: "terminated", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
         if (error) throw error;
-        await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_TERMINATE", severity: "high", description: "Examination terminated by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
+        await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_TERMINATE", severity: "high", description: "Examination terminated by officer for examination violation", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
         await broadcastOfficerCommand("terminate", attemptId, studentId, examId);
+        window.setTimeout(() => { void broadcastOfficerCommand("terminate", attemptId, studentId, examId); }, 500);
+        window.setTimeout(() => { void broadcastOfficerCommand("terminate", attemptId, studentId, examId); }, 1500);
         toast.success(`Terminated ${selected.name}`);
         setSelectedId(null);
       } else if (cmd === "submit") {

@@ -100,6 +100,24 @@ export async function saveCbtResult(input: {
     };
   });
 
+  if (input.terminated) {
+    if (input.attemptId) {
+      await supabase.from("exam_attempts").update({
+        status: "terminated",
+        answers: input.answers,
+        submitted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as never).eq("id", input.attemptId);
+    }
+    return {
+      scored: { totalScore: 0, maxMarks: 0, percentage: 0, grade: "—", passFail: "—", correct: 0, wrong: 0, unanswered: 0 },
+      error: null,
+      resultId: undefined,
+      status: "terminated",
+      published: false,
+    };
+  }
+
   const scored = scoreObjectiveAnswers(questionsForScore, input.answers);
   const status = input.terminated ? "terminated" : "submitted";
   const secStatus = input.terminated || input.faceWarned ? "flagged" : "pending";

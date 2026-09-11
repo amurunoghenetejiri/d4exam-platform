@@ -96,8 +96,11 @@ export function CbtExamPage() {
   const [started, setStarted] = useState(false);
   const [done, setDone] = useState(false);
   const [doneTerminated, setDoneTerminated] = useState(false);
+  const [doneForceSubmit, setDoneForceSubmit] = useState(false);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
+  const answersRef = useRef<Record<string, number>>({});
+  answersRef.current = answers;
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
   const [seconds, setSeconds] = useState<number | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
@@ -128,6 +131,8 @@ export function CbtExamPage() {
   const [liveAttemptId, setLiveAttemptId] = useState<string | null>(null);
   const finishingRef = useRef(false);
   const resumeIndexRef = useRef<number | null>(null);
+  /** Lock answers only after leave+continue (not while continuously writing). */
+  const [lockedAnswerIds, setLockedAnswerIds] = useState<Set<string>>(() => new Set());
   const startedRef = useRef(false);
   const doneRef = useRef(false);
   const pausedRef = useRef(false);
@@ -280,7 +285,10 @@ export function CbtExamPage() {
     };
     tick();
     const t = window.setInterval(tick, 1000);
-    return () => window.clearInterval(t);
+    const onVis = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => { window.clearInterval(t); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, done]);
 
@@ -399,11 +407,13 @@ export function CbtExamPage() {
         void reconnectCamera();
       } else if (cmd === "terminate") {
         setDoneTerminated(true);
+        setDoneForceSubmit(false);
         setPaused(false);
         try { haptic("officer_submit"); } catch { /* ignore */ }
         void finishAttempt(true);
       } else if (cmd === "submit") {
         setDoneTerminated(false);
+        setDoneForceSubmit(true);
         setPaused(false);
         try { haptic("officer_submit"); } catch { /* ignore */ }
         void finishAttempt(false);
@@ -438,6 +448,7 @@ export function CbtExamPage() {
         >;
         if (st === "submitted" || st === "flagged") {
           setDoneTerminated(false);
+          if (meta.officer_force_submit) setDoneForceSubmit(true);
           void finishAttempt(false);
           return;
         }
@@ -471,7 +482,7 @@ export function CbtExamPage() {
         /* ignore */
       }
     };
-    const t = window.setInterval(() => void poll(), 4000);
+    const t = window.setInterval(() => void poll(), 1500);
     void poll();
     return () => {
       cancelled = true;
@@ -638,12 +649,12 @@ export function CbtExamPage() {
     const aid = attemptIdRef.current;
     const tId = window.setTimeout(() => {
       void supabase.from("exam_attempts").update({
-        answers,
+        answers: answersRef.current,
         ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
         status: "in_progress",
         updated_at: new Date().toISOString(),
       } as never).eq("id", aid);
-    }, 1200);
+    }, 300);
     return () => window.clearTimeout(tId);
   }, [answers, started, done, previewMode]);
 
@@ -736,7 +747,7 @@ export function CbtExamPage() {
             originalOptions: (qq as { originalOptions?: string[] }).originalOptions ?? [],
             correctOptionText: (qq as { correctOptionText?: string | null }).correctOptionText ?? null,
           })),
-          answers, terminated: auto, resultVisibility: security.resultVisibility,
+          answers: answersRef.current, terminated: doneTerminated, resultVisibility: security.resultVisibility,
         });
         if (saved.error) toast.error(saved.error.message);
         else {
@@ -840,6 +851,8 @@ export function CbtExamPage() {
           if (existingFull.answers && typeof existingFull.answers === "object") {
             const prev = existingFull.answers as Record<string, number>;
             setAnswers(prev);
+            const lockedIds = new Set(Object.keys(prev).filter((k) => prev[k] !== undefined && prev[k] !== null));
+            setLockedAnswerIds(lockedIds);
             try {
               const ordered = orderedIdsRef.current || [];
               let idx = 0;
@@ -856,12 +869,25 @@ export function CbtExamPage() {
         
         // Restore absolute end clock from attempt (do not reset timer on Continue)
         try {
-          const ea = (existingFull as { ends_at?: string | null }).ends_at;
+          const ea = (existingFull as { ends_at?: string | null } | null)?.ends_at;
+          const sa = (existingFull as { started_at?: string | null } | null)?.started_at;
+          let endsMs: number | null = null;
           if (ea) {
             const ends = new Date(String(ea)).getTime();
-            if (!Number.isNaN(ends) && ends > Date.now()) {
-              endsAtRef.current = ends;
-              setSeconds(Math.max(0, Math.ceil((ends - Date.now()) / 1000)));
+            if (!Number.isNaN(ends)) endsMs = ends;
+          }
+          if (endsMs == null && sa) {
+            const startMs = new Date(String(sa)).getTime();
+            const mins = Math.max(1, Number(examQ.data?.duration_minutes ?? 60));
+            if (!Number.isNaN(startMs)) endsMs = startMs + mins * 60_000;
+          }
+          if (endsMs != null) {
+            endsAtRef.current = endsMs;
+            setSeconds(Math.max(0, Math.ceil((endsMs - Date.now()) / 1000)));
+            if (!ea && attemptIdRef.current) {
+              void supabase.from("exam_attempts").update({
+                ends_at: new Date(endsMs).toISOString(),
+              } as never).eq("id", attemptIdRef.current);
             }
           }
         } catch { /* ignore */ }
@@ -908,7 +934,7 @@ export function CbtExamPage() {
       {
         const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
         const now = Date.now();
-        if (endsAtRef.current != null && endsAtRef.current > now) {
+        if (endsAtRef.current != null) {
           setSeconds(Math.max(0, Math.ceil((endsAtRef.current - now) / 1000)));
         } else {
           let ends = now + durationSec * 1000;
@@ -981,7 +1007,7 @@ export function CbtExamPage() {
             {previewMode
               ? "Officer preview finished."
               : doneTerminated
-                ? "Your examination has been terminated by the examination officer. This examination can no longer be continued."
+                ? "Your examination has been terminated by the examination officer for an examination violation. No result was recorded for this attempt."
                 : "Your examination has been submitted. Your examination is no longer active."}
           </p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
@@ -1097,16 +1123,16 @@ export function CbtExamPage() {
           <ul className="mt-6 space-y-3">
             {(q?.options ?? []).map((opt, oi) => {
               const selected = q ? answers[q.id] === oi : false;
-              const locked = q ? answers[q.id] != null : false;
+              const locked = q ? lockedAnswerIds.has(q.id) : false;
               return (
                 <li key={oi}>
                   <button type="button" disabled={locked}
                     onClick={() => {
-                      if (!q || answers[q.id] != null) return;
+                      if (!q || lockedAnswerIds.has(q.id)) return;
                       setAnswers((a) => ({ ...a, [q.id]: oi }));
                     }}
                     className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
-                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
+                      locked ? "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through" : selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
                     <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
                       selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500")}>{String.fromCharCode(65 + oi)}</span>
                     <span>{opt}</span>
