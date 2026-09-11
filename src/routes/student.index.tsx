@@ -461,25 +461,43 @@ function Page() {
                       </p>
                     </div>
                     {isWriting(e.id) ? (
+                      (() => {
+                        const ea = endsAtByExam.get(e.id);
+                        const left = ea ? Math.max(0, new Date(ea).getTime() - nowTick) : null;
+                        const timeUp = left != null && left <= 0;
+                        return (
                       <Button
                         size="sm"
-                        className="h-8 shrink-0 bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700 sm:text-sm"
+                        className={
+                          timeUp
+                            ? "h-8 shrink-0 bg-red-600 px-3 text-xs font-bold text-white hover:bg-red-700 sm:text-sm"
+                            : "h-8 shrink-0 bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-700 sm:text-sm"
+                        }
                         type="button"
                         onClick={() => {
+                          if (timeUp) {
+                            const hasResult = finishedByResult.has(e.id);
+                            if (hasResult) {
+                              void navigate({ to: "/student/results/$id", params: { id: e.id } });
+                            } else {
+                              void navigate({ to: "/student/exam/$id", params: { id: e.id } });
+                            }
+                            return;
+                          }
                           void navigate({
                             to: "/student/exam/$id",
                             params: { id: e.id },
                           });
                         }}
                       >
-                        {(() => {
-                          const ea = endsAtByExam.get(e.id);
-                          if (!ea) return "Continue";
-                          const left = Math.max(0, new Date(ea).getTime() - nowTick);
-                          if (left <= 0) return "Continue";
-                          return `Continue · ${formatLeft(left)}`;
-                        })()}
+                        {timeUp
+                          ? "Time up · 00:00:00"
+                          : left != null
+                            ? `Continue · ${formatLeft(left)}`
+                            : "Continue"}
                       </Button>
+                        );
+                      })()
                     ) : canStart ? (
                       <Button
                         size="sm"
