@@ -96,26 +96,8 @@ export function CbtExamPage() {
   const [started, setStarted] = useState(false);
   const [done, setDone] = useState(false);
   const [doneTerminated, setDoneTerminated] = useState(false);
-  const [doneForceSubmit, setDoneForceSubmit] = useState(false);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number>>({});
-  const answersRef = useRef<Record<string, number>>({});
-  answersRef.current = answers;
-  const flushAttemptProgress = useCallback(async () => {
-    const aid = attemptIdRef.current;
-    if (!aid) return;
-    try {
-      await supabase.from("exam_attempts").update({
-        answers: answersRef.current,
-        ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
-        tab_switch_count: tabSwitchCountRef.current,
-        status: "in_progress",
-        updated_at: new Date().toISOString(),
-      } as never).eq("id", aid);
-    } catch (e) {
-      console.warn("[cbt] flushAttemptProgress", e);
-    }
-  }, []);
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
   const [seconds, setSeconds] = useState<number | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
@@ -146,10 +128,6 @@ export function CbtExamPage() {
   const [liveAttemptId, setLiveAttemptId] = useState<string | null>(null);
   const finishingRef = useRef(false);
   const resumeIndexRef = useRef<number | null>(null);
-  /** Lock answers only after leave+continue (not while continuously writing). */
-  const [lockedAnswerIds, setLockedAnswerIds] = useState<Set<string>>(() => new Set());
-  /** True after student left exam (tab/app) — on return, lock already-answered questions. */
-  const leftExamSessionRef = useRef(false);
   const startedRef = useRef(false);
   const doneRef = useRef(false);
   const pausedRef = useRef(false);
@@ -159,25 +137,6 @@ export function CbtExamPage() {
   doneRef.current = done;
   pausedRef.current = paused;
   resultIdRef.current = resultId;
-  /** Only integrity / officer messages during live exam — no generic toasts. */
-  const examSafeToast = {
-    message: (msg: string) => {
-      if (startedRef.current && !doneRef.current) return;
-      toast.message(msg);
-    },
-    success: (msg: string) => {
-      if (startedRef.current && !doneRef.current) return;
-      toast.success(msg);
-    },
-    error: (msg: string) => {
-      if (startedRef.current && !doneRef.current) {
-        setWarnBanner(msg);
-        window.setTimeout(() => setWarnBanner(null), 6000);
-        return;
-      }
-      toast.error(msg);
-    },
-  };
 
   const examQ = useQuery({
     queryKey: ["cbt-exam", id],
@@ -321,10 +280,7 @@ export function CbtExamPage() {
     };
     tick();
     const t = window.setInterval(tick, 1000);
-    const onVis = () => { if (document.visibilityState === "visible") tick(); };
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("focus", onVis);
-    return () => { window.clearInterval(t); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
+    return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [started, done]);
 
@@ -443,13 +399,11 @@ export function CbtExamPage() {
         void reconnectCamera();
       } else if (cmd === "terminate") {
         setDoneTerminated(true);
-        setDoneForceSubmit(false);
         setPaused(false);
         try { haptic("officer_submit"); } catch { /* ignore */ }
         void finishAttempt(true);
       } else if (cmd === "submit") {
         setDoneTerminated(false);
-        setDoneForceSubmit(true);
         setPaused(false);
         try { haptic("officer_submit"); } catch { /* ignore */ }
         void finishAttempt(false);
@@ -484,7 +438,6 @@ export function CbtExamPage() {
         >;
         if (st === "submitted" || st === "flagged") {
           setDoneTerminated(false);
-          if (meta.officer_force_submit) setDoneForceSubmit(true);
           void finishAttempt(false);
           return;
         }
@@ -518,7 +471,7 @@ export function CbtExamPage() {
         /* ignore */
       }
     };
-    const t = window.setInterval(() => void poll(), 1500);
+    const t = window.setInterval(() => void poll(), 4000);
     void poll();
     return () => {
       cancelled = true;
@@ -529,19 +482,19 @@ export function CbtExamPage() {
 
   // Integrity: fullscreen exit + app background / tab switch
   useEffect(() => {
-    if (!started || done || previewMode) return;
+    if (!started || done || previewMode || paused) return;
     const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
     const studentId = student?.studentId;
     if (!schoolId || !studentId || !id) return;
 
-    const DEBOUNCE_MS = 1200;
+    const DEBOUNCE_MS = 2500;
 
     const applyConsequence = async (eventType: string, description: string) => {
       const now = Date.now();
       if (now - lastViolationAtRef.current < DEBOUNCE_MS) return;
       lastViolationAtRef.current = now;
 
-      const action = String(security.thresholdAction || "flag").toLowerCase();
+      const action = security.thresholdAction || "flag";
       void logSecurityEvent({
         schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
         eventType, severity: action === "terminate" ? "high" : "medium",
@@ -553,100 +506,16 @@ export function CbtExamPage() {
         },
       });
 
-      try { haptic("tab_switch"); } catch { /* ignore */ }
-
       if (action === "warn" || action === "flag") {
         setWarnBanner(description);
+        try { haptic("tab_switch"); } catch { /* ignore */ }
         window.setTimeout(() => setWarnBanner(null), 6000);
       } else if (action === "pause") {
         beginTimedPause(description);
-      } else if (action === "terminate" || action === "auto_submit" || action === "submit") {
-        setDoneTerminated(action === "terminate");
+      } else if (action === "terminate") {
+        setDoneTerminated(true);
         await finishAttempt(true);
       }
-    };
-
-    const recordTabLeave = () => {
-      if (finishingRef.current || doneRef.current) return;
-      if (!security.tabMonitoring) {
-        leftExamSessionRef.current = true;
-        void flushAttemptProgress();
-        return;
-      }
-      if (pausedRef.current) {
-        leftExamSessionRef.current = true;
-        void flushAttemptProgress();
-        return;
-      }
-      const now = Date.now();
-      if (now - lastTabHiddenAtRef.current < 600) return;
-      lastTabHiddenAtRef.current = now;
-      leftExamSessionRef.current = true;
-      tabSwitchCountRef.current += 1;
-      setTabSwitchCount(tabSwitchCountRef.current);
-      void flushAttemptProgress();
-      if (attemptIdRef.current) {
-        void (async () => {
-          try {
-            const aid = attemptIdRef.current!;
-            const { data: prevRow } = await supabase.from("exam_attempts").select("metadata").eq("id", aid).maybeSingle();
-            const prevMeta = prevRow?.metadata && typeof prevRow.metadata === "object" && !Array.isArray(prevRow.metadata)
-              ? (prevRow.metadata as Record<string, unknown>)
-              : {};
-            await supabase.from("exam_attempts").update({
-              tab_switch_count: tabSwitchCountRef.current,
-              answers: answersRef.current,
-              ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
-              metadata: {
-                ...prevMeta,
-                tabSwitchCount: tabSwitchCountRef.current,
-                lastSeenAt: new Date().toISOString(),
-                lastTabLeaveAt: new Date().toISOString(),
-              },
-              updated_at: new Date().toISOString(),
-            } as never).eq("id", aid);
-          } catch (e) {
-            console.warn("[cbt] tab_switch persist", e);
-          }
-        })();
-      }
-      const max = Math.max(1, Number(security.maxTabSwitches) || 5);
-      if (tabSwitchCountRef.current >= max) {
-        void applyConsequence(
-          "TAB_SWITCH",
-          `Left the exam window (switch ${tabSwitchCountRef.current}/${max}). Threshold reached.`,
-        );
-      } else {
-        void logSecurityEvent({
-          schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
-          eventType: "TAB_SWITCH", severity: "low",
-          description: `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`,
-          questionIndex: index,
-        });
-        setWarnBanner(`Stay on the exam screen. Switches: ${tabSwitchCountRef.current}/${max}`);
-        try { haptic("tab_switch"); } catch { /* ignore */ }
-        window.setTimeout(() => setWarnBanner(null), 4000);
-      }
-    };
-
-    const onReturnToExam = () => {
-      if (leftExamSessionRef.current) {
-        const ids = new Set(
-          Object.keys(answersRef.current).filter(
-            (k) => answersRef.current[k] !== undefined && answersRef.current[k] !== null,
-          ),
-        );
-        if (ids.size) {
-          setLockedAnswerIds((prev) => {
-            const next = new Set(prev);
-            ids.forEach((id) => next.add(id));
-            return next;
-          });
-        }
-        leftExamSessionRef.current = false;
-      }
-      void flushAttemptProgress();
-      void reconnectCamera();
     };
 
     const onFsChange = () => {
@@ -656,6 +525,8 @@ export function CbtExamPage() {
         setFsGate(false);
         return;
       }
+      // On native we rely on StatusBar immersive; document fullscreen may be unavailable.
+      // Still record exit when browser fullscreen was previously active.
       fullscreenExitCountRef.current += 1;
       setFsGate(true);
       void applyConsequence("FULLSCREEN_EXIT", "Fullscreen was exited during the examination.");
@@ -667,36 +538,65 @@ export function CbtExamPage() {
     };
 
     const onVis = () => {
-      if (document.visibilityState === "hidden") {
-        recordTabLeave();
-      } else if (document.visibilityState === "visible") {
-        onReturnToExam();
+      if (!security.tabMonitoring) return;
+      if (document.visibilityState === "visible") {
+        void reconnectCamera();
+        return;
       }
-    };
-
-    const onPageHide = () => {
-      recordTabLeave();
-    };
-
-    const onWindowBlur = () => {
-      if (document.visibilityState === "hidden") return;
-      recordTabLeave();
+      if (document.visibilityState !== "hidden") return;
+      const now = Date.now();
+      if (now - lastTabHiddenAtRef.current < 800) return;
+      lastTabHiddenAtRef.current = now;
+      tabSwitchCountRef.current += 1;
+      setTabSwitchCount(tabSwitchCountRef.current);
+      if (attemptIdRef.current) {
+        void (async () => {
+          try {
+            const aid = attemptIdRef.current!;
+            const { data: prevRow } = await supabase.from("exam_attempts").select("metadata").eq("id", aid).maybeSingle();
+            const prevMeta = prevRow?.metadata && typeof prevRow.metadata === "object" && !Array.isArray(prevRow.metadata)
+              ? (prevRow.metadata as Record<string, unknown>)
+              : {};
+            await supabase.from("exam_attempts").update({
+              tab_switch_count: tabSwitchCountRef.current,
+              metadata: {
+                ...prevMeta,
+                tabSwitchCount: tabSwitchCountRef.current,
+                lastSeenAt: new Date().toISOString(),
+                studentName: String((student as { fullName?: string } | null)?.fullName || session?.fullName || prevMeta.studentName || "").trim() || prevMeta.studentName,
+                matricNumber: String((student as { matric?: string | null } | null)?.matric || session?.identifier || prevMeta.matricNumber || "").trim() || prevMeta.matricNumber,
+              },
+              updated_at: new Date().toISOString(),
+            } as never).eq("id", aid);
+          } catch (e) {
+            console.warn("[cbt] tab_switch persist", e);
+          }
+        })();
+      }
+      const max = security.maxTabSwitches ?? 5;
+      if (tabSwitchCountRef.current >= max) {
+        void applyConsequence("TAB_SWITCH", `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`);
+      } else {
+        void logSecurityEvent({
+          schoolId, examId: id, attemptId: attemptIdRef.current, studentId,
+          eventType: "TAB_SWITCH", severity: "low",
+          description: `Left the exam window (switch ${tabSwitchCountRef.current}/${max}).`,
+          questionIndex: index,
+        });
+        setWarnBanner(`Stay on the exam screen. Switches: ${tabSwitchCountRef.current}/${max}`);
+        window.setTimeout(() => setWarnBanner(null), 4000);
+      }
     };
 
     document.addEventListener("fullscreenchange", onFsChange);
     document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("pagehide", onPageHide);
-    window.addEventListener("blur", onWindowBlur);
     return () => {
       document.removeEventListener("fullscreenchange", onFsChange);
       document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("pagehide", onPageHide);
-      window.removeEventListener("blur", onWindowBlur);
     };
+    // finishAttempt is stable enough via refs for this monitoring effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [started, done, previewMode, student?.studentId, id, liveAttemptId, security.tabMonitoring, security.maxTabSwitches, security.thresholdAction, security.fullscreen, flushAttemptProgress]);
-
-
+  }, [started, done, previewMode, paused, security.fullscreen, security.tabMonitoring, security.maxTabSwitches, security.thresholdAction, id, index, examQ.data?.school_id, student?.studentId, student?.schoolId, session?.schoolId]);
 
   const questionsToAnswer = useMemo(() => {
     const fromExam = (examQ.data as { questions_to_answer?: number | null } | null)?.questions_to_answer;
@@ -738,12 +638,12 @@ export function CbtExamPage() {
     const aid = attemptIdRef.current;
     const tId = window.setTimeout(() => {
       void supabase.from("exam_attempts").update({
-        answers: answersRef.current,
+        answers,
         ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
         status: "in_progress",
         updated_at: new Date().toISOString(),
       } as never).eq("id", aid);
-    }, 300);
+    }, 1200);
     return () => window.clearTimeout(tId);
   }, [answers, started, done, previewMode]);
 
@@ -836,7 +736,7 @@ export function CbtExamPage() {
             originalOptions: (qq as { originalOptions?: string[] }).originalOptions ?? [],
             correctOptionText: (qq as { correctOptionText?: string | null }).correctOptionText ?? null,
           })),
-          answers: answersRef.current, terminated: doneTerminated, resultVisibility: security.resultVisibility,
+          answers, terminated: auto, resultVisibility: security.resultVisibility,
         });
         if (saved.error) toast.error(saved.error.message);
         else {
@@ -886,9 +786,9 @@ export function CbtExamPage() {
           stopMediaStream(mediaStreamRef.current);
           mediaStreamRef.current = stream;
           setLiveStream(stream);
-          examSafeToast.success(needCam ? "Camera ready" : "Microphone ready");
+          toast.success(needCam ? "Camera ready" : "Microphone ready");
         } catch {
-          examSafeToast.error(needCam ? "Camera is required for this examination." : "Microphone is required for this examination.");
+          toast.error(needCam ? "Camera is required for this examination." : "Microphone is required for this examination.");
           return;
         }
       }
@@ -898,14 +798,14 @@ export function CbtExamPage() {
         const share = await startScreenShareStream();
         if (!share.ok) {
           holdExamScreenShare(false);
-          examSafeToast.error(share.message || "Screen sharing is required for this examination.");
+          toast.error(share.message || "Screen sharing is required for this examination.");
           return;
         }
         // reuse keeps MediaProjection alive across Gate → CBT navigation
         screenStreamRef.current = share.stream;
         setScreenStream(share.stream);
         onScreenShareEnded(share.stream, () => {
-          setWarnBanner("Screen sharing stopped. Re-enable to continue the exam."); window.setTimeout(() => setWarnBanner(null), 6000);;
+          toast.error("Screen sharing stopped. Re-enable to continue the exam.");
           officerPauseRef.current = false;
           setIsOfficerPause(false);
           setPaused(true);
@@ -913,12 +813,12 @@ export function CbtExamPage() {
           setScreenStream(null);
           screenStreamRef.current = null;
         });
-        examSafeToast.success("Screen sharing active");
+        toast.success("Screen sharing active");
       }
       try { primeHaptics(); haptic("start"); } catch { /* ignore */ }
       if (security.fullscreen) {
         const ok = await requestExamFullscreen();
-        if (!ok) { examSafeToast.message("Please allow fullscreen to continue the exam"); setFsGate(true); }
+        if (!ok) { toast.message("Please allow fullscreen to continue the exam"); setFsGate(true); }
       }
       if (!previewMode && student?.studentId && examQ.data?.school_id) {
         // Load existing attempt for stable question set
@@ -940,8 +840,6 @@ export function CbtExamPage() {
           if (existingFull.answers && typeof existingFull.answers === "object") {
             const prev = existingFull.answers as Record<string, number>;
             setAnswers(prev);
-            const lockedIds = new Set(Object.keys(prev).filter((k) => prev[k] !== undefined && prev[k] !== null));
-            setLockedAnswerIds(lockedIds);
             try {
               const ordered = orderedIdsRef.current || [];
               let idx = 0;
@@ -958,25 +856,12 @@ export function CbtExamPage() {
         
         // Restore absolute end clock from attempt (do not reset timer on Continue)
         try {
-          const ea = (existingFull as { ends_at?: string | null } | null)?.ends_at;
-          const sa = (existingFull as { started_at?: string | null } | null)?.started_at;
-          let endsMs: number | null = null;
+          const ea = (existingFull as { ends_at?: string | null }).ends_at;
           if (ea) {
             const ends = new Date(String(ea)).getTime();
-            if (!Number.isNaN(ends)) endsMs = ends;
-          }
-          if (endsMs == null && sa) {
-            const startMs = new Date(String(sa)).getTime();
-            const mins = Math.max(1, Number(examQ.data?.duration_minutes ?? 60));
-            if (!Number.isNaN(startMs)) endsMs = startMs + mins * 60_000;
-          }
-          if (endsMs != null) {
-            endsAtRef.current = endsMs;
-            setSeconds(Math.max(0, Math.ceil((endsMs - Date.now()) / 1000)));
-            if (!ea && attemptIdRef.current) {
-              void supabase.from("exam_attempts").update({
-                ends_at: new Date(endsMs).toISOString(),
-              } as never).eq("id", attemptIdRef.current);
+            if (!Number.isNaN(ends) && ends > Date.now()) {
+              endsAtRef.current = ends;
+              setSeconds(Math.max(0, Math.ceil((ends - Date.now()) / 1000)));
             }
           }
         } catch { /* ignore */ }
@@ -1023,7 +908,7 @@ export function CbtExamPage() {
       {
         const durationSec = Math.max(60, Number(examQ.data?.duration_minutes ?? 60) * 60);
         const now = Date.now();
-        if (endsAtRef.current != null) {
+        if (endsAtRef.current != null && endsAtRef.current > now) {
           setSeconds(Math.max(0, Math.ceil((endsAtRef.current - now) / 1000)));
         } else {
           let ends = now + durationSec * 1000;
@@ -1050,8 +935,8 @@ export function CbtExamPage() {
 
   async function restoreFullscreenFromUser() {
     const ok = await requestExamFullscreen();
-    if (ok) { setFsGate(false); setPaused(false); examSafeToast.success("Fullscreen restored"); }
-    else examSafeToast.error("Could not enter fullscreen. Tap again or check device permissions.");
+    if (ok) { setFsGate(false); setPaused(false); toast.success("Fullscreen restored"); }
+    else toast.error("Could not enter fullscreen. Tap again or check device permissions.");
   }
 
   async function goToResult() {
@@ -1096,7 +981,7 @@ export function CbtExamPage() {
             {previewMode
               ? "Officer preview finished."
               : doneTerminated
-                ? "Your examination has been terminated by the examination officer for an examination violation. No result was recorded for this attempt."
+                ? "Your examination has been terminated by the examination officer. This examination can no longer be continued."
                 : "Your examination has been submitted. Your examination is no longer active."}
           </p>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
@@ -1212,16 +1097,16 @@ export function CbtExamPage() {
           <ul className="mt-6 space-y-3">
             {(q?.options ?? []).map((opt, oi) => {
               const selected = q ? answers[q.id] === oi : false;
-              const locked = q ? lockedAnswerIds.has(q.id) : false;
+              const locked = q ? answers[q.id] != null : false;
               return (
                 <li key={oi}>
                   <button type="button" disabled={locked}
                     onClick={() => {
-                      if (!q || lockedAnswerIds.has(q.id)) return;
+                      if (!q || answers[q.id] != null) return;
                       setAnswers((a) => ({ ...a, [q.id]: oi }));
                     }}
                     className={cn("flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left text-sm transition",
-                      locked ? "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through" : selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
+                      selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40")}>
                     <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border text-xs font-bold",
                       selected ? "border-primary bg-primary text-white" : "border-slate-300 text-slate-500")}>{String.fromCharCode(65 + oi)}</span>
                     <span>{opt}</span>
