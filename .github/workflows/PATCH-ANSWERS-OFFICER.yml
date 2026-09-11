@@ -1,0 +1,113 @@
+name: PATCH-ANSWERS-OFFICER
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/PATCH-ANSWERS-OFFICER.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch CbtExamSession + officer
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          assert len(t) > 40000, "file too small"
+
+          # 1) answersRef
+          if "answersRef" not in t:
+              t = t.replace(
+                  'const [answers, setAnswers] = useState<Record<string, number>>({});',
+                  'const [answers, setAnswers] = useState<Record<string, number>>({});\n  const answersRef = useRef<Record<string, number>>({});\n  answersRef.current = answers;'
+              )
+              print("answersRef")
+
+          # 2) lockedAnswerIds state (resume-only lock)
+          if "lockedAnswerIds" not in t:
+              t = t.replace(
+                  'const resumeIndexRef = useRef<number | null>(null);',
+                  'const resumeIndexRef = useRef<number | null>(null);\n  /** Lock answers only after leave+continue (not while continuously writing). */\n  const [lockedAnswerIds, setLockedAnswerIds] = useState<Set<string>>(() => new Set());'
+              )
+              print("lockedAnswerIds state")
+
+          # 3) On resume, set lockedAnswerIds from prev answers
+          old_resume = '''if (existingFull.answers && typeof existingFull.answers === "object") {
+            const prev = existingFull.answers as Record<string, number>;
+            setAnswers(prev);'''
+          new_resume = '''if (existingFull.answers && typeof existingFull.answers === "object") {
+            const prev = existingFull.answers as Record<string, number>;
+            setAnswers(prev);
+            const lockedIds = new Set(Object.keys(prev).filter((k) => prev[k] !== undefined && prev[k] !== null));
+            setLockedAnswerIds(lockedIds);'''
+          if old_resume in t and "setLockedAnswerIds" not in t[t.find("existingFull.answers"):t.find("existingFull.answers")+500]:
+              t = t.replace(old_resume, new_resume)
+              print("set locked on resume")
+
+          # 4) Option click: only lock via lockedAnswerIds, NOT immediate answers[q.id]
+          t = t.replace(
+              'if (!q || answers[q.id] != null) return;',
+              'if (!q || lockedAnswerIds.has(q.id)) return;'
+          )
+          # disabled={locked} where locked was answers-based - find pattern
+          # Replace common locked = answers[q.id] != null
+          if 'const locked = q ? answers[q.id] != null : false' in t:
+              t = t.replace(
+                  'const locked = q ? answers[q.id] != null : false',
+                  'const locked = q ? lockedAnswerIds.has(q.id) : false'
+              )
+              print("locked uses lockedAnswerIds")
+
+          # 5) Grey styles when locked
+          needle = 'selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40"'
+          repl = 'locked ? "border-slate-200 bg-slate-50 opacity-50 cursor-not-allowed line-through" : selected ? "border-primary bg-primary/5 ring-2 ring-primary/20" : "border-slate-200 hover:border-primary/40"'
+          if needle in t and "opacity-50 cursor-not-allowed" not in t:
+              t = t.replace(needle, repl)
+              print("grey styles")
+
+          # 6) Persist uses answersRef + faster debounce
+          if "answersRef" in t:
+              t = t.replace(", 1200)", ", 400)")
+              old_ans = "        answers,\n        ends_at:"
+              new_ans = "        answers: answersRef.current,\n        ends_at:"
+              if old_ans in t:
+                  t = t.replace(old_ans, new_ans)
+                  print("persist answersRef")
+
+          p.write_text(t)
+          print("Cbt final", len(t))
+
+          # Officer
+          op = Path("src/routes/officer.live-monitor.tsx")
+          ot = op.read_text()
+          if len(ot) > 20000:
+              pos = ot.find('.in("status", ["in_progress"])')
+              if pos >= 0 and "paused" not in ot[pos:pos+80]:
+                  ot = ot.replace('.in("status", ["in_progress"])', '.in("status", ["in_progress", "paused", "held"])', 1)
+                  print("officer attempts paused")
+              old_p = 'await supabase.from("exam_attempts").update({ metadata: meta, updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);'
+              new_p = 'await supabase.from("exam_attempts").update({ metadata: meta, status: "paused", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);'
+              idx = ot.find("officer_hold: true, officer_pause: true")
+              if idx > 0:
+                  sub = ot[idx:idx+900]
+                  if 'status: "paused"' not in sub and old_p in sub:
+                      ot = ot[:idx] + sub.replace(old_p, new_p, 1) + ot[idx+900:]
+                      print("officer pause status")
+              op.write_text(ot)
+              print("officer", len(ot))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
+          if git diff --cached --quiet; then echo No changes; else
+            git commit -m "fix(cbt+officer): lock answers only after leave+resume; persist on leave; officer pause/resume/terminate"
+            git pull --rebase origin main || true
+            git push origin HEAD:main
+          fi
