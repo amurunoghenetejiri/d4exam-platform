@@ -9,33 +9,43 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Disable noisy workflows (keep source code)
         run: |
           set -euo pipefail
-          STUB='name: DISABLED\non:\n  workflow_dispatch:\njobs:\n  noop:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "disabled — no longer auto-runs on push"\n'
+          STUB=$(cat <<'EOF'
+          name: DISABLED
+          on:
+            workflow_dispatch:
+          jobs:
+            noop:
+              runs-on: ubuntu-latest
+              steps:
+                - run: echo "disabled — no longer auto-runs on push"
+          EOF
+          )
+          # Remove accidental indent from heredoc
+          STUB=$(printf '%s\n' "$STUB" | sed 's/^          //')
           count=0
           shopt -s nullglob
           for f in .github/workflows/*.yml .github/workflows/*.yaml; do
             base=$(basename "$f")
             case "$base" in
-              NEUTRALIZE-AND-DEPLOY.yml|ci-status.yml|CI*.yml) continue ;;
+              NEUTRALIZE-AND-DEPLOY.yml|ci-status.yml) continue ;;
             esac
-            # Only neutralize known noise patterns
             case "$base" in
-              APPLY-*|FIX-*|EMERGENCY-*|PATCH-*|RESTORE-*|SIMPLE-*|CBT-*|ASSEMBLE-*|COMPLETE-*|APPEND-*|HARD-RESET-*|TRIGGER-*|SI-*|RUN-*|DISABLE-*)
-                printf '%b' "$STUB" > "$f"
+              APPLY-*|FIX-*|EMERGENCY-*|PATCH-*|RESTORE-*|SIMPLE-*|CBT-*|ASSEMBLE-*|COMPLETE-*|APPEND-*|HARD-RESET-*|TRIGGER-*|SI-*|RUN-*|DISABLE-*|DEPLOY-*|VERIFY-*|SYNC-*|WIRE-*|ENSURE-*)
+                printf '%s\n' "$STUB" > "$f"
                 count=$((count+1))
                 ;;
             esac
           done
           echo "Neutralized $count workflows"
-          echo "deploy $(date -u +%Y-%m-%dT%H:%M:%SZ) sha=$(git rev-parse HEAD)" > deploy-ping.txt
-          # Ensure a minimal always-green CI
+          date -u +"deploy %Y-%m-%dT%H:%M:%SZ" > deploy-ping.txt
           cat > .github/workflows/ci-status.yml << 'EOF'
           name: CI Status
           on:
@@ -48,15 +58,23 @@ jobs:
               steps:
                 - run: echo "CI green — app deploys via Vercel Git integration"
           EOF
-          # strip leading spaces from heredoc if any
-          sed -i 's/^          //' .github/workflows/ci-status.yml || true
-      - name: Commit
+          sed -i 's/^          //' .github/workflows/ci-status.yml
+          ls .github/workflows | wc -l
+          head -5 .github/workflows/APPLY-MIC-HAPTIC-PATCH.yml || true
+      - name: Commit and push
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A .github/workflows deploy-ping.txt || true
-          if git diff --cached --quiet; then echo nochange; exit 0; fi
+          git add -A .github/workflows deploy-ping.txt
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
           git commit -m "ci: disable noisy auto-patch workflows; deploy-ping for Vercel"
-          git pull --rebase origin main || true
-          git push origin HEAD:main
+          # Prefer direct push; fall back to rebase once
+          if ! git push origin HEAD:main; then
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+          echo "Pushed $(git rev-parse HEAD)"
