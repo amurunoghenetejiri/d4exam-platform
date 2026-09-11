@@ -1,6 +1,6 @@
 /**
- * CBT exam vibration — max amplitude native; long continuous bursts.
- * no-face / tab: ~1.5s hard | multi / officer: ~2s+ hard high pulse rate
+ * CBT exam vibration — max strength continuous motor.
+ * none/tab ~1.6s hard | multi ~2.2s harder | officer_warning loudest longest
  */
 import { Capacitor, registerPlugin } from "@capacitor/core";
 
@@ -17,9 +17,9 @@ export type HapticKind =
   | "light"
   | "strong";
 
-function burst(totalOnMs: number, pulseMs = 120, gapMs = 12): number[] {
+function burst(totalOnMs: number, pulseMs = 160, gapMs = 8): number[] {
   const out: number[] = [0];
-  let remaining = Math.max(300, totalOnMs);
+  let remaining = Math.max(400, totalOnMs);
   while (remaining > 0) {
     const on = Math.min(pulseMs, remaining);
     out.push(on);
@@ -30,17 +30,17 @@ function burst(totalOnMs: number, pulseMs = 120, gapMs = 12): number[] {
 }
 
 const PATTERNS: Record<HapticKind, number[]> = {
-  start: [0, 250, 40, 350],
-  none: burst(1500, 140, 10),
-  unclear: burst(1500, 140, 10),
-  light: burst(1500, 140, 10),
-  tab_switch: burst(1500, 140, 10),
-  multi: burst(2000, 150, 8),
-  strong: burst(2000, 150, 8),
-  camera_blocked: burst(2000, 150, 8),
-  officer_pause: burst(2000, 150, 8),
-  officer_submit: burst(2000, 150, 8),
-  officer_warning: burst(2600, 160, 8),
+  start: [0, 280, 40, 400],
+  none: burst(1600, 180, 6),
+  unclear: burst(1600, 180, 6),
+  light: burst(1600, 180, 6),
+  tab_switch: burst(1600, 180, 6),
+  multi: burst(2200, 200, 5),
+  strong: burst(2200, 200, 5),
+  camera_blocked: burst(2200, 200, 5),
+  officer_pause: burst(2200, 200, 5),
+  officer_submit: burst(2200, 200, 5),
+  officer_warning: burst(3000, 220, 4),
 };
 
 type ExamImmersivePlugin = {
@@ -74,9 +74,14 @@ function clearTimers() {
 }
 
 async function vibratePattern(pattern: number[]): Promise<boolean> {
-  const p = pattern.length ? pattern : [0, 400];
+  const p = pattern.length ? pattern : [0, 500];
   try {
     if (Capacitor.isNativePlatform()) {
+      const totalOn = p.filter((_, i) => i % 2 === 1).reduce((a, b) => a + b, 0);
+      if (totalOn >= 800) {
+        const ret = await ExamImmersive.vibrate({ ms: totalOn, pattern: p });
+        if (!(ret && ret.ok === false)) return true;
+      }
       const ret = await ExamImmersive.vibrate({ pattern: p });
       if (!(ret && ret.ok === false)) return true;
     }
@@ -100,14 +105,14 @@ function fire(pattern: number[]) {
 export function primeHaptics() {
   primed = true;
   clearTimers();
-  fire([0, 30]);
+  fire([0, 40]);
   fire(PATTERNS.start);
-  timers.push(window.setTimeout(() => fire(PATTERNS.start), 100));
+  timers.push(window.setTimeout(() => fire(PATTERNS.start), 90));
 }
 
 export function refreshHapticUnlock() {
   primed = true;
-  fire([0, 25]);
+  fire([0, 30]);
 }
 
 export function haptic(kind: HapticKind) {
@@ -115,23 +120,40 @@ export function haptic(kind: HapticKind) {
   const pattern = PATTERNS[kind] ?? PATTERNS.none;
   clearTimers();
   fire(pattern);
+
   const solid =
-    kind === "none" || kind === "unclear" || kind === "tab_switch" || kind === "light"
-      ? 1500
-      : kind === "officer_warning"
-        ? 2500
-        : 2000;
+    kind === "officer_warning"
+      ? 2800
+      : kind === "multi" ||
+          kind === "strong" ||
+          kind === "camera_blocked" ||
+          kind === "officer_pause" ||
+          kind === "officer_submit"
+        ? 2200
+        : 1600;
+
   fire([0, solid]);
   timers.push(
+    window.setTimeout(() => fire([0, solid]), 30),
     window.setTimeout(() => fire(pattern), 40),
-    window.setTimeout(() => fire([0, solid]), 50),
-    window.setTimeout(() => fire(pattern), 200),
-    window.setTimeout(() => fire([0, Math.floor(solid * 0.7)]), 350),
+    window.setTimeout(() => fire([0, solid]), 80),
+    window.setTimeout(() => fire(pattern), 180),
+    window.setTimeout(() => fire([0, Math.floor(solid * 0.85)]), 280),
+    window.setTimeout(() => fire(pattern), 500),
   );
+
+  if (kind === "multi" || kind === "strong") {
+    timers.push(
+      window.setTimeout(() => fire(burst(1800, 200, 5)), 400),
+      window.setTimeout(() => fire([0, 1200]), 900),
+    );
+  }
+
   if (kind === "officer_warning") {
     timers.push(
-      window.setTimeout(() => fire(burst(2000, 160, 8)), 600),
-      window.setTimeout(() => fire([0, 1000]), 2200),
+      window.setTimeout(() => fire(burst(2200, 220, 4)), 500),
+      window.setTimeout(() => fire([0, 1500]), 1200),
+      window.setTimeout(() => fire(burst(1200, 220, 4)), 2200),
     );
   }
 }

@@ -2,9 +2,8 @@
  * In-browser face detection for CBT camera monitoring.
  * Returns face COUNT only — no frames uploaded.
  *
- * Native FaceDetector preferred on desktop; MediaPipe preferred on Android/iOS
- * WebViews (Shape Detection API often stuck at 1 face or returns nothing).
- * Confidence filtering + IoU NMS to reduce false multi-face.
+ * MediaPipe preferred on Android/iOS (native FaceDetector often stuck at 1 face).
+ * NMS merges only true duplicates — does NOT collapse real multi-face to 1.
  */
 
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
@@ -12,9 +11,12 @@ const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 
 const MEDIAPIPE_LOAD_TIMEOUT_MS = 22_000;
-const STRONG_SCORE = 0.42;
-const WEAK_SCORE = 0.28;
-const NMS_IOU = 0.45;
+/** Accept detections above this score (after NMS). */
+const MIN_SCORE = 0.22;
+/** Only used for ranking, not for collapsing multi-face. */
+const STRONG_SCORE = 0.35;
+/** Boxes must overlap this much to be treated as the same face. */
+const NMS_IOU = 0.55;
 
 export type FaceEngine = {
   count: (video: HTMLVideoElement) => Promise<number | null>;
@@ -33,13 +35,17 @@ function iou(a: Box, b: Box): number {
   return ua > 0 ? inter / ua : 0;
 }
 
-/** Merge overlapping boxes so one face is not counted twice. */
+/**
+ * Count distinct faces. Do NOT collapse multi-face to 1 when a second
+ * box is weaker — that was the bug blocking "multiple faces detected".
+ */
 function nmsCount(boxes: Box[]): number {
   if (!boxes.length) return 0;
   const sorted = [...boxes].sort((a, b) => b.score - a.score);
   const kept: Box[] = [];
   for (const b of sorted) {
-    if (b.score < WEAK_SCORE) continue;
+    if (b.score < MIN_SCORE) continue;
+    if (b.w * b.h < 80) continue;
     let overlap = false;
     for (const k of kept) {
       if (iou(b, k) >= NMS_IOU) {
@@ -48,11 +54,6 @@ function nmsCount(boxes: Box[]): number {
       }
     }
     if (!overlap) kept.push(b);
-  }
-  const strong = kept.filter((b) => b.score >= STRONG_SCORE);
-  if (strong.length === 1 && kept.length > 1) {
-    const weakOnly = kept.filter((b) => b.score < STRONG_SCORE);
-    if (weakOnly.every((w) => iou(w, strong[0]) > 0.15)) return 1;
   }
   return kept.length;
 }
@@ -70,27 +71,30 @@ function extractBoxes(faces: unknown[]): Box[] {
         height?: number;
         xMin?: number;
         yMin?: number;
+        originX?: number;
+        originY?: number;
       };
       box?: { x?: number; y?: number; width?: number; height?: number };
     };
     const score =
-      any?.categories?.[0]?.score ?? (typeof any.score === "number" ? any.score : 0.55);
-    const bb = (any.boundingBox ?? any.box) as
-      | {
-          x?: number;
-          y?: number;
-          width?: number;
-          height?: number;
-          xMin?: number;
-          yMin?: number;
-        }
-      | undefined;
+      any?.categories?.[0]?.score ?? (typeof any.score === "number" ? any.score : STRONG_SCORE);
+    const bb = any.boundingBox ?? any.box;
     if (!bb) continue;
-    const x = Number(bb.xMin ?? bb.x ?? 0);
-    const y = Number(bb.yMin ?? bb.y ?? 0);
-    const w = Number(bb.width ?? 0);
-    const h = Number(bb.height ?? 0);
-    if (w < 4 || h < 4) continue;
+    const x = Number(
+      (bb as { xMin?: number }).xMin ??
+        (bb as { originX?: number }).originX ??
+        (bb as { x?: number }).x ??
+        0,
+    );
+    const y = Number(
+      (bb as { yMin?: number }).yMin ??
+        (bb as { originY?: number }).originY ??
+        (bb as { y?: number }).y ??
+        0,
+    );
+    const w = Number((bb as { width?: number }).width ?? 0);
+    const h = Number((bb as { height?: number }).height ?? 0);
+    if (w < 6 || h < 6) continue;
     out.push({ x, y, w, h, score: Number(score) || 0 });
   }
   return out;
@@ -114,7 +118,7 @@ function createNative(): FaceEngine | null {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const FD = (window as any).FaceDetector;
     if (typeof FD !== "function") return null;
-    const detector = new FD({ fastMode: true, maxDetectedFaces: 8 });
+    const detector = new FD({ fastMode: false, maxDetectedFaces: 10 });
     return {
       count: async (video) => {
         if (!videoReady(video)) return null;
@@ -128,24 +132,25 @@ function createNative(): FaceEngine | null {
           }
           const faces = await detector.detect(video);
           if (!Array.isArray(faces)) return 0;
-          // Map Shape Detection results into boxes for NMS + score filter
-          const boxes: Box[] = faces.map((f: { boundingBox?: DOMRectReadOnly; landmarks?: unknown }) => {
-            const bb = f?.boundingBox;
-            return {
-              x: bb?.x ?? 0,
-              y: bb?.y ?? 0,
-              w: bb?.width ?? 0,
-              h: bb?.height ?? 0,
-              score: 0.6,
-            };
-          }).filter((b) => b.w >= 8 && b.h >= 8);
+          const boxes: Box[] = faces
+            .map((f: { boundingBox?: DOMRectReadOnly }) => {
+              const bb = f?.boundingBox;
+              return {
+                x: bb?.x ?? 0,
+                y: bb?.y ?? 0,
+                w: bb?.width ?? 0,
+                h: bb?.height ?? 0,
+                score: 0.7,
+              };
+            })
+            .filter((b) => b.w >= 8 && b.h >= 8);
           return nmsCount(boxes);
         } catch {
           return null;
         }
       },
       close: () => {
-        /* native FaceDetector has no close */
+        /* no-op */
       },
     };
   } catch {
@@ -173,7 +178,7 @@ async function createMediapipe(): Promise<FaceEngine | null> {
       };
     };
     const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-    let mode: "IMAGE" | "VIDEO" = "IMAGE";
+    let mode: "IMAGE" | "VIDEO" = "VIDEO";
     let detector: {
       detect?: (input: HTMLCanvasElement | HTMLVideoElement) => { detections?: unknown[] };
       detectForVideo?: (video: HTMLVideoElement, ts: number) => { detections?: unknown[] };
@@ -182,17 +187,17 @@ async function createMediapipe(): Promise<FaceEngine | null> {
     try {
       detector = await FaceDetector.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
-        runningMode: "IMAGE",
-        minDetectionConfidence: WEAK_SCORE,
+        runningMode: "VIDEO",
+        minDetectionConfidence: MIN_SCORE,
       });
-      mode = "IMAGE";
+      mode = "VIDEO";
     } catch {
       detector = await FaceDetector.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
-        runningMode: "VIDEO",
-        minDetectionConfidence: WEAK_SCORE,
+        runningMode: "IMAGE",
+        minDetectionConfidence: MIN_SCORE,
       });
-      mode = "VIDEO";
+      mode = "IMAGE";
     }
     const canvas =
       typeof document !== "undefined" ? document.createElement("canvas") : null;
@@ -210,9 +215,16 @@ async function createMediapipe(): Promise<FaceEngine | null> {
             }
           }
           let faces: unknown[] = [];
-          if (mode === "IMAGE" && typeof detector.detect === "function") {
+          if (mode === "VIDEO" && typeof detector.detectForVideo === "function") {
+            let ts = performance.now();
+            if (ts <= lastTs) ts = lastTs + 1;
+            lastTs = ts;
+            const result = detector.detectForVideo(video, ts);
+            faces = result?.detections ?? [];
+          } else if (mode === "IMAGE" && typeof detector.detect === "function") {
             if (canvas && ctx) {
-              const w = Math.min(video.videoWidth, 320);
+              const maxW = 480;
+              const w = Math.min(video.videoWidth, maxW);
               const h = Math.round((video.videoHeight / video.videoWidth) * w);
               if (w >= 16 && h >= 16) {
                 canvas.width = w;
@@ -226,7 +238,8 @@ async function createMediapipe(): Promise<FaceEngine | null> {
               faces = result?.detections ?? [];
             }
           } else if (typeof detector.detectForVideo === "function") {
-            const ts = Math.max(lastTs + 1, Math.round(performance.now()));
+            let ts = performance.now();
+            if (ts <= lastTs) ts = lastTs + 1;
             lastTs = ts;
             const result = detector.detectForVideo(video, ts);
             faces = result?.detections ?? [];
@@ -240,12 +253,12 @@ async function createMediapipe(): Promise<FaceEngine | null> {
         try {
           detector.close?.();
         } catch {
-          /* noop */
+          /* ignore */
         }
       },
     };
   } catch (e) {
-    console.warn("[face-detector] MediaPipe unavailable", e);
+    console.warn("[face-detector] MediaPipe failed", e);
     return null;
   }
 }
@@ -278,8 +291,6 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
 function preferNativeFirst(): boolean {
   if (typeof navigator === "undefined") return true;
   const ua = navigator.userAgent || "";
-  // Android / iOS WebViews often expose a broken FaceDetector that never returns
-  // accurate counts (stuck at 1). Prefer MediaPipe there so detection works.
   if (/Android|iPhone|iPad|iPod/i.test(ua)) return false;
   try {
     const w = window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } };
@@ -311,7 +322,6 @@ export async function createFaceEngine(): Promise<FaceEngine | null> {
 
   const mp = await tryMp();
   if (mp) return mp;
-  // Last resort on mobile if MediaPipe CDN failed
   return tryNative();
 }
 
