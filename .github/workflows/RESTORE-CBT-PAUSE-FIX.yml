@@ -1,0 +1,247 @@
+name: RESTORE-CBT-PAUSE-FIX
+on:
+  workflow_dispatch:
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 30
+      - name: Restore CBT from last good + apply patches
+        run: |
+          set -euo pipefail
+          # Restore full CBT from commit before accidental placeholder overwrite
+          git show d5fbd9141713ada5f32f64b07074955e0fbd8aef:src/components/cbt/CbtExamSession.impl.tsx > src/components/cbt/CbtExamSession.impl.tsx
+          python3 << 'PY'
+          from pathlib import Path
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          needle = '  const [doneForceSubmit, setDoneForceSubmit] = useState(false);'
+          if 'doneEndReason' not in t and needle in t:
+            t = t.replace(needle, needle + '\n  const [doneEndReason, setDoneEndReason] = useState<string>("");\n  /** Ignore stale officer pause after a newer resume. */\n  const officerResumeAtRef = useRef(0);\n  const lastOfficerCmdTsRef = useRef(0);')
+          old_cmd = '''    ch.on("broadcast", { event: "officer_command" }, ({ payload }) => {
+      const p = payload as { command?: string; examId?: string; attemptId?: string };
+      if (!p?.command) return;
+      if (p.examId && id && String(p.examId) !== String(id)) return;
+      if (doneRef.current || finishingRef.current) return;
+      const cmd = String(p.command).toLowerCase();
+      if (cmd === "hold" || cmd === "pause") {
+        // Officer pause: indefinite — no auto-resume, no integrity countdown
+        officerPauseRef.current = true;
+        setIsOfficerPause(true);
+        pauseUntilRef.current = null;
+        setPauseRemainingSec(null);
+        setPauseReason("Paused by the examination officer");
+        setPaused(true);
+        try { haptic("officer_pause"); } catch { /* ignore */ }
+        setWarnBanner("Your examination has been paused by the officer");
+        window.setTimeout(() => setWarnBanner(null), 10000);
+      } else if (cmd === "release" || cmd === "resume") {
+        officerPauseRef.current = false;
+        setIsOfficerPause(false);
+        pauseUntilRef.current = null;
+        setPauseRemainingSec(null);
+        setPaused(false);
+        setPauseReason("");
+        setWarnBanner("Your examination has been resumed by the officer");
+        window.setTimeout(() => setWarnBanner(null), 6000);
+        void reconnectCamera();
+      } else if (cmd === "terminate") {
+        doneTerminatedRef.current = true;
+        setDoneTerminated(true);
+        setDoneForceSubmit(false);
+        setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
+        void finishAttempt(true, "terminate");
+      } else if (cmd === "submit") {
+        doneTerminatedRef.current = false;
+        setDoneTerminated(false);
+        setDoneForceSubmit(true);
+        setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
+        void finishAttempt(false, "auto_submit");
+      }
+    });'''
+          new_cmd = '''    ch.on("broadcast", { event: "officer_command" }, ({ payload }) => {
+      const p = payload as { command?: string; examId?: string; attemptId?: string; ts?: number };
+      if (!p?.command) return;
+      if (p.examId && id && String(p.examId) !== String(id)) return;
+      if (doneRef.current || finishingRef.current) return;
+      const cmdTs = Number(p.ts) || Date.now();
+      if (cmdTs > 0 && cmdTs < lastOfficerCmdTsRef.current) return; // stale
+      lastOfficerCmdTsRef.current = cmdTs;
+      const cmd = String(p.command).toLowerCase();
+      if (cmd === "hold" || cmd === "pause") {
+        // Officer pause: indefinite — no auto-resume, no integrity countdown
+        officerPauseRef.current = true;
+        setIsOfficerPause(true);
+        pauseUntilRef.current = null;
+        setPauseRemainingSec(null);
+        setPauseReason("Paused by the examination officer");
+        setPaused(true);
+        try { haptic("officer_pause"); } catch { /* ignore */ }
+        setWarnBanner("Your examination has been paused by the officer");
+        window.setTimeout(() => setWarnBanner(null), 10000);
+      } else if (cmd === "release" || cmd === "resume") {
+        // Resume must stick — mark resume time so poll cannot re-apply a stale hold
+        officerResumeAtRef.current = Date.now();
+        officerPauseRef.current = false;
+        setIsOfficerPause(false);
+        pauseUntilRef.current = null;
+        setPauseRemainingSec(null);
+        setPaused(false);
+        setPauseReason("");
+        setWarnBanner("Your examination has been resumed by the officer");
+        window.setTimeout(() => setWarnBanner(null), 6000);
+        void reconnectCamera();
+      } else if (cmd === "terminate") {
+        doneTerminatedRef.current = true;
+        setDoneTerminated(true);
+        setDoneForceSubmit(false);
+        setDoneEndReason("Your examination has been terminated by the officer for an examination violation. No result is available for this attempt.");
+        setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
+        void finishAttempt(true, "terminate");
+      } else if (cmd === "submit") {
+        doneTerminatedRef.current = false;
+        setDoneTerminated(false);
+        setDoneForceSubmit(true);
+        setDoneEndReason("Your examination was auto-submitted by the examination officer.");
+        setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
+        void finishAttempt(false, "auto_submit");
+      }
+    });'''
+          if old_cmd in t:
+            t = t.replace(old_cmd, new_cmd)
+            print("cmd ok")
+          else:
+            print("cmd missing")
+          old_poll = '''        const officerHold = meta.officer_hold === true || meta.officer_pause === true || String(meta.officer_hold || "").toLowerCase() === "true" || String(meta.officer_pause || "").toLowerCase() === "true";
+        if (st === "paused" || officerHold) {
+          if (!pausedRef.current) {
+            officerPauseRef.current = true;
+            setIsOfficerPause(true);
+            pauseUntilRef.current = null;
+            setPauseRemainingSec(null);
+            setPauseReason("Paused by the examination officer");
+            setPaused(true);
+          }
+        } else if (st === "in_progress" || st === "active" || st === "started") {
+          if (pausedRef.current && officerPauseRef.current) {
+            officerPauseRef.current = false;
+            setIsOfficerPause(false);
+            pauseUntilRef.current = null;
+            setPauseRemainingSec(null);
+            setPaused(false);
+            setPauseReason("");
+            void reconnectCamera();
+          }
+        }'''
+          new_poll = '''        const officerHold = meta.officer_hold === true || meta.officer_pause === true || String(meta.officer_hold || "").toLowerCase() === "true" || String(meta.officer_pause || "").toLowerCase() === "true";
+        const holdAtRaw = meta.officer_hold_at ? Date.parse(String(meta.officer_hold_at)) : 0;
+        const holdAt = Number.isFinite(holdAtRaw) ? holdAtRaw : 0;
+        // Only apply officer pause from DB if hold is active AND not older than a newer local resume
+        if (officerHold && holdAt >= officerResumeAtRef.current) {
+          if (!pausedRef.current || !officerPauseRef.current) {
+            officerPauseRef.current = true;
+            setIsOfficerPause(true);
+            pauseUntilRef.current = null;
+            setPauseRemainingSec(null);
+            setPauseReason("Paused by the examination officer");
+            setPaused(true);
+          }
+        } else if (!officerHold && (st === "in_progress" || st === "active" || st === "started" || st === "paused")) {
+          // Resume: clear officer pause even if status briefly lags
+          if (pausedRef.current && officerPauseRef.current) {
+            officerResumeAtRef.current = Date.now();
+            officerPauseRef.current = false;
+            setIsOfficerPause(false);
+            pauseUntilRef.current = null;
+            setPauseRemainingSec(null);
+            setPaused(false);
+            setPauseReason("");
+            void reconnectCamera();
+          }
+        }'''
+          if old_poll in t:
+            t = t.replace(old_poll, new_poll)
+            print("poll ok")
+          else:
+            print("poll missing")
+          t = t.replace(
+            '''            <p className="mt-3 text-sm font-medium text-red-900/90">
+              Your examination has been terminated for an examination violation.
+              No result was recorded for this attempt.
+            </p>''',
+            '''            <p className="mt-3 text-sm font-medium text-red-900/90">
+              {doneEndReason || "Your examination has been terminated for an examination violation. No result was recorded for this attempt."}
+            </p>''',
+          )
+          t = t.replace(
+            '''            {previewMode
+              ? "Officer preview finished."
+              : "Your examination has been submitted. Your examination is no longer active."}''',
+            '''            {previewMode
+              ? "Officer preview finished."
+              : doneForceSubmit
+                ? (doneEndReason || "Your examination was auto-submitted by the examination officer.")
+                : doneEndReason
+                  ? doneEndReason
+                  : "Your examination has been submitted. Your examination is no longer active."}''',
+          )
+          t = t.replace(
+            '''      } else if (action === "terminate") {
+        doneTerminatedRef.current = true;
+        setDoneTerminated(true);
+        await finishAttempt(true, "terminate");
+      } else if (action === "auto_submit" || action === "submit") {
+        doneTerminatedRef.current = false;
+        setDoneTerminated(false);
+        await finishAttempt(true, "auto_submit");
+      }''',
+            '''      } else if (action === "terminate") {
+        doneTerminatedRef.current = true;
+        setDoneTerminated(true);
+        setDoneEndReason(
+          description ||
+            "Your examination has been terminated for exceeding the allowed integrity violations. No result is available for this attempt.",
+        );
+        await finishAttempt(true, "terminate");
+      } else if (action === "auto_submit" || action === "submit") {
+        doneTerminatedRef.current = false;
+        setDoneTerminated(false);
+        setDoneForceSubmit(true);
+        setDoneEndReason(
+          description ||
+            "Your examination was auto-submitted due to an integrity violation (tab / policy limit).",
+        );
+        await finishAttempt(true, "auto_submit");
+      }''',
+          )
+          p.write_text(t)
+          print("cbt bytes", len(t))
+          PY
+          # Officer: remove delayed pause/release rebroadcast that causes resume then re-pause
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+          p = Path("src/routes/officer.live-monitor.tsx")
+          t = p.read_text()
+          t2, n = re.subn(
+            r"\n\s*window\.setTimeout\(\(\) => \{ void broadcastOfficerCommand\(\"(?:pause|release)\", attemptId, studentId, examId\); \}, 800\);",
+            "",
+            t,
+          )
+          print("removed delayed pause/release broadcasts", n)
+          p.write_text(t2)
+          PY
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
+          git commit -m "fix: pause/resume stick; terminate/auto-submit student messages" || echo "no change"
+          git push origin HEAD:main
