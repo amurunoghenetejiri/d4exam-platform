@@ -3,6 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - "scripts/patch_lock_tab.py"
       - "scripts/patch_exam_fixes.py"
       - ".github/workflows/RUN-EXAM-PATCH.yml"
 jobs:
@@ -12,15 +13,20 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Run patch
-        run: python3 scripts/patch_exam_fixes.py
+      - name: Run lock+tab patch
+        run: |
+          if [ -f scripts/patch_lock_tab.py ]; then
+            python3 scripts/patch_lock_tab.py
+          else
+            python3 scripts/patch_exam_fixes.py
+          fi
       - name: Commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx src/lib/cbt-save-result.ts
+          git add src/components/cbt/CbtExamSession.impl.tsx
           if git diff --cached --quiet; then echo "No changes"; else
-            git commit -m "fix(cbt+officer): terminate no-result; lock on resume only; absolute timer; force-submit message"
+            git commit -m "fix(cbt): lock answered options after leave+return; live tab violation consequences"
             git pull --rebase origin main || true
             git push origin HEAD:main
           fi
