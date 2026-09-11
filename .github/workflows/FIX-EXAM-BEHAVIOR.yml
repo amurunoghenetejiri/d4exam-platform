@@ -1,0 +1,235 @@
+name: FIX-EXAM-BEHAVIOR
+on:
+  push:
+    paths:
+      - ".github/workflows/FIX-EXAM-BEHAVIOR.yml"
+  workflow_dispatch:
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - name: Patch exam behavior
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          assert "setDone(true)" in t
+
+          if "lockedAnswerIds" not in t:
+            t = t.replace(
+              "  const resumeIndexRef = useRef<number | null>(null);",
+              "  const resumeIndexRef = useRef<number | null>(null);\n  /** Lock answers only after leave+continue (not while continuously writing). */\n  const [lockedAnswerIds, setLockedAnswerIds] = useState<Set<string>>(() => new Set());",
+              1,
+            )
+
+          if "setLockedAnswerIds(lockedIds)" not in t:
+            t = t.replace(
+              "            const prev = existingFull.answers as Record<string, number>;\n            setAnswers(prev);",
+              "            const prev = existingFull.answers as Record<string, number>;\n            setAnswers(prev);\n            const lockedIds = new Set(Object.keys(prev).filter((k) => prev[k] !== undefined && prev[k] !== null));\n            setLockedAnswerIds(lockedIds);",
+              1,
+            )
+
+          t = t.replace(
+            "const locked = q ? answers[q.id] != null : false;",
+            "const locked = q ? lockedAnswerIds.has(q.id) : false;",
+          )
+          t = t.replace(
+            "if (!q || answers[q.id] != null) return;",
+            "if (!q || lockedAnswerIds.has(q.id)) return;",
+          )
+
+          t = t.replace(
+            "const t = window.setInterval(() => void poll(), 4000);",
+            "const t = window.setInterval(() => void poll(), 1500);",
+          )
+
+          if 'window.addEventListener("focus", onVis)' not in t:
+            old_timer = """    tick();
+    const t = window.setInterval(tick, 1000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done]);"""
+            new_timer = """    tick();
+    const t = window.setInterval(tick, 1000);
+    const onVis = () => {
+      if (document.visibilityState === \"visible\") tick();
+    };
+    document.addEventListener(\"visibilitychange\", onVis);
+    window.addEventListener(\"focus\", onVis);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener(\"visibilitychange\", onVis);
+      window.removeEventListener(\"focus\", onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done]);"""
+            if old_timer in t:
+              t = t.replace(old_timer, new_timer, 1)
+              print("timer visibility recover")
+            else:
+              print("WARN timer pattern")
+
+          t = t.replace(
+            "enabled: started && !done && !previewMode,",
+            "enabled: started && !done && !previewMode && Boolean(security.requireMicrophone),",
+            1,
+          )
+
+          if "pagehide" not in t:
+            marker = "  }, [answers, started, done, previewMode]);\n\n  const faceWarnCountRef"
+            extra = """  }, [answers, started, done, previewMode]);
+
+  // Flush ends_at + answers when leaving tab/app so Continue shows live remaining time
+  useEffect(() => {
+    if (!started || done || previewMode) return;
+    const flush = () => {
+      const aid = attemptIdRef.current;
+      if (!aid) return;
+      try {
+        void supabase.from(\"exam_attempts\").update({
+          answers,
+          ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
+          status: \"in_progress\",
+          updated_at: new Date().toISOString(),
+        } as never).eq(\"id\", aid);
+      } catch { /* ignore */ }
+    };
+    const onHide = () => { if (document.visibilityState === \"hidden\") flush(); };
+    window.addEventListener(\"pagehide\", flush);
+    document.addEventListener(\"visibilitychange\", onHide);
+    return () => {
+      window.removeEventListener(\"pagehide\", flush);
+      document.removeEventListener(\"visibilitychange\", onHide);
+    };
+  }, [answers, started, done, previewMode]);
+
+  const faceWarnCountRef"""
+            if marker in t:
+              t = t.replace(marker, extra, 1)
+              print("pagehide flush")
+            else:
+              print("WARN pagehide marker")
+
+          p.write_text(t)
+          print("cbt size", len(t))
+          assert "lockedAnswerIds" in t
+
+          g = Path("src/components/cbt/ExamSecurityGate.tsx")
+          gt = g.read_text()
+          if "Enable microphone" not in gt:
+            if "Mic," not in gt:
+              gt = gt.replace(
+                "  CameraOff,\n  Loader2,\n  Monitor,",
+                "  CameraOff,\n  Loader2,\n  Mic,\n  Monitor,",
+                1,
+              )
+            if "micBlocked" not in gt:
+              gt = gt.replace(
+                '  const cameraBlocked = needCam && previewState !== "live";',
+                '  const cameraBlocked = needCam && previewState !== "live";\n  const micBlocked = needMic && !micGranted;',
+                1,
+              )
+              gt = gt.replace(
+                '    if (cameraBlocked) return "Camera preview required — tap Enable camera";\n    if (!acknowledgedNotice)',
+                '    if (cameraBlocked) return "Camera preview required — tap Enable camera";\n    if (micBlocked) return "Microphone required — tap Enable microphone";\n    if (!acknowledgedNotice)',
+                1,
+              )
+              gt = gt.replace(
+                "disabled={busy || hardBlock || cameraBlocked || !acknowledgedNotice}",
+                "disabled={busy || hardBlock || cameraBlocked || micBlocked || !acknowledgedNotice}",
+                1,
+              )
+            cam_end = '''                {previewState === "live" ? "Restart camera" : "Enable camera"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <ul className="mt-4 space-y-1 text-sm text-slate-600">'''
+            mic_block = '''                {previewState === "live" ? "Restart camera" : "Enable camera"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {needMic && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+            <p className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
+              <Mic className="h-4 w-4 text-primary" />
+              Microphone check
+            </p>
+            <p className="mt-2 text-xs text-slate-600">
+              This examination requires your microphone. Allow microphone access so the examination officer can hear live audio during the exam.
+            </p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className={"text-xs font-semibold " + (micGranted ? "text-emerald-600" : "text-amber-700")}>
+                {micGranted ? "✓ Microphone allowed" : "Microphone not enabled yet"}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={permBusy}
+                onClick={() => {
+                  void (async () => {
+                    setPermBusy(true);
+                    try {
+                      const r = await ensureMicrophonePermission();
+                      setMicGranted(Boolean(r.granted));
+                      if (!r.granted) {
+                        setPermHint(r.error || "Allow Microphone for D4EXAM in App Settings.");
+                      } else if (needCam) {
+                        await startPreview();
+                      }
+                    } finally {
+                      setPermBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {micGranted ? "Recheck mic" : "Enable microphone"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <ul className="mt-4 space-y-1 text-sm text-slate-600">'''
+            if cam_end in gt:
+              gt = gt.replace(cam_end, mic_block, 1)
+              print("mic section")
+            else:
+              print("WARN cam_end")
+            g.write_text(gt)
+          else:
+            print("gate already has mic UI")
+
+          a = Path("src/lib/live-audio.ts")
+          at = a.read_text()
+          at2 = at.replace("LIVE_MIC_INTERVAL_MS = 100", "LIVE_MIC_INTERVAL_MS = 80")
+          at2 = at2.replace("if (rms < 0.004) return;", "if (rms < 0.0012) return;")
+          a.write_text(at2)
+          print("audio patched", at != at2)
+          print("DONE")
+          PY
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/components/cbt/ExamSecurityGate.tsx src/lib/live-audio.ts
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix: answers lock only after leave; absolute timer; faster officer poll; mic permission UI"
+            git pull --rebase origin main || true
+            git push origin main
+          fi
