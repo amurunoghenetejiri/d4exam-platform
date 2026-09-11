@@ -1,0 +1,57 @@
+name: FIX-EXAM-LOCK-TIMER-MIC
+on:
+  push:
+    paths:
+      - ".github/workflows/FIX-EXAM-LOCK-TIMER-MIC.yml"
+      - "scripts/payloads/cbt.p0.b64"
+      - "scripts/payloads/cbt.p1.b64"
+      - "scripts/payloads/cbt.p2.b64"
+      - "scripts/payloads/cbt.p3.b64"
+      - "scripts/payloads/gate.gz.b64"
+      - "scripts/payloads/audio.gz.b64"
+  workflow_dispatch:
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - name: Assemble and write
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import base64, gzip, pathlib
+          root = pathlib.Path("scripts/payloads")
+          parts = sorted(root.glob("cbt.p*.b64"))
+          assert len(parts) >= 4, parts
+          b64 = "".join(p.read_text().strip() for p in parts)
+          raw = gzip.decompress(base64.b64decode(b64))
+          assert b"lockedAnswerIds" in raw and b"pagehide" in raw
+          dest = pathlib.Path("src/components/cbt/CbtExamSession.impl.tsx")
+          dest.write_bytes(raw)
+          print("cbt", len(raw))
+          g = gzip.decompress(base64.b64decode(root.joinpath("gate.gz.b64").read_text().strip()))
+          assert b"Enable microphone" in g
+          pathlib.Path("src/components/cbt/ExamSecurityGate.tsx").write_bytes(g)
+          print("gate", len(g))
+          a = gzip.decompress(base64.b64decode(root.joinpath("audio.gz.b64").read_text().strip()))
+          pathlib.Path("src/lib/live-audio.ts").write_bytes(a)
+          print("audio", len(a))
+          PY
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/components/cbt/ExamSecurityGate.tsx src/lib/live-audio.ts
+          if git diff --staged --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix: lock answers only after leave; absolute timer; officer poll; mic gate; terminate no result"
+            git pull --rebase origin main || true
+            git push origin main
+          fi
