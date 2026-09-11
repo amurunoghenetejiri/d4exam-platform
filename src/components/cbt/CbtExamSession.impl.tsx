@@ -159,6 +159,25 @@ export function CbtExamPage() {
   doneRef.current = done;
   pausedRef.current = paused;
   resultIdRef.current = resultId;
+  /** Only integrity / officer messages during live exam — no generic toasts. */
+  const examSafeToast = {
+    message: (msg: string) => {
+      if (startedRef.current && !doneRef.current) return;
+      toast.message(msg);
+    },
+    success: (msg: string) => {
+      if (startedRef.current && !doneRef.current) return;
+      toast.success(msg);
+    },
+    error: (msg: string) => {
+      if (startedRef.current && !doneRef.current) {
+        setWarnBanner(msg);
+        window.setTimeout(() => setWarnBanner(null), 6000);
+        return;
+      }
+      toast.error(msg);
+    },
+  };
 
   const examQ = useQuery({
     queryKey: ["cbt-exam", id],
@@ -678,6 +697,7 @@ export function CbtExamPage() {
   }, [started, done, previewMode, student?.studentId, id, liveAttemptId, security.tabMonitoring, security.maxTabSwitches, security.thresholdAction, security.fullscreen, flushAttemptProgress]);
 
 
+
   const questionsToAnswer = useMemo(() => {
     const fromExam = (examQ.data as { questions_to_answer?: number | null } | null)?.questions_to_answer;
     if (typeof fromExam === "number" && fromExam > 0) return Math.floor(fromExam);
@@ -866,9 +886,9 @@ export function CbtExamPage() {
           stopMediaStream(mediaStreamRef.current);
           mediaStreamRef.current = stream;
           setLiveStream(stream);
-          toast.success(needCam ? "Camera ready" : "Microphone ready");
+          examSafeToast.success(needCam ? "Camera ready" : "Microphone ready");
         } catch {
-          toast.error(needCam ? "Camera is required for this examination." : "Microphone is required for this examination.");
+          examSafeToast.error(needCam ? "Camera is required for this examination." : "Microphone is required for this examination.");
           return;
         }
       }
@@ -878,14 +898,14 @@ export function CbtExamPage() {
         const share = await startScreenShareStream();
         if (!share.ok) {
           holdExamScreenShare(false);
-          toast.error(share.message || "Screen sharing is required for this examination.");
+          examSafeToast.error(share.message || "Screen sharing is required for this examination.");
           return;
         }
         // reuse keeps MediaProjection alive across Gate → CBT navigation
         screenStreamRef.current = share.stream;
         setScreenStream(share.stream);
         onScreenShareEnded(share.stream, () => {
-          toast.error("Screen sharing stopped. Re-enable to continue the exam.");
+          setWarnBanner("Screen sharing stopped. Re-enable to continue the exam."); window.setTimeout(() => setWarnBanner(null), 6000);;
           officerPauseRef.current = false;
           setIsOfficerPause(false);
           setPaused(true);
@@ -893,12 +913,12 @@ export function CbtExamPage() {
           setScreenStream(null);
           screenStreamRef.current = null;
         });
-        toast.success("Screen sharing active");
+        examSafeToast.success("Screen sharing active");
       }
       try { primeHaptics(); haptic("start"); } catch { /* ignore */ }
       if (security.fullscreen) {
         const ok = await requestExamFullscreen();
-        if (!ok) { toast.message("Please allow fullscreen to continue the exam"); setFsGate(true); }
+        if (!ok) { examSafeToast.message("Please allow fullscreen to continue the exam"); setFsGate(true); }
       }
       if (!previewMode && student?.studentId && examQ.data?.school_id) {
         // Load existing attempt for stable question set
@@ -1030,8 +1050,8 @@ export function CbtExamPage() {
 
   async function restoreFullscreenFromUser() {
     const ok = await requestExamFullscreen();
-    if (ok) { setFsGate(false); setPaused(false); toast.success("Fullscreen restored"); }
-    else toast.error("Could not enter fullscreen. Tap again or check device permissions.");
+    if (ok) { setFsGate(false); setPaused(false); examSafeToast.success("Fullscreen restored"); }
+    else examSafeToast.error("Could not enter fullscreen. Tap again or check device permissions.");
   }
 
   async function goToResult() {
