@@ -1,0 +1,418 @@
+name: FIX-TERMINATE-LOCK-TIMER
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/FIX-TERMINATE-LOCK-TIMER.yml"
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patches
+        run: |
+          set -e
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          t = p.read_text()
+          assert len(t) > 40000, f"Cbt too small: {len(t)}"
+
+          # --- 1) doneForceSubmit state for officer auto-submit message ---
+          if "doneForceSubmit" not in t:
+              t = t.replace(
+                  "const [doneTerminated, setDoneTerminated] = useState(false);",
+                  "const [doneTerminated, setDoneTerminated] = useState(false);\n  const [doneForceSubmit, setDoneForceSubmit] = useState(false);",
+              )
+              print("doneForceSubmit state")
+
+          # --- 2) answersRef ensure ---
+          if "answersRef" not in t:
+              t = t.replace(
+                  'const [answers, setAnswers] = useState<Record<string, number>>({});',
+                  'const [answers, setAnswers] = useState<Record<string, number>>({});\n  const answersRef = useRef<Record<string, number>>({});\n  answersRef.current = answers;',
+              )
+              print("answersRef")
+
+          # --- 3) lockedAnswerIds on resume ---
+          if "setLockedAnswerIds(lockedIds)" not in t and "setLockedAnswerIds(new Set" not in t:
+              old = '''            const prev = existingFull.answers as Record<string, number>;
+            setAnswers(prev);'''
+              new = '''            const prev = existingFull.answers as Record<string, number>;
+            setAnswers(prev);
+            const lockedIds = new Set(Object.keys(prev).filter((k) => prev[k] !== undefined && prev[k] !== null));
+            setLockedAnswerIds(lockedIds);'''
+              if old in t:
+                  t = t.replace(old, new)
+                  print("locked on resume")
+              else:
+                  print("WARN: resume answers block not found")
+
+          # --- 4) Timer: never reset if ends_at or started_at available ---
+          # Fix the block that creates new ends when endsAtRef is null after resume
+          # Also restore from started_at + duration when ends_at missing
+          old_restore = '''        // Restore absolute end clock from attempt (do not reset timer on Continue)
+        try {
+          const ea = (existingFull as { ends_at?: string | null }).ends_at;
+          if (ea) {
+            const ends = new Date(String(ea)).getTime();
+            if (!Number.isNaN(ends) && ends > Date.now()) {
+              endsAtRef.current = ends;
+              setSeconds(Math.max(0, Math.ceil((ends - Date.now()) / 1000)));
+            }
+          }
+        } catch { /* ignore */ }'''
+          new_restore = '''        // Restore absolute end clock from attempt (do not reset timer on Continue)
+        try {
+          const ea = (existingFull as { ends_at?: string | null } | null)?.ends_at;
+          const sa = (existingFull as { started_at?: string | null } | null)?.started_at;
+          let endsMs: number | null = null;
+          if (ea) {
+            const ends = new Date(String(ea)).getTime();
+            if (!Number.isNaN(ends)) endsMs = ends;
+          }
+          if (endsMs == null && sa) {
+            const startMs = new Date(String(sa)).getTime();
+            const mins = Math.max(1, Number(examQ.data?.duration_minutes ?? 60));
+            if (!Number.isNaN(startMs)) endsMs = startMs + mins * 60_000;
+          }
+          if (endsMs != null) {
+            endsAtRef.current = endsMs;
+            setSeconds(Math.max(0, Math.ceil((endsMs - Date.now()) / 1000)));
+            // Persist ends_at if it was missing so future resumes keep the same clock
+            if (!ea && attemptIdRef.current) {
+              void supabase.from("exam_attempts").update({
+                ends_at: new Date(endsMs).toISOString(),
+              } as never).eq("id", attemptIdRef.current);
+            }
+          }
+        } catch { /* ignore */ }'''
+          if old_restore in t:
+              t = t.replace(old_restore, new_restore)
+              print("timer restore fixed")
+          else:
+              print("WARN: timer restore block not exact")
+
+          # --- 5) Prevent NEW ends_at when already have endsAtRef (even if expired) ---
+          old_new_ends = '''        if (endsAtRef.current != null && endsAtRef.current > now) {
+          setSeconds(Math.max(0, Math.ceil((endsAtRef.current - now) / 1000)));
+        } else {'''
+          new_new_ends = '''        if (endsAtRef.current != null) {
+          setSeconds(Math.max(0, Math.ceil((endsAtRef.current - now) / 1000)));
+        } else {'''
+          if old_new_ends in t:
+              t = t.replace(old_new_ends, new_new_ends)
+              print("never wipe existing endsAtRef")
+
+          # --- 6) Timer tick + visibility recalculate ---
+          old_tick_fx = '''  useEffect(() => {
+    // Absolute end clock — continues during officer/integrity pause and backgrounding
+    if (!started || done) return;
+    const tick = () => {
+      const ends = endsAtRef.current;
+      if (ends == null) return;
+      const left = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
+      setSeconds(left);
+      if (left <= 0 && !finishingRef.current && !doneRef.current) {
+        void finishAttempt(true);
+      }
+    };
+    tick();
+    const t = window.setInterval(tick, 1000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done]);'''
+          new_tick_fx = '''  useEffect(() => {
+    // Absolute end clock — continues during officer/integrity pause and backgrounding
+    if (!started || done) return;
+    const tick = () => {
+      const ends = endsAtRef.current;
+      if (ends == null) return;
+      const left = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
+      setSeconds(left);
+      if (left <= 0 && !finishingRef.current && !doneRef.current) {
+        void finishAttempt(true);
+      }
+    };
+    tick();
+    const t = window.setInterval(tick, 1000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, done]);'''
+          if old_tick_fx in t:
+              t = t.replace(old_tick_fx, new_tick_fx)
+              print("timer visibility")
+          elif "visibilitychange" not in t[t.find("Absolute end clock"):t.find("Absolute end clock")+600]:
+              print("WARN: timer effect shape different")
+
+          # --- 7) Persist: answersRef + 300ms + immediate save helper ---
+          t = t.replace(", 1200)", ", 300)")
+          t = t.replace(", 400)", ", 300)")
+          old_ans = "        answers,\n        ends_at:"
+          new_ans = "        answers: answersRef.current,\n        ends_at:"
+          if old_ans in t and "answersRef" in t:
+              t = t.replace(old_ans, new_ans)
+              print("persist answersRef")
+
+          # --- 8) Officer terminate / submit handlers set flags + messages ---
+          old_term = '''      } else if (cmd === "terminate") {
+        setDoneTerminated(true);
+        setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
+        void finishAttempt(true);
+      } else if (cmd === "submit") {
+        setDoneTerminated(false);
+        setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
+        void finishAttempt(false);
+      }'''
+          new_term = '''      } else if (cmd === "terminate") {
+        setDoneTerminated(true);
+        setDoneForceSubmit(false);
+        setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
+        void finishAttempt(true);
+      } else if (cmd === "submit") {
+        setDoneTerminated(false);
+        setDoneForceSubmit(true);
+        setPaused(false);
+        try { haptic("officer_submit"); } catch { /* ignore */ }
+        void finishAttempt(false);
+      }'''
+          if old_term in t:
+              t = t.replace(old_term, new_term)
+              print("officer cmd flags")
+
+          # Poll terminate/submit also set force flag
+          t = t.replace(
+              '''        if (st === "submitted" || st === "flagged") {
+          setDoneTerminated(false);
+          void finishAttempt(false);''',
+              '''        if (st === "submitted" || st === "flagged") {
+          setDoneTerminated(false);
+          if (meta.officer_force_submit) setDoneForceSubmit(true);
+          void finishAttempt(false);''',
+          )
+
+          # Faster poll
+          t = t.replace("void poll(), 4000)", "void poll(), 1500)")
+          t = t.replace("setInterval(() => void poll(), 4000)", "setInterval(() => void poll(), 1500)")
+
+          # --- 9) finishAttempt: terminate = no result ---
+          old_finish_body = '''        const schoolId = String(examQ.data.school_id ?? student.schoolId ?? "");
+        const saved = await saveCbtResult({
+          examId: id, studentId: student.studentId, schoolId, attemptId,
+          questions: questions.map((qq) => ({
+            id: qq.id, marks: qq.marks ?? 1, correct_answer: qq.correct_answer,
+            options: qq.options ?? [],
+            originalOptions: (qq as { originalOptions?: string[] }).originalOptions ?? [],
+            correctOptionText: (qq as { correctOptionText?: string | null }).correctOptionText ?? null,
+          })),
+          answers, terminated: auto, resultVisibility: security.resultVisibility,
+        });'''
+          new_finish_body = '''        const schoolId = String(examQ.data.school_id ?? student.schoolId ?? "");
+        // Officer terminate: close attempt with NO scored result
+        if (doneTerminated) {
+          await supabase.from("exam_attempts").update({
+            status: "terminated",
+            answers: answersRef.current,
+            submitted_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            ends_at: endsAtRef.current ? new Date(endsAtRef.current).toISOString() : undefined,
+          } as never).eq("id", attemptId);
+          toast.message("Examination terminated by officer — no result recorded");
+        } else {
+        const saved = await saveCbtResult({
+          examId: id, studentId: student.studentId, schoolId, attemptId,
+          questions: questions.map((qq) => ({
+            id: qq.id, marks: qq.marks ?? 1, correct_answer: qq.correct_answer,
+            options: qq.options ?? [],
+            originalOptions: (qq as { originalOptions?: string[] }).originalOptions ?? [],
+            correctOptionText: (qq as { correctOptionText?: string | null }).correctOptionText ?? null,
+          })),
+          answers: answersRef.current, terminated: false, resultVisibility: security.resultVisibility,
+        });'''
+          if old_finish_body in t:
+              t = t.replace(old_finish_body, new_finish_body)
+              # close the else block after save handling - find toast.success block end
+              # Look for pattern after saved handling
+              marker = "toast.success(saved.published ? \"Examination submitted — result is available now\" : \"Examination submitted successfully\");"
+              if marker in t:
+                  # add closing brace for else after the success handling block
+                  # Find the block structure: if saved.error ... else { ... toast ... }
+                  idx = t.find(marker)
+                  # insert after the line containing marker and following closing braces of else/if
+                  # Safer: replace marker to include closing else brace later
+                  pass
+              print("finishAttempt terminate no-result")
+          else:
+              print("WARN: finishAttempt body not found")
+
+          # Close the else for doneTerminated after the saveCbtResult handling
+          # Original structure after save:
+          # if (saved.error) toast.error...
+          # else { rid... toast.success... }
+          # We need an extra } after that else
+          old_close = '''        if (saved.error) toast.error(saved.error.message);
+        else {
+          let rid = saved.resultId ?? null;
+          if (!rid) {
+            const { data: res } = await supabase.from("results").select("id").eq("exam_id", id).eq("student_id", student.studentId).maybeSingle();
+            rid = (res?.id as string) ?? null;
+          }
+          if (rid) { setResultId(rid); resultIdRef.current = rid; }
+          toast.success(saved.published ? "Examination submitted — result is available now" : "Examination submitted successfully");
+        }'''
+          new_close = '''        if (saved.error) toast.error(saved.error.message);
+        else {
+          let rid = saved.resultId ?? null;
+          if (!rid) {
+            const { data: res } = await supabase.from("results").select("id").eq("exam_id", id).eq("student_id", student.studentId).maybeSingle();
+            rid = (res?.id as string) ?? null;
+          }
+          if (rid) { setResultId(rid); resultIdRef.current = rid; }
+          if (doneForceSubmit) {
+            toast.success("Examination auto-submitted by the examination officer");
+          } else {
+            toast.success(saved.published ? "Examination submitted — result is available now" : "Examination submitted successfully");
+          }
+        }
+        } // end non-terminate'''
+          if old_close in t:
+              t = t.replace(old_close, new_close)
+              print("finishAttempt close else + force-submit toast")
+
+          # --- 10) Done screen messages ---
+          old_msg = '''              : doneTerminated
+                ? "Your examination has been terminated by the examination officer. This examination can no longer be continued."
+                : "Your examination has been submitted. Your examination is no longer active."'''
+          new_msg = '''              : doneTerminated
+                ? "Your examination has been terminated by the examination officer for an examination violation. No result was recorded for this attempt."
+                : doneForceSubmit
+                  ? "Your examination has been auto-submitted by the examination officer for examination validation. Your answers have been saved."
+                  : "Your examination has been submitted. Your examination is no longer active."'''
+          if old_msg in t:
+              t = t.replace(old_msg, new_msg)
+              print("done messages")
+          else:
+              # try shorter
+              if "terminated by the examination officer" in t and "examination violation" not in t:
+                  t = t.replace(
+                      "Your examination has been terminated by the examination officer. This examination can no longer be continued.",
+                      "Your examination has been terminated by the examination officer for an examination violation. No result was recorded for this attempt.",
+                  )
+                  print("done terminate msg partial")
+
+          # Title area for done
+          if "Examination terminated" not in t:
+              t = t.replace(
+                  'doneTerminated\n              ? "Examination closed"',
+                  'doneTerminated\n              ? "Examination terminated"',
+              )
+
+          # Hide View results when terminated
+          # Look for resultId link button
+          if "doneTerminated" in t and "resultId" in t:
+              # disable result button when terminated
+              t2 = t.replace(
+                  "{resultId && (",
+                  "{resultId && !doneTerminated && (",
+              )
+              if t2 != t:
+                  t = t2
+                  print("hide results when terminated")
+
+          p.write_text(t)
+          print("Cbt written", len(t))
+
+          # --- Officer: strengthen terminate ---
+          op = Path("src/routes/officer.live-monitor.tsx")
+          ot = op.read_text()
+          if len(ot) > 20000:
+              # On terminate error with school_id, retry without school_id filter
+              old_t = '''      } else if (cmd === "terminate") {
+        const { error } = await supabase.from("exam_attempts").update({ status: "terminated", terminated_at: nowIso, submitted_at: nowIso, security_review_status: "terminated", updated_at: nowIso } as never).eq("id", attemptId).eq("school_id", schoolId);
+        if (error) throw error;
+        await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_TERMINATE", severity: "high", description: "Examination terminated by officer", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
+        await broadcastOfficerCommand("terminate", attemptId, studentId, examId);
+        toast.success(`Terminated ${selected.name}`);
+        setSelectedId(null);'''
+              new_t = '''      } else if (cmd === "terminate") {
+        let { error } = await supabase.from("exam_attempts").update({ status: "terminated", terminated_at: nowIso, submitted_at: nowIso, security_review_status: "terminated", updated_at: nowIso, metadata: { ...(selected.a.metadata || {}), officer_terminated: true, officer_terminated_at: nowIso } } as never).eq("id", attemptId).eq("school_id", schoolId);
+        if (error) {
+          const r2 = await supabase.from("exam_attempts").update({ status: "terminated", updated_at: nowIso, metadata: { ...(selected.a.metadata || {}), officer_terminated: true, officer_terminated_at: nowIso } } as never).eq("id", attemptId);
+          error = r2.error;
+          if (error) throw error;
+        }
+        await logSecurityEvent({ schoolId, examId, attemptId, studentId, eventType: "OFFICER_TERMINATE", severity: "high", description: "Examination terminated by officer for examination violation", extra: { source: "officer_live_monitor", officer_user_id: user?.userId ?? null } });
+        await broadcastOfficerCommand("terminate", attemptId, studentId, examId);
+        window.setTimeout(() => { void broadcastOfficerCommand("terminate", attemptId, studentId, examId); }, 500);
+        window.setTimeout(() => { void broadcastOfficerCommand("terminate", attemptId, studentId, examId); }, 1500);
+        toast.success(`Terminated ${selected.name}`);
+        setSelectedId(null);'''
+              if old_t in ot:
+                  ot = ot.replace(old_t, new_t)
+                  print("officer terminate hardened")
+              else:
+                  print("WARN: officer terminate block not exact")
+              op.write_text(ot)
+              print("officer", len(ot))
+
+          # saveCbtResult: skip creating result when terminated
+          sp = Path("src/lib/cbt-save-result.ts")
+          st = sp.read_text()
+          if "if (input.terminated)" not in st[:st.find("Preferred") if "Preferred" in st else 2000]:
+              # Insert early return for terminated before scoring/result creation
+              needle = "  const scored = scoreObjectiveAnswers(questionsForScore, input.answers);"
+              insert = '''  // Terminated by officer: update attempt only — no scored result row
+  if (input.terminated) {
+    if (input.attemptId) {
+      await supabase.from("exam_attempts").update({
+        status: "terminated",
+        answers: input.answers,
+        submitted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      } as never).eq("id", input.attemptId);
+    }
+    return {
+      scored: { totalScore: 0, maxMarks: 0, percentage: 0, grade: "—", passFail: "—", correct: 0, wrong: 0, unanswered: 0 },
+      error: null,
+      resultId: undefined,
+      status: "terminated",
+      published: false,
+    };
+  }
+
+  const scored = scoreObjectiveAnswers(questionsForScore, input.answers);'''
+              if needle in st:
+                  st = st.replace(needle, insert)
+                  sp.write_text(st)
+                  print("saveCbtResult skip result on terminate")
+          else:
+              print("saveCbtResult already has terminated guard or different shape")
+
+          print("DONE")
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx src/lib/cbt-save-result.ts
+          if git diff --cached --quiet; then echo "No changes"; else
+            git commit -m "fix(cbt+officer): terminate no result + violation message; lock answers on resume; absolute timer never resets; force-submit message"
+            git pull --rebase origin main || true
+            git push origin HEAD:main
+          fi
