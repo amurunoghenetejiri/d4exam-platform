@@ -19,6 +19,8 @@ import { LocalDbBootstrap } from "@/components/LocalDbBootstrap";
 import { OfflineStatusPill } from "@/components/OfflineStatusPill";
 import { NotificationLiveListener } from "@/components/NotificationLiveListener";
 import { NotificationPermissionPrompt } from "@/components/NotificationPermissionPrompt";
+import { AppUpdateGate } from "@/components/AppUpdateGate";
+import { AndroidApkInstallBanner } from "@/components/AndroidApkInstallBanner";
 import { useSessionUser, rememberLastPath, readLastRole, readPreferredRole, roleHome, roleFromPath, type AppRole } from "@/lib/session";
 import { initNativePushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
@@ -287,6 +289,8 @@ function RootComponent() {
       <OfflineStatusPill />
       <NotificationLiveListener />
       <NotificationPermissionPrompt />
+      <AppUpdateGate />
+      <AndroidApkInstallBanner />
       <Outlet />
       <NativeBootstrap />
       <AnimatedSplash />
