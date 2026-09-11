@@ -19,7 +19,7 @@ function haptic(kind: SecurityAlertKind) {
   fireHaptic(map[kind]);
 }
 
-const ALERT_COOLDOWN_MS = 1400;
+const ALERT_COOLDOWN_MS = 1100;
 
 const ALERT_COPY: Record<
   SecurityAlertKind,
@@ -84,7 +84,6 @@ export function ExamCameraPip({
   maxFaceWarnings?: number;
   stream?: MediaStream | null;
   onSecurityEvent?: (event: FaceSecurityEvent) => void;
-  /** Parent owns stream — called when tracks die so parent can re-acquire getUserMedia once */
   onNeedReconnect?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -93,7 +92,7 @@ export function ExamCameraPip({
   const lastAlertRef = useRef(0);
   const lastStateRef = useRef<FaceState>("unavailable");
   const pendingRef = useRef<{ state: FaceState; since: number } | null>(null);
-  const STABILITY_MS = 200;
+  const STABILITY_MS = 150;
   const ownStreamRef = useRef<MediaStream | null>(null);
   const acquiringRef = useRef(false);
   const dragState = useRef<{
@@ -128,7 +127,6 @@ export function ExamCameraPip({
       /* ignore */
     }
 
-    // No small sonner toasts during CBT — parent shows the top integrity banner only.
     onSecRef.current?.({
       kind,
       faceCount,
@@ -405,14 +403,18 @@ export function ExamCameraPip({
           if (nullStreak >= 10) applyState("unclear", null);
         }
       }
-      if (!cancelled) timer = window.setTimeout(() => void tick(), 250);
+      if (!cancelled) timer = window.setTimeout(() => void tick(), 180);
     };
 
     const bootEngine = async () => {
       try {
         await waitVideoReady(3000);
         if (cancelled) return;
-        try { faceEngineRef.current?.close?.(); } catch { /* ignore */ }
+        try {
+          faceEngineRef.current?.close?.();
+        } catch {
+          /* ignore */
+        }
         faceEngineRef.current = null;
         let engine: FaceEngine | null = null;
         for (let i = 0; i < 3 && !cancelled; i++) {
@@ -425,17 +427,16 @@ export function ExamCameraPip({
           return;
         }
         if (!engine) {
-          // Offline-first: no CDN face engine. Camera-only.
           setFaceStatus("ok");
           lastStateRef.current = "ok";
           onSecRef.current?.({ kind: "ok", faceCount: null, at: new Date().toISOString() });
           return;
-        }faceEngineRef.current = engine;
+        }
+        faceEngineRef.current = engine;
         nullStreak = 0;
         setFaceStatus((s) => (s === "unavailable" || s === "unclear" ? "unclear" : s));
         void tick();
       } catch {
-        // Offline: continue camera-only
         setFaceStatus("ok");
         lastStateRef.current = "ok";
       }
