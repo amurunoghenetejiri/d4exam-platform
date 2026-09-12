@@ -119,7 +119,12 @@ export function ExamCameraPip({
     const now = Date.now();
     if (now - lastAlertRef.current < ALERT_COOLDOWN_MS) return;
     lastAlertRef.current = now;
-    // Haptic once in parent onFaceSecurityEvent only (avoid motor cancel)
+    try {
+      refreshHapticUnlock();
+      haptic(kind);
+    } catch {
+      /* ignore */
+    }
     onSecRef.current?.({
       kind,
       faceCount,
@@ -273,7 +278,7 @@ export function ExamCameraPip({
       tr.addEventListener("ended", onEnded);
       tr.addEventListener("mute", onMute);
       tr.addEventListener("unmute", onUnmute);
-    }
+    };
     return () => {
       for (const tr of tracks) {
         tr.removeEventListener("ended", onEnded);
