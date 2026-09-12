@@ -1,0 +1,123 @@
+name: APPLY-FACE-HAPTIC-SPEED
+on:
+  workflow_dispatch:
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Patch ExamCameraPip + CbtExamSession + native vibrate cap
+        run: |
+          python3 << 'PY'
+          from pathlib import Path
+          import re
+
+          pip = Path("src/components/cbt/ExamCameraPip.tsx")
+          t = pip.read_text()
+          t = t.replace("const ALERT_COOLDOWN_MS = 1100;", "const ALERT_COOLDOWN_MS = 900;")
+          t = t.replace("const ALERT_COOLDOWN_MS = 1400;", "const ALERT_COOLDOWN_MS = 900;")
+          t = t.replace("const STABILITY_MS = 150;", "const STABILITY_MS = 50;")
+          t = t.replace("const STABILITY_MS = 200;", "const STABILITY_MS = 50;")
+          t = t.replace(
+              "if (!cancelled) timer = window.setTimeout(() => void tick(), 180);",
+              "if (!cancelled) timer = window.setTimeout(() => void tick(), 100);",
+          )
+          t = t.replace(
+              "if (!cancelled) timer = window.setTimeout(() => void tick(), 250);",
+              "if (!cancelled) timer = window.setTimeout(() => void tick(), 100);",
+          )
+          t = t.replace('if (nullStreak >= 8) applyState("none", 0);', 'if (nullStreak >= 3) applyState("none", 0);')
+          t = t.replace("Date.now() - startedAt > 1500 && nullStreak >= 5", "Date.now() - startedAt > 600 && nullStreak >= 2")
+          t = t.replace("nullStreak >= 12", "nullStreak >= 6")
+          t = t.replace("window.setTimeout(r, 600 * (i + 1))", "window.setTimeout(r, 200 * (i + 1))")
+          t2 = re.sub(
+              r"(const fireAlert = useCallback\(\(kind: SecurityAlertKind, faceCount: number \| null\) => \{\n    const now = Date\.now\(\);\n    if \(now - lastAlertRef\.current < ALERT_COOLDOWN_MS\) return;\n    lastAlertRef\.current = now;\n)\n\n    try \{\n      refreshHapticUnlock\(\);\n      haptic\(kind\);\n    \} catch \{\n      /\* ignore \*/\n    \}\n\n    (//[^\n]*\n    )?onSecRef",
+              r"\1    // Haptic once in parent onFaceSecurityEvent only\n    onSecRef",
+              t,
+          )
+          if t2 != t:
+              t = t2
+              print("fireAlert haptic removed")
+          else:
+              print("fireAlert already without haptic or pattern differs")
+          pip.write_text(t)
+          print("pip ok", "STABILITY_MS = 50" in t, "tick(), 100" in t)
+
+          sess = Path("src/components/cbt/CbtExamSession.impl.tsx")
+          s = sess.read_text()
+          if "Haptic FIRST" not in s:
+              old = '''  const onFaceSecurityEvent = useCallback((ev: FaceSecurityEvent) => {
+    faceStatusForLiveRef.current = ev.kind === "ok" ? "ok" : ev.kind;
+    if (previewMode || doneRef.current) return;
+    const mapped = mapFaceSecurityEvent(ev.kind, ev.faceCount);
+    const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
+    const studentId = student?.studentId;
+    if (!schoolId || !studentId || !id) return;
+    const isViolation = ev.kind === "none" || ev.kind === "multi" || ev.kind === "camera_blocked";
+    if (isViolation) faceWarnCountRef.current += 1;
+    // Vibration on every face integrity violation (native ExamImmersive on APK)
+    if (isViolation) {
+      try {
+        if (ev.kind === "multi") haptic("multi");
+        else if (ev.kind === "camera_blocked") haptic("camera_blocked");
+        else haptic("none"); // no face / unclear
+      } catch { /* ignore */ }
+    }
+    void logSecurityEvent({'''
+              new = '''  const onFaceSecurityEvent = useCallback((ev: FaceSecurityEvent) => {
+    faceStatusForLiveRef.current = ev.kind === "ok" ? "ok" : ev.kind;
+    if (previewMode || doneRef.current) return;
+    const isViolation = ev.kind === "none" || ev.kind === "multi" || ev.kind === "camera_blocked" || ev.kind === "unclear";
+    // Haptic FIRST — never blocked by missing ids / logging
+    if (isViolation) {
+      try {
+        if (ev.kind === "multi") haptic("multi");
+        else if (ev.kind === "camera_blocked") haptic("camera_blocked");
+        else haptic("none");
+      } catch { /* ignore */ }
+    }
+    const mapped = mapFaceSecurityEvent(ev.kind, ev.faceCount);
+    const schoolId = String(examQ.data?.school_id ?? student?.schoolId ?? session?.schoolId ?? "");
+    const studentId = student?.studentId;
+    if (!schoolId || !studentId || !id) return;
+    if (ev.kind === "none" || ev.kind === "multi" || ev.kind === "camera_blocked") {
+      faceWarnCountRef.current += 1;
+    }
+    void logSecurityEvent({'''
+              if old in s:
+                  s = s.replace(old, new)
+                  print("session haptic first applied")
+              else:
+                  print("session pattern not found")
+                  i = s.find("onFaceSecurityEvent")
+                  print(s[i:i+500])
+          else:
+              print("session already has Haptic FIRST")
+          s = s.replace(
+              "if (!isViolation) return;\n    if (faceWarnCountRef.current < maxW) {",
+              'if (ev.kind !== "none" && ev.kind !== "multi" && ev.kind !== "camera_blocked") return;\n    if (faceWarnCountRef.current < maxW) {',
+          )
+          sess.write_text(s)
+
+          nat = Path("native-android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java")
+          if nat.exists():
+              n = nat.read_text()
+              n2 = n.replace(
+                  "long ms = Math.max(80, Math.min(total > 0 ? total : 220, 1200));",
+                  "long ms = Math.max(80, Math.min(total > 0 ? total : 220, 4000));",
+              )
+              nat.write_text(n2)
+              print("native cap", n != n2)
+          PY
+      - name: Commit and push
+        run: |
+          git config user.name "d4exam-bot"
+          git config user.email "bot@d4exam.local"
+          git add -A
+          git diff --cached --stat
+          git commit -m "fix: faster face detection response + haptic before early return" || echo "nothing to commit"
+          git push
