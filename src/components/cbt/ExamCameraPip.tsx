@@ -19,7 +19,7 @@ function haptic(kind: SecurityAlertKind) {
   fireHaptic(map[kind]);
 }
 
-const ALERT_COOLDOWN_MS = 1100;
+const ALERT_COOLDOWN_MS = 900;
 
 const ALERT_COPY: Record<
   SecurityAlertKind,
@@ -92,7 +92,7 @@ export function ExamCameraPip({
   const lastAlertRef = useRef(0);
   const lastStateRef = useRef<FaceState>("unavailable");
   const pendingRef = useRef<{ state: FaceState; since: number } | null>(null);
-  const STABILITY_MS = 150;
+  const STABILITY_MS = 50;
   const ownStreamRef = useRef<MediaStream | null>(null);
   const acquiringRef = useRef(false);
   const dragState = useRef<{
@@ -119,14 +119,7 @@ export function ExamCameraPip({
     const now = Date.now();
     if (now - lastAlertRef.current < ALERT_COOLDOWN_MS) return;
     lastAlertRef.current = now;
-
-    try {
-      refreshHapticUnlock();
-      haptic(kind);
-    } catch {
-      /* ignore */
-    }
-
+    // Haptic once in parent onFaceSecurityEvent only (avoid motor cancel)
     onSecRef.current?.({
       kind,
       faceCount,
@@ -378,16 +371,16 @@ export function ExamCameraPip({
         if (v.readyState < 2 || v.videoWidth < 16) {
           if (Date.now() - startedAt > 1200) {
             nullStreak += 1;
-            if (nullStreak >= 8) applyState("none", 0);
+            if (nullStreak >= 3) applyState("none", 0);
           }
         } else {
           const n = await faceEngineRef.current.count(v);
           if (cancelled) return;
           if (n == null) {
             nullStreak += 1;
-            if (Date.now() - startedAt > 1500 && nullStreak >= 5) {
+            if (Date.now() - startedAt > 600 && nullStreak >= 2) {
               applyState("none", 0);
-            } else if (nullStreak >= 12) {
+            } else if (nullStreak >= 6) {
               applyState("unclear", null);
             }
           } else {
@@ -403,7 +396,7 @@ export function ExamCameraPip({
           if (nullStreak >= 10) applyState("unclear", null);
         }
       }
-      if (!cancelled) timer = window.setTimeout(() => void tick(), 180);
+      if (!cancelled) timer = window.setTimeout(() => void tick(), 100);
     };
 
     const bootEngine = async () => {
@@ -420,7 +413,7 @@ export function ExamCameraPip({
         for (let i = 0; i < 3 && !cancelled; i++) {
           engine = await createFaceEngine();
           if (engine) break;
-          await new Promise((r) => window.setTimeout(r, 600 * (i + 1)));
+          await new Promise((r) => window.setTimeout(r, 200 * (i + 1)));
         }
         if (cancelled) {
           engine?.close();
