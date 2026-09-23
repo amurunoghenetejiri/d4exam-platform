@@ -1074,23 +1074,59 @@ export function LiveMonitorPage({ courseIds = null, pageTitle }: LiveMonitorPage
     const from = dragIdRef.current;
     if (!from || from === overId) return;
   }
-  function onCardDrop(overId: string) {
+  function onCardDrop(overId: string, place: "before" | "after" | "swap" = "swap") {
     const from = dragIdRef.current;
     dragIdRef.current = null;
     if (!from || from === overId) return;
     setCardOrderIds((prev) => {
       const base = prev.length ? [...prev] : filtered.map((c) => c.a.id);
-      // include any new cards
       for (const c of filtered) {
         if (!base.includes(c.a.id)) base.push(c.a.id);
       }
       const fi = base.indexOf(from);
-      const ti = base.indexOf(overId);
+      let ti = base.indexOf(overId);
       if (fi < 0 || ti < 0) return base;
       base.splice(fi, 1);
-      base.splice(ti, 0, from);
+      ti = base.indexOf(overId);
+      if (ti < 0) {
+        base.push(from);
+        return base;
+      }
+      if (place === "before") {
+        base.splice(ti, 0, from);
+      } else if (place === "after") {
+        base.splice(ti + 1, 0, from);
+      } else {
+        // swap: put dragged where target was, target takes dragged's old slot
+        const target = base[ti]!;
+        base[ti] = from;
+        // insert target at original from index (adjusted)
+        const insertAt = fi > ti ? fi : fi;
+        // after removing from, indices shifted — recompute clean swap:
+        // simpler: remove both and reinsert
+        // Rebuild with swap of positions in original order snapshot
+        const snap = prev.length ? [...prev] : filtered.map((c) => c.a.id);
+        for (const c of filtered) {
+          if (!snap.includes(c.a.id)) snap.push(c.a.id);
+        }
+        const a = snap.indexOf(from);
+        const b = snap.indexOf(overId);
+        if (a >= 0 && b >= 0) {
+          const tmp = snap[a]!;
+          snap[a] = snap[b]!;
+          snap[b] = tmp;
+          return snap;
+        }
+        base.splice(ti, 0, from);
+      }
       return base;
     });
+  }
+
+  function onCardDropAtEdge(overId: string, clientX: number, rect: DOMRect) {
+    const mid = rect.left + rect.width / 2;
+    const place = clientX < mid ? "before" : "after";
+    onCardDrop(overId, place);
   }
 
   const selected = cards.find((c) => c.a.id === selectedId) ?? null;
@@ -1589,7 +1625,7 @@ export function LiveMonitorPage({ courseIds = null, pageTitle }: LiveMonitorPage
                   dragId={c.a.id}
                   onDragStart={onCardDragStart}
                   onDragOver={onCardDragOver}
-                  onDrop={onCardDrop}
+                  onDrop={(id, place) => onCardDrop(id, place || "swap")}
                   onClick={() => setSelectedId(c.a.id)}
                 />
               ))}
@@ -1603,7 +1639,7 @@ export function LiveMonitorPage({ courseIds = null, pageTitle }: LiveMonitorPage
                     dragId={c.a.id}
                   onDragStart={onCardDragStart}
                   onDragOver={onCardDragOver}
-                  onDrop={onCardDrop}
+                  onDrop={(id, place) => onCardDrop(id, place || "swap")}
                   onClick={() => setSelectedId(c.a.id)}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-lg border bg-white p-2 text-left shadow-sm transition hover:shadow-md sm:gap-3 sm:rounded-xl sm:p-3",
@@ -2049,7 +2085,7 @@ function StudentCard({
   dragId?: string;
   onDragStart?: (id: string) => void;
   onDragOver?: (e: React.DragEvent, id: string) => void;
-  onDrop?: (id: string) => void;
+  onDrop?: (id: string, place?: "before" | "after" | "swap") => void;
 }) {
   return (
     <button
@@ -2067,19 +2103,72 @@ function StudentCard({
       onDragOver={(e) => {
         if (!dragId) return;
         e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
         onDragOver?.(e, dragId);
       }}
       onDrop={(e) => {
         if (!dragId) return;
         e.preventDefault();
         e.stopPropagation();
-        onDrop?.(dragId);
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const mid = rect.left + rect.width / 2;
+        // Left half = insert before, right half = insert after (rearrange);
+        // center band still swaps via onDrop default when nearly center
+        const place =
+          e.clientX < mid - rect.width * 0.2
+            ? "before"
+            : e.clientX > mid + rect.width * 0.2
+              ? "after"
+              : "swap";
+        onDrop?.(dragId, place);
       }}
+      onTouchStart={(e) => {
+        if (!dragId) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        (e.currentTarget as HTMLElement).dataset.d4LongPress = "0";
+        const timer = window.setTimeout(() => {
+          (e.currentTarget as HTMLElement).dataset.d4LongPress = "1";
+          onDragStart?.(dragId);
+          try {
+            if (navigator.vibrate) navigator.vibrate(20);
+          } catch { /* ignore */ }
+        }, 380);
+        (e.currentTarget as HTMLElement).dataset.d4LpTimer = String(timer);
+      }}
+      onTouchEnd={(e) => {
+        const el = e.currentTarget as HTMLElement;
+        const timer = Number(el.dataset.d4LpTimer || 0);
+        if (timer) window.clearTimeout(timer);
+        if (el.dataset.d4LongPress === "1" && dragId) {
+          // Find element under finger
+          const tch = e.changedTouches[0];
+          if (tch) {
+            const under = document.elementFromPoint(tch.clientX, tch.clientY) as HTMLElement | null;
+            const card = under?.closest?.("[data-d4-card-id]") as HTMLElement | null;
+            const overId = card?.dataset?.d4CardId;
+            if (overId && overId !== dragId) {
+              const rect = card.getBoundingClientRect();
+              const mid = rect.left + rect.width / 2;
+              const place =
+                tch.clientX < mid - rect.width * 0.2
+                  ? "before"
+                  : tch.clientX > mid + rect.width * 0.2
+                    ? "after"
+                    : "swap";
+              onDrop?.(overId, place);
+            }
+          }
+        }
+        el.dataset.d4LongPress = "0";
+      }}
+      data-d4-card-id={dragId || undefined}
       className={cn(
         "overflow-hidden rounded-lg border bg-white text-left shadow-sm transition hover:shadow-md sm:rounded-xl sm:border-2",
         severityBorderClass(sev),
-        dragId && "cursor-grab active:cursor-grabbing",
+        dragId && "cursor-grab active:cursor-grabbing touch-manipulation",
       )}
+      title={dragId ? "Long-press or drag to rearrange" : undefined}
     >
       <div
         className={cn(

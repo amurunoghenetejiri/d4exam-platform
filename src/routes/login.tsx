@@ -184,6 +184,20 @@ async function goToRoleHome(role: string, rememberDevice = true) {
   } catch {
     /* ignore */
   }
+  // Warm session so dashboards have schoolId before first paint
+  try {
+    const needsSchool = role !== "super_admin";
+    for (let i = 0; i < (needsSchool ? 3 : 1); i++) {
+      const u = await Promise.race([
+        fetchSessionUser(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_500)),
+      ]);
+      if (u && (!needsSchool || u.schoolId)) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  } catch {
+    /* ignore */
+  }
   try {
     const addFlow = consumeAddAccountFlow();
     if (rememberDevice || addFlow || listSavedAccounts().length > 0) {

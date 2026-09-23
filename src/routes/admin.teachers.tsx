@@ -161,6 +161,7 @@ function Page() {
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [staffId, setStaffId] = useState("");
+  const [createCourses, setCreateCourses] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [assignBusy, setAssignBusy] = useState(false);
 
@@ -172,7 +173,7 @@ function Page() {
     }
     setBusy(true);
     try {
-      await createOne({
+      const result = await createOne({
         data: {
           role: "teacher",
           firstName: firstName.trim(),
@@ -181,15 +182,36 @@ function Page() {
           identifier: staffId.trim(),
         },
       });
+      const teacherRowId = String((result as { id?: string })?.id || "");
+      if (teacherRowId && createCourses.size && schoolId) {
+        const { error: linkErr } = await supabase.from("teacher_courses").insert(
+          [...createCourses].map((course_id) => ({
+            school_id: schoolId,
+            teacher_id: teacherRowId,
+            course_id,
+          })) as never,
+        );
+        if (linkErr) {
+          toast.warning(`Teacher created but courses not linked: ${linkErr.message}`);
+        }
+      }
+      const courseNames = courses
+        .filter((c) => createCourses.has(c.id))
+        .map((c) => c.code)
+        .join(", ");
       toast.success(
-        `Teacher created. Login with school code + Staff ID; password = Staff ID (${staffId.trim()}).`,
+        courseNames
+          ? `Teacher created with courses: ${courseNames}. Password = Staff ID (${staffId.trim()}).`
+          : `Teacher created. Login with school code + Staff ID; password = Staff ID (${staffId.trim()}).`,
       );
       setFirstName("");
       setLastName("");
       setEmail("");
       setStaffId("");
+      setCreateCourses(new Set());
       await qc.invalidateQueries({ queryKey: ["rows"] });
       await teachersQ.refetch();
+      await linksQ.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not create teacher");
     } finally {
@@ -453,6 +475,48 @@ function Page() {
                 required
                 minLength={4}
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Assign courses (optional — select one or more)</Label>
+              {courses.length === 0 ? (
+                <p className="text-xs text-slate-500">
+                  No courses yet. Create courses first, or assign them after creating the teacher.
+                </p>
+              ) : (
+                <div className="max-h-40 space-y-1.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+                  {courses.map((c) => {
+                    const on = createCourses.has(c.id);
+                    return (
+                      <label
+                        key={c.id}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm",
+                          on ? "bg-primary/10 font-semibold text-primary" : "hover:bg-white",
+                        )}
+                      >
+                        <Checkbox
+                          checked={on}
+                          onCheckedChange={() => {
+                            setCreateCourses((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(c.id)) next.delete(c.id);
+                              else next.add(c.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span>
+                          {c.code}
+                          <span className="ml-1 font-normal text-slate-500">{c.name}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                Same as mapping officers to a department — pick every course this teacher handles.
+              </p>
             </div>
             <Button type="submit" disabled={busy || !schoolId} className="font-semibold">
               {busy ? (

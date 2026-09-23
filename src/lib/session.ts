@@ -421,6 +421,122 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     (roleRes.data ?? []).map((r) => (r as { school_id?: string | null }).school_id).find(Boolean) ||
     null;
 
+  // Resolve profile id reliably (auth uid ≠ profiles.id in many rows)
+  let resolvedPid: string | null =
+    (rpcCtx?.profile_id ? String(rpcCtx.profile_id) : null) ||
+    (profile?.id ? String(profile.id as string) : null) ||
+    null;
+
+  if (!resolvedPid) {
+    try {
+      const { data: p2 } = await supabase
+        .from("profiles")
+        .select("id, school_id, full_name, email, status")
+        .eq("auth_user_id", user.id)
+        .maybeSingle();
+      if (p2?.id) {
+        resolvedPid = String(p2.id);
+        if (!profile) profile = p2 as never;
+        if (!schoolId && p2.school_id) schoolId = String(p2.school_id);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // user_roles may be keyed by auth uid OR profiles.id — query both
+  if (!schoolId || roles.length === 0) {
+    try {
+      const ids = Array.from(new Set([user.id, resolvedPid].filter(Boolean))) as string[];
+      for (const uid of ids) {
+        const { data: roleRows } = await supabase
+          .from("user_roles")
+          .select("role, school_id, user_id")
+          .eq("user_id", uid);
+        if (roleRows?.length) {
+          roles = [
+            ...new Set([
+              ...roles,
+              ...roleRows.map((r) => r.role as AppRole).filter(Boolean),
+            ]),
+          ];
+          if (!schoolId) {
+            schoolId =
+              roleRows.map((r) => r.school_id).find(Boolean) || schoolId;
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Role tables always carry school_id for staff/students
+  if (!schoolId && resolvedPid) {
+    try {
+      const [{ data: eo }, { data: te }, { data: st }] = await Promise.all([
+        supabase
+          .from("examination_officers")
+          .select("school_id, officer_id, status")
+          .eq("profile_id", resolvedPid)
+          .maybeSingle(),
+        supabase
+          .from("teachers")
+          .select("school_id, staff_id, employment_status")
+          .eq("profile_id", resolvedPid)
+          .maybeSingle(),
+        supabase
+          .from("students")
+          .select("school_id, matric_number, student_id, status")
+          .eq("profile_id", resolvedPid)
+          .maybeSingle(),
+      ]);
+      if (eo?.school_id) {
+        schoolId = String(eo.school_id);
+        if (!roles.includes("examination_officer")) roles = [...roles, "examination_officer"];
+      }
+      if (te?.school_id) {
+        if (!schoolId) schoolId = String(te.school_id);
+        if (!roles.includes("teacher")) roles = [...roles, "teacher"];
+      }
+      if (st?.school_id) {
+        if (!schoolId) schoolId = String(st.school_id);
+        if (!roles.includes("student")) roles = [...roles, "student"];
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // school_admins table (optional)
+  if (!schoolId && resolvedPid) {
+    try {
+      const { data: sa } = await supabase
+        .from("school_admins")
+        .select("school_id")
+        .eq("profile_id", resolvedPid)
+        .maybeSingle();
+      if (sa?.school_id) {
+        schoolId = String(sa.school_id);
+        if (!roles.includes("school_admin")) roles = [...roles, "school_admin"];
+      }
+    } catch {
+      /* table may not exist */
+    }
+  }
+
+  // Inject preferred/pending role only AFTER school recovery attempts
+  {
+    const preferred = readPreferredRole() || readPendingLoginRole();
+    if (
+      preferred &&
+      !roles.includes(preferred) &&
+      ["school_admin", "examination_officer", "teacher", "super_admin", "student"].includes(preferred)
+    ) {
+      roles = [...roles, preferred];
+    }
+  }
+
   // FAST EXIT: RPC already resolved identity — only load school branding
   if (roles.length > 0 && (schoolId || roles.includes("super_admin"))) {
     let schoolName: string | null = null;
