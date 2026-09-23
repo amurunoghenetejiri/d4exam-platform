@@ -1,8 +1,17 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { BookOpen, Check, Loader2, UserPlus, Trash2, UserX } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import {
+  BookOpen,
+  Loader2,
+  MoreVertical,
+  UserPlus,
+  Upload,
+  Trash2,
+  UserX,
+  Check,
+} from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +27,7 @@ import { notifyTeacherCoursesAssigned } from "@/lib/email-notify.functions";
 
 export const Route = createFileRoute("/admin/teachers")({
   head: () => ({
-    meta: [{ title: "Teachers & Course Assignment — D4EXAM" }],
+    meta: [{ title: "Teachers — D4EXAM" }],
   }),
   component: Page,
 });
@@ -27,6 +36,7 @@ type Teacher = {
   id: string;
   staff_id: string;
   employment_status: string;
+  profile_id?: string | null;
   profiles: { full_name: string; email?: string } | null;
 };
 
@@ -43,6 +53,34 @@ type TeacherCourse = {
   course_id: string;
 };
 
+function parseCsv(text: string): string[][] {
+  const lines = text
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.map((line) => {
+    const cells: string[] = [];
+    let cur = "";
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]!;
+      if (ch === '"') {
+        inQ = !inQ;
+        continue;
+      }
+      if (ch === "," && !inQ) {
+        cells.push(cur.trim());
+        cur = "";
+        continue;
+      }
+      cur += ch;
+    }
+    cells.push(cur.trim());
+    return cells;
+  });
+}
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
@@ -50,10 +88,11 @@ function Page() {
   const createOne = useServerFn(createSchoolUser);
   const qc = useQueryClient();
   const enabled = Boolean(schoolId);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const teachersQ = useRows<Teacher>({
     table: "teachers",
-    select: "id, staff_id, employment_status, profiles(full_name, email)",
+    select: "id, staff_id, employment_status, profile_id, profiles(full_name, email)",
     filters: schoolId ? [{ column: "school_id", value: schoolId }] : [],
     order: { column: "created_at", ascending: false },
     limit: 300,
@@ -73,89 +112,13 @@ function Page() {
     table: "teacher_courses",
     select: "id, teacher_id, course_id",
     filters: schoolId ? [{ column: "school_id", value: schoolId }] : [],
-    limit: 1000,
+    limit: 2000,
     enabled,
   });
-
-
-  const [actionBusy, setActionBusy] = useState<string | null>(null);
-
-  async function suspendTeacher(t: Teacher) {
-    if (!confirm(`Suspend ${t.profiles?.full_name || t.staff_id}? They will not access the teacher portal until reactivated.`)) return;
-    setActionBusy(t.id);
-    try {
-      const { error } = await supabase
-        .from("teachers")
-        .update({ employment_status: "suspended", updated_at: new Date().toISOString() } as never)
-        .eq("id", t.id);
-      if (error) throw error;
-      toast.success("Teacher suspended");
-      await qc.invalidateQueries();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not suspend teacher");
-    } finally {
-      setActionBusy(null);
-    }
-  }
-
-  async function reactivateTeacher(t: Teacher) {
-    setActionBusy(t.id);
-    try {
-      const { error } = await supabase
-        .from("teachers")
-        .update({ employment_status: "active", updated_at: new Date().toISOString() } as never)
-        .eq("id", t.id);
-      if (error) throw error;
-      toast.success("Teacher reactivated");
-      await qc.invalidateQueries();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not reactivate teacher");
-    } finally {
-      setActionBusy(null);
-    }
-  }
-
-  async function removeTeacher(t: Teacher) {
-    if (!confirm(`Remove teacher ${t.profiles?.full_name || t.staff_id}? Course assignments will be cleared and access revoked.`)) return;
-    setActionBusy(t.id);
-    try {
-      await supabase.from("teacher_courses").delete().eq("teacher_id", t.id);
-      const { error } = await supabase
-        .from("teachers")
-        .update({ employment_status: "terminated", updated_at: new Date().toISOString() } as never)
-        .eq("id", t.id);
-      if (error) throw error;
-      toast.success("Teacher removed");
-      await qc.invalidateQueries();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not remove teacher");
-    } finally {
-      setActionBusy(null);
-    }
-  }
 
   const teachers = teachersQ.data ?? [];
   const courses = coursesQ.data ?? [];
   const links = linksQ.data ?? [];
-
-  const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
-  const selectedTeacher =
-    teachers.find((t) => t.id === selectedTeacherId) ?? teachers[0] ?? null;
-
-  const assignedCourseIds = useMemo(() => {
-    if (!selectedTeacher) return new Set<string>();
-    return new Set(
-      links.filter((l) => l.teacher_id === selectedTeacher.id).map((l) => l.course_id),
-    );
-  }, [links, selectedTeacher]);
-
-  const [pendingCourses, setPendingCourses] = useState<Set<string> | null>(null);
-  const effectiveCourses = pendingCourses ?? assignedCourseIds;
-
-  function selectTeacher(id: string) {
-    setSelectedTeacherId(id);
-    setPendingCourses(null);
-  }
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -163,7 +126,19 @@ function Page() {
   const [staffId, setStaffId] = useState("");
   const [createCourses, setCreateCourses] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [assignBusy, setAssignBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [courseOpen, setCourseOpen] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+
+  const coursesByTeacher = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const l of links) {
+      if (!m.has(l.teacher_id)) m.set(l.teacher_id, new Set());
+      m.get(l.teacher_id)!.add(l.course_id);
+    }
+    return m;
+  }, [links]);
 
   async function addTeacher(e: React.FormEvent) {
     e.preventDefault();
@@ -183,7 +158,7 @@ function Page() {
         },
       });
       const teacherRowId = String((result as { id?: string })?.id || "");
-      if (teacherRowId && createCourses.size && schoolId) {
+      if (teacherRowId && createCourses.size) {
         const { error: linkErr } = await supabase.from("teacher_courses").insert(
           [...createCourses].map((course_id) => ({
             school_id: schoolId,
@@ -191,18 +166,13 @@ function Page() {
             course_id,
           })) as never,
         );
-        if (linkErr) {
-          toast.warning(`Teacher created but courses not linked: ${linkErr.message}`);
-        }
+        if (linkErr) toast.warning(`Teacher created but courses not linked: ${linkErr.message}`);
       }
-      const courseNames = courses
-        .filter((c) => createCourses.has(c.id))
-        .map((c) => c.code)
-        .join(", ");
+      const names = courses.filter((c) => createCourses.has(c.id)).map((c) => c.code).join(", ");
       toast.success(
-        courseNames
-          ? `Teacher created with courses: ${courseNames}. Password = Staff ID (${staffId.trim()}).`
-          : `Teacher created. Login with school code + Staff ID; password = Staff ID (${staffId.trim()}).`,
+        names
+          ? `Teacher created · courses: ${names}`
+          : `Teacher created. Password = Staff ID (${staffId.trim()}).`,
       );
       setFirstName("");
       setLastName("");
@@ -219,23 +189,11 @@ function Page() {
     }
   }
 
-  function toggleCourse(courseId: string) {
-    setPendingCourses((prev) => {
-      const base = prev ?? new Set(assignedCourseIds);
-      const next = new Set(base);
-      if (next.has(courseId)) next.delete(courseId);
-      else next.add(courseId);
-      return next;
-    });
-  }
-
-  async function saveAssignments() {
-    if (!schoolId || !selectedTeacher) return;
-    setAssignBusy(true);
+  async function setTeacherCourses(teacherId: string, desired: Set<string>) {
+    if (!schoolId) return;
+    setActionBusy(teacherId);
     try {
-      const desired = pendingCourses ?? assignedCourseIds;
-      const current = links.filter((l) => l.teacher_id === selectedTeacher.id);
-
+      const current = links.filter((l) => l.teacher_id === teacherId);
       const toRemove = current.filter((l) => !desired.has(l.course_id));
       if (toRemove.length) {
         const { error } = await supabase
@@ -247,208 +205,204 @@ function Page() {
           );
         if (error) throw error;
       }
-
       const existing = new Set(current.map((l) => l.course_id));
       const toAdd = [...desired].filter((id) => !existing.has(id));
       if (toAdd.length) {
         const { error } = await supabase.from("teacher_courses").insert(
           toAdd.map((course_id) => ({
             school_id: schoolId,
-            teacher_id: selectedTeacher.id,
+            teacher_id: teacherId,
             course_id,
           })) as never,
         );
         if (error) throw error;
       }
-
-      const names = courses
-        .filter((c) => desired.has(c.id))
-        .map((c) => c.code)
-        .join(", ");
-      toast.success(
-        `Courses saved for ${selectedTeacher.profiles?.full_name ?? "teacher"}: ${names || "none"}`,
-      );
+      const t = teachers.find((x) => x.id === teacherId);
+      const names = courses.filter((c) => desired.has(c.id)).map((c) => c.code).join(", ");
+      toast.success(`Courses saved${names ? `: ${names}` : ""}`);
       try {
-        const em = String((selectedTeacher.profiles as { email?: string } | null)?.email || "").trim();
+        const em = String(t?.profiles?.email || "").trim();
         if (em.includes("@") && names) {
           void notifyTeacherCoursesAssigned({
             data: {
               email: em,
-              fullName: selectedTeacher.profiles?.full_name || "Teacher",
+              fullName: t?.profiles?.full_name || "Teacher",
               courseLabels: names.split(", ").filter(Boolean),
             },
           });
         }
-      } catch { /* ignore */ }
-      setPendingCourses(null);
-      await qc.invalidateQueries({ queryKey: ["rows"] });
+      } catch {
+        /* ignore */
+      }
       await linksQ.refetch();
+      await qc.invalidateQueries({ queryKey: ["rows"] });
     } catch (err) {
-      toast.error((err as Error).message || "Could not save assignments");
+      toast.error((err as Error).message || "Could not save courses");
     } finally {
-      setAssignBusy(false);
+      setActionBusy(null);
     }
   }
 
-  function coursesForTeacher(teacherId: string) {
-    const ids = new Set(links.filter((l) => l.teacher_id === teacherId).map((l) => l.course_id));
-    return courses.filter((c) => ids.has(c.id));
+  async function suspendTeacher(t: Teacher) {
+    setMenuOpen(null);
+    setActionBusy(t.id);
+    try {
+      const { error } = await supabase
+        .from("teachers")
+        .update({ employment_status: "suspended", updated_at: new Date().toISOString() } as never)
+        .eq("id", t.id);
+      if (error) throw error;
+      toast.success("Teacher suspended");
+      await qc.invalidateQueries();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not suspend");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function reactivateTeacher(t: Teacher) {
+    setMenuOpen(null);
+    setActionBusy(t.id);
+    try {
+      const { error } = await supabase
+        .from("teachers")
+        .update({ employment_status: "active", updated_at: new Date().toISOString() } as never)
+        .eq("id", t.id);
+      if (error) throw error;
+      toast.success("Teacher reactivated");
+      await qc.invalidateQueries();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reactivate");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function removeTeacher(t: Teacher) {
+    if (!confirm(`Remove ${t.profiles?.full_name || t.staff_id}? They will lose access.`)) return;
+    setMenuOpen(null);
+    setActionBusy(t.id);
+    try {
+      await supabase.from("teacher_courses").delete().eq("teacher_id", t.id);
+      const { error } = await supabase
+        .from("teachers")
+        .update({ employment_status: "terminated", updated_at: new Date().toISOString() } as never)
+        .eq("id", t.id);
+      if (error) throw error;
+      toast.success("Teacher removed");
+      await qc.invalidateQueries();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function importTeachers(file: File) {
+    if (!schoolId) {
+      toast.error("Your account is not linked to a school.");
+      return;
+    }
+    setImportBusy(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (rows.length < 2) {
+        toast.error("CSV needs a header row and at least one teacher.");
+        return;
+      }
+      const header = rows[0]!.map((h) => h.toLowerCase().replace(/\s+/g, "_"));
+      const idx = (names: string[]) => header.findIndex((h) => names.some((n) => h.includes(n)));
+      const iFirst = idx(["first_name", "firstname", "first"]);
+      const iLast = idx(["last_name", "lastname", "last"]);
+      const iName = idx(["full_name", "name", "teacher"]);
+      const iEmail = idx(["email", "mail"]);
+      const iStaff = idx(["staff_id", "staff", "identifier", "id"]);
+      const iCourses = idx(["courses", "course_codes", "course"]);
+
+      let ok = 0;
+      let fail = 0;
+      for (const row of rows.slice(1)) {
+        try {
+          let first = iFirst >= 0 ? row[iFirst] || "" : "";
+          let last = iLast >= 0 ? row[iLast] || "" : "";
+          if (!first && iName >= 0) {
+            const parts = String(row[iName] || "").trim().split(/\s+/);
+            first = parts[0] || "Teacher";
+            last = parts.slice(1).join(" ") || "Staff";
+          }
+          const em = (iEmail >= 0 ? row[iEmail] : "") || "";
+          const staff = (iStaff >= 0 ? row[iStaff] : "") || "";
+          if (!staff || staff.length < 4) {
+            fail += 1;
+            continue;
+          }
+          const emailVal =
+            em.includes("@")
+              ? em.toLowerCase()
+              : `${staff.replace(/[^a-z0-9]+/gi, ".").toLowerCase()}@placeholder.local`;
+          const result = await createOne({
+            data: {
+              role: "teacher",
+              firstName: first || "Teacher",
+              lastName: last || "Staff",
+              email: emailVal,
+              identifier: staff.trim(),
+            },
+          });
+          const teacherRowId = String((result as { id?: string })?.id || "");
+          const courseCell = iCourses >= 0 ? String(row[iCourses] || "") : "";
+          if (teacherRowId && courseCell) {
+            const codes = courseCell
+              .split(/[;|]/)
+              .map((c) => c.trim().toUpperCase())
+              .filter(Boolean);
+            const ids = courses.filter((c) => codes.includes(c.code.toUpperCase())).map((c) => c.id);
+            if (ids.length) {
+              await supabase.from("teacher_courses").insert(
+                ids.map((course_id) => ({
+                  school_id: schoolId,
+                  teacher_id: teacherRowId,
+                  course_id,
+                })) as never,
+              );
+            }
+          }
+          ok += 1;
+        } catch {
+          fail += 1;
+        }
+      }
+      toast.success(`Import done: ${ok} created, ${fail} failed`);
+      await qc.invalidateQueries({ queryKey: ["rows"] });
+      await teachersQ.refetch();
+      await linksQ.refetch();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImportBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  if (!schoolId) {
+    return (
+      <>
+        <PageHeader title="Teachers" description="Manage teachers and course assignments." />
+        <SectionCard title="No school">
+          <p className="text-sm text-slate-500">Your account is not linked to a school yet.</p>
+        </SectionCard>
+      </>
+    );
   }
 
   return (
     <>
       <PageHeader
-        title="Teachers & Course Assignment"
-        description="Live teachers only. Create a teacher, create courses under Courses, then assign them here or on the Courses page."
+        title="Teachers"
+        description="Create teachers, assign multiple courses, import a list, or manage access — same clean layout as Departmental Officers."
       />
-
-      {!schoolId && (
-        <p className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Your account is not linked to a school yet.
-        </p>
-      )}
-
-      <SectionCard
-        title="Assign courses to teacher (live)"
-        description="Only teachers and courses that exist in your school database appear here — no sample data."
-      >
-        {teachersQ.isLoading || coursesQ.isLoading ? (
-          <p className="text-sm text-slate-500">Loading…</p>
-        ) : teachers.length === 0 ? (
-          <EmptyState
-            title="No teachers yet"
-            description="Create a teacher with the form below, then assign courses."
-          />
-        ) : (
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)]">
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-                1. Select teacher
-              </p>
-              <ul className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-                {teachers.map((t) => {
-                  const assigned = coursesForTeacher(t.id);
-                  const active = (selectedTeacher?.id ?? selectedTeacherId) === t.id;
-                  return (
-                    <li key={t.id}>
-                      <button
-                        type="button"
-                        onClick={() => selectTeacher(t.id)}
-                        className={cn(
-                          "w-full rounded-xl border px-3 py-3 text-left transition-colors",
-                          active
-                            ? "border-primary bg-primary/5 ring-2 ring-primary/20"
-                            : "border-slate-200 bg-white hover:border-slate-300",
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-bold text-slate-900">
-                              {t.profiles?.full_name ?? "Teacher"}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {t.staff_id}
-                              {t.profiles?.email ? ` · ${t.profiles.email}` : ""}
-                            </p>
-                            <p className="mt-1 text-xs font-semibold text-primary">
-                              {assigned.length === 0
-                                ? "No courses assigned"
-                                : assigned.map((c) => c.code).join(", ")}
-                            </p>
-                          </div>
-                          <StatusBadge status={t.employment_status || "active"} />
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
-                          {(t.employment_status || "active") === "suspended" ? (
-                            <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={actionBusy === t.id} onClick={() => void reactivateTeacher(t)}>
-                              Reactivate
-                            </Button>
-                          ) : (
-                            <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={actionBusy === t.id} onClick={() => void suspendTeacher(t)}>
-                              <UserX className="mr-1 h-3 w-3" /> Suspend
-                            </Button>
-                          )}
-                          <Button type="button" size="sm" variant="outline" className="h-7 border-red-200 text-xs text-red-600 hover:bg-red-50" disabled={actionBusy === t.id} onClick={() => void removeTeacher(t)}>
-                            <Trash2 className="mr-1 h-3 w-3" /> Remove
-                          </Button>
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-
-            <div>
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-                2. Tick courses for{" "}
-                {selectedTeacher?.profiles?.full_name ?? "teacher"}
-              </p>
-              {courses.length === 0 ? (
-                <EmptyState
-                  title="No courses in this school"
-                  description="Create courses first under Courses, then assign them here."
-                  actionLabel="Go to Courses"
-                  onAction={() => {
-                    window.location.href = "/admin/courses";
-                  }}
-                />
-              ) : !selectedTeacher ? (
-                <EmptyState title="Select a teacher" description="Choose someone from the list." />
-              ) : (
-                <>
-                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
-                    <BookOpen className="h-4 w-4 text-primary" />
-                    <span className="font-semibold text-slate-800">
-                      {selectedTeacher.profiles?.full_name}
-                    </span>
-                    <span className="text-slate-500">
-                      · {effectiveCourses.size} course(s) selected
-                    </span>
-                  </div>
-
-                  <div className="grid max-h-[320px] gap-2 overflow-y-auto sm:grid-cols-2">
-                    {courses.map((c) => {
-                      const checked = effectiveCourses.has(c.id);
-                      return (
-                        <label
-                          key={c.id}
-                          className={cn(
-                            "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition-colors",
-                            checked
-                              ? "border-primary/40 bg-primary/5"
-                              : "border-slate-200 bg-white hover:bg-slate-50",
-                          )}
-                        >
-                          <Checkbox
-                            checked={checked}
-                            onCheckedChange={() => toggleCourse(c.id)}
-                            className="mt-0.5"
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-bold text-slate-900">{c.code}</span>
-                            <span className="block text-xs text-slate-500">{c.name}</span>
-                          </span>
-                          {checked && <Check className="h-4 w-4 shrink-0 text-primary" />}
-                        </label>
-                      );
-                    })}
-                  </div>
-
-                  <Button
-                    className="mt-4 font-semibold"
-                    onClick={() => void saveAssignments()}
-                    disabled={assignBusy || !schoolId}
-                  >
-                    {assignBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Save course assignment
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </SectionCard>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <SectionCard title="Add teacher">
@@ -469,21 +423,20 @@ function Page() {
             </div>
             <div className="space-y-1.5">
               <Label>Staff ID (also their password)</Label>
-              <Input
-                value={staffId}
-                onChange={(e) => setStaffId(e.target.value)}
-                required
-                minLength={4}
-              />
+              <Input value={staffId} onChange={(e) => setStaffId(e.target.value)} required minLength={4} />
             </div>
             <div className="space-y-1.5">
-              <Label>Assign courses (optional — select one or more)</Label>
+              <Label>Courses (select one or more)</Label>
               {courses.length === 0 ? (
                 <p className="text-xs text-slate-500">
-                  No courses yet. Create courses first, or assign them after creating the teacher.
+                  No courses yet.{" "}
+                  <Link to="/admin/courses" className="font-semibold text-primary hover:underline">
+                    Create courses
+                  </Link>{" "}
+                  first.
                 </p>
               ) : (
-                <div className="max-h-40 space-y-1.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <div className="max-h-36 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
                   {courses.map((c) => {
                     const on = createCourses.has(c.id);
                     return (
@@ -514,44 +467,211 @@ function Page() {
                   })}
                 </div>
               )}
-              <p className="text-xs text-slate-500">
-                Same as mapping officers to a department — pick every course this teacher handles.
-              </p>
             </div>
-            <Button type="submit" disabled={busy || !schoolId} className="font-semibold">
-              {busy ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <UserPlus className="mr-2 h-4 w-4" />
-              )}
+            <Button type="submit" disabled={busy} className="font-semibold">
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
               Create teacher
             </Button>
             <p className="text-xs text-slate-500">
-              Login: school code <strong>{schoolCode || "—"}</strong> + email/staff ID · password =
-              Staff ID. Then assign courses above or on{" "}
-              <Link to="/admin/courses" className="font-semibold text-primary hover:underline">
-                Courses
-              </Link>
-              .
+              Login: school code <strong>{schoolCode || "—"}</strong> + email/staff ID · password = Staff ID.
             </p>
           </form>
         </SectionCard>
 
-        <SectionCard title="How assignment works">
-          <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-700">
-            <li>Create teachers on this page (saved to the database).</li>
-            <li>
-              Create courses under{" "}
-              <Link to="/admin/courses" className="font-semibold text-primary hover:underline">
-                Courses
-              </Link>
-              .
-            </li>
-            <li>Assign teachers ↔ courses here or from the Courses page.</li>
-            <li>
-              Teachers only see assigned courses in My Courses, Question Bank, and Exam Builder.
-            </li>
-          </ol>
+        <SectionCard title="Import teachers">
+          <p className="mb-3 text-sm text-slate-600">
+            Upload a CSV with columns like:{" "}
+            <code className="rounded bg-slate-100 px-1 text-xs">
+              first_name,last_name,email,staff_id,courses
+            </code>
+            . Courses can be codes separated by{" "}
+            <code className="rounded bg-slate-100 px-1 text-xs">;</code> (e.g.{" "}
+            <code className="rounded bg-slate-100 px-1 text-xs">CSC101;MTH101</code>).
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void importTeachers(f);
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            disabled={importBusy}
+            className="font-semibold"
+            onClick={() => fileRef.current?.click()}
+          >
+            {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            Import CSV
+          </Button>
+          <p className="mt-3 text-xs text-slate-500">
+            Word/PDF lists should be converted to CSV first (name + staff ID required).
+          </p>
+        </SectionCard>
+      </div>
+
+      <div className="mt-6">
+        <SectionCard title="Existing teachers">
+          {teachersQ.isLoading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : teachers.length === 0 ? (
+            <EmptyState title="No teachers yet" description="Create or import teachers above." />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {teachers.map((t) => {
+                const assigned = coursesByTeacher.get(t.id) ?? new Set<string>();
+                const labels = courses
+                  .filter((c) => assigned.has(c.id))
+                  .map((c) => c.code)
+                  .join(", ");
+                const open = courseOpen === t.id;
+                const menu = menuOpen === t.id;
+                return (
+                  <li
+                    key={t.id}
+                    className="relative flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-bold text-slate-900">
+                        {t.profiles?.full_name ?? "Teacher"}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {t.staff_id}
+                        {t.profiles?.email ? ` · ${t.profiles.email}` : ""}
+                      </p>
+                      <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-primary">
+                        <BookOpen className="h-3.5 w-3.5" />
+                        {labels || "No courses assigned"}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge status={t.employment_status || "active"} />
+
+                      {/* Course picker — one click */}
+                      <div className="relative">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-9 text-xs font-semibold"
+                          disabled={actionBusy === t.id}
+                          onClick={() => {
+                            setCourseOpen(open ? null : t.id);
+                            setMenuOpen(null);
+                          }}
+                        >
+                          Select courses
+                        </Button>
+                        {open ? (
+                          <div className="absolute right-0 z-30 mt-1 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+                            <p className="mb-1 px-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                              Assign courses
+                            </p>
+                            <div className="max-h-48 space-y-1 overflow-y-auto">
+                              {courses.map((c) => {
+                                const on = assigned.has(c.id);
+                                return (
+                                  <label
+                                    key={c.id}
+                                    className={cn(
+                                      "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm",
+                                      on ? "bg-primary/10 font-semibold text-primary" : "hover:bg-slate-50",
+                                    )}
+                                  >
+                                    <Checkbox
+                                      checked={on}
+                                      onCheckedChange={() => {
+                                        const next = new Set(assigned);
+                                        if (next.has(c.id)) next.delete(c.id);
+                                        else next.add(c.id);
+                                        void setTeacherCourses(t.id, next);
+                                      }}
+                                    />
+                                    <span>
+                                      {c.code}
+                                      <span className="ml-1 font-normal text-slate-500">{c.name}</span>
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="mt-2 w-full text-xs"
+                              onClick={() => setCourseOpen(null)}
+                            >
+                              <Check className="mr-1 h-3.5 w-3.5" />
+                              Done
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* ⋮ menu */}
+                      <div className="relative">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-9 w-9 p-0"
+                          disabled={actionBusy === t.id}
+                          onClick={() => {
+                            setMenuOpen(menu ? null : t.id);
+                            setCourseOpen(null);
+                          }}
+                          aria-label="Teacher actions"
+                        >
+                          {actionBusy === t.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <MoreVertical className="h-4 w-4" />
+                          )}
+                        </Button>
+                        {menu ? (
+                          <div className="absolute right-0 z-30 mt-1 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                            {(t.employment_status || "active") === "suspended" ? (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                                onClick={() => void reactivateTeacher(t)}
+                              >
+                                Reactivate teacher
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                                onClick={() => void suspendTeacher(t)}
+                              >
+                                <UserX className="h-3.5 w-3.5" />
+                                Suspend teacher
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                              onClick={() => void removeTeacher(t)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Remove teacher
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </SectionCard>
       </div>
     </>

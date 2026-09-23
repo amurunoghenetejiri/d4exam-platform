@@ -1,8 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { Loader2, ShieldCheck, UserPlus, Trash2, Building2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import {
+  Loader2,
+  UserPlus,
+  Trash2,
+  Building2,
+  Upload,
+  MoreVertical,
+  UserX,
+} from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,12 +40,41 @@ type Officer = {
 
 type Dept = { id: string; name: string };
 
+function parseCsv(text: string): string[][] {
+  const lines = text
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.map((line) => {
+    const cells: string[] = [];
+    let cur = "";
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]!;
+      if (ch === '"') {
+        inQ = !inQ;
+        continue;
+      }
+      if (ch === "," && !inQ) {
+        cells.push(cur.trim());
+        cur = "";
+        continue;
+      }
+      cur += ch;
+    }
+    cells.push(cur.trim());
+    return cells;
+  });
+}
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
   const schoolCode = user?.schoolCode ?? "";
   const createOne = useServerFn(createSchoolUser);
   const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const listQ = useRows<Officer>({
     table: "examination_officers",
@@ -72,6 +109,8 @@ function Page() {
   const [departmentId, setDepartmentId] = useState("");
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
   const [lastCreds, setLastCreds] = useState<{
     officerId: string;
     email: string;
@@ -96,7 +135,6 @@ function Page() {
           departmentId: departmentId || null,
         },
       });
-      // Best-effort map department if column exists
       if (departmentId && result?.id) {
         try {
           await supabase
@@ -141,17 +179,70 @@ function Page() {
       toast.error(
         err instanceof Error
           ? err.message
-          : "Could not map department. Run the SQL migration to add department_id on examination_officers.",
+          : "Could not map department. Run SQL migration for department_id if needed.",
       );
     } finally {
       setActionBusy(null);
     }
   }
 
+  async function suspendOfficer(o: Officer) {
+    setMenuOpen(null);
+    setActionBusy(o.id);
+    try {
+      const { error } = await supabase
+        .from("examination_officers")
+        .update({ status: "suspended", updated_at: new Date().toISOString() } as never)
+        .eq("id", o.id);
+      if (error) throw error;
+      if (o.profile_id) {
+        await supabase
+          .from("profiles")
+          .update({ status: "suspended", updated_at: new Date().toISOString() } as never)
+          .eq("id", o.profile_id);
+      }
+      toast.success("Officer suspended");
+      await qc.invalidateQueries();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not suspend");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function reactivateOfficer(o: Officer) {
+    setMenuOpen(null);
+    setActionBusy(o.id);
+    try {
+      const { error } = await supabase
+        .from("examination_officers")
+        .update({ status: "active", updated_at: new Date().toISOString() } as never)
+        .eq("id", o.id);
+      if (error) throw error;
+      if (o.profile_id) {
+        await supabase
+          .from("profiles")
+          .update({ status: "active", updated_at: new Date().toISOString() } as never)
+          .eq("id", o.profile_id);
+      }
+      toast.success("Officer reactivated");
+      await qc.invalidateQueries();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reactivate");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
   async function removeOfficer(o: Officer) {
-    if (!confirm(`Remove departmental officer ${o.profiles?.full_name || o.officer_id}? They will no longer access the app.`)) {
+    if (
+      !confirm(
+        `Remove departmental officer ${o.profiles?.full_name || o.officer_id}? They will no longer access the app.`,
+      )
+    ) {
       return;
     }
+    setMenuOpen(null);
     setActionBusy(o.id);
     try {
       const { error } = await supabase
@@ -174,11 +265,94 @@ function Page() {
     }
   }
 
+  async function importOfficers(file: File) {
+    if (!schoolId) {
+      toast.error("Your account is not linked to a school.");
+      return;
+    }
+    setImportBusy(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (rows.length < 2) {
+        toast.error("CSV needs a header row and at least one officer.");
+        return;
+      }
+      const header = rows[0]!.map((h) => h.toLowerCase().replace(/\s+/g, "_"));
+      const idx = (names: string[]) => header.findIndex((h) => names.some((n) => h.includes(n)));
+      const iFirst = idx(["first_name", "firstname", "first"]);
+      const iLast = idx(["last_name", "lastname", "last"]);
+      const iName = idx(["full_name", "name", "officer"]);
+      const iEmail = idx(["email", "mail"]);
+      const iOid = idx(["officer_id", "staff_id", "identifier", "id"]);
+      const iDept = idx(["department", "dept", "department_name"]);
+
+      let ok = 0;
+      let fail = 0;
+      for (const row of rows.slice(1)) {
+        try {
+          let first = iFirst >= 0 ? row[iFirst] || "" : "";
+          let last = iLast >= 0 ? row[iLast] || "" : "";
+          if (!first && iName >= 0) {
+            const parts = String(row[iName] || "").trim().split(/\s+/);
+            first = parts[0] || "Officer";
+            last = parts.slice(1).join(" ") || "Staff";
+          }
+          const em = (iEmail >= 0 ? row[iEmail] : "") || "";
+          const oid = (iOid >= 0 ? row[iOid] : "") || "";
+          if (!oid || oid.length < 4) {
+            fail += 1;
+            continue;
+          }
+          const deptLabel = iDept >= 0 ? String(row[iDept] || "").trim().toLowerCase() : "";
+          const dept =
+            departments.find((d) => d.name.toLowerCase() === deptLabel) ||
+            departments.find((d) => d.name.toLowerCase().includes(deptLabel) && deptLabel.length > 2);
+          const emailVal =
+            em.includes("@")
+              ? em.toLowerCase()
+              : `${oid.replace(/[^a-z0-9]+/gi, ".").toLowerCase()}@placeholder.local`;
+          const result = await createOne({
+            data: {
+              role: "examination_officer",
+              firstName: first || "Officer",
+              lastName: last || "Staff",
+              email: emailVal,
+              identifier: oid.trim(),
+              departmentId: dept?.id || null,
+            },
+          });
+          if (dept?.id && result?.id) {
+            try {
+              await supabase
+                .from("examination_officers")
+                .update({ department_id: dept.id } as never)
+                .eq("id", String(result.id));
+            } catch {
+              /* ignore */
+            }
+          }
+          ok += 1;
+        } catch {
+          fail += 1;
+        }
+      }
+      toast.success(`Import done: ${ok} created, ${fail} failed`);
+      await qc.invalidateQueries();
+      await listQ.refetch?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImportBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
   return (
     <>
       <PageHeader
         title="Departmental Officers"
-        description="Create officers, map each one to a department, and remove access when needed."
+        description="Create officers, map each one to a department, import a list, or remove access."
       />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -216,7 +390,6 @@ function Page() {
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-slate-500">Maps this officer to one department (e.g. Computer Engineering).</p>
             </div>
             <Button type="submit" disabled={busy || !schoolId} className="font-semibold">
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
@@ -236,12 +409,34 @@ function Page() {
           ) : null}
         </SectionCard>
 
-        <SectionCard title="How departmental officers work">
-          <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-700">
-            <li>School Admin creates the officer and maps them to a department.</li>
-            <li>That officer only works for exams/students in their department where enforced.</li>
-            <li>Remove (suspend) an officer to revoke app access immediately.</li>
-          </ol>
+        <SectionCard title="Import officers">
+          <p className="mb-3 text-sm text-slate-600">
+            CSV columns:{" "}
+            <code className="rounded bg-slate-100 px-1 text-xs">
+              first_name,last_name,email,officer_id,department
+            </code>
+            . Department should match an existing department name.
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void importOfficers(f);
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            disabled={importBusy || !schoolId}
+            className="font-semibold"
+            onClick={() => fileRef.current?.click()}
+          >
+            {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+            Import CSV
+          </Button>
         </SectionCard>
       </div>
 
@@ -254,7 +449,7 @@ function Page() {
           ) : officers.length === 0 ? (
             <EmptyState
               title="No departmental officers yet"
-              description="Create the first departmental officer with the form above."
+              description="Create or import officers above."
             />
           ) : (
             <ul className="divide-y divide-slate-100">
@@ -263,9 +458,13 @@ function Page() {
                   o.departments?.name ||
                   (o.department_id ? deptName.get(o.department_id) : null) ||
                   "No department";
+                const menu = menuOpen === o.id;
                 return (
-                  <li key={o.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
+                  <li
+                    key={o.id}
+                    className="relative flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0 flex-1">
                       <p className="truncate font-bold text-slate-900">
                         {o.profiles?.full_name ?? "Officer"}
                       </p>
@@ -286,28 +485,60 @@ function Page() {
                         disabled={actionBusy === o.id}
                         onChange={(e) => void mapDepartment(o.id, e.target.value)}
                       >
-                        <option value="">No department</option>
+                        <option value="">Select department…</option>
                         {departments.map((d) => (
                           <option key={d.id} value={d.id}>
                             {d.name}
                           </option>
                         ))}
                       </select>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="border-red-200 text-red-600 hover:bg-red-50"
-                        disabled={actionBusy === o.id || o.status === "suspended"}
-                        onClick={() => void removeOfficer(o)}
-                      >
-                        {actionBusy === o.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                        <span className="ml-1">Remove</span>
-                      </Button>
+                      <div className="relative">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-9 w-9 p-0"
+                          disabled={actionBusy === o.id}
+                          onClick={() => setMenuOpen(menu ? null : o.id)}
+                          aria-label="Officer actions"
+                        >
+                          {actionBusy === o.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <MoreVertical className="h-4 w-4" />
+                          )}
+                        </Button>
+                        {menu ? (
+                          <div className="absolute right-0 z-30 mt-1 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                            {o.status === "suspended" ? (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                                onClick={() => void reactivateOfficer(o)}
+                              >
+                                Reactivate officer
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                                onClick={() => void suspendOfficer(o)}
+                              >
+                                <UserX className="h-3.5 w-3.5" />
+                                Suspend officer
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                              onClick={() => void removeOfficer(o)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Remove officer
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </li>
                 );

@@ -295,10 +295,24 @@ export function FingerprintLockGate() {
     setLocked(false);
     setLogoutConfirm(false);
     try {
-      window.location.href = "/login";
+      appNavigate("/login");
     } catch {
-      window.location.assign("/login");
+      try {
+        window.location.href = "/login";
+      } catch {
+        window.location.assign("/login");
+      }
     }
+    // Hard fallback so unlock screen never traps the user
+    window.setTimeout(() => {
+      try {
+        if (!String(window.location.href || "").includes("login")) {
+          window.location.assign("/login");
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 400);
   }
 
   const evaluateLock = useCallback(() => {
