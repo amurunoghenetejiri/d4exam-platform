@@ -16,6 +16,7 @@ import { clientSignInWithSchoolCode } from "@/lib/auth.client-login";
 import { isNativeShell } from "@/native/platform";
 import { ensureLoginAccount } from "@/lib/ensure-login.functions";
 import { saveCurrentAccountToVault, consumeAddAccountFlow, listSavedAccounts } from "@/lib/account-switcher";
+import { appReplace } from "@/lib/app-navigate";
 
 import {
   Eye,
@@ -190,9 +191,13 @@ async function goToRoleHome(role: string, rememberDevice = true) {
     /* ignore */
   }
   try {
-    window.location.replace(path);
+    appReplace(path);
   } catch {
-    window.location.href = path;
+    try {
+      window.location.replace(path);
+    } catch {
+      window.location.href = path;
+    }
   }
   return true;
 }

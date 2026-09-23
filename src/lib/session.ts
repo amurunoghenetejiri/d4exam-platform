@@ -460,7 +460,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
       (typeof profile?.full_name === "string" ? profile.full_name.trim() : "") ||
       user.email ||
       "";
-    clearPendingLoginRole();
+    if (primaryRoleFast) clearPendingLoginRole();
     seedSchoolBrandFromSession(schoolId, schoolName, schoolLogoUrl);
     return {
       userId: user.id,
@@ -472,7 +472,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
       schoolName,
       schoolCode,
       schoolLogoUrl,
-      roles,
+      roles: primaryRoleFast && !roles.includes(primaryRoleFast) ? [...roles, primaryRoleFast] : roles,
       role: primaryRoleFast,
       identifier: rpcCtx?.officer_id || rpcCtx?.staff_id || rpcCtx?.matric || (profile?.email as string | undefined) || user.email || null,
       identifierLabel: rpcCtx?.officer_id ? "Officer ID" : rpcCtx?.staff_id ? "Staff ID" : rpcCtx?.matric ? "Matric" : "Email",
@@ -595,6 +595,10 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     "student",
   ];
   const preferred = readPreferredRole() || readPendingLoginRole();
+  // Keep preferred staff role even if user_roles lag / RLS delays (prevents admin→login loop)
+  if (preferred && !roles.includes(preferred) && ["school_admin", "examination_officer", "teacher", "super_admin"].includes(preferred)) {
+    roles = [...roles, preferred];
+  }
   const primaryRole =
     (preferred && roles.includes(preferred) ? preferred : null) ||
     priority.find((r) => roles.includes(r)) ||
@@ -614,6 +618,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     user.email ||
     "";
 
+  if (primaryRole) clearPendingLoginRole();
   seedSchoolBrandFromSession(schoolId, schoolName, schoolLogoUrl);
   return {
     userId: user.id,

@@ -3,6 +3,7 @@ import { redirect } from "@tanstack/react-router";
 import {
   fetchSessionUser,
   readPendingLoginRole,
+  readPreferredRole,
   clearPendingLoginRole,
   roleHome,
   type AppRole,
@@ -120,16 +121,23 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     // Last resort: valid Supabase session + role we just logged in with (avoids bounce to /login)
     try {
       const { data: sess } = await supabase.auth.getSession();
-      const pending = readPendingLoginRole();
+      const pending = readPendingLoginRole() || readPreferredRole();
       if (sess.session?.user && pending && allowed.includes(pending)) {
         try {
           const hard = await Promise.race([
             fetchSessionUser(),
             new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_500)),
           ]);
-          if (hard && (hard.role === "super_admin" || hard.schoolId)) {
+          // Accept resolved role even if schoolId is still hydrating (admin/officer login loop fix)
+          if (
+            hard &&
+            (hard.role === "super_admin" ||
+              hard.schoolId ||
+              (hard.role && allowed.includes(hard.role as never)) ||
+              allowed.some((r) => hard.roles?.includes(r)))
+          ) {
             if (queryClient) queryClient.setQueryData(["session-user"], hard);
-            clearPendingLoginRole();
+            if (hard.role || hard.schoolId) clearPendingLoginRole();
             return { user: hard };
           }
         } catch {

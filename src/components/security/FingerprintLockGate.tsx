@@ -21,6 +21,10 @@ import { App as CapApp } from "@capacitor/app";
 import {
   useSessionUser,
   readCachedSchoolBrand,
+  roleHome,
+  readPreferredRole,
+  readLastRole,
+  readPendingLoginRole,
   type AppRole,
 } from "@/lib/session";
 import { isNativeShell } from "@/native/platform";
@@ -466,6 +470,18 @@ export function FingerprintLockGate() {
     setLocked(false);
     promptedRef.current = false;
     runningRef.current = false;
+    // Unlock while still on /login (SPA race): go to role dashboard
+    try {
+      const path = pathname || "";
+      if (path === "/login" || path === "/") {
+        const role = readPreferredRole() || readLastRole() || readPendingLoginRole();
+        if (role && roleHome[role]) {
+          appNavigate(roleHome[role]);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     // After password unlock on a fingerprint-capable device that is not yet enabled → offer enable
     if (
       opts?.fromPassword &&

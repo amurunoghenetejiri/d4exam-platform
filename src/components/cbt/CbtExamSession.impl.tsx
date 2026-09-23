@@ -1572,7 +1572,7 @@ export function CbtExamPage() {
                 <button key={qq.id} type="button" onClick={() => setIndex(i)}
                   className={cn("grid h-9 place-items-center rounded-md text-xs font-bold transition",
                     isCurrent && "bg-primary text-white ring-2 ring-primary/30",
-                    !isCurrent && answered && "bg-slate-400 text-white cursor-default",
+                    !isCurrent && answered && "bg-emerald-500 text-white",
                     !isCurrent && isFlag && !answered && "bg-amber-400 text-slate-900",
                     !isCurrent && !answered && !isFlag && "border border-slate-200 bg-white text-slate-700 hover:border-primary")}>
                   {i + 1}
