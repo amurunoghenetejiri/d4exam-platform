@@ -146,10 +146,23 @@ export function isStudentEligibleForExam(
   if (exam.facultyId && student.facultyId && exam.facultyId !== student.facultyId) {
     return { allowed: false, reason: "Faculty mismatch" };
   }
-  if (exam.departmentId && student.departmentId && exam.departmentId !== student.departmentId) {
+  // Level / department may differ for approved carryover students on this course
+  const enrolledOnCourse =
+    Boolean(exam.courseId) && student.enrolledCourseIds.includes(exam.courseId!);
+  if (
+    exam.departmentId &&
+    student.departmentId &&
+    exam.departmentId !== student.departmentId &&
+    !enrolledOnCourse
+  ) {
     return { allowed: false, reason: "Department mismatch" };
   }
-  if (exam.levelId && student.levelId && exam.levelId !== student.levelId) {
+  if (
+    exam.levelId &&
+    student.levelId &&
+    exam.levelId !== student.levelId &&
+    !enrolledOnCourse
+  ) {
     return { allowed: false, reason: "Level mismatch" };
   }
   if (exam.sessionId && student.sessionId && exam.sessionId !== student.sessionId) {
@@ -160,6 +173,8 @@ export function isStudentEligibleForExam(
   }
 
   // Course enrollment is mandatory when the exam is tied to a course
+  // Carryover students may take the course without normal level/dept match
+  // when listed in enrolledCourseIds via carryover registration.
   if (exam.courseId) {
     if (!student.enrolledCourseIds.includes(exam.courseId)) {
       return { allowed: false, reason: "Not enrolled in course" };

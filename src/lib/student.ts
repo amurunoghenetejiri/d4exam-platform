@@ -151,6 +151,25 @@ export function useStudentContext() {
             } catch {
               courses = [];
             }
+            // Approved carryover courses count as enrollment for eligibility
+            try {
+              const { data: cos } = await supabase
+                .from("course_carryovers")
+                .select("course_id, courses(id, code, name)")
+                .eq("student_id", studentId)
+                .eq("status", "active")
+                .limit(100);
+              const extra = mapRows(cos ?? []);
+              const seen = new Set(courses.map((c) => c.id));
+              for (const c of extra) {
+                if (!seen.has(c.id)) {
+                  courses.push(c);
+                  seen.add(c.id);
+                }
+              }
+            } catch {
+              /* table may not exist yet */
+            }
             if (!courses.length) {
               try {
                 const { data: en } = await supabase

@@ -155,6 +155,7 @@ export const adminNav: RoleConfig = {
       items: [
         { label: "Examinations", to: "/admin/examinations", icon: FileText },
         { label: "Results", to: "/admin/results", icon: BarChart3 },
+        { label: "Carryover Students", to: "/admin/carryovers", icon: GraduationCap },
         { label: "Reports", to: "/admin/reports", icon: ScrollText },
       ],
     },
@@ -192,7 +193,8 @@ export const officerNav: RoleConfig = {
     {
       label: "Records",
       items: [
-        { label: "Results Release", to: "/officer/results", icon: BarChart3 },
+        { label: "Results", to: "/officer/results", icon: BarChart3 },
+        { label: "Carryover Students", to: "/officer/carryovers", icon: GraduationCap },
         { label: "Reports", to: "/officer/reports", icon: ScrollText },
         { label: "Audit Logs", to: "/officer/audit-logs", icon: ScrollText },
       ],

@@ -145,6 +145,7 @@ function Page() {
   const lockedCourse = teacher?.courses.find((c) => c.id === lockedCourseId) ?? null;
 
   const [courseId, setCourseId] = useState("");
+  const [carryoverIds, setCarryoverIds] = useState<string[]>([]);
   const [title, setTitle] = useState("");
   const [assessmentKind, setAssessmentKind] = useState<AssessmentKind>("examination");
   const [description, setDescription] = useState("");
@@ -209,7 +210,24 @@ function Page() {
   const bankList = bankListQ.data ?? [];
 
   const listQ = useQuery({
-    queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds, lockedCourseId, session?.userId],
+    
+  const carryoversQ = useQuery({
+    queryKey: ["teacher-carryovers", teacher?.schoolId, courseId],
+    enabled: Boolean(teacher?.schoolId && courseId),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("course_carryovers")
+        .select("id, student_id, students(id, full_name, matric_number, student_id, levels(name))")
+        .eq("school_id", teacher!.schoolId)
+        .eq("course_id", courseId)
+        .eq("status", "active")
+        .limit(200);
+      if (error) return [] as Array<{ id: string; student_id: string; students: { full_name?: string | null; matric_number?: string | null; student_id?: string; levels?: { name?: string } | null } | null }>;
+      return (data ?? []) as Array<{ id: string; student_id: string; students: { full_name?: string | null; matric_number?: string | null; student_id?: string; levels?: { name?: string } | null } | null }>;
+    },
+  });
+
+  queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds, lockedCourseId, session?.userId],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
     refetchInterval: 30_000,
     queryFn: async () => {
@@ -273,6 +291,7 @@ function Page() {
     setDurationText(String(e.duration_minutes || 60));
     setQuestionsText(String(meta.questionsToAnswer ?? 20));
     setSelectedQuestionIds(Array.isArray((meta as { selectedQuestionIds?: string[] }).selectedQuestionIds) ? (meta as { selectedQuestionIds?: string[] }).selectedQuestionIds! : []);
+    setCarryoverIds(Array.isArray((meta as { selectedCarryoverStudentIds?: string[] }).selectedCarryoverStudentIds) ? (meta as { selectedCarryoverStudentIds?: string[] }).selectedCarryoverStudentIds! : []);
     setStartAt(toLocalInput(e.scheduled_start));
     setEndAt(toLocalInput(e.scheduled_end));
     setSecurity(normalizeSecuritySettings(sec));
@@ -354,7 +373,7 @@ function Page() {
     try {
       const plain = stripInternalMarkers(description.trim() || "");
       const sec = normalizeSecuritySettings(security);
-      const metaBlob = `[[D4_EXAM_META]]${JSON.stringify({ questionsToAnswer, assessmentKind, selectedQuestionIds: selectedQuestionIds.length ? selectedQuestionIds : undefined })}`;
+      const metaBlob = `[[D4_EXAM_META]]${JSON.stringify({ questionsToAnswer, assessmentKind, selectedQuestionIds: selectedQuestionIds.length ? selectedQuestionIds : undefined, selectedCarryoverStudentIds: carryoverIds.length ? carryoverIds : undefined })}`;
       const secBlob = `[[D4_SECURITY_JSON]]${JSON.stringify(sec)}`;
       let desc: string | null = [plain, metaBlob, secBlob].filter(Boolean).join("\n") || null;
       const computedEnd = endAt || ""; // Teacher must set end time explicitly — do not auto-fill
@@ -595,6 +614,50 @@ function Page() {
                   </SelectContent>
                 </Select>
               </div>
+              {(carryoversQ.data?.length ?? 0) > 0 ? (
+                <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                  <Label className="font-semibold text-amber-900">Carryover students</Label>
+                  <p className="text-xs text-amber-800">
+                    Approved carryovers for this course. Tick who should sit this paper. Results still show each student&apos;s current level.
+                  </p>
+                  <ul className="max-h-40 space-y-1 overflow-y-auto">
+                    {(carryoversQ.data ?? []).map((co) => {
+                      const st = co.students;
+                      const name = (st?.full_name || "Student").trim();
+                      const mat = st?.matric_number || st?.student_id || "—";
+                      const lvl =
+                        st?.levels && !Array.isArray(st.levels) ? st.levels?.name : "";
+                      const on = carryoverIds.includes(co.student_id);
+                      return (
+                        <li key={co.id}>
+                          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-white/80">
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => {
+                                setCarryoverIds((prev) =>
+                                  on
+                                    ? prev.filter((id) => id !== co.student_id)
+                                    : [...prev, co.student_id],
+                                );
+                              }}
+                            />
+                            <span>
+                              {name} · {mat}
+                              {lvl ? ` · ${lvl}` : ""}
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : courseId ? (
+                <p className="text-xs text-slate-500">
+                  No approved carryover students for this course. School Admin / Officer can add them under Carryover Students.
+                </p>
+              ) : null}
+
               <div className="space-y-2">
                 <Label className="font-semibold">Title</Label>
                 <Input value={title} onChange={(e) => setTitle(e.target.value)} />

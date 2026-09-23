@@ -1,29 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DbRecordsPage, type Row } from "@/components/pages/DbRecordsPage";
+import { ResultsRecordsPage } from "@/components/results/ResultsRecordsPage";
 
 export const Route = createFileRoute("/admin/results")({
   head: () => ({
-    meta: [
-      { title: "Results — D4EXAM" },
-      { name: "description", content: "Institution-wide results by course and session." },
-      { property: "og:title", content: "Results — D4EXAM" },
-      { property: "og:description", content: "Institution-wide results by course and session." },
-    ],
+    meta: [{ title: "Result Records — D4EXAM" }],
   }),
-  component: Page,
-});
-
-function Page() {
-  return (
-    <DbRecordsPage
-      title="Results"
-      description="Institution-wide results by course and session."
-      tableTitle="Results"
-      columns={[
-      { key: "course", header: "Course" },
-      { key: "score", header: "Score" },
-      { key: "status", header: "Status" },
-      ]}
+  component: () => (
+    <ResultsRecordsPage
+      title="Result Records"
+      description="School-wide results. Filter by session, semester, department, level, course and assessment type. Print and export professional records."
     />
-  );
-}
+  ),
+});
