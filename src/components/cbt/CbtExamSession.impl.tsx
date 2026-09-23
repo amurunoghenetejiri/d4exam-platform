@@ -13,7 +13,7 @@ import { useSessionUser, readCachedSchoolBrand } from "@/lib/session";
 import { friendlyError } from "@/lib/friendly-error";
 import { fromExamSettingsRow, type ExamSettingsRow } from "@/lib/exam-security";
 import { parseExamMeta } from "@/lib/exam-meta";
-import { loadExamQuestionBank, prepareStudentPaper } from "@/lib/cbt-load-questions";
+import { loadExamQuestionBank, prepareStudentPaper, reshuffleUnansweredPaper, type CbtQuestionRow } from "@/lib/cbt-load-questions";
 import { type DeviceCapabilities } from "@/lib/device-capabilities";
 import { toast } from "sonner";
 import { ExamCameraPip, type FaceSecurityEvent } from "@/components/cbt/ExamCameraPip";
@@ -106,6 +106,11 @@ export function CbtExamPage() {
   const [answers, setAnswers] = useState<Record<string, number | string>>({});
   const answersRef = useRef<Record<string, number | string>>({});
   answersRef.current = answers;
+  /** Live paper after tab-leave reshuffle (answered locked; unanswered replaced). */
+  const [livePaper, setLivePaper] = useState<CbtQuestionRow[] | null>(null);
+  const livePaperRef = useRef<CbtQuestionRow[] | null>(null);
+  livePaperRef.current = livePaper;
+  const reshuffleOnTabLeaveRef = useRef<() => void>(() => {});
   const flushAttemptProgress = useCallback(async () => {
     const aid = attemptIdRef.current;
     if (!aid) return;
@@ -727,6 +732,9 @@ export function CbtExamPage() {
       leftExamSessionRef.current = true;
       tabSwitchCountRef.current += 1;
       setTabSwitchCount(tabSwitchCountRef.current);
+      try {
+        reshuffleOnTabLeaveRef.current();
+      } catch { /* ignore */ }
       void flushAttemptProgress();
       if (attemptIdRef.current) {
         void (async () => {
@@ -899,7 +907,7 @@ export function CbtExamPage() {
     return meta.questionsToAnswer && meta.questionsToAnswer > 0 ? meta.questionsToAnswer : null;
   }, [examQ.data, settingsQ.data, examQ.data?.description]);
 
-  const questions = useMemo(() => {
+  const basePaper = useMemo(() => {
     const key = student?.studentId ?? (previewMode ? "officer-preview" : session?.userId ?? "anon");
     const paper = prepareStudentPaper((questionsQ.data ?? []) as never, {
       questionsToAnswer,
@@ -908,7 +916,6 @@ export function CbtExamPage() {
       studentKey: key,
       examId: id,
     });
-    // Prefer locked order from attempt (stable across refresh)
     const locked = orderedIdsRef.current;
     if (locked && locked.length) {
       const byId = new Map(paper.map((q) => [q.id, q]));
@@ -917,6 +924,52 @@ export function CbtExamPage() {
     }
     return paper;
   }, [questionsQ.data, questionsToAnswer, security.randomizeQuestions, security.randomizeOptions, student?.studentId, session?.userId, previewMode, id]);
+
+  const questions = livePaper ?? basePaper;
+
+  // Keep tab-leave reshuffle function fresh without rebinding visibility listeners every render
+  reshuffleOnTabLeaveRef.current = () => {
+    try {
+      if (previewMode || doneRef.current || finishingRef.current) return;
+      const key = student?.studentId ?? session?.userId ?? "anon";
+      const fullBank = prepareStudentPaper((questionsQ.data ?? []) as never, {
+        questionsToAnswer: null,
+        randomizeQuestions: false,
+        randomizeOptions: Boolean(security.randomizeOptions),
+        studentKey: key,
+        examId: id,
+      });
+      const current = livePaperRef.current ?? basePaper;
+      if (!current.length) return;
+      const next = reshuffleUnansweredPaper(fullBank, current, answersRef.current, {
+        examId: id,
+        studentKey: key,
+        salt: `${tabSwitchCountRef.current}:${Date.now()}`,
+        randomizeOptions: Boolean(security.randomizeOptions) || true,
+      });
+      // Only update if something actually changed among unanswered
+      const changed = next.some((q, i) => q.id !== current[i]?.id);
+      if (!changed) return;
+      setLivePaper(next);
+      livePaperRef.current = next;
+      orderedIdsRef.current = next.map((q) => q.id);
+      setWarnBanner("Unanswered questions were changed after you left the exam tab.");
+      window.setTimeout(() => setWarnBanner(null), 7000);
+      // Persist new order on attempt when possible
+      const aid = attemptIdRef.current;
+      if (aid) {
+        void supabase
+          .from("exam_attempts")
+          .update({
+            question_order: next.map((q) => q.id),
+            updated_at: new Date().toISOString(),
+          } as never)
+          .eq("id", aid);
+      }
+    } catch (e) {
+      console.warn("[cbt] tab-leave reshuffle", e);
+    }
+  };
 
   const TOTAL = questions.length;
   const q = questions[index];
@@ -1519,7 +1572,7 @@ export function CbtExamPage() {
                 <button key={qq.id} type="button" onClick={() => setIndex(i)}
                   className={cn("grid h-9 place-items-center rounded-md text-xs font-bold transition",
                     isCurrent && "bg-primary text-white ring-2 ring-primary/30",
-                    !isCurrent && answered && "bg-emerald-500 text-white",
+                    !isCurrent && answered && "bg-slate-400 text-white cursor-default",
                     !isCurrent && isFlag && !answered && "bg-amber-400 text-slate-900",
                     !isCurrent && !answered && !isFlag && "border border-slate-200 bg-white text-slate-700 hover:border-primary")}>
                   {i + 1}

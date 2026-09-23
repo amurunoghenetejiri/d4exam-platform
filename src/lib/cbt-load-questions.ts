@@ -419,3 +419,70 @@ export function prepareStudentPaper(
   }
   return picked;
 }
+
+
+/**
+ * On tab-leave during CBT: keep answered questions fixed; replace unanswered
+ * slots with other questions from the teacher bank (or reshuffle unanswered
+ * among themselves when the bank is exhausted). Option order may be remixed;
+ * correct answers stay bound via correctOptionText / originalOptions.
+ */
+export function reshuffleUnansweredPaper(
+  fullBank: CbtQuestionRow[],
+  currentPaper: CbtQuestionRow[],
+  answers: Record<string, number | string | null | undefined>,
+  opts: {
+    examId: string;
+    studentKey: string;
+    salt: string | number;
+    randomizeOptions: boolean;
+  },
+): CbtQuestionRow[] {
+  if (!currentPaper.length) return currentPaper;
+
+  const isAnswered = (id: string) => {
+    const v = answers[id];
+    if (v === undefined || v === null) return false;
+    if (typeof v === "string") return v.trim().length > 0;
+    return true;
+  };
+
+  const answeredIds = new Set(currentPaper.filter((q) => isAnswered(q.id)).map((q) => q.id));
+  const need = currentPaper.filter((q) => !isAnswered(q.id)).length;
+  if (need <= 0) return currentPaper;
+
+  const byId = new Map(fullBank.map((q) => [q.id, q]));
+  let pool = fullBank.filter((q) => !answeredIds.has(q.id));
+  if (pool.length < need) {
+    pool = currentPaper.filter((q) => !isAnswered(q.id));
+  }
+
+  const seed = `${opts.examId}:${opts.studentKey}:tableave:${opts.salt}`;
+  let picked = seededShuffle(pool, seed).slice(0, need);
+
+  if (picked.length < need) {
+    const extra = currentPaper.filter(
+      (q) => !isAnswered(q.id) && !picked.some((p) => p.id === q.id),
+    );
+    picked = [...picked, ...seededShuffle(extra, seed + ":fill")].slice(0, need);
+  }
+
+  if (opts.randomizeOptions) {
+    picked = picked.map((q) => {
+      const base = byId.get(q.id) || q;
+      const optsList = base.originalOptions?.length ? [...base.originalOptions] : [...base.options];
+      return {
+        ...base,
+        options: seededShuffle(optsList, `${seed}:${q.id}:opts`),
+      };
+    });
+  } else {
+    picked = picked.map((q) => byId.get(q.id) || q);
+  }
+
+  const queue = [...picked];
+  return currentPaper.map((q) => {
+    if (isAnswered(q.id)) return q;
+    return queue.shift() || q;
+  });
+}

@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { BookOpen, Check, Loader2, UserPlus } from "lucide-react";
+import { BookOpen, Check, Loader2, UserPlus, Trash2, UserX } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +76,63 @@ function Page() {
     limit: 1000,
     enabled,
   });
+
+
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+
+  async function suspendTeacher(t: Teacher) {
+    if (!confirm(`Suspend ${t.profiles?.full_name || t.staff_id}? They will not access the teacher portal until reactivated.`)) return;
+    setActionBusy(t.id);
+    try {
+      const { error } = await supabase
+        .from("teachers")
+        .update({ employment_status: "suspended", updated_at: new Date().toISOString() } as never)
+        .eq("id", t.id);
+      if (error) throw error;
+      toast.success("Teacher suspended");
+      await qc.invalidateQueries();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not suspend teacher");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function reactivateTeacher(t: Teacher) {
+    setActionBusy(t.id);
+    try {
+      const { error } = await supabase
+        .from("teachers")
+        .update({ employment_status: "active", updated_at: new Date().toISOString() } as never)
+        .eq("id", t.id);
+      if (error) throw error;
+      toast.success("Teacher reactivated");
+      await qc.invalidateQueries();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not reactivate teacher");
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function removeTeacher(t: Teacher) {
+    if (!confirm(`Remove teacher ${t.profiles?.full_name || t.staff_id}? Course assignments will be cleared and access revoked.`)) return;
+    setActionBusy(t.id);
+    try {
+      await supabase.from("teacher_courses").delete().eq("teacher_id", t.id);
+      const { error } = await supabase
+        .from("teachers")
+        .update({ employment_status: "terminated", updated_at: new Date().toISOString() } as never)
+        .eq("id", t.id);
+      if (error) throw error;
+      toast.success("Teacher removed");
+      await qc.invalidateQueries();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove teacher");
+    } finally {
+      setActionBusy(null);
+    }
+  }
 
   const teachers = teachersQ.data ?? [];
   const courses = coursesQ.data ?? [];
@@ -278,6 +335,20 @@ function Page() {
                             </p>
                           </div>
                           <StatusBadge status={t.employment_status || "active"} />
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          {(t.employment_status || "active") === "suspended" ? (
+                            <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={actionBusy === t.id} onClick={() => void reactivateTeacher(t)}>
+                              Reactivate
+                            </Button>
+                          ) : (
+                            <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={actionBusy === t.id} onClick={() => void suspendTeacher(t)}>
+                              <UserX className="mr-1 h-3 w-3" /> Suspend
+                            </Button>
+                          )}
+                          <Button type="button" size="sm" variant="outline" className="h-7 border-red-200 text-xs text-red-600 hover:bg-red-50" disabled={actionBusy === t.id} onClick={() => void removeTeacher(t)}>
+                            <Trash2 className="mr-1 h-3 w-3" /> Remove
+                          </Button>
                         </div>
                       </button>
                     </li>
