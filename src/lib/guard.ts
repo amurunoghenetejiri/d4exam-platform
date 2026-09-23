@@ -112,8 +112,15 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
         if (cached) user = cached;
       }
     }
-    if (queryClient && user && !isIncomplete(user)) {
-      queryClient.setQueryData(["session-user"], user);
+    if (queryClient && user) {
+      // Cache even incomplete staff sessions so login→dashboard does not bounce
+      const roleOk =
+        user.role === "super_admin" ||
+        Boolean(user.schoolId) ||
+        allowed.some((r) => user!.roles.includes(r) || user!.role === r);
+      if (roleOk || !isIncomplete(user)) {
+        queryClient.setQueryData(["session-user"], user);
+      }
     }
   }
 
@@ -191,7 +198,20 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
     throw redirect({ to: "/login", search: { pending: "1" } as never });
   }
 
-  const hasRole = allowed.some((r) => user!.roles.includes(r) || user!.role === r);
+  let hasRole = allowed.some((r) => user!.roles.includes(r) || user!.role === r);
+  if (!hasRole) {
+    const preferred = readPreferredRole() || readPendingLoginRole();
+    if (preferred && allowed.includes(preferred)) {
+      // Hydration lag: trust preferred role for this navigation
+      user = {
+        ...user!,
+        role: preferred,
+        roles: Array.from(new Set([...(user!.roles || []), preferred])),
+      };
+      hasRole = true;
+      if (queryClient) queryClient.setQueryData(["session-user"], user);
+    }
+  }
   if (!hasRole) {
     throw redirect({ to: (user.role ? roleHome[user.role] : "/login") as never });
   }

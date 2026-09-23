@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { createRouter, createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 import { isOnlineNow } from "@/lib/offline-sync";
+import { bindAppRouter } from "@/lib/app-navigate";
 
 function DefaultPending() {
   return (
@@ -163,6 +164,12 @@ export const getRouter = () => {
     defaultPendingComponent: DefaultPending,
     defaultErrorComponent: DefaultError as never,
   });
+
+  try {
+    bindAppRouter(router as never);
+  } catch {
+    /* ignore */
+  }
 
   return router;
 };

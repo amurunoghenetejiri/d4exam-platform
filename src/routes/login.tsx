@@ -8,6 +8,8 @@ import {
   seedPendingLoginRole,
   setPreferredRole,
   rememberLastPath,
+  readPreferredRole,
+  readPendingLoginRole,
   readLastPath,
   type AppRole,
 } from "@/lib/session";
@@ -225,13 +227,28 @@ function LoginPage() {
   }, [prefill.email]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function resolveRoleAndGoHome(): Promise<boolean> {
+    const priority = [
+      "super_admin",
+      "school_admin",
+      "examination_officer",
+      "teacher",
+      "student",
+    ] as const;
+
+    // Prefer session user (allow enough time after setSession)
     try {
+      await new Promise((r) => setTimeout(r, 150));
       const user = await Promise.race([
         fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_200)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_000)),
       ]);
       if (user?.role && user.role in roleHome) {
         return await goToRoleHome(user.role, remember);
+      }
+      // Role list without primaryRole still counts
+      if (user?.roles?.length) {
+        const found = priority.find((r) => user.roles.map((x) => String(x).toLowerCase()).includes(r));
+        if (found) return await goToRoleHome(found, remember);
       }
     } catch {
       /* continue */
@@ -244,13 +261,6 @@ function LoginPage() {
             typeof r === "string" ? r : String((r as { role?: string }).role || ""),
           )
         : [];
-      const priority = [
-        "super_admin",
-        "school_admin",
-        "examination_officer",
-        "teacher",
-        "student",
-      ] as const;
       const found = priority.find((r) => list.map((x) => x.toLowerCase()).includes(r));
       if (found) return await goToRoleHome(found, remember);
     } catch {
@@ -262,21 +272,60 @@ function LoginPage() {
         data: { user },
       } = await supabase.auth.getUser();
       if (user?.id) {
+        // user_roles may key on auth uid OR profiles.id
         const { data: roles } = await supabase
           .from("user_roles")
           .select("role")
-          .eq("user_id", user.id)
-          .limit(10);
+          .or(`user_id.eq.${user.id}`)
+          .limit(20);
         const list = (roles ?? []).map((r) => String(r.role).toLowerCase());
-        const priority = [
-          "super_admin",
-          "school_admin",
-          "examination_officer",
-          "teacher",
-          "student",
-        ] as const;
-        const found = priority.find((r) => list.includes(r));
+        let found = priority.find((r) => list.includes(r));
         if (found) return await goToRoleHome(found, remember);
+
+        // Table probes for officer / teacher / student
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("id")
+          .or(`id.eq.${user.id},auth_user_id.eq.${user.id}`)
+          .maybeSingle();
+        const pid = prof?.id || user.id;
+        const checks: { table: string; role: (typeof priority)[number] }[] = [
+          { table: "examination_officers", role: "examination_officer" },
+          { table: "teachers", role: "teacher" },
+          { table: "students", role: "student" },
+        ];
+        for (const c of checks) {
+          const { data: row } = await supabase
+            .from(c.table)
+            .select("id")
+            .eq("profile_id", pid)
+            .limit(1)
+            .maybeSingle();
+          if (row?.id) return await goToRoleHome(c.role, remember);
+        }
+        // school admin: role in user_roles only — also check school_admins if table exists
+        try {
+          const { data: sa } = await supabase
+            .from("school_admins")
+            .select("id")
+            .eq("profile_id", pid)
+            .limit(1)
+            .maybeSingle();
+          if (sa?.id) return await goToRoleHome("school_admin", remember);
+        } catch {
+          /* table may not exist */
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // Last: preferred / pending role if we have a live session
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      if (sess.session?.user) {
+        const pref = readPreferredRole() || readPendingLoginRole();
+        if (pref && pref in roleHome) return await goToRoleHome(pref, remember);
       }
     } catch {
       /* ignore */
@@ -339,8 +388,14 @@ function LoginPage() {
               access_token: nativeResult.accessToken,
               refresh_token: nativeResult.refreshToken || "",
             });
-            if (!sessErr && (await resolveRoleAndGoHome())) {
+            if (!sessErr) {
+              if (await resolveRoleAndGoHome()) {
+                navigated = true;
+                return;
+              }
+              // Session is valid — never leave user stuck on login
               navigated = true;
+              await goToRoleHome(readPreferredRole() || "student", remember);
               return;
             }
           } else if (nativeResult && "error" in nativeResult && nativeResult.error) {
@@ -382,6 +437,10 @@ function LoginPage() {
               navigated = true;
               return;
             }
+            // Session exists — never bounce back to login form
+            navigated = true;
+            await goToRoleHome(readPreferredRole() || readPendingLoginRole() || "student", remember);
+            return;
           } else if (result.role && result.role in roleHome) {
             navigated = true;
             await goToRoleHome(String(result.role), remember);

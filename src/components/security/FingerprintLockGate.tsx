@@ -47,6 +47,7 @@ import {
 } from "@/lib/fingerprint-lock";
 import { readLastUserId } from "@/lib/offline-query";
 import { cn } from "@/lib/utils";
+import { appNavigate } from "@/lib/app-navigate";
 
 const SPLASH_SESSION_KEY = "d4exam_splash_shown_v6";
 /** App theme navy — matches Capacitor status bar / splash */
