@@ -705,19 +705,6 @@ export function FingerprintLockGate() {
             )}
           </div>
 
-          {/* Top logout — always visible on website + app */}
-          <div className="mb-2 flex w-full items-center justify-between px-1">
-            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">D4EXAM</span>
-            <button
-              type="button"
-              onClick={() => setLogoutConfirm(true)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-red-400/40 bg-red-600/80 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-500"
-            >
-              <LogOut className="h-3.5 w-3.5" aria-hidden />
-              Log out
-            </button>
-          </div>
-
           {/* School name directly under logo */}
           {!isSuperAdmin && schoolName ? (
             <p className="mt-3 max-w-[18rem] text-center text-sm font-medium leading-snug text-slate-300 md:max-w-md md:text-base">
@@ -857,11 +844,11 @@ export function FingerprintLockGate() {
 
         )}
 
-        <div className="flex w-full shrink-0 items-center justify-between gap-2 px-1 pb-2 pt-2">
+        <div className="flex w-full shrink-0 items-center justify-between gap-2 px-1 pb-2">
           <button
             type="button"
             onClick={() => setLogoutConfirm(true)}
-            className="inline-flex items-center gap-2 rounded-full border border-red-500/50 bg-red-600/90 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 transition hover:bg-red-500 md:px-5 md:py-3 md:text-base"
+            className="inline-flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-500/15 hover:text-red-300 md:px-4 md:py-2.5 md:text-base"
           >
             <LogOut className="h-4 w-4 md:h-5 md:w-5" aria-hidden />
             Log out
