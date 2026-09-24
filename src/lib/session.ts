@@ -672,6 +672,23 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     }
   }
 
+  // Server repair when client RLS leaves schoolId empty (officers after unlock)
+  if (!schoolId && !roles.includes("super_admin")) {
+    try {
+      const { repairMySessionSchool } = await import("@/lib/repair-session-school.functions");
+      const fixed = await withTimeout(repairMySessionSchool(), 4000, "repair-school");
+      if (fixed?.schoolId) {
+        schoolId = String(fixed.schoolId);
+        for (const r of fixed.roles || []) {
+          if (r && !roles.includes(r as AppRole)) roles = [...roles, r as AppRole];
+        }
+        seedLoginSchoolContext(fixed.schoolId, fixed.schoolCode);
+      }
+    } catch (e) {
+      console.warn("[session] repairMySessionSchool", e);
+    }
+  }
+
   // Inject preferred/pending role only AFTER school recovery attempts
   {
     const preferred = readPreferredRole() || readPendingLoginRole();
@@ -943,7 +960,14 @@ export function useSessionUser() {
         void queryClient.invalidateQueries({ queryKey: ["session-user"] });
       }
     });
-    return () => sub.subscription.unsubscribe();
+    const onRefresh = () => {
+      void queryClient.invalidateQueries({ queryKey: ["session-user"] });
+    };
+    window.addEventListener("d4-session-refresh", onRefresh);
+    return () => {
+      sub.subscription.unsubscribe();
+      window.removeEventListener("d4-session-refresh", onRefresh);
+    };
   }, [queryClient]);
 
   return useQuery({

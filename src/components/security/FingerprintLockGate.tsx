@@ -489,6 +489,24 @@ export function FingerprintLockGate() {
     setLocked(false);
     promptedRef.current = false;
     runningRef.current = false;
+    // Refresh school-linked session after unlock (fixes officer "not linked to school")
+    void (async () => {
+      try {
+        const { repairMySessionSchool } = await import("@/lib/repair-session-school.functions");
+        const fixed = await repairMySessionSchool();
+        if (fixed?.schoolId) {
+          const { seedLoginSchoolContext } = await import("@/lib/session");
+          seedLoginSchoolContext(fixed.schoolId, fixed.schoolCode);
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        window.dispatchEvent(new Event("d4-session-refresh"));
+      } catch {
+        /* ignore */
+      }
+    })();
     // Unlock while still on /login (SPA race): go to role dashboard
     try {
       const path = pathname || "";
