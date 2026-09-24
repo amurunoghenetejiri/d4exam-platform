@@ -320,7 +320,11 @@ export function OfficerResultsPage() {
         .neq("status", "terminated");
       const unmarked = (pendingRows ?? []).filter((r) => {
         const sec = String((r as { security_review_status?: string }).security_review_status || "").toLowerCase();
-        return sec !== "teacher_marked" && sec !== "flagged";
+        const st = String((r as { status?: string }).status || "").toLowerCase();
+        // Already released / published is fine; teacher_marked / marked / clear after teacher work
+        if (st === "published" || sec === "teacher_marked" || sec === "marked" || sec === "flagged") return false;
+        // Pending objective-only (essay papers need teacher_marked)
+        return true;
       });
       if (unmarked.length > 0) {
         toast.error(

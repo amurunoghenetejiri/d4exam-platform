@@ -362,7 +362,8 @@ export async function loadExamResultRecord(
     /* ignore */
   }
 
-  const dateIso = exam.scheduled_end || exam.scheduled_start || null;
+  // Date of the examination = when it was scheduled to start / posted (not end time)
+  const dateIso = exam.scheduled_start || exam.scheduled_end || null;
   let dateLabel = "—";
   if (dateIso) {
     try {

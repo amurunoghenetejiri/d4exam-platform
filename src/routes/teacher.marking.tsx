@@ -399,35 +399,72 @@ function Page() {
         .update({ metadata: nextMeta } as never)
         .eq("id", active.id);
 
-      // Update official results row
+      // Official results via server (sets security_review_status = teacher_marked for officer release)
+      let savedOk = false;
       try {
-        const payload: Record<string, unknown> = {
-          school_id: teacher.schoolId,
-          exam_id: examId,
-          student_id: active.student_id,
-          attempt_id: active.id,
-          total_score: finalScore,
-          objective_score: objectiveScore,
-          max_score: maxScore,
-          percentage,
-          grade,
-          status: resultStatus,
-          released_at: releasedAt,
-        };
-        if (resultQ.data?.id) {
-          await supabase.from("results").update(payload as never).eq("id", resultQ.data.id);
+        const { saveTeacherMarksServer } = await import("@/lib/teacher-marks.functions");
+        const res = await saveTeacherMarksServer({
+          data: {
+            examId,
+            attemptId: active.id,
+            studentId: active.student_id,
+            schoolId: teacher.schoolId,
+            objectiveScore,
+            subjectiveScore: subjectiveTotal,
+            totalScore: finalScore,
+            maxScore,
+            percentage,
+            grade,
+            releaseNow,
+            subjectiveMarks: marksMap,
+          },
+        });
+        if (res && "error" in res && res.error) {
+          console.warn("[marking] server save", res.error);
         } else {
-          await supabase.from("results").upsert(payload as never, { onConflict: "exam_id,student_id" });
+          savedOk = true;
         }
       } catch (e) {
-        console.warn("[marking] results update", e);
+        console.warn("[marking] server marks failed, client fallback", e);
       }
 
-      toast.success(
-        releaseNow
-          ? "Marks saved — result released to student"
-          : "Marks saved — waiting for officer to release",
-      );
+      if (!savedOk) {
+        try {
+          const payload: Record<string, unknown> = {
+            school_id: teacher.schoolId,
+            exam_id: examId,
+            student_id: active.student_id,
+            attempt_id: active.id,
+            total_score: finalScore,
+            objective_score: objectiveScore,
+            max_score: maxScore,
+            percentage,
+            grade,
+            pass_fail: percentage >= 40 ? "pass" : "fail",
+            status: resultStatus,
+            security_review_status: "teacher_marked",
+            released_at: releasedAt,
+          };
+          if (resultQ.data?.id) {
+            await supabase.from("results").update(payload as never).eq("id", resultQ.data.id);
+          } else {
+            await supabase.from("results").upsert(payload as never, { onConflict: "exam_id,student_id" });
+          }
+          savedOk = true;
+        } catch (e) {
+          console.warn("[marking] results update", e);
+        }
+      }
+
+      if (!savedOk) {
+        toast.error("Marks saved on script but result row failed — contact support");
+      } else {
+        toast.success(
+          releaseNow
+            ? "Marks saved — result released to student"
+            : "Marks saved — ready for officer to release",
+        );
+      }
       void qc.invalidateQueries({ queryKey: ["teacher-marking-attempts"] });
       void qc.invalidateQueries({ queryKey: ["teacher-submissions-by-exam"] });
       void navigate({ to: "/teacher/marking", search: { examId } });
@@ -717,16 +754,21 @@ function Page() {
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
               <p className="text-sm font-semibold text-slate-800">
-                Auto (MCQ/TF) <span className="text-primary font-bold">{objectiveScore}</span>
-                {" + "}
-                Essay <span className="text-primary font-bold">{subjectiveTotal}</span>
-                {" = "}
-                <span className="text-lg font-extrabold text-primary">{objectiveScore + subjectiveTotal}</span>
-                {maxSubjective ? (
-                  <span className="ml-1 text-xs font-normal text-slate-500">
-                    (essay max {maxSubjective})
+                <span className="block">
+                  Exam total max:{" "}
+                  <span className="font-bold text-slate-900">
+                    {(Number(resultQ.data?.max_score) || objectiveScore + maxSubjective) || "—"}
                   </span>
-                ) : null}
+                </span>
+                <span className="block mt-0.5">
+                  Auto (MCQ/TF) <span className="text-primary font-bold">{objectiveScore}</span>
+                  {" + "}
+                  Essay <span className="text-primary font-bold">{subjectiveTotal}</span>
+                  {" / "}
+                  <span className="text-slate-500">{maxSubjective}</span>
+                  {" = "}
+                  <span className="text-lg font-extrabold text-primary">{objectiveScore + subjectiveTotal}</span>
+                </span>
               </p>
               <Button className="font-semibold" disabled={busy} onClick={() => void saveMarks()}>
                 {busy ? (
