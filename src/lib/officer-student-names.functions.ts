@@ -1,8 +1,56 @@
 /**
- * Resolve student display names for officers (bypasses client RLS gaps).
+ * Resolve student display names for staff (bypasses client RLS gaps).
+ * Matches by students.id, profile_id, student_id text, or matric.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+
+export type ResolvedStudentName = {
+  full_name: string;
+  matric_number: string | null;
+  student_id: string | null;
+  department_name?: string | null;
+  level_name?: string | null;
+};
+
+async function assertStaffOfSchool(
+  admin: { from: (t: string) => any },
+  userId: string,
+  schoolId: string,
+): Promise<boolean> {
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("id, school_id")
+    .eq("auth_user_id", userId)
+    .maybeSingle();
+  const pid = profile?.id ? String(profile.id) : null;
+  if (profile && String(profile.school_id || "") === schoolId) return true;
+
+  const ids = [userId, pid].filter(Boolean) as string[];
+  for (const id of ids) {
+    try {
+      const [{ data: ur }, { data: eo }, { data: te }, saRes] = await Promise.all([
+        admin.from("user_roles").select("id").eq("user_id", id).eq("school_id", schoolId).limit(1),
+        admin.from("examination_officers").select("id").eq("profile_id", id).eq("school_id", schoolId).maybeSingle(),
+        admin.from("teachers").select("id").eq("profile_id", id).eq("school_id", schoolId).maybeSingle(),
+        admin.from("school_admins").select("id").eq("profile_id", id).eq("school_id", schoolId).maybeSingle(),
+      ]);
+      const sa = (saRes as { data?: { id?: string } | null })?.data;
+      if ((ur && ur.length) || eo?.id || te?.id || sa?.id) return true;
+    } catch {
+      const [{ data: ur }, { data: eo }, { data: te }] = await Promise.all([
+        admin.from("user_roles").select("id").eq("user_id", id).eq("school_id", schoolId).limit(1),
+        admin.from("examination_officers").select("id").eq("profile_id", id).eq("school_id", schoolId).maybeSingle(),
+        admin.from("teachers").select("id").eq("profile_id", id).eq("school_id", schoolId).maybeSingle(),
+      ]);
+      if ((ur && ur.length) || eo?.id || te?.id) return true;
+    }
+  }
+  // Super admin
+  const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", userId);
+  if ((roles ?? []).some((r: { role?: string }) => r.role === "super_admin")) return true;
+  return false;
+}
 
 export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -13,61 +61,109 @@ export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
     }: {
       data: { schoolId: string; studentIds: string[] };
       context: { userId: string };
-    }): Promise<Record<string, { full_name: string; matric_number: string | null; student_id: string | null }>> => {
+    }): Promise<Record<string, ResolvedStudentName>> => {
       const schoolId = String(data?.schoolId || "").trim();
-      const studentIds = [...new Set((data?.studentIds || []).map(String).filter(Boolean))].slice(0, 300);
+      const studentIds = [...new Set((data?.studentIds || []).map(String).filter(Boolean))].slice(0, 400);
       if (!schoolId || !studentIds.length) return {};
 
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
       const userId = context.userId;
 
-      // Caller must belong to this school (any staff role)
-      const { data: profile } = await supabaseAdmin
-        .from("profiles")
-        .select("id, school_id")
-        .eq("auth_user_id", userId)
-        .maybeSingle();
-      if (!profile || String((profile as { school_id?: string }).school_id) !== schoolId) {
-        return {};
-      }
+      const ok = await assertStaffOfSchool(supabaseAdmin, userId, schoolId);
+      if (!ok) return {};
 
-      const { data: studs } = await supabaseAdmin
+      const selectCols =
+        "id, full_name, matric_number, student_id, profile_id, department_id, level_id, departments(name), levels(name)";
+
+      // A) by uuid id
+      const { data: byId } = await supabaseAdmin
         .from("students")
-        .select("id, full_name, matric_number, student_id, profile_id")
+        .select(selectCols)
         .eq("school_id", schoolId)
         .in("id", studentIds);
 
-      const out: Record<string, { full_name: string; matric_number: string | null; student_id: string | null }> = {};
-      const needProfiles: { studentId: string; profileId: string }[] = [];
+      // B) by profile_id
+      const { data: byProf } = await supabaseAdmin
+        .from("students")
+        .select(selectCols)
+        .eq("school_id", schoolId)
+        .in("profile_id", studentIds);
 
-      for (const s of studs ?? []) {
-        const id = String((s as { id: string }).id);
-        const fn = String((s as { full_name?: string | null }).full_name || "").trim();
-        const mat = (s as { matric_number?: string | null }).matric_number ?? null;
-        const sid = (s as { student_id?: string | null }).student_id ?? null;
-        const pid = (s as { profile_id?: string | null }).profile_id;
-        out[id] = { full_name: fn, matric_number: mat, student_id: sid };
-        if (!fn && pid) needProfiles.push({ studentId: id, profileId: String(pid) });
+      // C) school-wide slice for matric / student_id text matches
+      const { data: schoolSlice } = await supabaseAdmin
+        .from("students")
+        .select(selectCols)
+        .eq("school_id", schoolId)
+        .limit(1500);
+
+      type Raw = {
+        id: string;
+        full_name?: string | null;
+        matric_number?: string | null;
+        student_id?: string | null;
+        profile_id?: string | null;
+        department_id?: string | null;
+        level_id?: string | null;
+        departments?: { name?: string } | null;
+        levels?: { name?: string } | null;
+      };
+
+      const pool = new Map<string, Raw>();
+      for (const s of [...(byId ?? []), ...(byProf ?? []), ...(schoolSlice ?? [])] as Raw[]) {
+        pool.set(String(s.id), s);
+      }
+
+      const out: Record<string, ResolvedStudentName> = {};
+      const needProfiles: { key: string; profileId: string }[] = [];
+
+      function put(key: string, s: Raw) {
+        const fn = String(s.full_name || "").trim();
+        const entry: ResolvedStudentName = {
+          full_name: fn,
+          matric_number: s.matric_number ?? null,
+          student_id: s.student_id ?? null,
+          department_name: s.departments?.name ?? null,
+          level_name: s.levels?.name ?? null,
+        };
+        out[key] = entry;
+        out[String(s.id)] = entry;
+        if (s.profile_id) out[String(s.profile_id)] = entry;
+        if (s.student_id) out[String(s.student_id)] = entry;
+        if (s.matric_number) out[String(s.matric_number)] = entry;
+        if (!fn && s.profile_id) needProfiles.push({ key, profileId: String(s.profile_id) });
+      }
+
+      for (const id of studentIds) {
+        const direct = pool.get(id);
+        if (direct) {
+          put(id, direct);
+          continue;
+        }
+        // profile_id match
+        let hit: Raw | undefined;
+        for (const s of pool.values()) {
+          if (String(s.profile_id || "") === id) {
+            hit = s;
+            break;
+          }
+          if (String(s.student_id || "") === id || String(s.matric_number || "") === id) {
+            hit = s;
+            break;
+          }
+        }
+        if (hit) put(id, hit);
       }
 
       if (needProfiles.length) {
         const pids = [...new Set(needProfiles.map((x) => x.profileId))];
         const { data: profiles } = await supabaseAdmin
           .from("profiles")
-          .select("id, full_name, first_name, last_name")
-          .in("id", pids);
-        const pmap = new Map<string, string>();
-        for (const pr of profiles ?? []) {
-          const pid = String((pr as { id: string }).id);
-          const full = String((pr as { full_name?: string }).full_name || "").trim();
-          const first = String((pr as { first_name?: string | null }).first_name || "").trim();
-          const last = String((pr as { last_name?: string | null }).last_name || "").trim();
-          const composed = full || [first, last].filter(Boolean).join(" ");
-          if (composed) pmap.set(pid, composed);
-        }
-        for (const n of needProfiles) {
-          const name = pmap.get(n.profileId);
-          if (name && out[n.studentId]) out[n.studentId].full_name = name;
+          .select("id, full_name")
+          .in("id", pids.slice(0, 300));
+        const pmap = new Map((profiles ?? []).map((p: { id: string; full_name?: string | null }) => [p.id, String(p.full_name || "").trim()]));
+        for (const { key, profileId } of needProfiles) {
+          const n = pmap.get(profileId);
+          if (n && out[key]) out[key] = { ...out[key], full_name: n };
         }
       }
 

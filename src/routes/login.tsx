@@ -229,10 +229,10 @@ async function goToRoleHome(role: string, rememberDevice = true, loginSchool?: {
     } catch {
       /* ignore */
     }
-    for (let i = 0; i < (needsSchool ? 6 : 2); i++) {
+    for (let i = 0; i < (needsSchool ? 2 : 1); i++) {
       const u = await Promise.race([
         fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000)),
       ]);
       if (u && (!needsSchool || u.schoolId)) {
         // Persist complete session so offline/query cache is not empty
@@ -246,7 +246,7 @@ async function goToRoleHome(role: string, rememberDevice = true, loginSchool?: {
         }
         break;
       }
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 150));
     }
   } catch {
     /* ignore */

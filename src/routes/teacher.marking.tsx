@@ -14,10 +14,10 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/teacher/marking")({
   head: () => ({
-    meta: [
-      { title: "Marking Center — D4EXAM" },
-      { name: "description", content: "Mark subjective answers for your assigned courses." },
-    ],
+    meta: [{ title: "Marking — D4EXAM" }],
+  }),
+  validateSearch: (search: Record<string, unknown>) => ({
+    examId: typeof search.examId === "string" ? search.examId : undefined,
   }),
   component: Page,
 });
@@ -47,6 +47,8 @@ type PaperQ = {
 
 function Page() {
   const { data: teacher, isLoading } = useTeacherContext();
+  const search = Route.useSearch();
+  const filterExamId = search.examId;
   const { data: session } = useSessionUser();
   const qc = useQueryClient();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -118,7 +120,10 @@ function Page() {
     },
   });
 
-  const active = (attemptsQ.data ?? []).find((a) => a.id === activeId) ?? null;
+  const attempts = filterExamId
+    ? (attemptsQ.data ?? []).filter((a) => a.exam_id === filterExamId)
+    : (attemptsQ.data ?? []);
+  const active = attempts.find((a) => a.id === activeId) ?? null;
 
   const paperQ = useQuery({
     queryKey: ["marking-paper", active?.exam_id],
@@ -260,7 +265,7 @@ function Page() {
   return (
     <>
       <PageHeader
-        title="Marking Center"
+        title={filterExamId ? "Mark student scripts" : "Marking Center"}
         description={`Theory / essay marking for ${teacher.fullName}. MCQ & True/False are auto-scored on submit.`}
       />
 
@@ -268,14 +273,14 @@ function Page() {
         <SectionCard className="lg:col-span-2" title="Submitted scripts">
           {attemptsQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading attempts…</p>
-          ) : (attemptsQ.data ?? []).length === 0 ? (
+          ) : attempts.length === 0 ? (
             <EmptyState
               title="Nothing to mark"
               description="When students submit on your courses, scripts appear here."
             />
           ) : (
             <ul className="max-h-[32rem] space-y-2 overflow-y-auto">
-              {(attemptsQ.data ?? []).map((a) => {
+              {attempts.map((a) => {
                 const name =
                   (a.students as { full_name?: string | null } | null)?.full_name
                   || a.students?.profiles?.full_name

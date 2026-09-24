@@ -49,6 +49,12 @@ function resultReasonLabel(status: string, security: string | null, releasedAt: 
   if (s === "published" || releasedAt) {
     return { label: "Released", className: "bg-emerald-100 text-emerald-800 border-emerald-200" };
   }
+  if (sec.includes("teacher_marked") || sec === "marked") {
+    return { label: "Teacher marked — ready to release", className: "bg-sky-100 text-sky-900 border-sky-200" };
+  }
+  if (sec.includes("await") || sec.includes("essay") || sec.includes("marking")) {
+    return { label: "Waiting for teacher marking", className: "bg-violet-100 text-violet-900 border-violet-200" };
+  }
   if (s === "held" || sec.includes("hold") || sec.includes("held")) {
     return { label: "Held by departmental officer", className: "bg-amber-100 text-amber-900 border-amber-200" };
   }

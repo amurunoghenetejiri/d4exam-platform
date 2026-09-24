@@ -367,14 +367,14 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   let roleRes: { data: { role: string; school_id: string | null; user_id: string }[] | null } = { data: null };
   try {
     // Retry session RPC — first paint after login often races auth.uid()
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const rpcData = await withTimeout(
           supabase.rpc("get_my_session_context" as never).then((r) => {
             if (r.error) console.warn("[session] rpc", r.error.message);
             return r.data;
           }),
-          3500,
+          2500,
           "get_my_session_context",
         );
         if (rpcData && typeof rpcData === "object") {
@@ -403,7 +403,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
           .maybeSingle(),
         supabase.from("user_roles").select("role, school_id, user_id").eq("user_id", user.id),
       ]),
-      4000,
+      2500,
       "profiles+roles",
     ).catch(() => null);
     if (triple) {
@@ -950,7 +950,7 @@ export function useSessionUser() {
     queryKey: ["session-user"],
     queryFn: async () => {
       const last = readLastUserId();
-      const u = await withTimeout(fetchSessionUser(), 8000, "session");
+      const u = await withTimeout(fetchSessionUser(), 4500, "session");
       if (u?.userId) {
         rememberLastUserId(u.userId);
         const complete = u.role === "super_admin" || Boolean(u.schoolId);

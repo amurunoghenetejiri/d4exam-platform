@@ -65,15 +65,57 @@ function Page() {
       if (!schoolId) return [] as AttemptRow[];
       const sel =
         "id, exam_id, student_id, status, tab_switch_count, fullscreen_exit_count, total_score, security_review_status, submitted_at, examinations(title)";
-      const { data, error } = await supabase
+      // Prefer attempts that need / had integrity review; also any recent submitted scripts
+      let rows: AttemptRow[] = [];
+      const { data: reviewed, error: e1 } = await supabase
+        .from("exam_attempts")
+        .select(sel)
+        .eq("school_id", schoolId)
+        .not("security_review_status", "is", null)
+        .order("submitted_at", { ascending: false, nullsFirst: false })
+        .limit(120);
+      if (!e1 && reviewed?.length) rows = reviewed as AttemptRow[];
+      const { data: submitted, error: e2 } = await supabase
         .from("exam_attempts")
         .select(sel)
         .eq("school_id", schoolId)
         .in("status", ["submitted", "terminated", "flagged", "completed", "graded"])
         .order("submitted_at", { ascending: false, nullsFirst: false })
-        .limit(100);
-      if (error) throw error;
-      return (data ?? []) as AttemptRow[];
+        .limit(120);
+      if (e2 && !rows.length) throw e2;
+      const byId = new Map<string, AttemptRow>();
+      for (const a of [...rows, ...((submitted ?? []) as AttemptRow[])]) {
+        byId.set(a.id, a);
+      }
+      // Also pull student ids that have integrity events but missing from attempts list
+      try {
+        const { data: evs } = await supabase
+          .from("integrity_events")
+          .select("attempt_id, student_id, exam_id")
+          .eq("school_id", schoolId)
+          .order("created_at", { ascending: false })
+          .limit(200);
+        const missingAttemptIds = [...new Set(
+          (evs ?? [])
+            .map((e) => e.attempt_id)
+            .filter((id): id is string => Boolean(id) && !byId.has(String(id))),
+        )].slice(0, 40);
+        if (missingAttemptIds.length) {
+          const { data: extra } = await supabase
+            .from("exam_attempts")
+            .select(sel)
+            .eq("school_id", schoolId)
+            .in("id", missingAttemptIds);
+          for (const a of (extra ?? []) as AttemptRow[]) byId.set(a.id, a);
+        }
+      } catch {
+        /* ignore */
+      }
+      return [...byId.values()].sort((a, b) => {
+        const ta = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+        const tb = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
+        return tb - ta;
+      });
     },
   });
 
