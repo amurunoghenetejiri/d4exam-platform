@@ -87,16 +87,34 @@ function Page() {
     2000,
   );
 
-  const pending = useCount(
-    "examinations",
-    schoolId
-      ? [
-          { column: "school_id", value: schoolId },
-          { column: "status", value: "pending_approval" },
-        ]
-      : [],
+  // Live pending count (avoid stale offline 0 from useCount)
+  const pendingQ = useQuery({
+    queryKey: ["officer-dash-pending", schoolId],
     enabled,
-  );
+    staleTime: 3_000,
+    refetchInterval: 8_000,
+    queryFn: async () => {
+      if (!schoolId) return 0;
+      const { count, error } = await supabase
+        .from("examinations")
+        .select("id", { count: "exact", head: true })
+        .eq("school_id", schoolId)
+        .in("status", ["pending_approval", "changes_requested"]);
+      if (error) {
+        console.warn("[officer-dash] pending", error.message);
+        // fallback: fetch rows
+        const { data } = await supabase
+          .from("examinations")
+          .select("id, status")
+          .eq("school_id", schoolId)
+          .in("status", ["pending_approval", "changes_requested"])
+          .limit(200);
+        return (data ?? []).length;
+      }
+      return count ?? 0;
+    },
+  });
+  const pending = { data: pendingQ.data, isLoading: pendingQ.isLoading };
 
   const liveStatsQ = useQuery({
     queryKey: ["officer-dash-live", schoolId],

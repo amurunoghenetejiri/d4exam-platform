@@ -60,9 +60,11 @@ export function useCount(table: string, filters: Filter[] = [], enabled = true) 
   return useQuery({
     queryKey: ["count", table, filters],
     enabled,
-    staleTime: 5 * 60_000,
+    staleTime: 8_000,
+    refetchInterval: enabled ? 12_000 : false,
+    refetchOnWindowFocus: true,
     networkMode: "offlineFirst",
-    retry: 0,
+    retry: 1,
     queryFn: async () => {
       const uid = readLastUserId();
       return withOfflineCache(

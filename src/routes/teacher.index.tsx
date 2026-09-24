@@ -26,35 +26,45 @@ function Page() {
   const { data: teacher, isLoading, isFetching } = useTeacherContext();
 
   const examsQ = useQuery({
-    queryKey: ["teacher-exams-dash", teacher?.teacherId, teacher?.courseIds],
-    enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
-    staleTime: 3 * 60_000,
+    queryKey: ["teacher-exams-dash", teacher?.teacherId, teacher?.courseIds, teacher?.schoolId],
+    enabled: Boolean(teacher?.schoolId),
+    staleTime: 8_000,
+    refetchInterval: 15_000,
     queryFn: async () => {
       if (!teacher) return [] as ExamRow[];
-      const { data, error } = await supabase
+      let q = supabase
         .from("examinations")
         .select("id, title, status, scheduled_start, course_id, courses(code, name)")
         .eq("school_id", teacher.schoolId)
-        .in("course_id", teacher.courseIds)
         .order("created_at", { ascending: false })
-        .limit(12);
-      if (error) throw error;
+        .limit(20);
+      if (teacher.courseIds?.length) q = q.in("course_id", teacher.courseIds);
+      const { data, error } = await q;
+      if (error) {
+        console.warn("[teacher-dash] exams", error.message);
+        return [];
+      }
       return (data ?? []) as ExamRow[];
     },
   });
 
   const questionsQ = useQuery({
     queryKey: ["teacher-q-count", teacher?.schoolId, teacher?.courseIds],
-    enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
-    staleTime: 3 * 60_000,
+    enabled: Boolean(teacher?.schoolId),
+    staleTime: 8_000,
+    refetchInterval: 20_000,
     queryFn: async () => {
       if (!teacher) return 0;
-      const { count, error } = await supabase
+      let q = supabase
         .from("questions")
         .select("*", { count: "exact", head: true })
-        .eq("school_id", teacher.schoolId)
-        .in("course_id", teacher.courseIds);
-      if (error) throw error;
+        .eq("school_id", teacher.schoolId);
+      if (teacher.courseIds?.length) q = q.in("course_id", teacher.courseIds);
+      const { count, error } = await q;
+      if (error) {
+        console.warn("[teacher-dash] questions", error.message);
+        return 0;
+      }
       return count ?? 0;
     },
   });

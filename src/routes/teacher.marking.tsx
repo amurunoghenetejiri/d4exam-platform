@@ -221,6 +221,45 @@ function Page() {
     [paperQ.data],
   );
 
+  const resultQ = useQuery({
+    queryKey: ["teacher-marking-result", teacher?.schoolId, examId, active?.student_id, attemptId],
+    enabled: Boolean(teacher?.schoolId && examId && active?.student_id),
+    queryFn: async () => {
+      if (!teacher?.schoolId || !examId || !active?.student_id) return null;
+      const { data } = await supabase
+        .from("results")
+        .select("id, objective_score, total_score, max_score, percentage, grade, status, released_at")
+        .eq("school_id", teacher.schoolId)
+        .eq("exam_id", examId)
+        .eq("student_id", active.student_id)
+        .maybeSingle();
+      return data as {
+        id: string;
+        objective_score: number | null;
+        total_score: number | null;
+        max_score: number | null;
+        percentage: number | null;
+        grade: string | null;
+        status: string | null;
+        released_at: string | null;
+      } | null;
+    },
+  });
+
+  const examMetaQ = useQuery({
+    queryKey: ["teacher-marking-exam-meta", examId],
+    enabled: Boolean(examId),
+    queryFn: async () => {
+      if (!examId) return null;
+      const { data } = await supabase
+        .from("examinations")
+        .select("description, result_visibility, title")
+        .eq("id", examId)
+        .maybeSingle();
+      return data as { description: string | null; result_visibility?: string | null; title?: string } | null;
+    },
+  });
+
   useEffect(() => {
     if (!active || !subjective.length) return;
     const meta = (active.metadata || {}) as Record<string, unknown>;
@@ -233,9 +272,38 @@ function Page() {
     setFeedbackMap({});
   }, [active?.id, subjective.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const objectiveScore = Number(
-    ((active?.metadata as { score?: { totalScore?: number } } | null)?.score?.totalScore) ?? 0,
-  );
+  const objectiveScore = useMemo(() => {
+    // Prefer official results.objective_score (auto MCQ/TF marking on submit)
+    const fromResult = Number(resultQ.data?.objective_score);
+    if (Number.isFinite(fromResult) && fromResult > 0) return fromResult;
+    const fromTotal = Number(resultQ.data?.total_score);
+    // Only use total if no essay pending (otherwise total may already include zeros)
+    const metaScore = Number(
+      ((active?.metadata as { score?: { totalScore?: number; objectiveScore?: number } } | null)?.score
+        ?.objectiveScore) ??
+        ((active?.metadata as { score?: { totalScore?: number } } | null)?.score?.totalScore) ??
+        0,
+    );
+    if (Number.isFinite(fromResult) && fromResult >= 0 && resultQ.data) return fromResult;
+    if (Number.isFinite(metaScore) && metaScore > 0) return metaScore;
+    if (Number.isFinite(fromTotal) && fromTotal > 0 && !subjective.length) return fromTotal;
+    // Recompute objective from answers + paper when possible
+    try {
+      const ans = (active?.answers || {}) as Record<string, unknown>;
+      let sum = 0;
+      for (const q of paperQ.data ?? []) {
+        if (isEssayType(q.question_type)) continue;
+        const raw = ans[q.question_id];
+        // Presence of any non-empty answer cannot auto-score without correct key —
+        // leave as results table value; meta fallback above covers saved scores.
+        void raw;
+        void sum;
+      }
+    } catch {
+      /* ignore */
+    }
+    return Number.isFinite(fromResult) ? Math.max(0, fromResult) : Math.max(0, metaScore || 0);
+  }, [resultQ.data, active?.metadata, active?.answers, paperQ.data, subjective.length]);
   const subjectiveTotal = useMemo(
     () => subjective.reduce((s, q) => s + (Number(marksMap[q.question_id]) || 0), 0),
     [subjective, marksMap],
@@ -273,14 +341,43 @@ function Page() {
         }
       }
 
+      const maxFromResult = Number(resultQ.data?.max_score) || 0;
       const maxScore =
+        maxFromResult ||
         Number(
           ((active.metadata as { score?: { maxScore?: number } } | null)?.score?.maxScore) ?? 0,
-        ) || objectiveScore + maxSubjective;
+        ) ||
+        objectiveScore + maxSubjective;
       const finalScore = objectiveScore + subjectiveTotal;
       const percentage = maxScore > 0 ? Math.round((finalScore / maxScore) * 1000) / 10 : 0;
       const grade =
         percentage >= 70 ? "A" : percentage >= 60 ? "B" : percentage >= 50 ? "C" : percentage >= 40 ? "D" : "F";
+
+      // Release policy from exam settings
+      let vis = String(examMetaQ.data?.result_visibility || "").toLowerCase();
+      if (!vis && examMetaQ.data?.description) {
+        try {
+          const { parseExamMeta } = await import("@/lib/exam-meta");
+          const meta = parseExamMeta(examMetaQ.data.description);
+          vis = String((meta as { resultVisibility?: string }).resultVisibility || "").toLowerCase();
+        } catch {
+          /* ignore */
+        }
+      }
+      vis = vis.replace(/[\s-]+/g, "_");
+      const immediateAliases = new Set([
+        "immediate",
+        "immediately",
+        "immediately_after_submit",
+        "immediately_after_marking",
+        "after_marking",
+        "release_immediately",
+        "release_immediately_after_exam",
+        "after_submit",
+      ]);
+      const releaseNow = immediateAliases.has(vis);
+      const resultStatus = releaseNow ? "published" : "pending";
+      const releasedAt = releaseNow ? new Date().toISOString() : null;
 
       const nextMeta = {
         ...(active.metadata || {}),
@@ -289,6 +386,7 @@ function Page() {
         subjective_marks: marksMap,
         score: {
           ...(((active.metadata as { score?: Record<string, unknown> })?.score) || {}),
+          objectiveScore,
           totalScore: finalScore,
           maxScore,
           percentage,
@@ -301,36 +399,35 @@ function Page() {
         .update({ metadata: nextMeta } as never)
         .eq("id", active.id);
 
-      // Upsert into examination_results / results if present
+      // Update official results row
       try {
-        const payload = {
+        const payload: Record<string, unknown> = {
           school_id: teacher.schoolId,
           exam_id: examId,
           student_id: active.student_id,
           attempt_id: active.id,
-          score: finalScore,
+          total_score: finalScore,
+          objective_score: objectiveScore,
           max_score: maxScore,
           percentage,
           grade,
-          status: "marked",
-          released: false,
+          status: resultStatus,
+          released_at: releasedAt,
         };
-        const tryTables = ["examination_results", "exam_results", "results"] as const;
-        for (const table of tryTables) {
-          try {
-            const { error } = await supabase.from(table).upsert(payload as never, {
-              onConflict: "exam_id,student_id",
-            });
-            if (!error) break;
-          } catch {
-            /* try next */
-          }
+        if (resultQ.data?.id) {
+          await supabase.from("results").update(payload as never).eq("id", resultQ.data.id);
+        } else {
+          await supabase.from("results").upsert(payload as never, { onConflict: "exam_id,student_id" });
         }
-      } catch {
-        /* results table optional */
+      } catch (e) {
+        console.warn("[marking] results update", e);
       }
 
-      toast.success("Marks saved — ready for officer release");
+      toast.success(
+        releaseNow
+          ? "Marks saved — result released to student"
+          : "Marks saved — waiting for officer to release",
+      );
       void qc.invalidateQueries({ queryKey: ["teacher-marking-attempts"] });
       void qc.invalidateQueries({ queryKey: ["teacher-submissions-by-exam"] });
       void navigate({ to: "/teacher/marking", search: { examId } });
@@ -343,13 +440,39 @@ function Page() {
   }
 
   function answerFor(qid: string): string {
-    const ans = active?.answers;
+    let ans: unknown = active?.answers;
+    if (typeof ans === "string") {
+      try {
+        ans = JSON.parse(ans);
+      } catch {
+        return ans;
+      }
+    }
     if (!ans || typeof ans !== "object") return "";
-    const raw = (ans as Record<string, unknown>)[qid];
+    const map = ans as Record<string, unknown>;
+    // Common shapes: { [qid]: "text" } | { [qid]: { text } } | { answers: { [qid]: ... } }
+    let raw: unknown = map[qid];
+    if (raw == null && map.answers && typeof map.answers === "object") {
+      raw = (map.answers as Record<string, unknown>)[qid];
+    }
+    if (raw == null) {
+      // case-insensitive key match
+      const found = Object.keys(map).find((k) => k.toLowerCase() === qid.toLowerCase());
+      if (found) raw = map[found];
+    }
     if (raw == null) return "";
     if (typeof raw === "string") return raw;
-    if (typeof raw === "object" && raw !== null && "text" in raw) {
-      return String((raw as { text?: string }).text || "");
+    if (typeof raw === "number") return String(raw);
+    if (typeof raw === "object" && raw !== null) {
+      const o = raw as Record<string, unknown>;
+      if (typeof o.text === "string") return o.text;
+      if (typeof o.answer === "string") return o.answer;
+      if (typeof o.value === "string") return o.value;
+      try {
+        return JSON.stringify(raw);
+      } catch {
+        return String(raw);
+      }
     }
     return String(raw);
   }
@@ -594,8 +717,11 @@ function Page() {
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
               <p className="text-sm font-semibold text-slate-800">
-                Auto {objectiveScore} + Manual {subjectiveTotal} ={" "}
-                <span className="text-primary">{objectiveScore + subjectiveTotal}</span>
+                Auto (MCQ/TF) <span className="text-primary font-bold">{objectiveScore}</span>
+                {" + "}
+                Essay <span className="text-primary font-bold">{subjectiveTotal}</span>
+                {" = "}
+                <span className="text-lg font-extrabold text-primary">{objectiveScore + subjectiveTotal}</span>
                 {maxSubjective ? (
                   <span className="ml-1 text-xs font-normal text-slate-500">
                     (essay max {maxSubjective})

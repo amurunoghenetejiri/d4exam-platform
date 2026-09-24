@@ -69,19 +69,45 @@ export function ResultsRecordsPage({
   const optsQ = useQuery({
     queryKey: ["result-filter-opts", schoolId],
     enabled: Boolean(schoolId) || user?.role === "super_admin",
-    queryFn: () => loadFilterOptions(schoolId),
+    staleTime: 60_000,
+    queryFn: async () => {
+      try {
+        return await loadFilterOptions(schoolId);
+      } catch (e) {
+        console.warn("[results] filter options", e);
+        return { sessions: [], semesters: [], departments: [], levels: [], courses: [] };
+      }
+    },
   });
 
   const examsQ = useQuery({
     queryKey: ["result-scoped-exams", user?.userId, user?.role, filters],
     enabled: Boolean(user),
-    queryFn: () => loadScopedExams(user as SessionUser, filters),
+    staleTime: 15_000,
+    queryFn: async () => {
+      try {
+        if (!user) return [];
+        return await loadScopedExams(user as SessionUser, filters);
+      } catch (e) {
+        console.warn("[results] scoped exams", e);
+        return [];
+      }
+    },
   });
 
   const recordQ = useQuery({
     queryKey: ["result-record", examId, user?.userId],
     enabled: Boolean(user && examId),
-    queryFn: () => loadExamResultRecord(user as SessionUser, examId),
+    staleTime: 10_000,
+    queryFn: async () => {
+      try {
+        if (!user || !examId) return null;
+        return await loadExamResultRecord(user as SessionUser, examId);
+      } catch (e) {
+        console.warn("[results] record", e);
+        return null;
+      }
+    },
   });
 
   const exams = examsQ.data ?? [];
@@ -91,32 +117,32 @@ export function ResultsRecordsPage({
 
   const filteredRows = useMemo(() => {
     let rows = record?.rows ?? [];
+    const deptOpts = optsQ.data?.departments ?? [];
+    const levelOpts = optsQ.data?.levels ?? [];
     // Live filters on student rows (department / level from filter bar)
     if (departmentId) {
-      const deptName = (opts?.departments ?? []).find((d) => d.id === departmentId)?.name?.toLowerCase();
+      const deptName = deptOpts.find((d) => d.id === departmentId)?.name?.toLowerCase();
       if (deptName) {
-        rows = rows.filter((r) => r.departmentName.toLowerCase() === deptName || r.departmentName === "—");
-        // Prefer exact department match; keep rows that resolved
-        rows = rows.filter((r) => r.departmentName.toLowerCase() === deptName);
+        rows = rows.filter((r) => String(r.departmentName || "").toLowerCase() === deptName);
       }
     }
     if (levelId) {
-      const lvlName = (opts?.levels ?? []).find((l) => l.id === levelId)?.name?.toLowerCase();
+      const lvlName = levelOpts.find((l) => l.id === levelId)?.name?.toLowerCase();
       if (lvlName) {
-        rows = rows.filter((r) => r.levelName.toLowerCase() === lvlName);
+        rows = rows.filter((r) => String(r.levelName || "").toLowerCase() === lvlName);
       }
     }
     const q = search.trim().toLowerCase();
     if (q) {
       rows = rows.filter(
         (r) =>
-          r.fullName.toLowerCase().includes(q) ||
-          r.matric.toLowerCase().includes(q) ||
-          r.departmentName.toLowerCase().includes(q),
+          String(r.fullName || "").toLowerCase().includes(q) ||
+          String(r.matric || "").toLowerCase().includes(q) ||
+          String(r.departmentName || "").toLowerCase().includes(q),
       );
     }
     return rows;
-  }, [record?.rows, search, departmentId, levelId, opts?.departments, opts?.levels]);
+  }, [record?.rows, search, departmentId, levelId, optsQ.data?.departments, optsQ.data?.levels]);
 
 
   function printRecord() {
@@ -150,23 +176,6 @@ export function ResultsRecordsPage({
     a.download = `${record.header.courseCode || "result"}-${record.header.assessmentLabel}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-  }
-
-  if (!user) {
-    return (
-      <div className="flex justify-center py-16">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (user.role !== "super_admin" && !schoolId) {
-    return (
-      <>
-        <PageHeader title={title} description={description} />
-        <EmptyState title="No school linked" description="Sign in with a school account to view results." />
-      </>
-    );
   }
 
   const opts = optsQ.data;
@@ -207,6 +216,24 @@ export function ResultsRecordsPage({
       cancelled = true;
     };
   }, [user, role, schoolId, officerDeptLocked]);
+
+  if (!user) {
+    return (
+      <div className="flex justify-center py-16">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (user.role !== "super_admin" && !schoolId) {
+    return (
+      <>
+        <PageHeader title={title} description={description} />
+        <EmptyState title="No school linked" description="Sign in with a school account to view results." />
+      </>
+    );
+  }
+
 
 
   return (
