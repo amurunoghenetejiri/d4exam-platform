@@ -51,12 +51,7 @@ export function useStudentContext() {
 
   return useQuery({
     queryKey: ["student-context", session?.profileId, session?.schoolId, session?.userId],
-    enabled: Boolean(
-      session?.userId &&
-        (session.role === "student" ||
-          (session.roles && session.roles.includes("student")) ||
-          session?.schoolId),
-    ),
+    enabled: Boolean(session?.userId),
     staleTime: 20_000,
     queryFn: async (): Promise<StudentContext | null> => {
       const uid = session?.userId;
@@ -88,7 +83,15 @@ export function useStudentContext() {
                 .maybeSingle();
               profile = byId.data;
             }
-            if (!profile) return null;
+            if (!profile) {
+              profile = {
+                id: session?.profileId || uid,
+                full_name: session?.fullName || null,
+                email: session?.email || null,
+                status: session?.status || "active",
+                school_id: session?.schoolId || null,
+              } as typeof profile;
+            }
             const schoolId = (profile.school_id as string) || session?.schoolId || "";
             let studentQ = await supabase
               .from("students")

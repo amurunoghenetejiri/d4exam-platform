@@ -37,21 +37,19 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
       profile = profileById;
     }
 
-    if (!profile?.id || !profile.school_id) return null;
-
-    const schoolId = profile.school_id as string;
-    const profileId = profile.id as string;
+    const profileId = (profile?.id as string | undefined) || userId;
+    let schoolId = (profile?.school_id as string | undefined) || "";
 
     const studentSelect =
       "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, status, full_name, departments(name), faculties(name), levels(name)";
 
     let student: Record<string, unknown> | null = null;
 
+    // Do NOT require profiles.school_id first — many student rows carry school_id themselves
     const { data: byProfile, error: byProfileErr } = await db
       .from("students")
       .select(studentSelect)
       .eq("profile_id", profileId)
-      .eq("school_id", schoolId)
       .maybeSingle();
 
     if (byProfileErr && /full_name/i.test(byProfileErr.message)) {
@@ -61,22 +59,19 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
           "id, matric_number, student_id, school_id, profile_id, department_id, level_id, faculty_id, status, departments(name), faculties(name), levels(name)",
         )
         .eq("profile_id", profileId)
-        .eq("school_id", schoolId)
         .maybeSingle();
       student = (fb.data as Record<string, unknown> | null) ?? null;
     } else {
       student = (byProfile as Record<string, unknown> | null) ?? null;
     }
 
-    if (!student && profile.email) {
+    if (!student && profile?.email) {
       const local = String(profile.email).split("@")[0] || "";
       const norm = local.replace(/[^a-z0-9]/gi, "").toLowerCase();
       if (norm.length >= 6) {
-        const { data: candidates } = await db
-          .from("students")
-          .select(studentSelect)
-          .eq("school_id", schoolId)
-          .limit(5000);
+        let candQ = db.from("students").select(studentSelect).limit(5000);
+        if (schoolId) candQ = candQ.eq("school_id", schoolId);
+        const { data: candidates } = await candQ;
         const rows = (candidates ?? []) as Record<string, unknown>[];
         student =
           rows.find((r) => {
@@ -89,6 +84,9 @@ export const getMyStudentContext = createServerFn({ method: "GET" })
     }
 
     if (!student) return null;
+
+    schoolId = String(student.school_id || schoolId || "");
+    if (!schoolId) return null;
 
     const departments = student.departments as { name?: string } | null;
     const faculties = student.faculties as { name?: string } | null;

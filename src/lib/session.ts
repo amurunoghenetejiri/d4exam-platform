@@ -950,29 +950,35 @@ export function useSessionUser() {
     queryKey: ["session-user"],
     queryFn: async () => {
       const last = readLastUserId();
-      return withOfflineCache(
-        last,
-        OfflineKeys.sessionUser,
-        async () => {
-          const u = await withTimeout(fetchSessionUser(), 3500, "session");
-          if (u?.userId) {
-            rememberLastUserId(u.userId);
-            const complete = u.role === "super_admin" || Boolean(u.schoolId);
-            if (complete) {
-              void offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
-              void mirrorSessionUser(u);
-            }
-          }
-          return u;
-        },
-        { fallback: null },
-      );
+      const u = await withTimeout(fetchSessionUser(), 8000, "session");
+      if (u?.userId) {
+        rememberLastUserId(u.userId);
+        const complete = u.role === "super_admin" || Boolean(u.schoolId);
+        if (complete) {
+          void offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
+          void mirrorSessionUser(u);
+        }
+      } else if (last) {
+        // Network failed — only reuse a COMPLETE cached session
+        try {
+          const cached = await withOfflineCache(
+            last,
+            OfflineKeys.sessionUser,
+            async () => null,
+            { fallback: null },
+          );
+          if (cached && (cached.role === "super_admin" || cached.schoolId)) return cached;
+        } catch {
+          /* ignore */
+        }
+      }
+      return u;
     },
-    staleTime: 60_000,
+    staleTime: 15_000,
     gcTime: 30 * 60_000,
-    refetchOnWindowFocus: false,
-    refetchOnMount: true,
-    retry: 1,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    retry: 2,
     retryDelay: 400,
   });
 }
