@@ -1,21 +1,26 @@
 /**
- * First-login app password setup — same navy full-screen style as unlock.
- * User creates password + confirm, then uses it on the unlock screen next time.
+ * First-login Create App Password — same navy full-screen style as unlock.
+ * Enter + confirm password on this screen; later the unlock gate uses that password.
+ * Does NOT change the Supabase account password.
  */
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouterState } from "@tanstack/react-router";
-import { KeyRound, Loader2, Fingerprint, Shield } from "lucide-react";
+import { Fingerprint, KeyRound, Loader2, Shield } from "lucide-react";
 import { toast } from "sonner";
-import { isNativeShell } from "@/native/platform";
 import { useSessionUser } from "@/lib/session";
+import { isNativeShell } from "@/native/platform";
 import { hasAppUnlockFor, setAppUnlockPassword } from "@/lib/app-unlock";
 import {
-  isBiometricAvailable,
+  enableFingerprintFor,
   isFingerprintEnabledFor,
-  setFingerprintEnabledFor,
-  verifyIdentity,
-} from "@/lib/biometric";
+  markSessionUnlocked,
+  setFingerprintLocked,
+} from "@/lib/fingerprint-lock";
+import {
+  authenticateWithFingerprint,
+  checkFingerprintAvailable,
+} from "@/native/fingerprintAuth";
 
 const THEME_NAVY = "#0b1b3a";
 const SETUP_DONE_PREFIX = "d4exam_unlock_setup_done_v1:";
@@ -41,28 +46,28 @@ function isSetupDone(userId: string) {
 }
 
 export function AppUnlockSetupGate() {
-  const native = isNativeShell();
   const { data: session } = useSessionUser();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [needed, setNeeded] = useState(false);
-  const [step, setStep] = useState<"password" | "fingerprint">("password");
   const [pw1, setPw1] = useState("");
   const [pw2, setPw2] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<"password" | "fingerprint">("password");
   const [fpAvailable, setFpAvailable] = useState(false);
 
-  const isPublicAuthPath =
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/signup") ||
-    pathname.startsWith("/forgot") ||
+  const isPublic =
+    pathname === "/login" ||
+    pathname === "/" ||
+    pathname.startsWith("/forgot-password") ||
     pathname.startsWith("/forgot-app-password") ||
     pathname.startsWith("/reset-app-password") ||
-    pathname.startsWith("/apply") ||
-    pathname.startsWith("/reset-password");
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/school-application") ||
+    pathname.startsWith("/apply");
 
   useEffect(() => {
-    if (isPublicAuthPath || !session?.userId) {
+    if (isPublic || !session?.userId) {
       setNeeded(false);
       return;
     }
@@ -83,8 +88,8 @@ export function AppUnlockSetupGate() {
         setNeeded(true);
         setStep("password");
         try {
-          const avail = await isBiometricAvailable();
-          if (!cancelled) setFpAvailable(Boolean(avail));
+          const avail = await checkFingerprintAvailable();
+          if (!cancelled) setFpAvailable(Boolean(avail?.ok));
         } catch {
           if (!cancelled) setFpAvailable(false);
         }
@@ -95,7 +100,7 @@ export function AppUnlockSetupGate() {
     return () => {
       cancelled = true;
     };
-  }, [session?.userId, isPublicAuthPath, pathname]);
+  }, [session?.userId, isPublic, pathname]);
 
   async function onSetPassword() {
     if (!session?.userId) return;
@@ -112,10 +117,16 @@ export function AppUnlockSetupGate() {
     }
     setBusy(true);
     try {
-      await setAppUnlockPassword(session.userId, a);
+      const res = await setAppUnlockPassword(session.userId, a);
+      if (res && typeof res === "object" && "ok" in res && !res.ok) {
+        setErr(res.error || "Could not save app password.");
+        return;
+      }
       markSetupDone(session.userId);
+      markSessionUnlocked();
+      setFingerprintLocked(false);
       toast.success("App password created");
-      if (fpAvailable && !isFingerprintEnabledFor(session.userId)) {
+      if (isNativeShell() && fpAvailable && !isFingerprintEnabledFor(session.userId)) {
         setStep("fingerprint");
       } else {
         setNeeded(false);
@@ -131,11 +142,13 @@ export function AppUnlockSetupGate() {
     if (!session?.userId) return;
     setBusy(true);
     try {
-      const ok = await verifyIdentity({
+      const result = await authenticateWithFingerprint({
         reason: "Enable fingerprint unlock for D4EXAM",
       });
-      if (ok) {
-        setFingerprintEnabledFor(session.userId, true);
+      if (result?.ok) {
+        enableFingerprintFor(session.userId);
+        markSessionUnlocked();
+        setFingerprintLocked(false);
         toast.success("Fingerprint unlock enabled");
       } else {
         toast.message("Fingerprint not enabled — you can turn it on in Settings.");
@@ -211,9 +224,7 @@ export function AppUnlockSetupGate() {
                 className="mt-1.5 w-full rounded-xl border border-white/15 bg-white/10 px-3 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-blue-400"
                 placeholder="Re-enter password"
               />
-              {err ? (
-                <p className="mt-2 text-center text-xs font-semibold text-amber-300">{err}</p>
-              ) : null}
+              {err ? <p className="mt-2 text-center text-xs font-semibold text-amber-300">{err}</p> : null}
               <button
                 type="button"
                 disabled={busy}
@@ -224,7 +235,7 @@ export function AppUnlockSetupGate() {
                 Create App Password
               </button>
               <p className="mt-3 text-center text-[11px] text-slate-500">
-                After this, use the same password on the unlock screen to open your dashboard.
+                After this, use the same password on the unlock screen to open your role dashboard.
               </p>
             </>
           ) : (
@@ -251,12 +262,6 @@ export function AppUnlockSetupGate() {
             </>
           )}
         </div>
-
-        {!native ? (
-          <p className="mt-4 text-center text-[10px] text-slate-500">
-            Works on website and app — same unlock password for this account on this device.
-          </p>
-        ) : null}
       </div>
     </div>,
     document.body,
