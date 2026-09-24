@@ -1,8 +1,3 @@
 name: RESTORE-AND-PATCH-CBT
 on:
   workflow_dispatch:
-jobs:
-  disabled:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo disabled

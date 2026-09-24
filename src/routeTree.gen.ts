@@ -245,14 +245,14 @@ const AdminReportsRoute = AdminReportsRouteImport.update({
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminCarryoversRoute = AdminCarryoversRouteImport.update({
-  id: '/admin/carryovers',
-  path: '/admin/carryovers',
-  getParentRoute: () => rootRouteImport,
+  id: '/carryovers',
+  path: '/carryovers',
+  getParentRoute: () => AdminRoute,
 } as any)
 const OfficerCarryoversRoute = OfficerCarryoversRouteImport.update({
-  id: '/officer/carryovers',
-  path: '/officer/carryovers',
-  getParentRoute: () => rootRouteImport,
+  id: '/carryovers',
+  path: '/carryovers',
+  getParentRoute: () => OfficerRoute,
 } as any)
 const AdminResultsRoute = AdminResultsRouteImport.update({
   id: '/results',
@@ -1811,6 +1811,7 @@ interface AdminRouteChildren {
   AdminProfileRoute: typeof AdminProfileRoute
   AdminReportsRoute: typeof AdminReportsRoute
   AdminResultsRoute: typeof AdminResultsRoute
+  AdminCarryoversRoute: typeof AdminCarryoversRoute
   AdminSemestersRoute: typeof AdminSemestersRoute
   AdminSessionsRoute: typeof AdminSessionsRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
@@ -1834,8 +1835,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminProfileRoute: AdminProfileRoute,
   AdminReportsRoute: AdminReportsRoute,
   AdminResultsRoute: AdminResultsRoute,
-  AdminCarryoversRoute,
-  OfficerCarryoversRoute,
+  AdminCarryoversRoute: AdminCarryoversRoute,
   AdminSemestersRoute: AdminSemestersRoute,
   AdminSessionsRoute: AdminSessionsRoute,
   AdminSettingsRoute: AdminSettingsRoute,
@@ -1860,6 +1860,7 @@ interface OfficerRouteChildren {
   OfficerProfileRoute: typeof OfficerProfileRoute
   OfficerReportsRoute: typeof OfficerReportsRoute
   OfficerResultsRoute: typeof OfficerResultsRoute
+  OfficerCarryoversRoute: typeof OfficerCarryoversRoute
   OfficerSettingsRoute: typeof OfficerSettingsRoute
   OfficerIndexRoute: typeof OfficerIndexRoute
   OfficerExamPreviewIdRoute: typeof OfficerExamPreviewIdRoute
@@ -1875,6 +1876,7 @@ const OfficerRouteChildren: OfficerRouteChildren = {
   OfficerProfileRoute: OfficerProfileRoute,
   OfficerReportsRoute: OfficerReportsRoute,
   OfficerResultsRoute: OfficerResultsRoute,
+  OfficerCarryoversRoute: OfficerCarryoversRoute,
   OfficerSettingsRoute: OfficerSettingsRoute,
   OfficerIndexRoute: OfficerIndexRoute,
   OfficerExamPreviewIdRoute: OfficerExamPreviewIdRoute,

@@ -1,8 +1,3 @@
 name: RESTORE-CBT
 on:
   workflow_dispatch:
-jobs:
-  apply:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "RESTORE-CBT disabled — was overwriting live exam fixes on every push"
