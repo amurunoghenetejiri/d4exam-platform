@@ -90,6 +90,7 @@ export const ensureLoginAccount = createServerFn({ method: "POST" })
     });
 
     let userId: string | null = null;
+    let linkedSchoolId: string | null = null;
     try {
       for (let page = 1; page <= 5 && !userId; page++) {
         const { data: listed, error: listErr } = await admin.auth.admin.listUsers({
@@ -183,20 +184,56 @@ export const ensureLoginAccount = createServerFn({ method: "POST" })
           }
         }
 
-        const { data: existingRole } = await admin
+        // Ensure at least one role row for this school (do not wipe existing staff roles)
+        const { data: anyRole } = await admin
           .from("user_roles")
-          .select("id")
+          .select("id, role")
           .eq("user_id", userId)
-          .eq("role", "school_admin")
-          .eq("school_id", school.id)
-          .maybeSingle();
-        if (!existingRole) {
+          .limit(5);
+        const hasRoleForSchool = (anyRole ?? []).some(
+          (r: { role?: string }) => Boolean(r.role),
+        );
+        if (!hasRoleForSchool) {
           await admin.from("user_roles").insert({
             user_id: userId,
             school_id: school.id,
             role: "school_admin",
           } as never);
+        } else {
+          // Backfill school_id on existing roles missing it
+          for (const r of anyRole ?? []) {
+            try {
+              await admin
+                .from("user_roles")
+                .update({ school_id: school.id } as never)
+                .eq("id", (r as { id: string }).id)
+                .is("school_id", null);
+            } catch {
+              /* ignore */
+            }
+          }
         }
+        // Also link profile_id based role rows
+        const { data: prof } = await admin
+          .from("profiles")
+          .select("id")
+          .eq("auth_user_id", userId)
+          .maybeSingle();
+        if (prof?.id && prof.id !== userId) {
+          const { data: profRoles } = await admin
+            .from("user_roles")
+            .select("id")
+            .eq("user_id", prof.id)
+            .limit(5);
+          if (!(profRoles ?? []).length && !(anyRole ?? []).length) {
+            await admin.from("user_roles").insert({
+              user_id: prof.id,
+              school_id: school.id,
+              role: "school_admin",
+            } as never);
+          }
+        }
+        linkedSchoolId = school.id;
       }
     }
 
@@ -220,5 +257,5 @@ export const ensureLoginAccount = createServerFn({ method: "POST" })
       /* ignore */
     }
 
-    return { ok: true as const, email, userId };
+    return { ok: true as const, email, userId, schoolId: linkedSchoolId };
   });

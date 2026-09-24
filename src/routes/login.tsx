@@ -7,6 +7,7 @@ import {
   roleHome,
   seedPendingLoginRole,
   setPreferredRole,
+  seedLoginSchoolContext,
   rememberLastPath,
   readPreferredRole,
   readPendingLoginRole,
@@ -167,7 +168,33 @@ function readQueryPrefill(): { email: string; isSwitch: boolean; isAdd: boolean 
 }
 
 /** Full page load so Capacitor WebView always applies the new session. */
-async function goToRoleHome(role: string, rememberDevice = true) {
+async function seedSchoolFromCode(schoolCode: string | null | undefined) {
+  const code = (schoolCode || "").trim().toUpperCase();
+  if (!code || code === "SUPER" || code === "PLATFORM") return null;
+  try {
+    const { data: rpcSchool } = await supabase.rpc("resolve_school_for_login", {
+      _school_code: code,
+    });
+    const row = Array.isArray(rpcSchool) ? rpcSchool[0] : rpcSchool;
+    const id =
+      row && typeof row === "object" && (row as { id?: string }).id
+        ? String((row as { id: string }).id)
+        : null;
+    if (id) {
+      seedLoginSchoolContext(id, code);
+      return id;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function goToRoleHome(role: string, rememberDevice = true, loginSchool?: { schoolId?: string | null; schoolCode?: string | null }) {
+  try {
+    if (loginSchool?.schoolId) seedLoginSchoolContext(loginSchool.schoolId, loginSchool.schoolCode || null);
+  } catch { /* ignore */ }
+
   const home = roleHome[role as AppRole];
   try {
     setPreferredRole(role as AppRole);
@@ -190,6 +217,15 @@ async function goToRoleHome(role: string, rememberDevice = true) {
     // Let auth tokens settle in the client
     try {
       await supabase.auth.getSession();
+    } catch {
+      /* ignore */
+    }
+    // Ensure school context from login school-code is available before fetchSessionUser
+    try {
+      const { readLoginSchoolContext } = await import("@/lib/session");
+      if (!readLoginSchoolContext()?.schoolId && loginSchool?.schoolCode) {
+        await seedSchoolFromCode(loginSchool.schoolCode);
+      }
     } catch {
       /* ignore */
     }
@@ -420,7 +456,14 @@ function LoginPage() {
               refresh_token: nativeResult.refreshToken || "",
             });
             if (!sessErr) {
-              if (await resolveRoleAndGoHome()) {
+              try {
+                if (nativeResult.schoolId) {
+                  seedLoginSchoolContext(nativeResult.schoolId, nativeResult.schoolCode || schoolCode);
+                } else if (schoolCode) {
+                  await seedSchoolFromCode(schoolCode);
+                }
+              } catch { /* ignore */ }
+              await seedSchoolFromCode(schoolCode); if (await resolveRoleAndGoHome()) {
                 navigated = true;
                 return;
               }
@@ -464,7 +507,7 @@ function LoginPage() {
               await goToRoleHome(String(result.role), remember);
               return;
             }
-            if (await resolveRoleAndGoHome()) {
+            await seedSchoolFromCode(schoolCode); if (await resolveRoleAndGoHome()) {
               navigated = true;
               return;
             }
@@ -520,7 +563,7 @@ function LoginPage() {
           const data = raced.data;
           const authErr = raced.error;
           if (!authErr && data?.session) {
-            if (await resolveRoleAndGoHome()) {
+            await seedSchoolFromCode(schoolCode); if (await resolveRoleAndGoHome()) {
               navigated = true;
               return;
             }
@@ -554,7 +597,7 @@ function LoginPage() {
               password: pass,
             });
             if (!againErr && again.session) {
-              if (await resolveRoleAndGoHome()) {
+              await seedSchoolFromCode(schoolCode); if (await resolveRoleAndGoHome()) {
                 navigated = true;
                 return;
               }

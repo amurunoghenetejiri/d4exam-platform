@@ -29,6 +29,49 @@ export type AppRole =
 const LAST_PATH_KEY = "d4exam_last_path_v1";
 const LAST_ROLE_KEY = "d4exam_last_role_v1";
 const PREFERRED_ROLE_KEY = "d4exam_preferred_role_v1";
+/** School resolved at login (school code) — used when RPC/RLS lag on schoolId. */
+const LOGIN_SCHOOL_KEY = "d4exam_login_school_v1";
+
+export function seedLoginSchoolContext(schoolId: string | null | undefined, schoolCode?: string | null) {
+  if (typeof window === "undefined" || !schoolId) return;
+  try {
+    window.localStorage.setItem(
+      LOGIN_SCHOOL_KEY,
+      JSON.stringify({
+        schoolId: String(schoolId),
+        schoolCode: schoolCode ? String(schoolCode).toUpperCase() : null,
+        ts: Date.now(),
+      }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readLoginSchoolContext(): { schoolId: string; schoolCode: string | null } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LOGIN_SCHOOL_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as { schoolId?: string; schoolCode?: string | null; ts?: number };
+    if (!p?.schoolId) return null;
+    // Expire after 7 days
+    if (p.ts && Date.now() - p.ts > 7 * 24 * 60 * 60 * 1000) return null;
+    return { schoolId: String(p.schoolId), schoolCode: p.schoolCode ? String(p.schoolCode) : null };
+  } catch {
+    return null;
+  }
+}
+
+export function clearLoginSchoolContext() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(LOGIN_SCHOOL_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 
 /** Map an in-app pathname to AppRole when possible. */
 export function roleFromPath(path: string | null | undefined): AppRole | null {
@@ -618,6 +661,14 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
       }
     } catch {
       /* ignore */
+    }
+  }
+
+  // Login-school fallback (from school code at sign-in) when DB lag leaves schoolId null
+  if (!schoolId) {
+    const loginSchool = readLoginSchoolContext();
+    if (loginSchool?.schoolId) {
+      schoolId = loginSchool.schoolId;
     }
   }
 
