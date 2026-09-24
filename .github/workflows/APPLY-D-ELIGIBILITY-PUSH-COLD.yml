@@ -1,3 +1,0 @@
-name: APPLY-D-ELIGIBILITY-PUSH-COLD
-on:
-  workflow_dispatch:

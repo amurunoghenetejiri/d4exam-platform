@@ -1,3 +1,0 @@
-name: RESTORE-APPSHELL-BRAND
-on:
-  workflow_dispatch:

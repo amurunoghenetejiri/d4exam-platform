@@ -1,3 +1,0 @@
-name: ASSEMBLE-CBT
-on:
-  workflow_dispatch:

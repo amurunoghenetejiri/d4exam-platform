@@ -1,3 +1,0 @@
-name: APPLY-F-OFFICER-COLDSTART
-on:
-  workflow_dispatch:

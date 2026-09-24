@@ -1,3 +1,0 @@
-name: Apply face+haptic restore
-on:
-  workflow_dispatch:

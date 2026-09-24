@@ -1,3 +1,0 @@
-name: Apply notify templates integration
-on:
-  workflow_dispatch:

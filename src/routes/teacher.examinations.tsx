@@ -209,8 +209,6 @@ function Page() {
   });
   const bankList = bankListQ.data ?? [];
 
-  const listQ = useQuery({
-    
   const carryoversQ = useQuery({
     queryKey: ["teacher-carryovers", teacher?.schoolId, courseId],
     enabled: Boolean(teacher?.schoolId && courseId),
@@ -222,12 +220,33 @@ function Page() {
         .eq("course_id", courseId)
         .eq("status", "active")
         .limit(200);
-      if (error) return [] as Array<{ id: string; student_id: string; students: { full_name?: string | null; matric_number?: string | null; student_id?: string; levels?: { name?: string } | null } | null }>;
-      return (data ?? []) as Array<{ id: string; student_id: string; students: { full_name?: string | null; matric_number?: string | null; student_id?: string; levels?: { name?: string } | null } | null }>;
+      if (error) {
+        return [] as Array<{
+          id: string;
+          student_id: string;
+          students: {
+            full_name?: string | null;
+            matric_number?: string | null;
+            student_id?: string;
+            levels?: { name?: string } | null;
+          } | null;
+        }>;
+      }
+      return (data ?? []) as Array<{
+        id: string;
+        student_id: string;
+        students: {
+          full_name?: string | null;
+          matric_number?: string | null;
+          student_id?: string;
+          levels?: { name?: string } | null;
+        } | null;
+      }>;
     },
   });
 
-  queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds, lockedCourseId, session?.userId],
+  const listQ = useQuery({
+    queryKey: ["teacher-exams", teacher?.schoolId, teacher?.courseIds, lockedCourseId, session?.userId],
     enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
     refetchInterval: 30_000,
     queryFn: async () => {

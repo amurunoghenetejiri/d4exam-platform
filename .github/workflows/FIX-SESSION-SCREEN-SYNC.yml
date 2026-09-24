@@ -1,3 +1,0 @@
-name: FIX-SESSION-SCREEN-SYNC
-on:
-  workflow_dispatch:

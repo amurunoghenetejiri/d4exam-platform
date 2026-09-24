@@ -1,3 +1,0 @@
-name: RESTORE-STUDENT-INDEX-AND-PATCH
-on:
-  workflow_dispatch:

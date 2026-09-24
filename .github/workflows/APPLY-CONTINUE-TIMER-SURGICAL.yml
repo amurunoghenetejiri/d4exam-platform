@@ -1,3 +1,0 @@
-name: APPLY-CONTINUE-TIMER-SURGICAL
-on:
-  workflow_dispatch:

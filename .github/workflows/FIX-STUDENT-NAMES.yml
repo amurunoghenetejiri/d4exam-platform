@@ -1,3 +1,0 @@
-name: FIX-STUDENT-NAMES
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: RESTORE-SCREEN-PLUGIN-NOW
-on:
-  workflow_dispatch:

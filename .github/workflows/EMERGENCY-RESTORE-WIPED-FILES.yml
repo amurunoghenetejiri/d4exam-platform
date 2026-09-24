@@ -1,3 +1,0 @@
-name: EMERGENCY-RESTORE-WIPED-FILES
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: APPLY-K-PUSH-NOTIFY
-on:
-  workflow_dispatch:

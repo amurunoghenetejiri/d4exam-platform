@@ -1,3 +1,0 @@
-name: FIX-EXAM-LOCK-TIMER-MIC
-on:
-  workflow_dispatch:

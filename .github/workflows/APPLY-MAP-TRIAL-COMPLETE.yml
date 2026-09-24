@@ -1,3 +1,0 @@
-name: APPLY-MAP-TRIAL-COMPLETE
-on:
-  workflow_dispatch:

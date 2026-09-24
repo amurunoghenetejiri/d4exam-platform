@@ -1,3 +1,0 @@
-name: restore-login-tsx
-on:
-  workflow_dispatch:

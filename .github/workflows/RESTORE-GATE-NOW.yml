@@ -1,3 +1,0 @@
-name: RESTORE-GATE-NOW
-on:
-  workflow_dispatch:

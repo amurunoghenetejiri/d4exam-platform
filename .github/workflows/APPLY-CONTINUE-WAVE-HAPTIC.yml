@@ -1,3 +1,0 @@
-name: APPLY continue countdown + locked greys
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: APPLY-ENROL-MATERIALS
-on:
-  workflow_dispatch:

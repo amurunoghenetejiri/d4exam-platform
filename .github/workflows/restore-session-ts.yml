@@ -1,3 +1,0 @@
-name: restore-session-ts
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: Fix officer blank crash
-on:
-  workflow_dispatch:

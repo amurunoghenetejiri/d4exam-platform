@@ -1,3 +1,0 @@
-name: APPLY face+submit haptic
-on:
-  workflow_dispatch:

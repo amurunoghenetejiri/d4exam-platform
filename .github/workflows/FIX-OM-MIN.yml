@@ -1,3 +1,0 @@
-name: FIX-OM-MIN
-on:
-  workflow_dispatch:

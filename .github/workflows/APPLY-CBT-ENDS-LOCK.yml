@@ -1,3 +1,0 @@
-name: APPLY-CBT-ENDS-LOCK
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: fix-login-redirect
-on:
-  workflow_dispatch:

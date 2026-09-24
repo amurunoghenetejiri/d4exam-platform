@@ -1,3 +1,0 @@
-name: restore-exam-gate
-on:
-  workflow_dispatch:

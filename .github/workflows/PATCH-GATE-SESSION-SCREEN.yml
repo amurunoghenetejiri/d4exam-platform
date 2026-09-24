@@ -1,3 +1,0 @@
-name: PATCH-GATE-SESSION-SCREEN
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: RESTORE-OFFICER-MONITOR-SCREEN
-on:
-  workflow_dispatch:

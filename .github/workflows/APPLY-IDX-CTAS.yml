@@ -1,3 +1,0 @@
-name: APPLY-IDX-CTAS
-on:
-  workflow_dispatch:

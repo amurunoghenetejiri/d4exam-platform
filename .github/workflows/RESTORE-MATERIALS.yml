@@ -1,3 +1,0 @@
-name: RESTORE-MATERIALS
-on:
-  workflow_dispatch:

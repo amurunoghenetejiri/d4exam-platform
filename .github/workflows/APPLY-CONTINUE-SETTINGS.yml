@@ -1,3 +1,0 @@
-name: APPLY-CONTINUE-SETTINGS
-on:
-  workflow_dispatch:

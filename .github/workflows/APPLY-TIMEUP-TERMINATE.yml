@@ -1,3 +1,0 @@
-name: APPLY-TIMEUP-TERMINATE
-on:
-  workflow_dispatch:

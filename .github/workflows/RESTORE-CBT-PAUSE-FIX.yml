@@ -1,3 +1,0 @@
-name: RESTORE-CBT-PAUSE-FIX
-on:
-  workflow_dispatch:

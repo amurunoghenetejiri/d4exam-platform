@@ -1,3 +1,0 @@
-name: Apply live identity v2
-on:
-  workflow_dispatch:

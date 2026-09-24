@@ -1,3 +1,0 @@
-name: fix-import-students-export
-on:
-  workflow_dispatch:

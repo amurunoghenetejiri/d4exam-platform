@@ -1,3 +1,0 @@
-name: Apply identity patch v3
-on:
-  workflow_dispatch:

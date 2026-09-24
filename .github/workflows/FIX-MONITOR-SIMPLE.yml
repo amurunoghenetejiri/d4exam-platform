@@ -1,3 +1,0 @@
-name: FIX-MONITOR-SIMPLE
-on:
-  workflow_dispatch:

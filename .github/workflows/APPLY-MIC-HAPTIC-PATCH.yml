@@ -1,3 +1,0 @@
-name: APPLY-MIC-HAPTIC-PATCH
-on:
-  workflow_dispatch:

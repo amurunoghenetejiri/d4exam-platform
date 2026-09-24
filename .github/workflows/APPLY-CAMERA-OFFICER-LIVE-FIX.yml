@@ -1,3 +1,0 @@
-name: APPLY-CAMERA-OFFICER-LIVE-FIX
-on:
-  workflow_dispatch:

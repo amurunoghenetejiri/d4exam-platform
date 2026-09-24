@@ -1,3 +1,0 @@
-name: PATCH-SCREEN-SHARE-PLUGIN
-on:
-  workflow_dispatch:

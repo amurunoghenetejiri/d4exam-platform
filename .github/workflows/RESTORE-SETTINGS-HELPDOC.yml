@@ -1,3 +1,0 @@
-name: RESTORE-SETTINGS-HELPDOC
-on:
-  workflow_dispatch:

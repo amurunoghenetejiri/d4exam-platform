@@ -1,3 +1,0 @@
-name: Apply officer CBT surgical fixes
-on:
-  workflow_dispatch:

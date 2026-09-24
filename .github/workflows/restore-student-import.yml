@@ -1,3 +1,0 @@
-name: restore-student-import
-on:
-  workflow_dispatch:

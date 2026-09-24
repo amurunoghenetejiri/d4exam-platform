@@ -1,3 +1,0 @@
-name: apply-screen-share-wiring
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: PATCH-ANSWERS-OFFICER
-on:
-  workflow_dispatch:

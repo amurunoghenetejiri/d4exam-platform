@@ -1,3 +1,0 @@
-name: Fix ExamCameraPip no fake ok
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: RESTORE-PLUGIN-ON-PUSH
-on:
-  workflow_dispatch:

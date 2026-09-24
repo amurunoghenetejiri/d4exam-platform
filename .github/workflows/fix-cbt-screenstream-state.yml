@@ -1,3 +1,0 @@
-name: fix-cbt-screenstream-state
-on:
-  workflow_dispatch:

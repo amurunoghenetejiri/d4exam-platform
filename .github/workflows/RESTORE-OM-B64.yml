@@ -1,3 +1,0 @@
-name: RESTORE-OM-B64
-on:
-  workflow_dispatch:

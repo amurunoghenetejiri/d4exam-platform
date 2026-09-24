@@ -1,3 +1,0 @@
-name: APPLY-PERMS-AND-CI
-on:
-  workflow_dispatch:

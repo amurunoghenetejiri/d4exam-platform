@@ -1,3 +1,0 @@
-name: APPLY-MONITOR-FEED
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: assemble-lv-and-patch
-on:
-  workflow_dispatch:

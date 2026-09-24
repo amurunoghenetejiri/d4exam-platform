@@ -1,3 +1,0 @@
-name: fix-exam-permissions-speed
-on:
-  workflow_dispatch:

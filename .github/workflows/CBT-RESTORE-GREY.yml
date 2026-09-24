@@ -1,3 +1,0 @@
-name: CBT-RESTORE-GREY
-on:
-  workflow_dispatch:

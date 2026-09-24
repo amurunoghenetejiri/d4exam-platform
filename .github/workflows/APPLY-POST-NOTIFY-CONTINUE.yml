@@ -1,3 +1,0 @@
-name: APPLY-POST-NOTIFY-CONTINUE
-on:
-  workflow_dispatch:

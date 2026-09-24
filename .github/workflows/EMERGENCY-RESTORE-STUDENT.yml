@@ -1,3 +1,0 @@
-name: EMERGENCY-RESTORE-STUDENT
-on:
-  workflow_dispatch:

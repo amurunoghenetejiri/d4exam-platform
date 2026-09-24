@@ -1,3 +1,0 @@
-name: FIX-MATERIALS
-on:
-  workflow_dispatch:

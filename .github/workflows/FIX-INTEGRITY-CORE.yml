@@ -1,3 +1,0 @@
-name: FIX-INTEGRITY-CORE
-on:
-  workflow_dispatch:

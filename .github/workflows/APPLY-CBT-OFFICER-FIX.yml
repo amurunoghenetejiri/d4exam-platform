@@ -1,3 +1,0 @@
-name: APPLY-CBT-OFFICER-FIX
-on:
-  workflow_dispatch:

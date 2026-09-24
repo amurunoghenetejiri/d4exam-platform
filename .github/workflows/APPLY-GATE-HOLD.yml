@@ -1,3 +1,0 @@
-name: APPLY-GATE-HOLD
-on:
-  workflow_dispatch:

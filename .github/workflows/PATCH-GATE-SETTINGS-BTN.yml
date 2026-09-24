@@ -1,3 +1,0 @@
-name: PATCH-GATE-SETTINGS-BTN
-on:
-  workflow_dispatch:

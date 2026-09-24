@@ -1,3 +1,0 @@
-name: APPLY-CBT-PATCH-SCRIPT
-on:
-  workflow_dispatch:

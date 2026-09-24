@@ -1,3 +1,0 @@
-name: APPLY-SUPERADMIN-TRIAL-MAP
-on:
-  workflow_dispatch:

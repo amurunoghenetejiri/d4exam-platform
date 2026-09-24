@@ -1,3 +1,0 @@
-name: RESTORE-SCREEN-SHARE-NOW
-on:
-  workflow_dispatch:

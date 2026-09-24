@@ -1,3 +1,0 @@
-name: PATCH-SETTINGS-HELP
-on:
-  workflow_dispatch:

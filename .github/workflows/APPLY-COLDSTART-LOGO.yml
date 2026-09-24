@@ -1,3 +1,0 @@
-name: APPLY-COLDSTART-LOGO
-on:
-  workflow_dispatch:

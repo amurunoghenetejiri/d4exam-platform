@@ -1,3 +1,0 @@
-name: RESTORE-CBT-AND-SWITCH
-on:
-  workflow_dispatch:

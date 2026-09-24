@@ -1,3 +1,0 @@
-name: apply-perm-button-v4
-on:
-  workflow_dispatch:

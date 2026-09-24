@@ -1,3 +1,0 @@
-name: Apply officer live stable
-on:
-  workflow_dispatch:

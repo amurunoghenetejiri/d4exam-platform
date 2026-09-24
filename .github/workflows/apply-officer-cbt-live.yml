@@ -1,3 +1,0 @@
-name: Apply officer CBT live fixes
-on:
-  workflow_dispatch:

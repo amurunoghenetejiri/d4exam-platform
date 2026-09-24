@@ -1,3 +1,0 @@
-name: APPLY-FIX-ELIGIBILITY-SCHOOL
-on:
-  workflow_dispatch:

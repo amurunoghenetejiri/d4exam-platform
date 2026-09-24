@@ -1,3 +1,0 @@
-name: APPLY-CONTINUE-V3
-on:
-  workflow_dispatch:

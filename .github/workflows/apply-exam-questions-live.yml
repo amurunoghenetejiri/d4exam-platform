@@ -1,3 +1,0 @@
-name: Apply exam questions live
-on:
-  workflow_dispatch:

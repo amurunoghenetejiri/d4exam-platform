@@ -1,3 +1,0 @@
-name: RESTORE-CBT-FP
-on:
-  workflow_dispatch:

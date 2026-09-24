@@ -1,3 +1,0 @@
-name: FIX-PAUSE-HAPTIC-WIRE
-on:
-  workflow_dispatch:

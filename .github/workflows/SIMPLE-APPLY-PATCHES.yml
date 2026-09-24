@@ -1,3 +1,0 @@
-name: SIMPLE-APPLY-PATCHES
-on:
-  workflow_dispatch:

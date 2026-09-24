@@ -1,4 +1,0 @@
-name: Restore app to c93a499 (Vercel shell)
-
-on:
-  workflow_dispatch:

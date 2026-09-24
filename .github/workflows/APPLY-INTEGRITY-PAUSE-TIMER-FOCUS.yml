@@ -1,4 +1,0 @@
-name: Apply integrity pause/timer/focus minimal fixes
-
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: Apply identity tab quality
-on:
-  workflow_dispatch:

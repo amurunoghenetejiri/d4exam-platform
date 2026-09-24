@@ -1,3 +1,0 @@
-name: PATCH-SUPERADMIN
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: fix-deploy-permissions-final
-on:
-  workflow_dispatch:

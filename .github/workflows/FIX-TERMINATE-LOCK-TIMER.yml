@@ -1,3 +1,0 @@
-name: FIX-TERMINATE-LOCK-TIMER
-on:
-  workflow_dispatch:

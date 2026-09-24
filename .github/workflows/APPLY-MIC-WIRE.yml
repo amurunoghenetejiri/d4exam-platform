@@ -1,3 +1,0 @@
-name: APPLY-MIC-WIRE
-on:
-  workflow_dispatch:

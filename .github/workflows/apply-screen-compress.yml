@@ -1,3 +1,0 @@
-name: Apply screen compress
-on:
-  workflow_dispatch:

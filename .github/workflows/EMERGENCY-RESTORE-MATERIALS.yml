@@ -1,3 +1,0 @@
-name: EMERGENCY-RESTORE-MATERIALS
-on:
-  workflow_dispatch:

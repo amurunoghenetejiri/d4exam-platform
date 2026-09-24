@@ -1,3 +1,0 @@
-name: FIX-INTEGRITY-PATCH2
-on:
-  workflow_dispatch:

@@ -1,4 +1,0 @@
-name: APPLY-CALCULATOR
-# Applies teacher Security calculator toggle + CBT floating calculator overlay
-on:
-  workflow_dispatch:

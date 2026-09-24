@@ -1,4 +1,0 @@
-name: Restore app exactly to b89c7bef
-
-on:
-  workflow_dispatch:

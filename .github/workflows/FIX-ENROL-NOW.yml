@@ -1,3 +1,0 @@
-name: FIX-ENROL-NOW
-on:
-  workflow_dispatch:

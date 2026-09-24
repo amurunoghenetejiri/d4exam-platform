@@ -1,3 +1,0 @@
-name: APPLY-SETTINGS-CBT-FINAL
-on:
-  workflow_dispatch:

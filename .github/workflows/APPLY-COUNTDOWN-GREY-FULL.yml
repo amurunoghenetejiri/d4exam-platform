@@ -1,3 +1,0 @@
-name: APPLY-COUNTDOWN-GREY-FULL
-on:
-  workflow_dispatch:

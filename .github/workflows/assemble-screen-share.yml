@@ -1,3 +1,0 @@
-name: assemble-screen-share
-on:
-  workflow_dispatch:

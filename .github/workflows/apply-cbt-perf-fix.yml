@@ -1,3 +1,0 @@
-name: apply-cbt-perf-fix
-on:
-  workflow_dispatch:

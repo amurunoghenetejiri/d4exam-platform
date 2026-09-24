@@ -1,3 +1,0 @@
-name: RESTORE-SCHOOL-APP-MAP
-on:
-  workflow_dispatch:

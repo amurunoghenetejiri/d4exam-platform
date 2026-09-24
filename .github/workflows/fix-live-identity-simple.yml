@@ -1,3 +1,0 @@
-name: Fix live identity simple
-on:
-  workflow_dispatch:

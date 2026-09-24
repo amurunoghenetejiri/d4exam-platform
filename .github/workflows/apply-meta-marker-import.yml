@@ -1,3 +1,0 @@
-name: Apply META_MARKER import
-on:
-  workflow_dispatch:

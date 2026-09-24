@@ -1,3 +1,0 @@
-name: RESTORE-FROM-PAYLOAD
-on:
-  workflow_dispatch:

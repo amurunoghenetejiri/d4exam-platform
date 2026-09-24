@@ -1,3 +1,0 @@
-name: APPLY-MONITOR-LAYOUT-V2
-on:
-  workflow_dispatch:

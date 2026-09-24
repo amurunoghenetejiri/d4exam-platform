@@ -1,3 +1,0 @@
-name: Apply meta embed2
-on:
-  workflow_dispatch:

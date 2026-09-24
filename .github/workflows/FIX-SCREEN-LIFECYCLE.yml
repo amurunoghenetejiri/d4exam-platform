@@ -1,3 +1,0 @@
-name: FIX-SCREEN-LIFECYCLE
-on:
-  workflow_dispatch:

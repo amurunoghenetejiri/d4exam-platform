@@ -1,3 +1,0 @@
-name: APPLY-LIVE-MONITOR-VIDEO-FIX
-on:
-  workflow_dispatch:

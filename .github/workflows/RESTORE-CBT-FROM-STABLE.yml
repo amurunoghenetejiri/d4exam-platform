@@ -1,3 +1,0 @@
-name: RESTORE-CBT-FROM-STABLE
-on:
-  workflow_dispatch:

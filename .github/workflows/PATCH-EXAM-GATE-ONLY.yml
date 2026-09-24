@@ -1,3 +1,0 @@
-name: PATCH-EXAM-GATE-ONLY
-on:
-  workflow_dispatch:

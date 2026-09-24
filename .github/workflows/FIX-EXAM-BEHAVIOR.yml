@@ -1,3 +1,0 @@
-name: FIX-EXAM-BEHAVIOR
-on:
-  workflow_dispatch:

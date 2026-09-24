@@ -1,3 +1,0 @@
-name: APPLY-CONTINUE-TIMER-BADGES
-on:
-  workflow_dispatch:

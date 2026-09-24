@@ -1,3 +1,0 @@
-name: RESTORE-AND-PATCH-CBT
-on:
-  workflow_dispatch:

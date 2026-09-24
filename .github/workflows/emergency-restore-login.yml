@@ -1,3 +1,0 @@
-name: emergency-restore-login
-on:
-  workflow_dispatch:

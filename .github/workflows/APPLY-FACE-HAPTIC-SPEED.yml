@@ -1,3 +1,0 @@
-name: APPLY-FACE-HAPTIC-SPEED
-on:
-  workflow_dispatch:

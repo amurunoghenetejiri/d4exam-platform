@@ -1,3 +1,0 @@
-name: Fix school identity
-on:
-  workflow_dispatch:

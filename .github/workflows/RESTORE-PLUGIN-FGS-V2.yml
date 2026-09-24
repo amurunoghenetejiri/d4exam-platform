@@ -1,3 +1,0 @@
-name: RESTORE-PLUGIN-FGS-V2
-on:
-  workflow_dispatch:

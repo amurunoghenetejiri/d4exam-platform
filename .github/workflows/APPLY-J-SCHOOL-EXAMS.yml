@@ -1,3 +1,0 @@
-name: APPLY-J-SCHOOL-EXAMS
-on:
-  workflow_dispatch:

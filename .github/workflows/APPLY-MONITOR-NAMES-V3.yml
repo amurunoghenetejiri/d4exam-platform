@@ -1,3 +1,0 @@
-name: APPLY-MONITOR-NAMES-V3
-on:
-  workflow_dispatch:

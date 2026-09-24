@@ -1,3 +1,0 @@
-name: APPLY-FACE-PIP-FIX
-on:
-  workflow_dispatch:

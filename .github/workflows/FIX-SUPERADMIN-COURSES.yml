@@ -1,3 +1,0 @@
-name: FIX-SUPERADMIN-COURSES
-on:
-  workflow_dispatch:

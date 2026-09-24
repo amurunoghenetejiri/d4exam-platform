@@ -1,3 +1,0 @@
-name: APPLY-E-STUDENT-TS
-on:
-  workflow_dispatch:

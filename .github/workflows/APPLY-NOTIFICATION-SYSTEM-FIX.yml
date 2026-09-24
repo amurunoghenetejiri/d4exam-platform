@@ -1,3 +1,0 @@
-name: APPLY-NOTIFICATION-SYSTEM-FIX
-on:
-  workflow_dispatch:

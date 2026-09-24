@@ -1,3 +1,0 @@
-name: Offline-first WhatsApp-style
-on:
-  workflow_dispatch:

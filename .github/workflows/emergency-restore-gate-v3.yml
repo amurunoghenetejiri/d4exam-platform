@@ -1,3 +1,0 @@
-name: emergency-restore-gate-v3
-on:
-  workflow_dispatch:

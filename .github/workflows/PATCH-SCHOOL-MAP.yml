@@ -1,3 +1,0 @@
-name: PATCH-SCHOOL-MAP
-on:
-  workflow_dispatch:

@@ -1,3 +1,0 @@
-name: APPEND-ENROL-FN
-on:
-  workflow_dispatch:

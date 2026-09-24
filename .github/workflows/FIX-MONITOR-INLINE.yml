@@ -1,4 +1,0 @@
-name: FIX-MONITOR-INLINE
-
-on:
-  workflow_dispatch:

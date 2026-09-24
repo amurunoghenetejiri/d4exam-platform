@@ -1,3 +1,0 @@
-name: APPLY-CBT-CAM-TAB-FIX
-on:
-  workflow_dispatch:

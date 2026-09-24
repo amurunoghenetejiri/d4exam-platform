@@ -1,3 +1,0 @@
-name: fix-student-import-path
-on:
-  workflow_dispatch:

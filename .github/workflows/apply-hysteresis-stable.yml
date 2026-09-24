@@ -1,3 +1,0 @@
-name: Apply hysteresis stable live frames
-on:
-  workflow_dispatch:

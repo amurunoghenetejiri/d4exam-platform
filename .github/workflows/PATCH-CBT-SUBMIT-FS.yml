@@ -1,3 +1,0 @@
-name: PATCH-CBT-SUBMIT-FS
-on:
-  workflow_dispatch:

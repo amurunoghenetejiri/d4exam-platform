@@ -1,3 +1,0 @@
-name: FIX-SCREEN-KEEP-ACTIVE
-on:
-  workflow_dispatch:

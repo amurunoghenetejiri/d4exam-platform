@@ -1,3 +1,0 @@
-name: APPLY-SCREEN-SHARE-FIX
-on:
-  workflow_dispatch:

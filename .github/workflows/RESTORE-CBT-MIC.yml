@@ -1,3 +1,0 @@
-name: RESTORE-CBT-MIC
-on:
-  workflow_dispatch:

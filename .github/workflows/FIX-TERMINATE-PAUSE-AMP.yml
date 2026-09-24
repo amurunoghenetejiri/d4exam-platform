@@ -1,3 +1,0 @@
-name: FIX-TERMINATE-PAUSE-AMP
-on:
-  workflow_dispatch:

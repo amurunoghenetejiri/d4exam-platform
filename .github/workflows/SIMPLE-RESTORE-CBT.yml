@@ -1,3 +1,0 @@
-name: SIMPLE-RESTORE-CBT
-on:
-  workflow_dispatch:
