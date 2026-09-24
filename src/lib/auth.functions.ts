@@ -439,6 +439,72 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
 
       const uid = signIn.user.id;
       const token = signIn.session.access_token;
+
+      // Always persist school_id on profile + roles so session never shows "not linked"
+      if (schoolId && serviceKey) {
+        try {
+          const admin = makeClient(url, serviceKey);
+          const { data: byAuth } = await admin
+            .from("profiles")
+            .select("id, school_id")
+            .eq("auth_user_id", uid)
+            .maybeSingle();
+          let profileId = byAuth?.id ? String(byAuth.id) : null;
+          if (byAuth?.id) {
+            if (!byAuth.school_id || String(byAuth.school_id) !== String(schoolId)) {
+              await admin
+                .from("profiles")
+                .update({ school_id: schoolId, status: "active" } as never)
+                .eq("id", byAuth.id);
+            }
+          } else {
+            const { data: byId } = await admin
+              .from("profiles")
+              .select("id, school_id")
+              .eq("id", uid)
+              .maybeSingle();
+            if (byId?.id) {
+              profileId = String(byId.id);
+              await admin
+                .from("profiles")
+                .update({ school_id: schoolId, status: "active", auth_user_id: uid } as never)
+                .eq("id", byId.id);
+            }
+          }
+          // Backfill user_roles.school_id for auth uid and profile id
+          for (const rid of [uid, profileId].filter(Boolean) as string[]) {
+            const { data: roles } = await admin
+              .from("user_roles")
+              .select("id, school_id, role")
+              .eq("user_id", rid);
+            for (const r of roles ?? []) {
+              if (!(r as { school_id?: string }).school_id) {
+                await admin
+                  .from("user_roles")
+                  .update({ school_id: schoolId } as never)
+                  .eq("id", (r as { id: string }).id);
+              }
+            }
+          }
+          // Link staff tables if profile is known but school missing
+          if (profileId) {
+            for (const table of ["examination_officers", "teachers", "students"] as const) {
+              try {
+                await admin
+                  .from(table)
+                  .update({ school_id: schoolId } as never)
+                  .eq("profile_id", profileId)
+                  .is("school_id", null);
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[login] school backfill", e);
+        }
+      }
+
       const priority = ["super_admin", "school_admin", "examination_officer", "teacher", "student"];
       let primaryRole: string | null = null;
 
@@ -502,6 +568,8 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
             refresh_token: signIn.session.refresh_token,
           },
           role: null,
+          schoolId: schoolId || null,
+          schoolCode: schoolCode || null,
           error:
             "Signed in, but no role is assigned. Ask your school admin to create/import this user again.",
         };
@@ -513,6 +581,8 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
           refresh_token: signIn.session.refresh_token,
         },
         role: primaryRole,
+        schoolId: schoolId || null,
+        schoolCode: schoolCode || null,
       };
     } catch (e) {
       console.error("[login] unhandled", e);

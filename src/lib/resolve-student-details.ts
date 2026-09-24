@@ -43,6 +43,7 @@ export async function resolveStudentDetails(
           const hit = map[id];
           if (!hit) continue;
           const fullName = String(hit.full_name || "").trim() || "Student";
+          // Prefer real name over placeholder
           const matric = String(hit.matric_number || hit.student_id || "").trim() || "—";
           const detail: StudentDetail = {
             fullName,
@@ -60,7 +61,9 @@ export async function resolveStudentDetails(
     }
   }
 
-  const still = ids.filter((id) => !out[id] || out[id].fullName === "Student" || out[id].matric === "—");
+  const still = ids.filter(
+    (id) => !out[id] || out[id].fullName === "Student" || !out[id].fullName || out[id].matric === "—",
+  );
   if (!still.length) return out;
 
   const byKey = new Map<string, Raw>();

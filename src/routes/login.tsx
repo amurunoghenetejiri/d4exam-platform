@@ -229,13 +229,12 @@ async function goToRoleHome(role: string, rememberDevice = true, loginSchool?: {
     } catch {
       /* ignore */
     }
-    for (let i = 0; i < (needsSchool ? 2 : 1); i++) {
+    for (let i = 0; i < (needsSchool ? 3 : 1); i++) {
       const u = await Promise.race([
         fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_500)),
       ]);
       if (u && (!needsSchool || u.schoolId)) {
-        // Persist complete session so offline/query cache is not empty
         try {
           if (u.userId) {
             const { offlineSet, OfflineKeys } = await import("@/lib/offline-cache");
@@ -246,7 +245,19 @@ async function goToRoleHome(role: string, rememberDevice = true, loginSchool?: {
         }
         break;
       }
-      await new Promise((r) => setTimeout(r, 150));
+      // Explicit repair if still missing school
+      if (needsSchool) {
+        try {
+          const { repairMySessionSchool } = await import("@/lib/repair-session-school.functions");
+          const fixed = await repairMySessionSchool();
+          if (fixed?.schoolId) {
+            seedLoginSchoolContext(fixed.schoolId, fixed.schoolCode);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      await new Promise((r) => setTimeout(r, 200));
     }
   } catch {
     /* ignore */
@@ -497,6 +508,19 @@ function LoginPage() {
               /* ignore */
             }
           }
+          const loginSchool = {
+            schoolId: (result as { schoolId?: string | null }).schoolId || null,
+            schoolCode: (result as { schoolCode?: string | null }).schoolCode || schoolCode || null,
+          };
+          try {
+            if (loginSchool.schoolId) {
+              seedLoginSchoolContext(loginSchool.schoolId, loginSchool.schoolCode);
+            } else if (schoolCode) {
+              await seedSchoolFromCode(schoolCode);
+            }
+          } catch {
+            /* ignore */
+          }
           const { error: sessErr } = await supabase.auth.setSession({
             access_token: result.session.access_token,
             refresh_token: result.session.refresh_token,
@@ -504,20 +528,25 @@ function LoginPage() {
           if (!sessErr) {
             if (result.role && result.role in roleHome) {
               navigated = true;
-              await goToRoleHome(String(result.role), remember);
+              await goToRoleHome(String(result.role), remember, loginSchool);
               return;
             }
-            await seedSchoolFromCode(schoolCode); if (await resolveRoleAndGoHome()) {
+            await seedSchoolFromCode(schoolCode);
+            if (await resolveRoleAndGoHome()) {
               navigated = true;
               return;
             }
             // Session exists — never bounce back to login form
             navigated = true;
-            await goToRoleHome(readPreferredRole() || readPendingLoginRole() || "student", remember);
+            await goToRoleHome(
+              readPreferredRole() || readPendingLoginRole() || "student",
+              remember,
+              loginSchool,
+            );
             return;
           } else if (result.role && result.role in roleHome) {
             navigated = true;
-            await goToRoleHome(String(result.role), remember);
+            await goToRoleHome(String(result.role), remember, loginSchool);
             return;
           }
         }

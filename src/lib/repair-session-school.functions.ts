@@ -66,41 +66,65 @@ export const repairMySessionSchool = createServerFn({ method: "GET" })
     }
 
     for (const id of ids) {
-      const [{ data: eo }, { data: te }, { data: st }, { data: sa }] = await Promise.all([
+      const [eoRes, teRes, stRes] = await Promise.all([
         supabaseAdmin
           .from("examination_officers")
           .select("school_id, officer_id")
           .eq("profile_id", id)
-          .maybeSingle(),
-        supabaseAdmin.from("teachers").select("school_id, staff_id").eq("profile_id", id).maybeSingle(),
+          .limit(3),
+        supabaseAdmin.from("teachers").select("school_id, staff_id").eq("profile_id", id).limit(3),
         supabaseAdmin
           .from("students")
           .select("school_id, matric_number")
           .eq("profile_id", id)
-          .maybeSingle(),
-        supabaseAdmin
+          .limit(3),
+      ]);
+      for (const eo of eoRes.data ?? []) {
+        if (eo?.school_id) {
+          if (!schoolId) schoolId = String(eo.school_id);
+          roles.add("examination_officer");
+        }
+      }
+      for (const te of teRes.data ?? []) {
+        if (te?.school_id) {
+          if (!schoolId) schoolId = String(te.school_id);
+          roles.add("teacher");
+        }
+      }
+      for (const st of stRes.data ?? []) {
+        if (st?.school_id) {
+          if (!schoolId) schoolId = String(st.school_id);
+          roles.add("student");
+        }
+      }
+      try {
+        const { data: saRows } = await supabaseAdmin
           .from("school_admins")
           .select("school_id")
           .eq("profile_id", id)
-          .maybeSingle()
-          .then((r) => r)
-          .catch(() => ({ data: null })),
-      ]);
-      if (eo?.school_id) {
-        if (!schoolId) schoolId = String(eo.school_id);
-        roles.add("examination_officer");
+          .limit(3);
+        for (const sa of saRows ?? []) {
+          if (sa?.school_id) {
+            if (!schoolId) schoolId = String(sa.school_id);
+            roles.add("school_admin");
+          }
+        }
+      } catch {
+        /* table may not exist */
       }
-      if (te?.school_id) {
-        if (!schoolId) schoolId = String(te.school_id);
-        roles.add("teacher");
-      }
-      if (st?.school_id) {
-        if (!schoolId) schoolId = String(st.school_id);
-        roles.add("student");
-      }
-      if (sa && (sa as { school_id?: string }).school_id) {
-        if (!schoolId) schoolId = String((sa as { school_id: string }).school_id);
-        roles.add("school_admin");
+    }
+
+    // Also match roles where user_id is auth id and school already known from roles
+    if (!schoolId) {
+      for (const id of ids) {
+        const { data: urs } = await supabaseAdmin
+          .from("user_roles")
+          .select("role, school_id")
+          .eq("user_id", id);
+        for (const r of urs ?? []) {
+          if (r.role) roles.add(String(r.role));
+          if (!schoolId && r.school_id) schoolId = String(r.school_id);
+        }
       }
     }
 
@@ -114,41 +138,22 @@ export const repairMySessionSchool = createServerFn({ method: "GET" })
       } catch {
         /* ignore */
       }
-      // Ensure officer role row exists with school
-      if (roles.has("examination_officer")) {
-        const { data: existing } = await supabaseAdmin
+      // Backfill school_id on any role rows missing it
+      for (const rid of [profileId, userId]) {
+        const { data: roleRows } = await supabaseAdmin
           .from("user_roles")
-          .select("id")
-          .eq("user_id", profileId)
-          .eq("role", "examination_officer")
-          .maybeSingle();
-        if (!existing) {
-          const { data: byAuth } = await supabaseAdmin
-            .from("user_roles")
-            .select("id")
-            .eq("user_id", userId)
-            .eq("role", "examination_officer")
-            .maybeSingle();
-          if (!byAuth) {
+          .select("id, school_id, role")
+          .eq("user_id", rid);
+        for (const r of roleRows ?? []) {
+          if (!(r as { school_id?: string }).school_id) {
             try {
-              await supabaseAdmin.from("user_roles").insert({
-                user_id: userId,
-                school_id: schoolId,
-                role: "examination_officer",
-              } as never);
+              await supabaseAdmin
+                .from("user_roles")
+                .update({ school_id: schoolId } as never)
+                .eq("id", (r as { id: string }).id);
             } catch {
               /* ignore */
             }
-          }
-        } else {
-          try {
-            await supabaseAdmin
-              .from("user_roles")
-              .update({ school_id: schoolId } as never)
-              .eq("id", (existing as { id: string }).id)
-              .is("school_id", null);
-          } catch {
-            /* ignore */
           }
         }
       }

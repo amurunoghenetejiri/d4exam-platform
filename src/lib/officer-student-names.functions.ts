@@ -72,29 +72,27 @@ export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
       const ok = await assertStaffOfSchool(supabaseAdmin, userId, schoolId);
       if (!ok) return {};
 
+      // Plain columns only — nested joins can fail under some RLS/schema states
       const selectCols =
-        "id, full_name, matric_number, student_id, profile_id, department_id, level_id, departments(name), levels(name)";
+        "id, full_name, matric_number, student_id, profile_id, department_id, level_id";
 
-      // A) by uuid id
       const { data: byId } = await supabaseAdmin
         .from("students")
         .select(selectCols)
         .eq("school_id", schoolId)
         .in("id", studentIds);
 
-      // B) by profile_id
       const { data: byProf } = await supabaseAdmin
         .from("students")
         .select(selectCols)
         .eq("school_id", schoolId)
         .in("profile_id", studentIds);
 
-      // C) school-wide slice for matric / student_id text matches
       const { data: schoolSlice } = await supabaseAdmin
         .from("students")
         .select(selectCols)
         .eq("school_id", schoolId)
-        .limit(1500);
+        .limit(2000);
 
       type Raw = {
         id: string;
@@ -111,6 +109,30 @@ export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
       const pool = new Map<string, Raw>();
       for (const s of [...(byId ?? []), ...(byProf ?? []), ...(schoolSlice ?? [])] as Raw[]) {
         pool.set(String(s.id), s);
+      }
+
+      // Department / level names (separate queries — reliable)
+      {
+        const deptIds = [...new Set([...pool.values()].map((s) => s.department_id).filter(Boolean))] as string[];
+        const levelIds = [...new Set([...pool.values()].map((s) => s.level_id).filter(Boolean))] as string[];
+        const deptMap = new Map<string, string>();
+        const levelMap = new Map<string, string>();
+        if (deptIds.length) {
+          const { data } = await supabaseAdmin.from("departments").select("id, name").in("id", deptIds.slice(0, 200));
+          for (const d of data ?? []) deptMap.set(String(d.id), String(d.name || ""));
+        }
+        if (levelIds.length) {
+          const { data } = await supabaseAdmin.from("levels").select("id, name").in("id", levelIds.slice(0, 200));
+          for (const l of data ?? []) levelMap.set(String(l.id), String(l.name || ""));
+        }
+        for (const s of pool.values()) {
+          if (s.department_id && deptMap.get(String(s.department_id))) {
+            s.departments = { name: deptMap.get(String(s.department_id)) };
+          }
+          if (s.level_id && levelMap.get(String(s.level_id))) {
+            s.levels = { name: levelMap.get(String(s.level_id)) };
+          }
+        }
       }
 
       const out: Record<string, ResolvedStudentName> = {};
@@ -130,7 +152,7 @@ export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
         if (s.profile_id) out[String(s.profile_id)] = entry;
         if (s.student_id) out[String(s.student_id)] = entry;
         if (s.matric_number) out[String(s.matric_number)] = entry;
-        if (!fn && s.profile_id) needProfiles.push({ key, profileId: String(s.profile_id) });
+        if (s.profile_id) needProfiles.push({ key, profileId: String(s.profile_id) });
       }
 
       for (const id of studentIds) {
@@ -159,11 +181,80 @@ export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
         const { data: profiles } = await supabaseAdmin
           .from("profiles")
           .select("id, full_name")
-          .in("id", pids.slice(0, 300));
-        const pmap = new Map((profiles ?? []).map((p: { id: string; full_name?: string | null }) => [p.id, String(p.full_name || "").trim()]));
+          .in("id", pids.slice(0, 400));
+        const pmap = new Map(
+          (profiles ?? []).map((p: { id: string; full_name?: string | null }) => [
+            p.id,
+            String(p.full_name || "").trim(),
+          ]),
+        );
+        for (const key of Object.keys(out)) {
+          const entry = out[key];
+          // Re-find student row for this key in pool
+          const row = pool.get(key);
+          const pid = row?.profile_id
+            ? String(row.profile_id)
+            : needProfiles.find((x) => x.key === key)?.profileId;
+          if (!pid) continue;
+          const n = pmap.get(pid);
+          if (n) {
+            out[key] = { ...entry, full_name: entry.full_name?.trim() ? entry.full_name : n };
+          }
+        }
+        // Ensure every requested id has a name if we found a profile
         for (const { key, profileId } of needProfiles) {
           const n = pmap.get(profileId);
-          if (n && out[key]) out[key] = { ...out[key], full_name: n };
+          if (n && out[key] && !String(out[key].full_name || "").trim()) {
+            out[key] = { ...out[key], full_name: n };
+          }
+        }
+      }
+
+      // Final pass: any empty full_name → try profiles by student profile_id in pool
+      {
+        const emptyKeys = Object.entries(out)
+          .filter(([, v]) => !String(v.full_name || "").trim())
+          .map(([k]) => k);
+        if (emptyKeys.length) {
+          const pids = [
+            ...new Set(
+              emptyKeys
+                .map((k) => {
+                  const row = [...pool.values()].find(
+                    (s) =>
+                      String(s.id) === k ||
+                      String(s.profile_id || "") === k ||
+                      String(s.student_id || "") === k ||
+                      String(s.matric_number || "") === k,
+                  );
+                  return row?.profile_id ? String(row.profile_id) : null;
+                })
+                .filter(Boolean),
+            ),
+          ] as string[];
+          if (pids.length) {
+            const { data: profiles } = await supabaseAdmin
+              .from("profiles")
+              .select("id, full_name")
+              .in("id", pids.slice(0, 400));
+            const pmap = new Map(
+              (profiles ?? []).map((p: { id: string; full_name?: string | null }) => [
+                String(p.id),
+                String(p.full_name || "").trim(),
+              ]),
+            );
+            for (const k of emptyKeys) {
+              const row = [...pool.values()].find(
+                (s) =>
+                  String(s.id) === k ||
+                  String(s.profile_id || "") === k ||
+                  String(s.student_id || "") === k ||
+                  String(s.matric_number || "") === k,
+              );
+              const n = row?.profile_id ? pmap.get(String(row.profile_id)) : null;
+              if (n && out[k]) out[k] = { ...out[k], full_name: n };
+            }
+          }
         }
       }
 
