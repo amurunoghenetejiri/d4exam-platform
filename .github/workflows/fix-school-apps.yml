@@ -1,33 +1,3 @@
 name: Fix school identity
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/fix-school-apps.yml"
-jobs:
-  fix:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Restore school-identity from good commit
-        run: |
-          set -euo pipefail
-          git show f3958907eba70678a519a6e98e10f7bbb419287b:src/lib/school-identity.ts > src/lib/school-identity.ts
-          test $(wc -c < src/lib/school-identity.ts) -gt 5000
-          grep -q useSchoolIdentity src/lib/school-identity.ts
-          grep -q uploadSchoolLogo src/lib/school-identity.ts
-          ! grep -q PLACEHOLDER src/lib/school-identity.ts
-          echo "redeploy $(date -u +%Y%m%d%H%M%S) school-identity restored" > DEPLOY_TRIGGER.txt
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git add src/lib/school-identity.ts DEPLOY_TRIGGER.txt
-          if git diff --cached --quiet; then
-            echo "No changes"
-          else
-            git commit -m "fix: restore school-identity.ts (logo upload + useSchoolIdentity)"
-            git push origin HEAD:main
-          fi

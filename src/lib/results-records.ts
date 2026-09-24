@@ -232,7 +232,7 @@ export async function loadExamResultRecord(
   const { data: exam, error } = await supabase
     .from("examinations")
     .select(
-      "id, title, description, school_id, course_id, scheduled_start, scheduled_end, courses(code, name, department_id, level_id, semester_id, departments(name), levels(name), semesters(name, academic_session_id, academic_sessions(name)))",
+      "id, title, description, school_id, course_id, scheduled_start, scheduled_end, courses(code, name, department_id, level_id, semester_id)",
     )
     .eq("id", examId)
     .maybeSingle();
@@ -264,30 +264,48 @@ export async function loadExamResultRecord(
       department_id?: string | null;
       level_id?: string | null;
       semester_id?: string | null;
-      departments?: { name?: string } | { name?: string }[] | null;
-      levels?: { name?: string } | { name?: string }[] | null;
-      semesters?:
-        | {
-            name?: string;
-            academic_session_id?: string | null;
-            academic_sessions?: { name?: string } | { name?: string }[] | null;
-          }
-        | {
-            name?: string;
-            academic_session_id?: string | null;
-            academic_sessions?: { name?: string } | { name?: string }[] | null;
-          }[]
-        | null;
     } | null;
   }).courses;
 
   const one = <T,>(v: T | T[] | null | undefined): T | null =>
     Array.isArray(v) ? v[0] ?? null : v ?? null;
 
-  const dept = one(courses?.departments);
-  const level = one(courses?.levels);
-  const sem = one(courses?.semesters);
-  const sess = one(sem?.academic_sessions as { name?: string } | { name?: string }[] | null | undefined);
+  let deptName = "—";
+  let levelName = "—";
+  let semName = "—";
+  let sessName = "—";
+  try {
+    if (courses?.department_id) {
+      const { data: d } = await supabase.from("departments").select("name").eq("id", courses.department_id).maybeSingle();
+      if (d?.name) deptName = d.name;
+    }
+    if (courses?.level_id) {
+      const { data: l } = await supabase.from("levels").select("name").eq("id", courses.level_id).maybeSingle();
+      if (l?.name) levelName = l.name;
+    }
+    if (courses?.semester_id) {
+      const { data: s } = await supabase
+        .from("semesters")
+        .select("name, academic_session_id")
+        .eq("id", courses.semester_id)
+        .maybeSingle();
+      if (s?.name) semName = s.name;
+      if (s?.academic_session_id) {
+        const { data: sess } = await supabase
+          .from("academic_sessions")
+          .select("name")
+          .eq("id", s.academic_session_id)
+          .maybeSingle();
+        if (sess?.name) sessName = sess.name;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const dept = { name: deptName };
+  const level = { name: levelName };
+  const sem = { name: semName };
+  const sess = { name: sessName };
 
   let schoolName: string | null = user.schoolName;
   try {

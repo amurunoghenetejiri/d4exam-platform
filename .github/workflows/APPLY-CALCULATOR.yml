@@ -2,27 +2,3 @@ name: APPLY-CALCULATOR
 # Applies teacher Security calculator toggle + CBT floating calculator overlay
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/APPLY-CALCULATOR.yml"
-      - "scripts/calc_feature/**"
-jobs:
-  apply:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Apply calculator feature
-        run: bash scripts/calc_feature/apply.sh
-      - name: Commit
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git status
-          if git diff --cached --quiet; then echo nothing; exit 0; fi
-          git commit -m "feat(exam): in-exam calculator (teacher setting + basic/scientific CBT overlay)"
-          git push origin HEAD:main

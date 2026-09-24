@@ -1,33 +1,3 @@
 name: RESTORE-CBT-MIC
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/RESTORE-CBT-MIC.yml"
-jobs:
-  restore:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Restore CBT from last non-empty + wire mic
-        run: |
-          set -euo pipefail
-          SHA=$(git log --all --pretty=format:%H -- src/components/cbt/CbtExamSession.impl.tsx | while read h; do
-            sz=$(git cat-file -s "$h:src/components/cbt/CbtExamSession.impl.tsx" 2>/dev/null || echo 0)
-            if [ "$sz" -gt 1000 ]; then echo "$h"; break; fi
-          done)
-          echo "Using SHA=$SHA size check"
-          if [ -z "$SHA" ]; then echo "No good CBT found"; exit 1; fi
-          git show "$SHA:src/components/cbt/CbtExamSession.impl.tsx" > src/components/cbt/CbtExamSession.impl.tsx
-          wc -c src/components/cbt/CbtExamSession.impl.tsx
-          python3 scripts/wire_mic.py
-          test $(wc -c < src/components/cbt/CbtExamSession.impl.tsx) -gt 1000
-          grep -q useLiveMicPublish src/components/cbt/CbtExamSession.impl.tsx || true
-          git config user.name "d4exam-bot"
-          git config user.email "bot@d4exam.local"
-          git add src/components/cbt/CbtExamSession.impl.tsx src/routes/officer.live-monitor.tsx
-          if git diff --cached --quiet; then echo no changes; else git commit -m "fix: restore CBT session + live mic for officer" && git push; fi

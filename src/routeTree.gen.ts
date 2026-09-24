@@ -38,6 +38,8 @@ import { Route as AdminOfficersRouteImport } from './routes/admin.officers'
 import { Route as AdminProfileRouteImport } from './routes/admin.profile'
 import { Route as AdminReportsRouteImport } from './routes/admin.reports'
 import { Route as AdminResultsRouteImport } from './routes/admin.results'
+import { Route as AdminCarryoversRouteImport } from './routes/admin.carryovers'
+import { Route as OfficerCarryoversRouteImport } from './routes/officer.carryovers'
 import { Route as AdminSemestersRouteImport } from './routes/admin.semesters'
 import { Route as AdminSessionsRouteImport } from './routes/admin.sessions'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
@@ -241,6 +243,16 @@ const AdminReportsRoute = AdminReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
   getParentRoute: () => AdminRoute,
+} as any)
+const AdminCarryoversRoute = AdminCarryoversRouteImport.update({
+  id: '/admin/carryovers',
+  path: '/admin/carryovers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OfficerCarryoversRoute = OfficerCarryoversRouteImport.update({
+  id: '/officer/carryovers',
+  path: '/officer/carryovers',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AdminResultsRoute = AdminResultsRouteImport.update({
   id: '/results',
@@ -1822,6 +1834,8 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminProfileRoute: AdminProfileRoute,
   AdminReportsRoute: AdminReportsRoute,
   AdminResultsRoute: AdminResultsRoute,
+  AdminCarryoversRoute,
+  OfficerCarryoversRoute,
   AdminSemestersRoute: AdminSemestersRoute,
   AdminSessionsRoute: AdminSessionsRoute,
   AdminSettingsRoute: AdminSettingsRoute,

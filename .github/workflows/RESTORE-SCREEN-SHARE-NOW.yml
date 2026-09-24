@@ -1,32 +1,3 @@
 name: RESTORE-SCREEN-SHARE-NOW
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - .github/workflows/RESTORE-SCREEN-SHARE-NOW.yml
-jobs:
-  restore:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Restore screen-share.ts from known-good commit
-        run: |
-          set -euo pipefail
-          git show 310e749dea1369d51caf48fdb8202fd7e9485352:src/lib/screen-share.ts > src/lib/screen-share.ts
-          test -s src/lib/screen-share.ts
-          grep -q isNativeScreenShareActive src/lib/screen-share.ts
-          grep -qv PLACEHOLDER src/lib/screen-share.ts
-          wc -c src/lib/screen-share.ts
-      - name: Commit
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/lib/screen-share.ts
-          if git diff --cached --quiet; then echo No changes; else
-            git commit -m "fix(screen): restore screen-share.ts from known-good commit"
-            git push
-          fi
