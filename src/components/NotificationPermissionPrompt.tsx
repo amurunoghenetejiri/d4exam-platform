@@ -11,7 +11,7 @@ import {
   getPushPermissionState,
   refreshNativePushPermissionState,
 } from "@/lib/push";
-import { isNativeShell } from "@/native/platform";
+import { isNativeShell, waitForNativeShell } from "@/native/platform";
 import { notificationsEnabledConfirm } from "@/lib/notify-messages";
 import { showD4ExamNativeNotification } from "@/native/localNotify";
 
@@ -52,7 +52,6 @@ export function NotificationPermissionPrompt() {
   // After login: request REAL Android notification permission (POST_NOTIFICATIONS)
   // once per install — not a fake web dialog.
   useEffect(() => {
-    if (!isNativeShell()) return;
     const uid = session?.userId;
     if (!uid) return;
     try {
@@ -63,8 +62,11 @@ export function NotificationPermissionPrompt() {
     let cancelled = false;
     (async () => {
       try {
+        // Wait for Capacitor bridge (critical with server.url remote load)
+        const nativeReady = await waitForNativeShell(8_000);
+        if (cancelled || !nativeReady) return;
         // Let splash / dashboard settle
-        await new Promise((r) => setTimeout(r, 2_500));
+        await new Promise((r) => setTimeout(r, 1_500));
         if (cancelled) return;
         const { LocalNotifications } = await import("@capacitor/local-notifications");
         const cur = await LocalNotifications.checkPermissions();

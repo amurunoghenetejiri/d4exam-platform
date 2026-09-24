@@ -10,13 +10,29 @@ import {
   refreshNativePushPermissionState,
   type PushPermissionState,
 } from "@/lib/push";
-import { isNativeShell } from "@/native/platform";
+import { isNativeShell, waitForNativeShell } from "@/native/platform";
 
 export function PushSettingsCard({ scope }: { scope?: string }) {
   const { data: session } = useSessionUser();
   const [pushBusy, setPushBusy] = useState(false);
   const [pushStatus, setPushStatus] = useState<PushPermissionState>(() => getPushPermissionState());
-  const native = isNativeShell();
+  const [native, setNative] = useState(() => isNativeShell());
+
+  useEffect(() => {
+    if (native) return;
+    let cancelled = false;
+    void waitForNativeShell(8_000).then((ok) => {
+      if (!cancelled && ok) setNative(true);
+    });
+    const onReady = () => {
+      if (isNativeShell()) setNative(true);
+    };
+    window.addEventListener("d4-native-ready", onReady);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("d4-native-ready", onReady);
+    };
+  }, [native]);
 
   useEffect(() => {
     if (!native) {

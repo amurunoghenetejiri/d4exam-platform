@@ -15,7 +15,7 @@ import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getMessaging, getToken, isSupported, onMessage, type Messaging } from "firebase/messaging";
 import { FIREBASE_WEB_CONFIG, FIREBASE_VAPID_KEY } from "@/lib/firebase-config";
 import { supabase } from "@/integrations/supabase/client";
-import { isNativeShell, getRuntimePlatform } from "@/native/platform";
+import { isNativeShell, getRuntimePlatform, waitForNativeShell } from "@/native/platform";
 import { showD4ExamNativeNotification, bindLocalNotificationActions } from "@/native/localNotify";
 import { notificationsEnabledConfirm } from "@/lib/notify-messages";
 
@@ -41,6 +41,9 @@ export function getPushPermissionState(): PushPermissionState {
 }
 
 export async function refreshNativePushPermissionState(): Promise<PushPermissionState> {
+  if (!isNativeShell()) {
+    await waitForNativeShell(3_000);
+  }
   if (!isNativeShell()) return getPushPermissionState();
   try {
     const { LocalNotifications } = await import("@capacitor/local-notifications");
@@ -547,6 +550,10 @@ export async function enablePushNotifications(
   opts?: { requestPermission?: boolean },
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
   if (!userId) return { ok: false, error: "Sign in required" };
+  // Capacitor bridge may inject late when APK loads remote server.url
+  if (!isNativeShell()) {
+    await waitForNativeShell(6_000);
+  }
   if (isNativeShell()) {
     await disableWebPushInNativeShell();
     return enableNativePushNotifications(userId, role, {

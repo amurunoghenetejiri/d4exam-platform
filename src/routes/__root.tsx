@@ -26,6 +26,7 @@ import { AndroidApkInstallBanner } from "@/components/AndroidApkInstallBanner";
 import { useSessionUser, rememberLastPath, readLastRole, readPreferredRole, roleHome, roleFromPath, type AppRole } from "@/lib/session";
 import { initNativePushIfNeeded, initWebPushIfNeeded } from "@/lib/push";
 import { isNativeShell } from "@/native/platform";
+// native bootstrap patched below;
 import { applyNativeStatusBar } from "@/native/statusBar";
 import { registerAndroidBackButton } from "@/native/backButton";
 import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
@@ -34,6 +35,12 @@ import { SchoolSessionBootstrap } from "@/components/SchoolSessionBootstrap";
 import { startAccountVaultKeepAlive } from "@/lib/account-switcher";
 import { notifyWelcomeRole } from "@/lib/email-notify.functions";
 import { isSyntheticStudentEmail } from "@/lib/student-email";
+import { startNativeShellWatcher } from "@/native/platform";
+
+if (typeof window !== "undefined") {
+  startNativeShellWatcher();
+}
+
 
 function NativeBootstrap() {
   const { data: session } = useSessionUser();

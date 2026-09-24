@@ -3,7 +3,7 @@
  * Invokes Android BiometricPrompt. Never stores fingerprint data.
  */
 import { Capacitor, registerPlugin } from "@capacitor/core";
-import { isNativeShell } from "@/native/platform";
+import { isNativeShell, waitForNativeShell } from "@/native/platform";
 
 export type FingerprintAvailability =
   | { ok: true; hasFingerprint: true }
@@ -77,7 +77,11 @@ function isUnimplemented(err: unknown): boolean {
  * Resolve Capgo NativeBiometric through Capacitor bridge (works with server.url).
  */
 async function getPlugin(): Promise<NativeBiometricPlugin | null> {
-  if (!isNativeShell()) return null;
+  // Bridge can inject after first paint when loading remote server.url
+  if (!isNativeShell()) {
+    const ready = await waitForNativeShell(6_000);
+    if (!ready && !isNativeShell()) return null;
+  }
   if (cachedPlugin) return cachedPlugin;
 
   // Official package export (bundled on website + APK)

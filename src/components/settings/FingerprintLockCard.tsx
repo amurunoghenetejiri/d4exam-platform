@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { SectionCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { useSessionUser } from "@/lib/session";
-import { isNativeShell } from "@/native/platform";
+import { isNativeShell, waitForNativeShell } from "@/native/platform";
 import {
   authenticateWithFingerprint,
   checkFingerprintAvailable,
@@ -18,7 +18,7 @@ import {
 
 export function FingerprintLockCard() {
   const { data: session } = useSessionUser();
-  const native = isNativeShell();
+  const [native, setNative] = useState(() => isNativeShell());
   const [busy, setBusy] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [availability, setAvailability] = useState<FingerprintAvailability | null>(null);
@@ -31,6 +31,23 @@ export function FingerprintLockCard() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Capacitor may inject after first paint (remote server.url WebView)
+  useEffect(() => {
+    if (native) return;
+    let cancelled = false;
+    void waitForNativeShell(8_000).then((ok) => {
+      if (!cancelled && ok) setNative(true);
+    });
+    const onReady = () => {
+      if (isNativeShell()) setNative(true);
+    };
+    window.addEventListener("d4-native-ready", onReady);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("d4-native-ready", onReady);
+    };
+  }, [native]);
 
   useEffect(() => {
     if (!native) return;

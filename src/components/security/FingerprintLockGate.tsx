@@ -27,7 +27,7 @@ import {
   readPendingLoginRole,
   type AppRole,
 } from "@/lib/session";
-import { isNativeShell } from "@/native/platform";
+import { isNativeShell, waitForNativeShell } from "@/native/platform";
 import {
   authenticateWithFingerprint,
   checkFingerprintAvailable,
@@ -137,8 +137,24 @@ function lastKnownRole(): AppRole | null {
 }
 
 export function FingerprintLockGate() {
-  const native = isNativeShell();
+  const [native, setNative] = useState(() => isNativeShell());
   const { data: session } = useSessionUser();
+
+  useEffect(() => {
+    if (native) return;
+    let cancelled = false;
+    void waitForNativeShell(10_000).then((ok) => {
+      if (!cancelled && (ok || isNativeShell())) setNative(true);
+    });
+    const onReady = () => {
+      if (isNativeShell()) setNative(true);
+    };
+    window.addEventListener("d4-native-ready", onReady);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("d4-native-ready", onReady);
+    };
+  }, [native]);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [locked, setLocked] = useState(false);
   const [failedMsg, setFailedMsg] = useState<string | null>(null);
