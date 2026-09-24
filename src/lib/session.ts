@@ -317,37 +317,52 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   }
   if (!user) return null;
 
-  // FAST: RPC + profiles/roles in parallel (~2.5s max)
+  // FAST: RPC (retry) + profiles/roles in parallel — schoolId must resolve for dashboards
   let rpcCtx: SessionContextRpc | null = null;
   let profileByAuth: { data: Record<string, unknown> | null } = { data: null };
   let profileById: { data: Record<string, unknown> | null } = { data: null };
   let roleRes: { data: { role: string; school_id: string | null; user_id: string }[] | null } = { data: null };
   try {
-    const [rpcData, triple] = await Promise.all([
-      withTimeout(
-        supabase.rpc("get_my_session_context" as never).then((r) => r.data),
-        1800,
-        "get_my_session_context",
-      ).catch(() => null),
-      withTimeout(
-        Promise.all([
-          supabase
-            .from("profiles")
-            .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
-            .eq("auth_user_id", user.id)
-            .maybeSingle(),
-          supabase
-            .from("profiles")
-            .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
-            .eq("id", user.id)
-            .maybeSingle(),
-          supabase.from("user_roles").select("role, school_id, user_id").eq("user_id", user.id),
-        ]),
-        1800,
-        "profiles+roles",
-      ).catch(() => null),
-    ]);
-    if (rpcData && typeof rpcData === "object") rpcCtx = rpcData as SessionContextRpc;
+    // Retry session RPC — first paint after login often races auth.uid()
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const rpcData = await withTimeout(
+          supabase.rpc("get_my_session_context" as never).then((r) => {
+            if (r.error) console.warn("[session] rpc", r.error.message);
+            return r.data;
+          }),
+          3500,
+          "get_my_session_context",
+        );
+        if (rpcData && typeof rpcData === "object") {
+          rpcCtx = rpcData as SessionContextRpc;
+          if (rpcCtx.school_id || (Array.isArray(rpcCtx.roles) && rpcCtx.roles.length) || rpcCtx.profile_id) {
+            break;
+          }
+        }
+      } catch (e) {
+        console.warn("[session] rpc attempt", attempt, e);
+      }
+      await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+    }
+
+    const triple = await withTimeout(
+      Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
+          .eq("auth_user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("profiles")
+          .select("id, full_name, first_name, last_name, email, status, school_id, auth_user_id")
+          .eq("id", user.id)
+          .maybeSingle(),
+        supabase.from("user_roles").select("role, school_id, user_id").eq("user_id", user.id),
+      ]),
+      4000,
+      "profiles+roles",
+    ).catch(() => null);
     if (triple) {
       profileByAuth = triple[0] as typeof profileByAuth;
       profileById = triple[1] as typeof profileById;
@@ -527,20 +542,82 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     } catch { /* ignore */ }
   }
 
-  // school_admins table (optional)
-  if (!schoolId && resolvedPid) {
+  // school_admins table (optional) — try profile id + auth id
+  if (!schoolId) {
     try {
-      const { data: sa } = await supabase
-        .from("school_admins")
-        .select("school_id")
-        .eq("profile_id", resolvedPid)
-        .maybeSingle();
-      if (sa?.school_id) {
-        schoolId = String(sa.school_id);
-        if (!roles.includes("school_admin")) roles = [...roles, "school_admin"];
+      const ids = [...new Set([resolvedPid, user.id].filter(Boolean))] as string[];
+      for (const pid of ids) {
+        const { data: sa } = await supabase
+          .from("school_admins")
+          .select("school_id")
+          .eq("profile_id", pid)
+          .maybeSingle();
+        if (sa?.school_id) {
+          schoolId = String(sa.school_id);
+          if (!roles.includes("school_admin")) roles = [...roles, "school_admin"];
+          break;
+        }
       }
     } catch {
       /* table may not exist */
+    }
+  }
+
+  // Last-chance school from profiles row if still empty
+  if (!schoolId && (profile as { school_id?: string | null } | null)?.school_id) {
+    schoolId = String((profile as { school_id: string }).school_id);
+  }
+
+  // teachers / students / officers by auth id as profile_id (legacy)
+  if (!schoolId) {
+    try {
+      const ids = [...new Set([resolvedPid, user.id].filter(Boolean))] as string[];
+      for (const pid of ids) {
+        const [{ data: te }, { data: st }, { data: eo }] = await Promise.all([
+          supabase.from("teachers").select("school_id").eq("profile_id", pid).maybeSingle(),
+          supabase.from("students").select("school_id").eq("profile_id", pid).maybeSingle(),
+          supabase.from("examination_officers").select("school_id").eq("profile_id", pid).maybeSingle(),
+        ]);
+        if (eo?.school_id) {
+          schoolId = String(eo.school_id);
+          if (!roles.includes("examination_officer")) roles = [...roles, "examination_officer"];
+          break;
+        }
+        if (te?.school_id) {
+          schoolId = String(te.school_id);
+          if (!roles.includes("teacher")) roles = [...roles, "teacher"];
+          break;
+        }
+        if (st?.school_id) {
+          schoolId = String(st.school_id);
+          if (!roles.includes("student")) roles = [...roles, "student"];
+          break;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Re-call RPC once more if still no school (auth may have settled)
+  if (!schoolId && !roles.includes("super_admin")) {
+    try {
+      const rpcData = await withTimeout(
+        supabase.rpc("get_my_session_context" as never).then((r) => r.data),
+        4000,
+        "get_my_session_context_retry",
+      );
+      if (rpcData && typeof rpcData === "object") {
+        const again = rpcData as SessionContextRpc;
+        if (again.school_id) schoolId = String(again.school_id);
+        if (Array.isArray(again.roles)) {
+          roles = [...new Set([...roles, ...(again.roles as AppRole[])])];
+        }
+        if (!rpcCtx) rpcCtx = again;
+        else rpcCtx = { ...rpcCtx, ...again };
+      }
+    } catch {
+      /* ignore */
     }
   }
 

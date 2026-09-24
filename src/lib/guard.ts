@@ -88,7 +88,7 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
       try {
         user = await Promise.race([
           fetchSessionUser(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_500)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_500)),
         ]);
       } catch {
         user = null;
@@ -133,7 +133,7 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
         try {
           const hard = await Promise.race([
             fetchSessionUser(),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_500)),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 5_000)),
           ]);
           // Accept resolved role even if schoolId is still hydrating (admin/officer login loop fix)
           if (

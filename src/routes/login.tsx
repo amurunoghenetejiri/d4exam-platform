@@ -184,16 +184,33 @@ async function goToRoleHome(role: string, rememberDevice = true) {
   } catch {
     /* ignore */
   }
-  // Warm session so dashboards have schoolId before first paint
+  // Warm session so dashboards have schoolId before first paint (retry hard after auth)
   try {
     const needsSchool = role !== "super_admin";
-    for (let i = 0; i < (needsSchool ? 3 : 1); i++) {
+    // Let auth tokens settle in the client
+    try {
+      await supabase.auth.getSession();
+    } catch {
+      /* ignore */
+    }
+    for (let i = 0; i < (needsSchool ? 6 : 2); i++) {
       const u = await Promise.race([
         fetchSessionUser(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_500)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4_000)),
       ]);
-      if (u && (!needsSchool || u.schoolId)) break;
-      await new Promise((r) => setTimeout(r, 300));
+      if (u && (!needsSchool || u.schoolId)) {
+        // Persist complete session so offline/query cache is not empty
+        try {
+          if (u.userId) {
+            const { offlineSet, OfflineKeys } = await import("@/lib/offline-cache");
+            await offlineSet(u.userId, OfflineKeys.sessionUser, u, { schoolId: u.schoolId });
+          }
+        } catch {
+          /* ignore */
+        }
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 400));
     }
   } catch {
     /* ignore */
