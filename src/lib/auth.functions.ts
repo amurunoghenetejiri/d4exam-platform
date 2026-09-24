@@ -550,8 +550,46 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       if (!primaryRole && serviceKey) {
         try {
           const admin = makeClient(url, serviceKey);
-          const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", uid);
-          primaryRole = pickRole((roles ?? []).map((r: { role: string }) => String(r.role)));
+          // Roles may be keyed by auth uid OR profiles.id
+          const { data: prof } = await admin
+            .from("profiles")
+            .select("id")
+            .eq("auth_user_id", uid)
+            .maybeSingle();
+          const ids = [uid, prof?.id ? String(prof.id) : ""].filter(Boolean);
+          const roleList: string[] = [];
+          for (const id of ids) {
+            const { data: roles } = await admin.from("user_roles").select("role").eq("user_id", id);
+            for (const r of roles ?? []) {
+              if (r?.role) roleList.push(String(r.role));
+            }
+          }
+          primaryRole = pickRole(roleList);
+
+          // Staff tables as authoritative role signal
+          if (!primaryRole && prof?.id) {
+            const pid = String(prof.id);
+            const [{ data: eo }, { data: te }, { data: st }] = await Promise.all([
+              admin.from("examination_officers").select("id").eq("profile_id", pid).limit(1),
+              admin.from("teachers").select("id").eq("profile_id", pid).limit(1),
+              admin.from("students").select("id").eq("profile_id", pid).limit(1),
+            ]);
+            if ((eo ?? []).length) primaryRole = "examination_officer";
+            else if ((te ?? []).length) primaryRole = "teacher";
+            else if ((st ?? []).length) primaryRole = "student";
+            else {
+              try {
+                const { data: sa } = await admin
+                  .from("school_admins")
+                  .select("id")
+                  .eq("profile_id", pid)
+                  .limit(1);
+                if ((sa ?? []).length) primaryRole = "school_admin";
+              } catch {
+                /* optional table */
+              }
+            }
+          }
         } catch {
           /* ignore */
         }
@@ -560,6 +598,7 @@ export const loginWithSchoolCode = createServerFn({ method: "POST" })
       if (!primaryRole && resolvedKind === "student") primaryRole = "student";
       if (!primaryRole && resolvedKind === "teacher") primaryRole = "teacher";
       if (!primaryRole && resolvedKind === "officer") primaryRole = "examination_officer";
+      if (!primaryRole && resolvedKind === "school_admin") primaryRole = "school_admin";
 
       if (!primaryRole) {
         return {

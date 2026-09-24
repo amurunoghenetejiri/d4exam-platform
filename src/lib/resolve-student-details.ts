@@ -177,3 +177,10 @@ export function integritySeverityBand(
   if (t.includes("MULTI") || t.includes("FACE") || t.includes("TAB")) return "medium";
   return "low";
 }
+
+/** Tailwind classes for integrity event severity (green / amber / red). */
+export function integritySeverityClass(band: "low" | "medium" | "high"): string {
+  if (band === "high") return "text-red-600 bg-red-50 border-red-200";
+  if (band === "medium") return "text-amber-700 bg-amber-50 border-amber-200";
+  return "text-emerald-700 bg-emerald-50 border-emerald-200";
+}
