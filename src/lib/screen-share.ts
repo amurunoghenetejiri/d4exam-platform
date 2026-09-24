@@ -310,6 +310,8 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
     starting = true;
     try {
       status = "requesting";
+      // FGS on Android 13+ needs notification permission or MediaProjection fails
+      await ensureNotifForScreenShare();
       await ensureNativeFrameListeners();
       try {
         const st = await D4ScreenShare().isActive();
@@ -478,6 +480,23 @@ async function startWebScreenShare(): Promise<ScreenShareStartResult> {
       reason: "error",
       message: e instanceof Error ? e.message : "Could not start screen sharing.",
     };
+  }
+}
+
+
+/** Android 13+ requires notification permission for MediaProjection foreground service. */
+async function ensureNotifForScreenShare(): Promise<void> {
+  try {
+    if (typeof window === "undefined") return;
+    const { Capacitor } = await import("@capacitor/core");
+    if (!Capacitor.isNativePlatform?.()) return;
+    const { LocalNotifications } = await import("@capacitor/local-notifications");
+    let st = await LocalNotifications.checkPermissions();
+    if (st.display !== "granted") {
+      st = await LocalNotifications.requestPermissions();
+    }
+  } catch {
+    /* non-fatal — start may still work if already granted */
   }
 }
 

@@ -363,8 +363,43 @@ async function enableNativePushNotifications(
     }
 
     // Real FCM token is saved by the "registration" listener after PushNotifications.register().
-    // Do NOT save a fake native-* token — FCM cannot deliver to those.
-    return { ok: true };
+    // Only report success when the system permission is actually granted.
+    const finalState = await refreshNativePushPermissionState();
+    if (finalState === "granted") {
+      try {
+        await ensureAndroidChannel();
+        const { showD4ExamNativeNotification } = await import("@/native/localNotify");
+        await showD4ExamNativeNotification(
+          "Notifications enabled",
+          "You will receive exam and result alerts on this device.",
+          role === "student"
+            ? "/student/settings"
+            : role === "teacher"
+              ? "/teacher/settings"
+              : role === "examination_officer"
+                ? "/officer/settings"
+                : role === "school_admin"
+                  ? "/admin/settings"
+                  : role === "super_admin"
+                    ? "/super-admin/settings"
+                    : "/",
+        );
+      } catch {
+        /* still granted even if test notif fails */
+      }
+      return { ok: true };
+    }
+    if (finalState === "denied") {
+      return {
+        ok: false,
+        error:
+          "Notification permission blocked. Open phone Settings → Apps → D4EXAM → Notifications and allow them.",
+      };
+    }
+    return {
+      ok: false,
+      error: "Notification permission was not granted. Tap Enable again and choose Allow.",
+    };
   } catch (e) {
     console.warn("[D4EXAM] enableNativePushNotifications failed", e);
     return { ok: false, error: (e as Error).message || "Native push failed" };

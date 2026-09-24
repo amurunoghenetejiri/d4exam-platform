@@ -33,8 +33,8 @@ type NativeBiometricPlugin = {
   verifyIdentity: (opts?: Record<string, unknown>) => Promise<void>;
 };
 
-const AUTH_MS = 45_000;
-const CHECK_MS = 8_000;
+const AUTH_MS = 90_000;
+const CHECK_MS = 12_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -102,7 +102,7 @@ async function getPlugin(): Promise<NativeBiometricPlugin | null> {
       if (registered && typeof registered.verifyIdentity === "function") {
         // Probe once; UNIMPLEMENTED means not in APK
         try {
-          await withTimeout(registered.isAvailable({ useFallback: false }), 3_000, "fp_probe");
+          await withTimeout(registered.isAvailable({ useFallback: true }), 8_000, "fp_probe");
           cachedPlugin = registered;
           return cachedPlugin;
         } catch (e) {
@@ -219,7 +219,7 @@ export async function authenticateWithFingerprint(opts?: {
         description: opts?.reason || "Unlock D4EXAM",
         negativeButtonText: "Use password",
         maxAttempts: 5,
-        useFallback: false,
+        useFallback: true,
       }),
       AUTH_MS,
       "fp_auth",

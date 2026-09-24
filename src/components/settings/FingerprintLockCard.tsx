@@ -22,7 +22,6 @@ export function FingerprintLockCard() {
   const [busy, setBusy] = useState(false);
   const [enabled, setEnabled] = useState(false);
   const [availability, setAvailability] = useState<FingerprintAvailability | null>(null);
-  const safetyRef = useRef<number | null>(null);
   const runningRef = useRef(false);
 
   const refresh = useCallback(() => {
@@ -36,19 +35,14 @@ export function FingerprintLockCard() {
   useEffect(() => {
     if (!native) return;
     let cancelled = false;
-    // Delay check slightly so Capacitor bridge is ready (server.url cold start)
     const t = window.setTimeout(() => {
       void checkFingerprintAvailable().then((a) => {
         if (!cancelled) setAvailability(a);
       });
-    }, 600);
+    }, 400);
     return () => {
       cancelled = true;
       window.clearTimeout(t);
-      if (safetyRef.current != null) {
-        window.clearTimeout(safetyRef.current);
-        safetyRef.current = null;
-      }
     };
   }, [native]);
 
@@ -61,15 +55,6 @@ export function FingerprintLockCard() {
       ? availability.message
       : null;
 
-  function clearBusy() {
-    if (safetyRef.current != null) {
-      window.clearTimeout(safetyRef.current);
-      safetyRef.current = null;
-    }
-    runningRef.current = false;
-    setBusy(false);
-  }
-
   async function onEnable() {
     if (!session?.userId) {
       toast.error("Sign in required.");
@@ -79,13 +64,14 @@ export function FingerprintLockCard() {
     runningRef.current = true;
     setBusy(true);
 
-    if (safetyRef.current != null) window.clearTimeout(safetyRef.current);
-    safetyRef.current = window.setTimeout(() => {
-      clearBusy();
-      toast.error("Fingerprint timed out. Make sure a fingerprint is enrolled, then try again.");
-    }, 15_000);
-
     try {
+      const avail = await checkFingerprintAvailable();
+      setAvailability(avail);
+      if (!avail.ok) {
+        toast.error(avail.message);
+        return;
+      }
+
       const auth = await authenticateWithFingerprint({
         reason: "Confirm your fingerprint to enable unlock for D4EXAM",
         title: "Enable Fingerprint",
@@ -95,6 +81,10 @@ export function FingerprintLockCard() {
       if (!auth.ok) {
         if (auth.code === "cancelled") {
           toast.message("Fingerprint cancelled.");
+        } else if (auth.code === "timeout") {
+          toast.error(
+            "Fingerprint prompt closed without a match. Enroll a fingerprint in phone Settings, then try again.",
+          );
         } else {
           toast.error(auth.message);
           setAvailability({
@@ -110,12 +100,13 @@ export function FingerprintLockCard() {
       setEnabled(true);
       setAvailability({ ok: true, hasFingerprint: true });
       toast.success(
-        "Fingerprint unlock enabled. It stays on until you disable it or log out.",
+        "Fingerprint unlock enabled. Use it when you reopen the app after 30 seconds in the background.",
       );
     } catch (e) {
       toast.error((e as Error)?.message || "Could not enable fingerprint.");
     } finally {
-      clearBusy();
+      runningRef.current = false;
+      setBusy(false);
     }
   }
 
