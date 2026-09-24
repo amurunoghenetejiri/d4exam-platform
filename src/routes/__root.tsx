@@ -30,6 +30,7 @@ import { applyNativeStatusBar } from "@/native/statusBar";
 import { registerAndroidBackButton } from "@/native/backButton";
 import { AnimatedSplash } from "@/components/splash/AnimatedSplash";
 import { DisplayPrefsBootstrap } from "@/components/DisplayPrefsBootstrap";
+import { SchoolSessionBootstrap } from "@/components/SchoolSessionBootstrap";
 import { startAccountVaultKeepAlive } from "@/lib/account-switcher";
 import { notifyWelcomeRole } from "@/lib/email-notify.functions";
 import { isSyntheticStudentEmail } from "@/lib/student-email";
@@ -419,6 +420,7 @@ function RootComponent() {
       <Outlet />
       <NativeBootstrap />
       <WebPushBootstrap />
+      <SchoolSessionBootstrap />
       <DisplayPrefsBootstrap />
       <AnimatedSplash />
       <Toaster />

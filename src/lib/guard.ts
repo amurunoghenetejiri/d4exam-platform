@@ -95,14 +95,32 @@ export async function requireRole(role: AppRole | AppRole[], queryClient?: Query
       }
       if ((!user || isIncomplete(user)) && hasAuthSession) {
         try {
-          await new Promise((r) => setTimeout(r, 200));
+          // Server repair: write profiles.school_id from officers/teachers/roles
+          const { repairMySessionSchool } = await import("@/lib/repair-session-school.functions");
+          const fixed = await Promise.race([
+            repairMySessionSchool(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_500)),
+          ]);
+          if (fixed && (fixed as { schoolId?: string }).schoolId) {
+            const { seedLoginSchoolContext } = await import("@/lib/session");
+            seedLoginSchoolContext(
+              String((fixed as { schoolId: string }).schoolId),
+              (fixed as { schoolCode?: string | null }).schoolCode ?? null,
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+        try {
+          await new Promise((r) => setTimeout(r, 150));
           const again = await Promise.race([
             fetchSessionUser(),
-            new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000)),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
           ]);
           if (again && (!user || !isIncomplete(again))) user = again;
           else if (again && isIncomplete(user) && !isIncomplete(again)) user = again;
           else if (again && !user) user = again;
+          else if (again) user = again;
         } catch {
           /* ignore */
         }

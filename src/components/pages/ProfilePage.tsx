@@ -155,12 +155,8 @@ export function ProfilePage() {
           .eq("auth_user_id", user.userId);
         if (up2) throw up2;
       }
-      if (user.role === "student" && student?.studentId) {
-        await supabase
-          .from("students")
-          .update({ full_name: fullName.trim() } as never)
-          .eq("id", student.studentId);
-      }
+      // Production students table has no full_name — name stays on profiles only
+
       await qc.invalidateQueries({ queryKey: ["session-user"] });
       await qc.invalidateQueries({ queryKey: ["student-context"] });
       toast.success("Profile saved");
