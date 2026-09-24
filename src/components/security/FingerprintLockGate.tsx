@@ -216,6 +216,34 @@ export function FingerprintLockGate() {
   const [hwState, setHwState] = useState<"pending" | "yes" | "no">("pending");
   /** Soft prompt: enable fingerprint after password unlock */
   const [offerEnableFp, setOfferEnableFp] = useState(false);
+
+  // Detect real device biometric support (was imported but never called — hwState stayed pending)
+  useEffect(() => {
+    if (!native) {
+      setHwState("no");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const avail = await checkFingerprintAvailable();
+        if (cancelled) return;
+        if (avail.ok && avail.hasFingerprint !== false) {
+          setHwState("yes");
+        } else if (avail.reason === "timeout") {
+          // Keep pending briefly — do not force password-only on slow devices
+          setHwState("yes");
+        } else {
+          setHwState("no");
+        }
+      } catch {
+        if (!cancelled) setHwState("yes"); // prefer FP UI; prompt will fail gracefully
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [native]);
   const [enableFpBusy, setEnableFpBusy] = useState(false);
   /** User explicitly chose password — do not auto-switch back until unlock cycle resets */
   const userPickedPasswordRef = useRef(false);
@@ -542,11 +570,20 @@ export function FingerprintLockGate() {
       if (runningRef.current) {
         runningRef.current = false;
         setStatus("failed");
-        setFailedMsg("Fingerprint timed out. Tap the fingerprint to try again.");
+        setFailedMsg("Fingerprint timed out. Tap the fingerprint to try again, or use your app password.");
       }
-    }, 18_000);
+    }, 90_000);
 
     try {
+      const avail = await checkFingerprintAvailable();
+      if (!avail.ok) {
+        setHwState("no");
+        setMode("password");
+        setStatus("failed");
+        setFailedMsg(avail.message || "Fingerprint is not available on this device. Use your app password.");
+        return;
+      }
+      setHwState("yes");
       const result = await authenticateWithFingerprint({
         reason: "Unlock D4EXAM",
         title: "D4EXAM",

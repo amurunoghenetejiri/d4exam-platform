@@ -16,12 +16,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { SchoolResultHeader } from "@/components/brand/SchoolResultHeader";
 import { useStudentContext } from "@/lib/student";
-import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
-import { withOfflineCache } from "@/lib/offline-query";
-import { OfflineKeys } from "@/lib/offline-cache";
 
 export const Route = createFileRoute("/student/results/$id")({
   head: () => ({
@@ -110,7 +107,6 @@ function scoreTone(pct: number | null, passFail: string | null, released: boolea
 function ResultDetailPage() {
   const { id } = Route.useParams();
   const { data: student, isLoading: sLoading } = useStudentContext();
-  const { data: user } = useSessionUser();
 
   useRealtimeInvalidate(
     `student-result-detail-${id}`,
@@ -125,36 +121,57 @@ function ResultDetailPage() {
     queryKey: ["student-result-detail", id, student?.studentId],
     enabled: Boolean(id && student?.studentId),
     staleTime: 10_000,
+    retry: 2,
     queryFn: async () => {
       if (!student?.studentId) return null;
-      const uid = user?.userId ?? student.profileId;
-      return withOfflineCache(
-        uid,
-        `${OfflineKeys.studentResults}::detail::${id}`,
-        async () => {
-          const select = `id, exam_id, student_id, attempt_id, total_score, max_score, percentage, grade, pass_fail,
-           correct_count, wrong_count, unanswered_count, status, security_review_status,
-           released_at, created_at,
-           examinations(title, duration_minutes, scheduled_start, scheduled_end, courses(code, name))`;
-          const byId = await supabase
-            .from("results")
-            .select(select)
-            .eq("student_id", student.studentId)
-            .eq("id", id)
+      // Flat select first — nested examinations(courses) often fails under RLS
+      const cols =
+        "id, exam_id, student_id, attempt_id, total_score, max_score, percentage, grade, pass_fail, correct_count, wrong_count, unanswered_count, status, security_review_status, released_at, created_at";
+      let row: Record<string, unknown> | null = null;
+      const byId = await supabase
+        .from("results")
+        .select(cols)
+        .eq("student_id", student.studentId)
+        .eq("id", id)
+        .maybeSingle();
+      if (byId.error) console.warn("[student-result-detail]", byId.error.message);
+      if (byId.data) row = byId.data as Record<string, unknown>;
+      if (!row) {
+        const byExam = await supabase
+          .from("results")
+          .select(cols)
+          .eq("student_id", student.studentId)
+          .eq("exam_id", id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (byExam.data) row = byExam.data as Record<string, unknown>;
+      }
+      if (!row) return null;
+
+      // Enrich exam + course
+      const examId = String(row.exam_id || "");
+      let examinations: ResultRow["examinations"] = null;
+      if (examId) {
+        const eq = await supabase
+          .from("examinations")
+          .select("title, duration_minutes, scheduled_start, scheduled_end, courses(code, name)")
+          .eq("id", examId)
+          .maybeSingle();
+        if (eq.data) {
+          examinations = eq.data as ResultRow["examinations"];
+        } else {
+          const simple = await supabase
+            .from("examinations")
+            .select("title, duration_minutes, scheduled_start, scheduled_end")
+            .eq("id", examId)
             .maybeSingle();
-          if (byId.data) return byId.data as unknown as ResultRow;
-          const byExam = await supabase
-            .from("results")
-            .select(select)
-            .eq("student_id", student.studentId)
-            .eq("exam_id", id)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          return (byExam.data as unknown as ResultRow) ?? null;
-        },
-        { schoolId: student.schoolId, fallback: null },
-      );
+          if (simple.data) {
+            examinations = { ...(simple.data as object), courses: null } as ResultRow["examinations"];
+          }
+        }
+      }
+      return { ...row, examinations } as unknown as ResultRow;
     },
   });
 

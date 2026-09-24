@@ -102,6 +102,11 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
           {pushBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {enabled ? "Notifications enabled" : pushBusy ? "Requesting permission…" : "Enable notifications"}
         </Button>
+        {pushStatus === "denied" ? (
+          <p className="text-xs text-amber-800">
+            Notifications are blocked. Open phone Settings → Apps → D4EXAM → Notifications and turn them on, then return here and tap Enable again.
+          </p>
+        ) : null}
       </div>
     </SectionCard>
   );

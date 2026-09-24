@@ -153,7 +153,7 @@ export async function checkFingerprintAvailable(): Promise<FingerprintAvailabili
   }
 
   try {
-    const info = await withTimeout(plugin.isAvailable({ useFallback: false }), CHECK_MS, "fp_check");
+    const info = await withTimeout(plugin.isAvailable({ useFallback: true }), CHECK_MS, "fp_check");
     if (info?.isAvailable) {
       return { ok: true, hasFingerprint: true };
     }
