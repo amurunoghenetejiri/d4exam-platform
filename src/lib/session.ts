@@ -933,6 +933,32 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   }
 
   if (primaryRole) clearPendingLoginRole();
+
+  // Final safety: login school code context (must never show "not linked" after valid school login)
+  if (!schoolId) {
+    const loginSchool = readLoginSchoolContext();
+    if (loginSchool?.schoolId) {
+      schoolId = loginSchool.schoolId;
+      if (!schoolCode && loginSchool.schoolCode) schoolCode = loginSchool.schoolCode;
+    }
+  }
+  if (schoolId && (!schoolName || !schoolLogoUrl)) {
+    try {
+      const { data: school } = await supabase
+        .from("schools")
+        .select("name, school_code, logo_url")
+        .eq("id", schoolId)
+        .maybeSingle();
+      if (school) {
+        schoolName = schoolName || school.name || null;
+        schoolCode = schoolCode || school.school_code || null;
+        schoolLogoUrl = schoolLogoUrl || (school.logo_url as string | null) || null;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   seedSchoolBrandFromSession(schoolId, schoolName, schoolLogoUrl);
   return {
     userId: user.id,
@@ -974,7 +1000,56 @@ export function useSessionUser() {
     queryKey: ["session-user"],
     queryFn: async () => {
       const last = readLastUserId();
-      const u = await withTimeout(fetchSessionUser(), 4500, "session");
+      let u = await withTimeout(fetchSessionUser(), 6000, "session");
+      // Merge login school if session still missing school (teacher/admin after unlock)
+      if (u && !u.schoolId && u.role !== "super_admin") {
+        const loginSchool = readLoginSchoolContext();
+        if (loginSchool?.schoolId) {
+          let schoolName = u.schoolName;
+          let schoolCode = u.schoolCode || loginSchool.schoolCode;
+          let schoolLogoUrl = u.schoolLogoUrl;
+          try {
+            const { data: school } = await supabase
+              .from("schools")
+              .select("name, school_code, logo_url")
+              .eq("id", loginSchool.schoolId)
+              .maybeSingle();
+            if (school) {
+              schoolName = school.name ?? schoolName;
+              schoolCode = school.school_code ?? schoolCode;
+              schoolLogoUrl = (school.logo_url as string | null) ?? schoolLogoUrl;
+            }
+          } catch {
+            /* ignore */
+          }
+          u = {
+            ...u,
+            schoolId: loginSchool.schoolId,
+            schoolName: schoolName ?? u.schoolName,
+            schoolCode: schoolCode ?? u.schoolCode,
+            schoolLogoUrl: schoolLogoUrl ?? u.schoolLogoUrl,
+          };
+        } else {
+          // Last attempt: server repair
+          try {
+            const { repairMySessionSchool } = await import("@/lib/repair-session-school.functions");
+            const fixed = await withTimeout(repairMySessionSchool(), 4000, "repair");
+            if (fixed?.schoolId) {
+              seedLoginSchoolContext(fixed.schoolId, fixed.schoolCode);
+              u = {
+                ...u,
+                schoolId: fixed.schoolId,
+                schoolName: fixed.schoolName ?? u.schoolName,
+                schoolCode: fixed.schoolCode ?? u.schoolCode,
+                schoolLogoUrl: fixed.schoolLogoUrl ?? u.schoolLogoUrl,
+                roles: [...new Set([...(u.roles || []), ...(fixed.roles || [])])] as AppRole[],
+              };
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
       if (u?.userId) {
         rememberLastUserId(u.userId);
         const complete = u.role === "super_admin" || Boolean(u.schoolId);
@@ -983,7 +1058,6 @@ export function useSessionUser() {
           void mirrorSessionUser(u);
         }
       } else if (last) {
-        // Network failed — only reuse a COMPLETE cached session
         try {
           const cached = await withOfflineCache(
             last,

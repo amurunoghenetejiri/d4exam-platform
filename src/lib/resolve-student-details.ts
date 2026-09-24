@@ -1,6 +1,6 @@
 /**
  * Student detail resolution for results / integrity / release.
- * Prefers staff server fn (bypasses RLS), then client fallbacks.
+ * Production students table has NO full_name — names live on profiles only.
  */
 import { supabase } from "@/integrations/supabase/client";
 
@@ -13,9 +13,8 @@ export type StudentDetail = {
   levelName: string;
 };
 
-type Raw = {
+type StudentRow = {
   id: string;
-  full_name?: string | null;
   matric_number?: string | null;
   student_id?: string | null;
   department_id?: string | null;
@@ -23,42 +22,41 @@ type Raw = {
   profile_id?: string | null;
 };
 
+const STUDENT_COLS = "id, matric_number, student_id, department_id, level_id, profile_id";
+
 export async function resolveStudentDetails(
-  schoolId: string | null | undefined,
+  schoolId: string,
   studentIds: string[],
 ): Promise<Record<string, StudentDetail>> {
   const ids = [...new Set(studentIds.map(String).filter(Boolean))];
   const out: Record<string, StudentDetail> = {};
-  if (!ids.length) return out;
+  if (!schoolId || !ids.length) return out;
 
-  // 1) Server resolve (staff + service role) — primary for officers/teachers
-  if (schoolId) {
-    try {
-      const { resolveStudentNamesForOfficer } = await import("@/lib/officer-student-names.functions");
-      const map = await resolveStudentNamesForOfficer({
-        data: { schoolId, studentIds: ids },
-      });
-      if (map && typeof map === "object") {
-        for (const id of ids) {
-          const hit = map[id];
-          if (!hit) continue;
-          const fullName = String(hit.full_name || "").trim() || "Student";
-          // Prefer real name over placeholder
-          const matric = String(hit.matric_number || hit.student_id || "").trim() || "—";
-          const detail: StudentDetail = {
-            fullName,
-            matric,
-            departmentId: null,
-            levelId: null,
-            departmentName: String(hit.department_name || "").trim() || "—",
-            levelName: String(hit.level_name || "").trim() || "—",
-          };
-          out[id] = detail;
-        }
+  // 1) Server (service role) — preferred
+  try {
+    const { resolveStudentNamesForOfficer } = await import("@/lib/officer-student-names.functions");
+    const map = await resolveStudentNamesForOfficer({
+      data: { schoolId, studentIds: ids },
+    } as never);
+    if (map && typeof map === "object") {
+      for (const id of ids) {
+        const hit = map[id];
+        if (!hit) continue;
+        const fullName = String(hit.full_name || "").trim() || "Student";
+        const matric = String(hit.matric_number || hit.student_id || "").trim() || "—";
+        const detail: StudentDetail = {
+          fullName,
+          matric,
+          departmentId: null,
+          levelId: null,
+          departmentName: String(hit.department_name || "").trim() || "—",
+          levelName: String(hit.level_name || "").trim() || "—",
+        };
+        out[id] = detail;
       }
-    } catch (e) {
-      console.warn("[resolveStudentDetails] server", e);
     }
+  } catch (e) {
+    console.warn("[resolveStudentDetails] server", e);
   }
 
   const still = ids.filter(
@@ -66,72 +64,59 @@ export async function resolveStudentDetails(
   );
   if (!still.length) return out;
 
-  const byKey = new Map<string, Raw>();
-  const ingest = (rows: Raw[] | null | undefined) => {
-    for (const s of rows ?? []) {
-      const id = String(s.id);
-      byKey.set(id, s);
-      if (s.profile_id) byKey.set(String(s.profile_id), s);
-      if (s.student_id) byKey.set(String(s.student_id).toLowerCase(), s);
-      if (s.matric_number) byKey.set(String(s.matric_number).toLowerCase(), s);
-    }
-  };
-
-  for (let i = 0; i < still.length; i += 80) {
-    const chunk = still.slice(i, i + 80);
-    let q = supabase
+  // 2) Client fallback — no full_name column on students
+  const byKey = new Map<string, StudentRow>();
+  try {
+    const { data: byId } = await supabase
       .from("students")
-      .select("id, full_name, matric_number, student_id, department_id, level_id, profile_id")
-      .in("id", chunk);
-    if (schoolId) q = q.eq("school_id", schoolId);
-    const { data } = await q;
-    ingest(data as Raw[] | null);
-  }
-
-  const stillB = still.filter((id) => !byKey.has(id));
-  if (stillB.length) {
-    for (let i = 0; i < stillB.length; i += 80) {
-      const chunk = stillB.slice(i, i + 80);
-      let q = supabase
-        .from("students")
-        .select("id, full_name, matric_number, student_id, department_id, level_id, profile_id")
-        .in("profile_id", chunk);
-      if (schoolId) q = q.eq("school_id", schoolId);
-      const { data } = await q;
-      ingest(data as Raw[] | null);
+      .select(STUDENT_COLS)
+      .eq("school_id", schoolId)
+      .in("id", still.slice(0, 300));
+    for (const s of (byId ?? []) as StudentRow[]) {
+      byKey.set(String(s.id), s);
+      if (s.profile_id) byKey.set(String(s.profile_id), s);
+      if (s.student_id) byKey.set(String(s.student_id), s);
+      if (s.matric_number) byKey.set(String(s.matric_number), s);
     }
-  }
 
-  if (schoolId) {
-    const unresolved = still.filter((id) => {
-      const s = byKey.get(id) || byKey.get(id.toLowerCase());
-      return !s || (!(s.full_name || "").trim() && !s.matric_number);
-    });
-    if (unresolved.length) {
-      const { data: all } = await supabase
+    const missing = still.filter((id) => !byKey.has(id));
+    if (missing.length) {
+      const { data: byProf } = await supabase
         .from("students")
-        .select("id, full_name, matric_number, student_id, department_id, level_id, profile_id")
+        .select(STUDENT_COLS)
         .eq("school_id", schoolId)
-        .limit(1200);
-      ingest(all as Raw[] | null);
+        .in("profile_id", missing.slice(0, 200));
+      for (const s of (byProf ?? []) as StudentRow[]) {
+        byKey.set(String(s.id), s);
+        if (s.profile_id) byKey.set(String(s.profile_id), s);
+      }
     }
+  } catch (e) {
+    console.warn("[resolveStudentDetails] client students", e);
   }
 
-  const needProf: { key: string; profileId: string }[] = [];
-  for (const id of still) {
-    const s = byKey.get(id) || byKey.get(id.toLowerCase());
-    if (s && !(s.full_name || "").trim() && s.profile_id) {
-      needProf.push({ key: id, profileId: String(s.profile_id) });
-    }
-  }
-  if (needProf.length) {
-    const pids = [...new Set(needProf.map((x) => x.profileId))];
-    const { data: profiles } = await supabase.from("profiles").select("id, full_name").in("id", pids.slice(0, 250));
-    const pmap = new Map((profiles ?? []).map((p) => [p.id, String(p.full_name || "").trim()]));
-    for (const { key, profileId } of needProf) {
-      const n = pmap.get(profileId);
-      const s = byKey.get(key) || byKey.get(key.toLowerCase());
-      if (n && s) byKey.set(key, { ...s, full_name: n });
+  // Profiles for names
+  const pids = [
+    ...new Set(
+      [...byKey.values()]
+        .map((s) => s.profile_id)
+        .filter(Boolean)
+        .map(String),
+    ),
+  ];
+  const pmap = new Map<string, string>();
+  if (pids.length) {
+    try {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", pids.slice(0, 300));
+      for (const p of profiles ?? []) {
+        const n = String(p.full_name || "").trim();
+        if (n) pmap.set(String(p.id), n);
+      }
+    } catch {
+      /* ignore */
     }
   }
 
@@ -151,15 +136,18 @@ export async function resolveStudentDetails(
   for (const id of still) {
     const s = byKey.get(id) || byKey.get(id.toLowerCase());
     if (!s) continue;
-    const fullName = String(s.full_name || "").trim() || "Student";
+    const fullName =
+      (s.profile_id && pmap.get(String(s.profile_id))) ||
+      out[id]?.fullName ||
+      "Student";
     const matric = String(s.matric_number || s.student_id || "").trim() || "—";
     const detail: StudentDetail = {
-      fullName,
+      fullName: fullName === "Student" && out[id]?.fullName ? out[id].fullName : fullName,
       matric,
       departmentId: s.department_id ?? null,
       levelId: s.level_id ?? null,
-      departmentName: (s.department_id && deptNames.get(s.department_id)) || "—",
-      levelName: (s.level_id && levelNames.get(s.level_id)) || "—",
+      departmentName: (s.department_id && deptNames.get(s.department_id)) || out[id]?.departmentName || "—",
+      levelName: (s.level_id && levelNames.get(s.level_id)) || out[id]?.levelName || "—",
     };
     out[id] = detail;
     out[s.id] = detail;
@@ -182,30 +170,10 @@ export function integritySeverityBand(
   eventType: string,
   severity: string | null | undefined,
 ): "low" | "medium" | "high" {
-  const t = String(eventType || "").toUpperCase();
   const s = String(severity || "").toLowerCase();
-  if (
-    /MULTIPLE.?FACE|MULTI.?FACE|FACE.?MULTIPLE/.test(t) ||
-    /TAB.?SWITCH|TAB_SWITCH|LEFT.?THE.?EXAM/.test(t) ||
-    /TERMINAT|AUTO.?SUBMIT|FORCE.?SUBMIT|POST.?EXAM|POST_EXAM/.test(t) ||
-    s === "high" ||
-    s === "critical"
-  ) {
-    return "high";
-  }
-  if (/NO.?FACE|FACE.?NOT|FACE_NOT_DETECTED|FACE.?MISSING/.test(t) || s === "medium" || s === "warning") {
-    return "medium";
-  }
-  if (/RESUMED|RESUME|RESULTS.?READ|LOW|INFO/.test(t) || s === "low" || s === "info") {
-    return "low";
-  }
   if (s === "high" || s === "critical") return "high";
-  if (s === "medium" || s === "warning") return "medium";
+  if (s === "medium" || s === "warn" || s === "warning") return "medium";
+  const t = String(eventType || "").toUpperCase();
+  if (t.includes("MULTI") || t.includes("FACE") || t.includes("TAB")) return "medium";
   return "low";
-}
-
-export function integritySeverityClass(band: "low" | "medium" | "high"): string {
-  if (band === "high") return "bg-red-100 text-red-800 border-red-200";
-  if (band === "medium") return "bg-amber-100 text-amber-900 border-amber-200";
-  return "bg-emerald-100 text-emerald-800 border-emerald-200";
 }

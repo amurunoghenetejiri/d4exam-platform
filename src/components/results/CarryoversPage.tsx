@@ -51,7 +51,7 @@ export function CarryoversPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("students")
-        .select("id, full_name, matric_number, student_id, level_id, department_id, levels(name), departments(name)")
+        .select("id, matric_number, student_id, level_id, department_id, profile_id, levels(name), departments(name), profiles(full_name)")
         .eq("school_id", schoolId!)
         .order("full_name")
         .limit(800);
@@ -91,7 +91,7 @@ export function CarryoversPage() {
       const { data, error } = await supabase
         .from("course_carryovers")
         .select(
-          "id, student_id, course_id, original_level_id, reason, status, students(id, full_name, matric_number, student_id, levels(name)), courses(id, code, name), levels:original_level_id(name)",
+          "id, student_id, course_id, original_level_id, reason, status, students(id, matric_number, student_id, profiles(full_name), levels(name)), courses(id, code, name), levels:original_level_id(name)",
         )
         .eq("school_id", schoolId!)
         .order("created_at", { ascending: false })
@@ -117,7 +117,7 @@ export function CarryoversPage() {
     return students
       .filter(
         (s) =>
-          (s.full_name || "").toLowerCase().includes(q) ||
+          (s.profiles?.full_name || s.matric_number || "").toLowerCase().includes(q) ||
           (s.matric_number || "").toLowerCase().includes(q) ||
           (s.student_id || "").toLowerCase().includes(q),
       )
@@ -211,7 +211,7 @@ export function CarryoversPage() {
                 <option value="">Select student…</option>
                 {filteredStudents.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {(s.full_name || "Student").trim()} · {s.matric_number || s.student_id}
+                    {(s.profiles?.full_name || "Student").trim()} · {s.matric_number || s.student_id}
                     {s.levels && !Array.isArray(s.levels) && s.levels.name ? ` · ${s.levels.name}` : ""}
                   </option>
                 ))}

@@ -108,7 +108,7 @@ function Page() {
         .select(
           `id, exam_id, student_id, status, submitted_at, answers, metadata,
            examinations(id, title, course_id, school_id),
-           students(id, full_name, matric_number, student_id, profiles(full_name))`,
+           students(id, matric_number, student_id, profiles(full_name))`,
         )
         .eq("school_id", teacher.schoolId)
         .in("exam_id", examIds)

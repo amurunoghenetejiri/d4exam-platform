@@ -439,13 +439,13 @@ export function LiveMonitorPage({ courseIds = null, pageTitle }: LiveMonitorPage
       const selects = [
         `id, exam_id, student_id, status, started_at, updated_at, ends_at, tab_switch_count, metadata,
            examinations(title, status, courses(code, name)),
-           students(full_name, matric_number, student_id, profiles(full_name))`,
+           students(matric_number, student_id, profiles(full_name))`,
         `id, exam_id, student_id, status, started_at, updated_at, ends_at, tab_switch_count, metadata,
            examinations(title, status, courses(code, name)),
            students(matric_number, student_id, profiles(full_name))`,
         `id, exam_id, student_id, status, started_at, updated_at, tab_switch_count, metadata,
            examinations(title, status, courses(code, name)),
-           students(full_name, matric_number, student_id, profiles(full_name))`,
+           students(matric_number, student_id, profiles(full_name))`,
         `id, exam_id, student_id, status, started_at, updated_at, tab_switch_count, metadata,
            examinations(title, status, courses(code, name)),
            students(matric_number, student_id, profiles(full_name))`,
@@ -480,7 +480,7 @@ export function LiveMonitorPage({ courseIds = null, pageTitle }: LiveMonitorPage
       const selects = [
         `id, exam_id, student_id, status, started_at, updated_at, ends_at, tab_switch_count, metadata,
              examinations(title, status, courses(code, name)),
-             students(full_name, matric_number, student_id, profiles(full_name))`,
+             students(matric_number, student_id, profiles(full_name))`,
         `id, exam_id, student_id, status, started_at, updated_at, ends_at, tab_switch_count, metadata,
              examinations(title, status, courses(code, name)),
              students(matric_number, student_id, profiles(full_name))`,
@@ -665,7 +665,7 @@ export function LiveMonitorPage({ courseIds = null, pageTitle }: LiveMonitorPage
       const map: Record<string, string> = {};
       const { data } = await supabase
         .from("students")
-        .select("id, full_name, matric_number, student_id, profiles(full_name, first_name, last_name)")
+        .select("id, matric_number, student_id, profiles(full_name, first_name, last_name)")
         .eq("school_id", schoolId!)
         .limit(500);
       for (const s of data ?? []) {

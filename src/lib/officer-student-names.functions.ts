@@ -73,8 +73,9 @@ export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
       if (!ok) return {};
 
       // Plain columns only — nested joins can fail under some RLS/schema states
+      // Production students has NO full_name — names come from profiles only
       const selectCols =
-        "id, full_name, matric_number, student_id, profile_id, department_id, level_id";
+        "id, matric_number, student_id, profile_id, department_id, level_id";
 
       const { data: byId } = await supabaseAdmin
         .from("students")
@@ -96,7 +97,6 @@ export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
 
       type Raw = {
         id: string;
-        full_name?: string | null;
         matric_number?: string | null;
         student_id?: string | null;
         profile_id?: string | null;
@@ -139,9 +139,8 @@ export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
       const needProfiles: { key: string; profileId: string }[] = [];
 
       function put(key: string, s: Raw) {
-        const fn = String(s.full_name || "").trim();
         const entry: ResolvedStudentName = {
-          full_name: fn,
+          full_name: "",
           matric_number: s.matric_number ?? null,
           student_id: s.student_id ?? null,
           department_name: s.departments?.name ?? null,
@@ -152,6 +151,7 @@ export const resolveStudentNamesForOfficer = createServerFn({ method: "POST" })
         if (s.profile_id) out[String(s.profile_id)] = entry;
         if (s.student_id) out[String(s.student_id)] = entry;
         if (s.matric_number) out[String(s.matric_number)] = entry;
+        // Always resolve name from profiles
         if (s.profile_id) needProfiles.push({ key, profileId: String(s.profile_id) });
       }
 

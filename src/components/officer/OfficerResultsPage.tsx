@@ -163,7 +163,7 @@ export function OfficerResultsPage() {
       const selects = [
         `id, exam_id, student_id, attempt_id, total_score, max_score, percentage, grade, pass_fail,
            correct_count, wrong_count, unanswered_count, status, security_review_status, released_at, created_at,
-           students(full_name, matric_number, student_id, profiles(full_name))`,
+           students(matric_number, student_id, profiles(full_name))`,
         `id, exam_id, student_id, attempt_id, total_score, max_score, percentage, grade, pass_fail,
            correct_count, wrong_count, unanswered_count, status, security_review_status, released_at, created_at,
            students(matric_number, student_id)`,
