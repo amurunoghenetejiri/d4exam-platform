@@ -1,5 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ClipboardList, ChevronRight, Loader2 } from "lucide-react";
 import { PageHeader, SectionCard, EmptyState, StatusBadge } from "@/components/dashboard/kit";
@@ -14,16 +13,6 @@ export const Route = createFileRoute("/teacher/submissions")({
   component: Page,
 });
 
-type AttemptRow = {
-  id: string;
-  exam_id: string;
-  student_id: string;
-  status: string;
-  submitted_at: string | null;
-  metadata?: Record<string, unknown> | null;
-  examinations: { id: string; title: string; course_id: string | null } | null;
-};
-
 function isEssayType(ty: string): boolean {
   const t = (ty || "").toLowerCase();
   return (
@@ -37,39 +26,42 @@ function isEssayType(ty: string): boolean {
 
 function Page() {
   const { data: teacher, isLoading } = useTeacherContext();
+  const navigate = useNavigate();
 
   const dataQ = useQuery({
     queryKey: ["teacher-submissions-by-exam", teacher?.schoolId, teacher?.courseIds],
-    enabled: Boolean(teacher?.schoolId && teacher?.courseIds?.length),
+    enabled: Boolean(teacher?.schoolId),
     staleTime: 5_000,
-    refetchInterval: 15_000,
+    refetchInterval: 20_000,
     queryFn: async () => {
-      if (!teacher) return [] as { examId: string; title: string; total: number; marked: number; pending: number }[];
-      const { data: exams } = await supabase
+      if (!teacher?.schoolId) return [] as { examId: string; title: string; total: number; marked: number; pending: number }[];
+
+      let examQ = supabase
         .from("examinations")
         .select("id, title, course_id")
         .eq("school_id", teacher.schoolId)
-        .in("course_id", teacher.courseIds)
         .limit(200);
+      if (teacher.courseIds?.length) {
+        examQ = examQ.in("course_id", teacher.courseIds);
+      }
+      const { data: exams } = await examQ;
       const examList = exams ?? [];
       if (!examList.length) return [];
 
       const examIds = examList.map((e) => e.id as string);
-
-      // Detect essay exams
       const essayExamIds = new Set<string>();
       try {
         const { data: links } = await supabase
           .from("exam_questions")
           .select("exam_id, question_id")
           .in("exam_id", examIds)
-          .limit(3000);
+          .limit(4000);
         const qids = [...new Set((links ?? []).map((l) => String(l.question_id)).filter(Boolean))];
         if (qids.length) {
           const { data: qs } = await supabase.from("questions").select("id, question_type").in("id", qids);
           const essayQ = new Set(
             (qs ?? [])
-              .filter((q) => isEssayType(String((q as { question_type?: string }).question_type || "")))
+              .filter((q) => isEssayType(String((q as { question_type?: string }).question_type)))
               .map((q) => String((q as { id: string }).id)),
           );
           for (const l of links ?? []) {
@@ -77,117 +69,130 @@ function Page() {
           }
         }
       } catch {
-        /* if detection fails, treat all as possible marking */
+        /* keep all */
       }
 
       const targetExamIds = essayExamIds.size ? [...essayExamIds] : examIds;
+      if (!targetExamIds.length) return [];
 
-      const { data: attempts, error } = await supabase
+      const { data: attempts } = await supabase
         .from("exam_attempts")
-        .select("id, exam_id, student_id, status, submitted_at, metadata")
+        .select("id, exam_id, status, metadata")
         .eq("school_id", teacher.schoolId)
         .in("exam_id", targetExamIds)
-        .in("status", ["submitted", "terminated", "flagged", "completed", "graded"])
-        .limit(500);
-      if (error) throw error;
+        .in("status", ["submitted", "terminated", "flagged"])
+        .limit(3000);
 
-      const byExam = new Map<string, AttemptRow[]>();
-      for (const a of (attempts ?? []) as AttemptRow[]) {
-        const list = byExam.get(a.exam_id) || [];
-        list.push(a);
-        byExam.set(a.exam_id, list);
+      const byExam = new Map<string, { total: number; marked: number }>();
+      for (const a of attempts ?? []) {
+        const eid = String(a.exam_id);
+        const cur = byExam.get(eid) || { total: 0, marked: 0 };
+        cur.total += 1;
+        const meta = (a.metadata || {}) as Record<string, unknown>;
+        if (meta.essay_marked === true || meta.subjective_marked === true) cur.marked += 1;
+        byExam.set(eid, cur);
       }
 
       const titleMap = new Map(examList.map((e) => [e.id as string, e.title as string]));
       const out: { examId: string; title: string; total: number; marked: number; pending: number }[] = [];
       for (const examId of targetExamIds) {
-        const list = byExam.get(examId) || [];
-        if (!list.length && essayExamIds.size && !essayExamIds.has(examId)) continue;
-        if (!list.length && essayExamIds.size) continue; // only show exams with attempts
-        let marked = 0;
-        for (const a of list) {
-          if (a.metadata && (a.metadata as { essayMarked?: boolean }).essayMarked) marked += 1;
-        }
+        const list = byExam.get(examId) || { total: 0, marked: 0 };
+        // Only show exams that have at least one submission OR are known essay exams
+        if (!list.total && essayExamIds.size && !essayExamIds.has(examId)) continue;
+        if (!list.total && !essayExamIds.has(examId)) continue;
         out.push({
           examId,
           title: titleMap.get(examId) || "Examination",
-          total: list.length,
-          marked,
-          pending: Math.max(0, list.length - marked),
+          total: list.total,
+          marked: list.marked,
+          pending: Math.max(0, list.total - list.marked),
         });
       }
-      // Prefer exams with pending marks first
-      out.sort((a, b) => b.pending - a.pending || b.total - a.total);
+      // Prefer pending first
+      out.sort((a, b) => b.pending - a.pending || a.title.localeCompare(b.title));
       return out;
     },
   });
 
-  const rows = dataQ.data ?? [];
-
   if (isLoading) {
     return (
-      <p className="flex items-center gap-2 text-sm text-slate-500">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-      </p>
+      <div className="flex justify-center py-16">
+        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+      </div>
     );
   }
+
   if (!teacher) {
-    return <EmptyState title="Teacher profile not found" description="Contact School Admin." />;
+    return (
+      <>
+        <PageHeader title="Submissions" description="Essay / theory scripts awaiting marking" />
+        <EmptyState title="Teacher profile not found" description="Your account is not linked as a teacher." />
+      </>
+    );
   }
+
+  const rows = dataQ.data ?? [];
 
   return (
     <>
       <PageHeader
-        title="Submissions & Marking"
-        description="Exams that need essay / theory marking. Open an exam to mark student scripts."
+        title="Submissions"
+        description="Only examinations that need essay or theory marking. Open an exam to mark student scripts."
       />
-
       <SectionCard
         title="Exams requiring marking"
-        description="Only papers with essay, short-answer or theory questions"
+        className="mt-2"
+        action={
+          <ClipboardList className="h-4 w-4 text-primary" />
+        }
       >
         {dataQ.isLoading ? (
-          <p className="text-sm text-slate-500">Loading exams…</p>
-        ) : rows.length === 0 ? (
+          <div className="flex justify-center py-10">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          </div>
+        ) : !rows.length ? (
           <EmptyState
-            title="No exams to mark"
-            description="When students submit papers that include essay questions on your courses, they appear here."
+            title="Nothing to mark"
+            description="When students submit papers with essay questions for your courses, they appear here."
           />
         ) : (
-          <ul className="space-y-2">
+          <ul className="divide-y divide-slate-100">
             {rows.map((r) => (
               <li key={r.examId}>
-                <Link
-                  to="/teacher/marking"
-                  search={{ examId: r.examId }}
-                  className="flex items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-3 transition hover:border-primary/40 hover:bg-primary/5"
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 px-1 py-3.5 text-left transition hover:bg-slate-50"
+                  onClick={() =>
+                    void navigate({ to: "/teacher/marking", search: { examId: r.examId } })
+                  }
                 >
-                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                    <ClipboardList className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-bold text-slate-900">{r.title}</p>
-                    <p className="text-xs text-slate-500">
-                      {r.total} submission{r.total === 1 ? "" : "s"} ·{" "}
-                      <span className={r.pending ? "font-semibold text-amber-700" : "text-emerald-700"}>
-                        {r.pending ? `${r.pending} waiting for marking` : "All marked"}
-                      </span>
-                      {r.marked ? ` · ${r.marked} marked` : ""}
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-slate-900">{r.title}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {r.total} submission{r.total === 1 ? "" : "s"}
+                      {r.pending ? ` · ${r.pending} waiting for marking` : " · all marked"}
                     </p>
                   </div>
-                  <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />
-                </Link>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <StatusBadge status={r.pending ? "Needs marking" : "Marked"} />
+                    <ChevronRight className="h-5 w-5 text-slate-400" />
+                  </div>
+                </button>
               </li>
             ))}
           </ul>
         )}
+        <div className="mt-4">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void navigate({ to: "/teacher/marking" })}
+          >
+            Open marking center
+          </Button>
+        </div>
       </SectionCard>
-
-      <div className="mt-4">
-        <Button variant="outline" asChild>
-          <Link to="/teacher/marking">Open marking center</Link>
-        </Button>
-      </div>
     </>
   );
 }

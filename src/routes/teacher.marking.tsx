@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useMemo, useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Save } from "lucide-react";
+import { ArrowLeft, ChevronRight, Loader2, Save, ClipboardCheck } from "lucide-react";
 import { PageHeader, SectionCard, EmptyState, StatusBadge } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTeacherContext } from "@/lib/teacher";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
+import { resolveStudentDetails } from "@/lib/resolve-student-details";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/teacher/marking")({
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/teacher/marking")({
   }),
   validateSearch: (search: Record<string, unknown>) => ({
     examId: typeof search.examId === "string" ? search.examId : undefined,
+    attemptId: typeof search.attemptId === "string" ? search.attemptId : undefined,
   }),
   component: Page,
 });
@@ -28,286 +30,450 @@ type AttemptRow = {
   student_id: string;
   status: string;
   submitted_at: string | null;
-  answers: Record<string, string> | null;
-  metadata: { score?: { totalScore?: number; maxScore?: number } } | null;
-  examinations: { id: string; title: string; course_id: string | null; school_id: string } | null;
-  students: { id: string; full_name?: string | null; matric_number: string | null; student_id: string; profiles: { full_name: string | null } | null } | null;
+  answers: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
 };
 
 type PaperQ = {
   question_id: string;
   marks: number;
-  questions: {
-    id: string;
-    question_text: string;
-    question_type: string;
-    marks: number;
-  } | null;
+  question_text: string;
+  question_type: string;
 };
 
+function isEssayType(ty: string): boolean {
+  const t = (ty || "").toLowerCase();
+  return (
+    t.includes("essay") ||
+    t.includes("short") ||
+    t.includes("theory") ||
+    t.includes("descript") ||
+    t === "numerical"
+  );
+}
+
 function Page() {
-  const { data: teacher, isLoading } = useTeacherContext();
-  const search = Route.useSearch();
-  const filterExamId = search.examId;
+  const { data: teacher, isLoading: teacherLoading } = useTeacherContext();
   const { data: session } = useSessionUser();
+  const search = Route.useSearch();
+  const navigate = useNavigate();
   const qc = useQueryClient();
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const examId = search.examId;
+  const attemptId = search.attemptId;
+
   const [marksMap, setMarksMap] = useState<Record<string, number>>({});
   const [feedbackMap, setFeedbackMap] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
-  const attemptsQ = useQuery({
-    queryKey: ["teacher-marking-attempts", teacher?.schoolId, teacher?.courseIds],
-    enabled: Boolean(teacher?.schoolId && teacher.courseIds.length),
+  // —— Step 0: list essay exams if no examId ——
+  const examsQ = useQuery({
+    queryKey: ["teacher-marking-exams", teacher?.schoolId, teacher?.courseIds],
+    enabled: Boolean(teacher?.schoolId) && !examId,
     queryFn: async () => {
-      if (!teacher) return [] as AttemptRow[];
-      const { data: exams } = await supabase
+      if (!teacher?.schoolId) return [] as { id: string; title: string; pending: number }[];
+      let examQ = supabase
         .from("examinations")
-        .select("id")
+        .select("id, title, course_id")
         .eq("school_id", teacher.schoolId)
-        .in("course_id", teacher.courseIds);
-      let examIds = (exams ?? []).map((e) => e.id as string);
-      if (!examIds.length) return [];
+        .limit(200);
+      if (teacher.courseIds?.length) {
+        examQ = examQ.in("course_id", teacher.courseIds);
+      }
+      const { data: exams } = await examQ;
+      const list = exams ?? [];
+      if (!list.length) return [];
 
-      // Only exams that include at least one essay / short_answer / theory question
+      const ids = list.map((e) => e.id as string);
+      const essaySet = new Set<string>();
       try {
         const { data: links } = await supabase
           .from("exam_questions")
           .select("exam_id, question_id")
-          .in("exam_id", examIds)
-          .limit(2000);
+          .in("exam_id", ids)
+          .limit(4000);
         const qids = [...new Set((links ?? []).map((l) => String(l.question_id)).filter(Boolean))];
         if (qids.length) {
-          const { data: qs } = await supabase
-            .from("questions")
-            .select("id, question_type")
-            .in("id", qids);
-          const essayIds = new Set(
-            (qs ?? [])
-              .filter((q) => {
-                const ty = String((q as { question_type?: string }).question_type || "").toLowerCase();
-                return ["essay", "short_answer", "short-answer", "theory", "descriptive", "numerical"].some((x) => ty.includes(x.replace("-", "_")) || ty === x);
-              })
-              .map((q) => String((q as { id: string }).id)),
+          const { data: qs } = await supabase.from("questions").select("id, question_type").in("id", qids);
+          const essayQ = new Set(
+            (qs ?? []).filter((q) => isEssayType(String((q as { question_type?: string }).question_type))).map((q) => String((q as { id: string }).id)),
           );
-          const essayExamIds = new Set(
-            (links ?? [])
-              .filter((l) => essayIds.has(String(l.question_id)))
-              .map((l) => String(l.exam_id)),
-          );
-          // Prefer essay exams; if detection finds none (RLS/type mismatch), keep all so teacher still sees scripts
-          if (essayExamIds.size) examIds = examIds.filter((id) => essayExamIds.has(id));
+          for (const l of links ?? []) {
+            if (essayQ.has(String(l.question_id))) essaySet.add(String(l.exam_id));
+          }
         }
       } catch {
-        /* keep all if filter fails */
+        /* if detection fails, show all exams with submissions */
       }
-      if (!examIds.length) return [];
 
+      const target = essaySet.size ? ids.filter((id) => essaySet.has(id)) : ids;
+      if (!target.length) return [];
+
+      const { data: attempts } = await supabase
+        .from("exam_attempts")
+        .select("id, exam_id, status, metadata")
+        .eq("school_id", teacher.schoolId)
+        .in("exam_id", target)
+        .in("status", ["submitted", "terminated", "flagged"])
+        .limit(2000);
+
+      const pendingByExam = new Map<string, number>();
+      for (const a of attempts ?? []) {
+        const meta = (a.metadata || {}) as Record<string, unknown>;
+        const marked = meta.essay_marked === true || meta.subjective_marked === true;
+        if (!marked) pendingByExam.set(a.exam_id, (pendingByExam.get(a.exam_id) || 0) + 1);
+      }
+
+      return target.map((id) => {
+        const title = list.find((e) => e.id === id)?.title || "Examination";
+        return { id, title, pending: pendingByExam.get(id) || 0 };
+      });
+    },
+  });
+
+  // —— Step 1: students for selected exam ——
+  const attemptsQ = useQuery({
+    queryKey: ["teacher-marking-attempts", teacher?.schoolId, examId],
+    enabled: Boolean(teacher?.schoolId && examId),
+    queryFn: async () => {
+      if (!teacher?.schoolId || !examId) return [] as (AttemptRow & { fullName: string; matric: string })[];
       const { data, error } = await supabase
         .from("exam_attempts")
-        .select(
-          `id, exam_id, student_id, status, submitted_at, answers, metadata,
-           examinations(id, title, course_id, school_id),
-           students(id, matric_number, student_id, profiles(full_name))`,
-        )
+        .select("id, exam_id, student_id, status, submitted_at, answers, metadata")
         .eq("school_id", teacher.schoolId)
-        .in("exam_id", examIds)
+        .eq("exam_id", examId)
         .in("status", ["submitted", "terminated", "flagged"])
         .order("submitted_at", { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      return (data ?? []) as AttemptRow[];
-    },
-  });
-
-  const attempts = filterExamId
-    ? (attemptsQ.data ?? []).filter((a) => a.exam_id === filterExamId)
-    : (attemptsQ.data ?? []);
-  const active = attempts.find((a) => a.id === activeId) ?? null;
-
-  const paperQ = useQuery({
-    queryKey: ["marking-paper", active?.exam_id],
-    enabled: Boolean(active?.exam_id),
-    queryFn: async () => {
-      let res = await supabase
-        .from("exam_questions")
-        .select("question_id, marks, questions(id, question_text, question_type, marks)")
-        .eq("exam_id", active!.exam_id)
-        .order("question_order");
-      if (res.error) {
-        res = await supabase
-          .from("exam_questions")
-          .select("question_id, marks, questions(id, question_text, question_type, marks)")
-          .eq("exam_id", active!.exam_id);
+        .limit(500);
+      if (error) {
+        console.warn("[marking] attempts", error.message);
+        return [];
       }
-      if (res.error) throw res.error;
-      return (res.data ?? []) as PaperQ[];
+      const rows = (data ?? []) as AttemptRow[];
+      const ids = rows.map((r) => r.student_id).filter(Boolean);
+      const details = await resolveStudentDetails(teacher.schoolId, ids);
+      return rows.map((r) => {
+        const d = details[r.student_id];
+        return {
+          ...r,
+          fullName: d?.fullName || "Student",
+          matric: d?.matric || "—",
+        };
+      });
     },
   });
 
-  const subjective = useMemo(() => {
-    const rows = paperQ.data ?? [];
-    return rows.filter((r) => {
-      const t = (r.questions?.question_type || "").toLowerCase();
-      return (
-        t === "essay" ||
-        t === "short_answer" ||
-        t === "short-answer" ||
-        t === "numerical" ||
-        t.includes("essay") ||
-        t.includes("short") ||
-        t.includes("theory") ||
-        t.includes("descript")
-      );
-    });
-  }, [paperQ.data]);
+  const examTitleQ = useQuery({
+    queryKey: ["teacher-marking-exam-title", examId],
+    enabled: Boolean(examId),
+    queryFn: async () => {
+      if (!examId) return "Examination";
+      const { data } = await supabase.from("examinations").select("title").eq("id", examId).maybeSingle();
+      return data?.title || "Examination";
+    },
+  });
 
-  const objectiveScore = Number(active?.metadata?.score?.totalScore ?? 0);
+  const active = useMemo(() => {
+    if (!attemptId) return null;
+    return (attemptsQ.data ?? []).find((a) => a.id === attemptId) || null;
+  }, [attemptId, attemptsQ.data]);
 
-  const subjectiveTotal = useMemo(() => {
-    return subjective.reduce((s, r) => s + (Number(marksMap[r.question_id]) || 0), 0);
-  }, [subjective, marksMap]);
+  // —— Step 2: paper questions for active attempt ——
+  const paperQ = useQuery({
+    queryKey: ["teacher-marking-paper", examId, attemptId],
+    enabled: Boolean(examId && attemptId),
+    queryFn: async () => {
+      if (!examId) return [] as PaperQ[];
+      const { data: links, error } = await supabase
+        .from("exam_questions")
+        .select("question_id, marks")
+        .eq("exam_id", examId)
+        .limit(200);
+      if (error) {
+        console.warn("[marking] paper links", error.message);
+        return [];
+      }
+      const qids = (links ?? []).map((l) => String(l.question_id)).filter(Boolean);
+      if (!qids.length) return [];
+      const { data: qs } = await supabase
+        .from("questions")
+        .select("id, question_text, question_type, marks")
+        .in("id", qids);
+      const qmap = new Map((qs ?? []).map((q) => [String((q as { id: string }).id), q as {
+        id: string;
+        question_text: string;
+        question_type: string;
+        marks: number;
+      }]));
+      return (links ?? []).map((l) => {
+        const q = qmap.get(String(l.question_id));
+        return {
+          question_id: String(l.question_id),
+          marks: Number(l.marks || q?.marks || 0),
+          question_text: q?.question_text || "Question",
+          question_type: q?.question_type || "",
+        };
+      });
+    },
+  });
 
-  const maxSubjective = useMemo(() => {
-    return subjective.reduce((s, r) => s + (Number(r.marks || r.questions?.marks) || 0), 0);
-  }, [subjective]);
+  const subjective = useMemo(
+    () => (paperQ.data ?? []).filter((q) => isEssayType(q.question_type)),
+    [paperQ.data],
+  );
 
-  function openAttempt(a: AttemptRow) {
-    setActiveId(a.id);
-    setMarksMap({});
+  useEffect(() => {
+    if (!active || !subjective.length) return;
+    const meta = (active.metadata || {}) as Record<string, unknown>;
+    const existing = (meta.subjective_marks || meta.essay_marks || {}) as Record<string, number>;
+    const next: Record<string, number> = {};
+    for (const q of subjective) {
+      if (existing[q.question_id] != null) next[q.question_id] = Number(existing[q.question_id]);
+    }
+    setMarksMap(next);
     setFeedbackMap({});
-  }
+  }, [active?.id, subjective.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const objectiveScore = Number(
+    ((active?.metadata as { score?: { totalScore?: number } } | null)?.score?.totalScore) ?? 0,
+  );
+  const subjectiveTotal = useMemo(
+    () => subjective.reduce((s, q) => s + (Number(marksMap[q.question_id]) || 0), 0),
+    [subjective, marksMap],
+  );
+  const maxSubjective = useMemo(
+    () => subjective.reduce((s, q) => s + (Number(q.marks) || 0), 0),
+    [subjective],
+  );
 
   async function saveMarks() {
-    if (!teacher || !session || !active) return;
+    if (!teacher || !session || !active || !examId) return;
     setBusy(true);
     try {
       for (const q of subjective) {
         const awarded = Number(marksMap[q.question_id] ?? 0);
-        const max = Number(q.marks || q.questions?.marks || 0);
-        await supabase.from("attempt_marks").upsert(
-          {
-            school_id: teacher.schoolId,
-            attempt_id: active.id,
-            exam_id: active.exam_id,
-            student_id: active.student_id,
-            question_id: q.question_id,
-            marks_awarded: Math.min(awarded, max),
-            max_marks: max,
-            feedback: feedbackMap[q.question_id] || null,
-            marked_by: session.userId,
-            marked_at: new Date().toISOString(),
-          } as never,
-          { onConflict: "attempt_id,question_id" },
-        );
+        const max = Number(q.marks || 0);
+        try {
+          await supabase.from("attempt_marks").upsert(
+            {
+              school_id: teacher.schoolId,
+              attempt_id: active.id,
+              exam_id: examId,
+              student_id: active.student_id,
+              question_id: q.question_id,
+              marks_awarded: Math.min(awarded, max),
+              max_marks: max,
+              feedback: feedbackMap[q.question_id] || null,
+              marked_by: session.userId,
+              marked_at: new Date().toISOString(),
+            } as never,
+            { onConflict: "attempt_id,question_id" },
+          );
+        } catch {
+          /* table may not have unique constraint — continue */
+        }
       }
 
-      const finalScore = objectiveScore + subjectiveTotal;
       const maxScore =
-        Number(active.metadata?.score?.maxScore ?? 0) || objectiveScore + maxSubjective;
+        Number(
+          ((active.metadata as { score?: { maxScore?: number } } | null)?.score?.maxScore) ?? 0,
+        ) || objectiveScore + maxSubjective;
+      const finalScore = objectiveScore + subjectiveTotal;
       const percentage = maxScore > 0 ? Math.round((finalScore / maxScore) * 1000) / 10 : 0;
       const grade =
-        percentage >= 70
-          ? "A"
-          : percentage >= 60
-            ? "B"
-            : percentage >= 50
-              ? "C"
-              : percentage >= 40
-                ? "D"
-                : "F";
+        percentage >= 70 ? "A" : percentage >= 60 ? "B" : percentage >= 50 ? "C" : percentage >= 40 ? "D" : "F";
 
-      const resultPayload: Record<string, unknown> = {
-        school_id: teacher.schoolId,
-        exam_id: active.exam_id,
-        student_id: active.student_id,
-        attempt_id: active.id,
-        total_score: finalScore,
-        max_score: maxScore,
-        percentage,
-        grade,
-        pass_fail: percentage >= 40 ? "pass" : "fail",
-        status: "pending",
-        teacher_reviewed_at: new Date().toISOString(),
-        security_review_status: "teacher_marked",
+      const nextMeta = {
+        ...(active.metadata || {}),
+        essay_marked: true,
+        subjective_marked: true,
+        subjective_marks: marksMap,
+        score: {
+          ...(((active.metadata as { score?: Record<string, unknown> })?.score) || {}),
+          totalScore: finalScore,
+          maxScore,
+          percentage,
+          grade,
+        },
       };
-      let { error: resErr } = await supabase.from("results").upsert(resultPayload as never, { onConflict: "exam_id,student_id" });
-      if (resErr) {
-        // Column may not exist — retry without security_review_status / teacher_reviewed_at
-        delete resultPayload.security_review_status;
-        delete resultPayload.teacher_reviewed_at;
-        const retry = await supabase.from("results").upsert(resultPayload as never, { onConflict: "exam_id,student_id" });
-        resErr = retry.error;
-      }
-      if (resErr) throw resErr;
 
-      // Flag attempt so officer release can require essay marking
+      await supabase
+        .from("exam_attempts")
+        .update({ metadata: nextMeta } as never)
+        .eq("id", active.id);
+
+      // Upsert into examination_results / results if present
       try {
-        const meta = { ...(active.metadata || {}), essayMarked: true, essayMarkedAt: new Date().toISOString() };
-        await supabase.from("exam_attempts").update({ metadata: meta } as never).eq("id", active.id);
-      } catch { /* ignore */ }
+        const payload = {
+          school_id: teacher.schoolId,
+          exam_id: examId,
+          student_id: active.student_id,
+          attempt_id: active.id,
+          score: finalScore,
+          max_score: maxScore,
+          percentage,
+          grade,
+          status: "marked",
+          released: false,
+        };
+        const tryTables = ["examination_results", "exam_results", "results"] as const;
+        for (const table of tryTables) {
+          try {
+            const { error } = await supabase.from(table).upsert(payload as never, {
+              onConflict: "exam_id,student_id",
+            });
+            if (!error) break;
+          } catch {
+            /* try next */
+          }
+        }
+      } catch {
+        /* results table optional */
+      }
 
-      toast.success(`Marked. Final score ${finalScore}/${maxScore} (${percentage}%)`);
-      await qc.invalidateQueries({ queryKey: ["teacher-marking-attempts"] });
-      await qc.invalidateQueries({ queryKey: ["teacher-results"] });
+      toast.success("Marks saved — ready for officer release");
+      void qc.invalidateQueries({ queryKey: ["teacher-marking-attempts"] });
+      void qc.invalidateQueries({ queryKey: ["teacher-submissions-by-exam"] });
+      void navigate({ to: "/teacher/marking", search: { examId } });
     } catch (e) {
-      toast.error((e as Error).message || "Could not save marks");
+      console.error(e);
+      toast.error("Could not save marks. Try again.");
     } finally {
       setBusy(false);
     }
   }
 
-  if (isLoading) return <p className="text-sm text-slate-500">Loading…</p>;
-  if (!teacher) {
-    return <EmptyState title="Teacher profile not found" description="Contact School Admin." />;
+  function answerFor(qid: string): string {
+    const ans = active?.answers;
+    if (!ans || typeof ans !== "object") return "";
+    const raw = (ans as Record<string, unknown>)[qid];
+    if (raw == null) return "";
+    if (typeof raw === "string") return raw;
+    if (typeof raw === "object" && raw !== null && "text" in raw) {
+      return String((raw as { text?: string }).text || "");
+    }
+    return String(raw);
   }
 
-  return (
-    <>
-      <PageHeader
-        title={filterExamId ? "Mark student scripts" : "Marking Center"}
-        description={`Theory / essay marking for ${teacher.fullName}. MCQ & True/False are auto-scored on submit.`}
-      />
+  if (teacherLoading) {
+    return (
+      <div className="flex justify-center py-16">
+        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+      </div>
+    );
+  }
 
-      <div className="grid gap-6 lg:grid-cols-5">
-        <SectionCard className="lg:col-span-2" title="Submitted scripts">
-          {attemptsQ.isLoading ? (
-            <p className="text-sm text-slate-500">Loading attempts…</p>
-          ) : attempts.length === 0 ? (
+  if (!teacher) {
+    return (
+      <>
+        <PageHeader title="Marking" description="Essay / theory scripts" />
+        <EmptyState title="Teacher profile not found" description="Your account is not linked as a teacher for this school." />
+      </>
+    );
+  }
+
+  // —— View: no exam selected ——
+  if (!examId) {
+    const rows = examsQ.data ?? [];
+    return (
+      <>
+        <PageHeader
+          title="Marking"
+          description="Select an examination that needs essay or theory marking."
+        />
+        <SectionCard title="Exams requiring marking" className="mt-2">
+          {examsQ.isLoading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : !rows.length ? (
             <EmptyState
-              title="Nothing to mark"
-              description="When students submit on your courses, scripts appear here."
+              title="No scripts waiting"
+              description="When students submit exams with essay questions, they appear here."
             />
           ) : (
-            <ul className="max-h-[32rem] space-y-2 overflow-y-auto">
-              {attempts.map((a) => {
-                const name =
-                  (a.students as { full_name?: string | null } | null)?.full_name
-                  || a.students?.profiles?.full_name
-                  || a.students?.matric_number
-                  || a.students?.student_id
-                  || "Student";
+            <ul className="divide-y divide-slate-100">
+              {rows.map((r) => (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 px-1 py-3 text-left hover:bg-slate-50"
+                    onClick={() => void navigate({ to: "/teacher/marking", search: { examId: r.id } })}
+                  >
+                    <div>
+                      <p className="font-semibold text-slate-900">{r.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {r.pending ? `${r.pending} waiting for marking` : "All marked"}
+                      </p>
+                    </div>
+                    <ChevronRight className="h-5 w-5 text-slate-400" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mt-4">
+            <Button asChild variant="outline" size="sm">
+              <Link to="/teacher/submissions">Back to submissions</Link>
+            </Button>
+          </div>
+        </SectionCard>
+      </>
+    );
+  }
+
+  // —— View: student list for exam ——
+  if (!attemptId) {
+    const rows = attemptsQ.data ?? [];
+    return (
+      <>
+        <PageHeader
+          title={examTitleQ.data || "Mark scripts"}
+          description="Select a student to mark their essay / theory answers."
+        />
+        <div className="mb-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-primary"
+            onClick={() => void navigate({ to: "/teacher/marking" })}
+          >
+            <ArrowLeft className="h-4 w-4" /> All exams
+          </Button>
+        </div>
+        <SectionCard title="Submitted students" className="mt-1">
+          {attemptsQ.isLoading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : !rows.length ? (
+            <EmptyState title="No submissions yet" description="No submitted scripts for this examination." />
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {rows.map((a) => {
+                const marked =
+                  (a.metadata as { essay_marked?: boolean })?.essay_marked === true ||
+                  (a.metadata as { subjective_marked?: boolean })?.subjective_marked === true;
                 return (
                   <li key={a.id}>
                     <button
                       type="button"
-                      onClick={() => openAttempt(a)}
-                      className={`w-full rounded-xl border px-3 py-2.5 text-left text-sm transition ${
-                        activeId === a.id
-                          ? "border-primary/40 bg-primary/5"
-                          : "border-slate-200 hover:bg-slate-50"
-                      }`}
+                      className="flex w-full items-center justify-between gap-3 px-1 py-3 text-left hover:bg-slate-50"
+                      onClick={() =>
+                        void navigate({
+                          to: "/teacher/marking",
+                          search: { examId, attemptId: a.id },
+                        })
+                      }
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-900">{name}</span>
-                        <StatusBadge status={a.status} />
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-slate-900">{a.fullName}</p>
+                        <p className="text-xs text-slate-500">{a.matric}</p>
                       </div>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {a.examinations?.title ?? "Exam"} ·{" "}
-                        {a.submitted_at
-                          ? new Date(a.submitted_at).toLocaleString()
-                          : "—"}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <StatusBadge status={marked ? "Marked" : "Needs marking"} />
+                        <ChevronRight className="h-5 w-5 text-slate-400" />
+                      </div>
                     </button>
                   </li>
                 );
@@ -315,99 +481,139 @@ function Page() {
             </ul>
           )}
         </SectionCard>
+      </>
+    );
+  }
 
-        <SectionCard
-          className="lg:col-span-3"
-          title={active ? "Mark script" : "Select a script"}
-          description={
-            active
-              ? `${active.students?.full_name || students?.profiles?.full_name || "Student"} · objective auto-score: ${objectiveScore}`
-              : "Choose a submitted attempt on the left"
-          }
+  // —— View: mark one student ——
+  if (!active && !attemptsQ.isLoading) {
+    return (
+      <>
+        <PageHeader title="Script not found" description="This attempt could not be loaded." />
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void navigate({ to: "/teacher/marking", search: { examId } })}
         >
-          {!active ? (
-            <EmptyState title="No script selected" description="Pick a submission to mark." />
-          ) : paperQ.isLoading ? (
-            <p className="text-sm text-slate-500">Loading paper…</p>
-          ) : subjective.length === 0 ? (
-            <div className="space-y-3">
-              <p className="text-sm text-slate-600">
-                No essay/short-answer questions on this paper. Objective score is already recorded.
-              </p>
-              <p className="text-sm font-semibold">
-                Auto score: {objectiveScore}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {subjective.map((q, i) => {
-                const rawAns = (active.answers ?? {})[q.question_id];
-                const ans = rawAns == null ? "" : String(rawAns);
-                const max = Number(q.marks || q.questions?.marks || 0);
-                return (
-                  <div key={q.question_id} className="rounded-xl border border-slate-200 p-3">
-                    <p className="text-xs font-semibold uppercase text-slate-500">
-                      Q{i + 1} · {q.questions?.question_type?.replaceAll("_", " ")} · max {max}
-                    </p>
-                    <p className="mt-1 text-sm font-medium text-slate-900">
-                      {q.questions?.question_text}
-                    </p>
-                    <div className="mt-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700 whitespace-pre-wrap">
-                      {ans || <em className="text-slate-400">No answer</em>}
+          Back to students
+        </Button>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHeader
+        title={active?.fullName || "Marking"}
+        description={`${active?.matric || ""} · ${examTitleQ.data || "Examination"}`}
+      />
+      <div className="mb-3">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="gap-1 text-primary"
+          onClick={() => void navigate({ to: "/teacher/marking", search: { examId } })}
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to students
+        </Button>
+      </div>
+
+      <SectionCard
+        title="Essay / theory answers"
+        className="mt-1"
+        action={
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500">
+            <ClipboardCheck className="h-3.5 w-3.5" />
+            Manual marking
+          </span>
+        }
+      >
+        {paperQ.isLoading || attemptsQ.isLoading ? (
+          <div className="flex justify-center py-10">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          </div>
+        ) : !subjective.length ? (
+          <EmptyState
+            title="No essay questions"
+            description="This paper has no essay/theory items to mark manually."
+          />
+        ) : (
+          <div className="space-y-5">
+            {subjective.map((q, idx) => {
+              const max = Number(q.marks) || 0;
+              const ans = answerFor(q.question_id);
+              return (
+                <div
+                  key={q.question_id}
+                  className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                >
+                  <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                    Question {idx + 1} · max {max}
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-slate-900 whitespace-pre-wrap">
+                    {q.question_text}
+                  </p>
+                  <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3 text-sm text-slate-800 whitespace-pre-wrap">
+                    {ans || <em className="text-slate-400">No answer submitted</em>}
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Marks awarded</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={max}
+                        step={0.5}
+                        value={marksMap[q.question_id] ?? ""}
+                        onChange={(e) =>
+                          setMarksMap((m) => ({
+                            ...m,
+                            [q.question_id]: Number(e.target.value) || 0,
+                          }))
+                        }
+                      />
                     </div>
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Marks awarded</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={max}
-                          step={0.5}
-                          value={marksMap[q.question_id] ?? ""}
-                          onChange={(e) =>
-                            setMarksMap((m) => ({
-                              ...m,
-                              [q.question_id]: Number(e.target.value) || 0,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="space-y-1 sm:col-span-1">
-                        <Label className="text-xs">Feedback</Label>
-                        <Textarea
-                          rows={2}
-                          value={feedbackMap[q.question_id] ?? ""}
-                          onChange={(e) =>
-                            setFeedbackMap((m) => ({
-                              ...m,
-                              [q.question_id]: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Feedback (optional)</Label>
+                      <Textarea
+                        rows={2}
+                        value={feedbackMap[q.question_id] ?? ""}
+                        onChange={(e) =>
+                          setFeedbackMap((m) => ({
+                            ...m,
+                            [q.question_id]: e.target.value,
+                          }))
+                        }
+                      />
                     </div>
                   </div>
-                );
-              })}
+                </div>
+              );
+            })}
 
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
-                <p className="text-sm font-semibold text-slate-800">
-                  Final: {objectiveScore} (auto) + {subjectiveTotal} (manual) ={" "}
-                  {objectiveScore + subjectiveTotal}
-                </p>
-                <Button className="font-semibold" disabled={busy} onClick={() => void saveMarks()}>
-                  {busy ? (
-                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Save className="mr-1.5 h-4 w-4" />
-                  )}
-                  Save marks & send for release
-                </Button>
-              </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+              <p className="text-sm font-semibold text-slate-800">
+                Auto {objectiveScore} + Manual {subjectiveTotal} ={" "}
+                <span className="text-primary">{objectiveScore + subjectiveTotal}</span>
+                {maxSubjective ? (
+                  <span className="ml-1 text-xs font-normal text-slate-500">
+                    (essay max {maxSubjective})
+                  </span>
+                ) : null}
+              </p>
+              <Button className="font-semibold" disabled={busy} onClick={() => void saveMarks()}>
+                {busy ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-1.5 h-4 w-4" />
+                )}
+                Save marks & send for release
+              </Button>
             </div>
-          )}
-        </SectionCard>
-      </div>
+          </div>
+        )}
+      </SectionCard>
     </>
   );
 }

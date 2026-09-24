@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BarChart3,
@@ -38,6 +38,7 @@ export function ResultsRecordsPage({
   const { data: user } = useSessionUser();
   const printRef = useRef<HTMLDivElement>(null);
   const schoolId = forcedSchoolId || user?.schoolId || null;
+  const role = user?.role;
 
   const [sessionId, setSessionId] = useState("");
   const [semesterId, setSemesterId] = useState("");
@@ -47,8 +48,10 @@ export function ResultsRecordsPage({
   const [assessment, setAssessment] = useState<"all" | "test" | "examination">("all");
   const [examId, setExamId] = useState<string>("");
   const [examPickerOpen, setExamPickerOpen] = useState(false);
+  const [examPickerSearch, setExamPickerSearch] = useState("");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"results" | "analysis">("results");
+  const [officerDeptLocked, setOfficerDeptLocked] = useState(false);
 
   const filters: ResultFilters = useMemo(
     () => ({
@@ -87,16 +90,34 @@ export function ResultsRecordsPage({
   const analytics = useMemo(() => computeResultAnalytics(record?.rows ?? []), [record?.rows]);
 
   const filteredRows = useMemo(() => {
-    const rows = record?.rows ?? [];
+    let rows = record?.rows ?? [];
+    // Live filters on student rows (department / level from filter bar)
+    if (departmentId) {
+      const deptName = (opts?.departments ?? []).find((d) => d.id === departmentId)?.name?.toLowerCase();
+      if (deptName) {
+        rows = rows.filter((r) => r.departmentName.toLowerCase() === deptName || r.departmentName === "—");
+        // Prefer exact department match; keep rows that resolved
+        rows = rows.filter((r) => r.departmentName.toLowerCase() === deptName);
+      }
+    }
+    if (levelId) {
+      const lvlName = (opts?.levels ?? []).find((l) => l.id === levelId)?.name?.toLowerCase();
+      if (lvlName) {
+        rows = rows.filter((r) => r.levelName.toLowerCase() === lvlName);
+      }
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
-        r.fullName.toLowerCase().includes(q) ||
-        r.matric.toLowerCase().includes(q) ||
-        r.departmentName.toLowerCase().includes(q),
-    );
-  }, [record?.rows, search]);
+    if (q) {
+      rows = rows.filter(
+        (r) =>
+          r.fullName.toLowerCase().includes(q) ||
+          r.matric.toLowerCase().includes(q) ||
+          r.departmentName.toLowerCase().includes(q),
+      );
+    }
+    return rows;
+  }, [record?.rows, search, departmentId, levelId, opts?.departments, opts?.levels]);
+
 
   function printRecord() {
     if (!printRef.current) return;
@@ -151,6 +172,43 @@ export function ResultsRecordsPage({
   const opts = optsQ.data;
   const semestersFiltered = (opts?.semesters ?? []).filter((s) => !sessionId || s.extra === sessionId);
 
+  // Role-scoped filter lists
+  const departmentsForUi = useMemo(() => {
+    const all = opts?.departments ?? [];
+    if (role === "examination_officer" && departmentId) {
+      return all.filter((d) => d.id === departmentId);
+    }
+    return all;
+  }, [opts?.departments, role, departmentId]);
+
+  const coursesForUi = useMemo(() => {
+    const all = opts?.courses ?? [];
+    // When a department is selected, still show all courses in opts (courses not always tagged in NamedOption)
+    return all;
+  }, [opts?.courses]);
+
+  // Lock departmental officer to their department once
+  useEffect(() => {
+    if (!user || role !== "examination_officer" || !schoolId || officerDeptLocked) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { resolveOfficerDepartmentId } = await import("@/lib/results-records");
+        const deptId = await resolveOfficerDepartmentId(schoolId, user.profileId);
+        if (!cancelled && deptId) {
+          setDepartmentId(deptId);
+          setOfficerDeptLocked(true);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, role, schoolId, officerDeptLocked]);
+
+
   return (
     <div className="mx-auto w-full max-w-6xl">
       <PageHeader title={title} description={description} />
@@ -185,9 +243,19 @@ export function ResultsRecordsPage({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <FilterSelect label="Academic Session" value={sessionId} onChange={(v) => { setSessionId(v); setSemesterId(""); setExamId(""); }} options={opts?.sessions ?? []} />
           <FilterSelect label="Semester" value={semesterId} onChange={(v) => { setSemesterId(v); setExamId(""); }} options={semestersFiltered} />
-          <FilterSelect label="Department" value={departmentId} onChange={(v) => { setDepartmentId(v); setExamId(""); }} options={opts?.departments ?? []} />
+          {role === "examination_officer" ? (
+            <FilterSelect
+              label="Department"
+              value={departmentId}
+              onChange={(v) => { setDepartmentId(v); setExamId(""); }}
+              options={departmentsForUi}
+              disabled={officerDeptLocked && Boolean(departmentId)}
+            />
+          ) : role === "teacher" ? null : (
+            <FilterSelect label="Department" value={departmentId} onChange={(v) => { setDepartmentId(v); setExamId(""); }} options={departmentsForUi} />
+          )}
           <FilterSelect label="Level" value={levelId} onChange={(v) => { setLevelId(v); setExamId(""); }} options={opts?.levels ?? []} />
-          <FilterSelect label="Course" value={courseId} onChange={(v) => { setCourseId(v); setExamId(""); }} options={opts?.courses ?? []} />
+          <FilterSelect label="Course" value={courseId} onChange={(v) => { setCourseId(v); setExamId(""); }} options={coursesForUi} />
           <div className="space-y-1">
             <label className="text-xs font-bold uppercase tracking-wide text-slate-500">Assessment</label>
             <select
@@ -240,15 +308,36 @@ export function ResultsRecordsPage({
                     className="flex max-h-[min(80vh,32rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="border-b border-slate-100 bg-primary px-4 py-3 text-white">
-                      <p className="text-sm font-bold">Select examination / test</p>
-                      <p className="text-[11px] text-white/80">Scroll and tap one assessment</p>
+                    <div className="border-b border-slate-100 bg-[#0b1b3a] px-4 py-3 text-white">
+                      <p className="text-sm font-bold">Select results</p>
+                      <p className="text-[11px] text-white/80">Scroll and tap an examination or test</p>
+                      <div className="relative mt-2">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/50" />
+                        <input
+                          value={examPickerSearch}
+                          onChange={(e) => setExamPickerSearch(e.target.value)}
+                          placeholder="Search by title or course…"
+                          className="h-9 w-full rounded-lg border border-white/20 bg-white/10 pl-8 pr-3 text-sm text-white placeholder:text-white/50 outline-none focus:border-white/40"
+                        />
+                      </div>
                     </div>
                     <ul className="flex-1 overflow-y-auto p-2">
-                      {exams.length === 0 ? (
+                      {exams.filter((e) => {
+                        const q = examPickerSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        const code = (e.courses?.code || "").toLowerCase();
+                        const name = (e.courses?.name || "").toLowerCase();
+                        return e.title.toLowerCase().includes(q) || code.includes(q) || name.includes(q);
+                      }).length === 0 ? (
                         <li className="px-3 py-6 text-center text-sm text-slate-500">No assessments match filters.</li>
                       ) : (
-                        exams.map((e) => {
+                        exams.filter((e) => {
+                        const q = examPickerSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        const code = (e.courses?.code || "").toLowerCase();
+                        const name = (e.courses?.name || "").toLowerCase();
+                        return e.title.toLowerCase().includes(q) || code.includes(q) || name.includes(q);
+                      }).map((e) => {
                           const code = e.courses?.code || "";
                           const active = examId === e.id;
                           return (
@@ -396,8 +485,26 @@ export function ResultsRecordsPage({
               <div className="mb-5 grid gap-2 text-sm sm:grid-cols-2">
                 <Meta label="Course Code" value={record.header.courseCode} />
                 <Meta label="Course" value={record.header.courseName} />
-                <Meta label="Department" value={record.header.departmentName} />
-                <Meta label="Level" value={record.header.levelName} />
+                {departmentId ? (
+                  <Meta
+                    label="Department"
+                    value={
+                      (opts?.departments ?? []).find((d) => d.id === departmentId)?.name ||
+                      record.header.departmentName
+                    }
+                  />
+                ) : null}
+                {levelId ? (
+                  <Meta
+                    label="Level"
+                    value={
+                      (opts?.levels ?? []).find((l) => l.id === levelId)?.name ||
+                      record.header.levelName
+                    }
+                  />
+                ) : (
+                  <Meta label="Level" value={record.header.levelName} />
+                )}
                 <Meta label="Semester" value={record.header.semesterName} />
                 <Meta label="Academic Session" value={record.header.sessionName} />
                 <Meta label="Assessment" value={record.header.assessmentLabel} />
@@ -486,18 +593,21 @@ function FilterSelect({
   value,
   onChange,
   options,
+  disabled,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { id: string; name: string }[];
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-1">
       <label className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</label>
       <select
-        className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+        className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-70"
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="">All</option>
