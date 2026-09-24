@@ -108,18 +108,31 @@ export function ProfilePage() {
 
   useEffect(() => {
     if (!user) return;
-    setFullName(user.fullName || student?.fullName || "");
+    const roleLike = /^(school\s*admin|examination\s*officer|departmental\s*officer|teacher|student|super\s*admin|user)$/i;
+    const seed = (user.fullName || student?.fullName || "").trim();
+    setFullName(seed && !roleLike.test(seed) ? seed : "");
     void (async () => {
       try {
-        const { data } = await supabase
+        let data: { phone?: string | null; full_name?: string | null } | null = null;
+        const byAuth = await supabase
           .from("profiles")
           .select("phone, full_name")
           .eq("auth_user_id", user.userId)
           .maybeSingle();
+        data = byAuth.data;
+        if ((!data?.full_name || roleLike.test(String(data.full_name || "").trim())) && user.profileId) {
+          const byId = await supabase
+            .from("profiles")
+            .select("phone, full_name")
+            .eq("id", user.profileId)
+            .maybeSingle();
+          if (byId.data) data = { ...(data || {}), ...byId.data };
+        }
         if (data?.phone) setPhone(String(data.phone));
-        if (data?.full_name && !user.fullName) setFullName(String(data.full_name));
+        const name = String(data?.full_name || "").trim();
+        if (name && !roleLike.test(name)) setFullName(name);
       } catch {
-        /* optional phone column */
+        /* ignore */
       }
     })();
   }, [user, student?.fullName]);

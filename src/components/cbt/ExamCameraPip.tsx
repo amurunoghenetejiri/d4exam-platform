@@ -132,8 +132,8 @@ export function ExamCameraPip({
     const copy = ALERT_COPY[kind];
     if (copy) {
       try {
-        if (copy.level === "error") toast.error(copy.message, { id: copy.toastId, duration: 3500 });
-        else toast.warning(copy.message, { id: copy.toastId, duration: 3200 });
+        /* Face banners stay in-UI; no bottom toasts during exam */
+        void copy;
       } catch {
         /* ignore */
       }

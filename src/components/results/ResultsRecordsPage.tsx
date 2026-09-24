@@ -46,6 +46,7 @@ export function ResultsRecordsPage({
   const [courseId, setCourseId] = useState("");
   const [assessment, setAssessment] = useState<"all" | "test" | "examination">("all");
   const [examId, setExamId] = useState<string>("");
+  const [examPickerOpen, setExamPickerOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"results" | "analysis">("results");
 
@@ -201,7 +202,7 @@ export function ResultsRecordsPage({
           </div>
         </div>
 
-        {/* Compact exam selector — no long sidebar list */}
+        {/* Branded exam picker (modal list, not native grey select) */}
         <div className="mt-4 space-y-1">
           <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
             Select examination / test
@@ -212,29 +213,85 @@ export function ResultsRecordsPage({
               Loading assessments…
             </p>
           ) : (
-            <select
-              className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm font-medium"
-              value={examId}
-              onChange={(e) => {
-                setExamId(e.target.value);
-                setTab("results");
-              }}
-            >
-              <option value="">— Choose an assessment —</option>
-              {exams.map((e) => {
-                const code = e.courses?.code || "";
-                const label = code ? `${code} · ${e.title}` : e.title;
-                return (
-                  <option key={e.id} value={e.id}>
-                    {label} ({e.status})
-                  </option>
-                );
-              })}
-            </select>
+            <>
+              <button
+                type="button"
+                onClick={() => setExamPickerOpen(true)}
+                className="flex h-11 w-full items-center justify-between rounded-xl border-2 border-primary/30 bg-primary/5 px-3 text-left text-sm font-semibold text-slate-900 transition hover:border-primary hover:bg-primary/10"
+              >
+                <span className="truncate">
+                  {examId
+                    ? (() => {
+                        const e = exams.find((x) => x.id === examId);
+                        if (!e) return "Selected assessment";
+                        const code = e.courses?.code;
+                        return code ? `${code} · ${e.title}` : e.title;
+                      })()
+                    : "Tap to select examination or test"}
+                </span>
+                <span className="ml-2 shrink-0 text-xs font-bold uppercase text-primary">Select</span>
+              </button>
+              {examPickerOpen ? (
+                <div
+                  className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"
+                  onClick={() => setExamPickerOpen(false)}
+                >
+                  <div
+                    className="flex max-h-[min(80vh,32rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="border-b border-slate-100 bg-primary px-4 py-3 text-white">
+                      <p className="text-sm font-bold">Select examination / test</p>
+                      <p className="text-[11px] text-white/80">Scroll and tap one assessment</p>
+                    </div>
+                    <ul className="flex-1 overflow-y-auto p-2">
+                      {exams.length === 0 ? (
+                        <li className="px-3 py-6 text-center text-sm text-slate-500">No assessments match filters.</li>
+                      ) : (
+                        exams.map((e) => {
+                          const code = e.courses?.code || "";
+                          const active = examId === e.id;
+                          return (
+                            <li key={e.id}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setExamId(e.id);
+                                  setExamPickerOpen(false);
+                                  setTab("results");
+                                }}
+                                className={cn(
+                                  "mb-1 w-full rounded-xl border px-3 py-2.5 text-left transition",
+                                  active
+                                    ? "border-primary bg-primary/10 ring-1 ring-primary/30"
+                                    : "border-slate-100 bg-white hover:border-primary/40 hover:bg-primary/5",
+                                )}
+                              >
+                                {code ? (
+                                  <p className="text-xs font-bold text-primary">{code}</p>
+                                ) : null}
+                                <p className="text-sm font-semibold text-slate-900">{e.title}</p>
+                                <p className="text-[10px] uppercase tracking-wide text-slate-400">{e.status}</p>
+                              </button>
+                            </li>
+                          );
+                        })
+                      )}
+                    </ul>
+                    <div className="border-t border-slate-100 p-2">
+                      <button
+                        type="button"
+                        className="w-full rounded-xl py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                        onClick={() => setExamPickerOpen(false)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </>
           )}
-          {!examsQ.isLoading && exams.length === 0 ? (
-            <p className="text-xs text-slate-500">No assessments match these filters.</p>
-          ) : null}
         </div>
       </SectionCard>
 

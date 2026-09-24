@@ -108,7 +108,11 @@ function unlockHint(): string {
 
 /** Proper name casing (not ALL CAPS). */
 function displayName(raw: string | null | undefined): string {
-  const s = (raw || "").trim();
+  let s = (raw || "").trim();
+  // Never show role titles as the person's name on unlock
+  if (/^(school\s*admin|examination\s*officer|departmental\s*officer|teacher|student|super\s*admin|user)$/i.test(s)) {
+    s = "";
+  }
   if (!s) return "D4EXAM User";
   // If already mixed case with spaces, keep as-is
   if (/[a-z]/.test(s) && /[A-Z]/.test(s)) return s;

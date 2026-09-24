@@ -508,6 +508,25 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     }
   }
 
+  // examination_officers: also match when profile_id equals auth user id (legacy rows)
+  if (resolvedPid || user.id) {
+    try {
+      const ids = [...new Set([resolvedPid, user.id].filter(Boolean))] as string[];
+      for (const pid of ids) {
+        const { data: eo } = await supabase
+          .from("examination_officers")
+          .select("school_id, officer_id, status, profile_id")
+          .eq("profile_id", pid)
+          .maybeSingle();
+        if (eo?.school_id) {
+          if (!schoolId) schoolId = String(eo.school_id);
+          if (!roles.includes("examination_officer")) roles = [...roles, "examination_officer"];
+          break;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
   // school_admins table (optional)
   if (!schoolId && resolvedPid) {
     try {
@@ -538,6 +557,14 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   }
 
   // FAST EXIT: RPC already resolved identity — only load school branding
+  // Ensure pending/preferred staff role is present before early return
+  {
+    const pref = readPreferredRole() || readPendingLoginRole();
+    if (pref && ["school_admin", "examination_officer", "teacher", "super_admin"].includes(pref) && !roles.includes(pref as AppRole)) {
+      roles = [...roles, pref as AppRole];
+    }
+  }
+
   if (roles.length > 0 && (schoolId || roles.includes("super_admin"))) {
     let schoolName: string | null = null;
     let schoolCode: string | null = null;
@@ -570,12 +597,19 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
       null;
     let statusFast = (profile?.status as string | undefined) ?? (rpcCtx?.status as string | undefined) ?? "active";
     if (primaryRoleFast && (statusFast === "pending" || statusFast === "invited")) statusFast = "active";
-    const fullNameFast =
+    let fullNameFast =
       displayNameFromProfile(profile as { full_name?: string | null; first_name?: string | null; last_name?: string | null } | null) ||
       (rpcCtx?.full_name || "").trim() ||
       (typeof profile?.full_name === "string" ? profile.full_name.trim() : "") ||
-      user.email ||
       "";
+    const roleLikeFast = /^(school\s*admin|examination\s*officer|departmental\s*officer|teacher|student|super\s*admin|user)$/i;
+    if (fullNameFast && roleLikeFast.test(fullNameFast)) fullNameFast = "";
+    if (!fullNameFast && profile?.id) {
+      try {
+        const { data: p2 } = await supabase.from("profiles").select("full_name, first_name, last_name").eq("id", profile.id).maybeSingle();
+        fullNameFast = displayNameFromProfile(p2 as { full_name?: string | null; first_name?: string | null; last_name?: string | null } | null);
+      } catch { /* ignore */ }
+    }
     if (primaryRoleFast) clearPendingLoginRole();
     seedSchoolBrandFromSession(schoolId, schoolName, schoolLogoUrl);
     return {
@@ -727,12 +761,31 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
     status = "active";
   }
 
-  const fullName =
+  let fullName =
     displayNameFromProfile(profile as { full_name?: string | null; first_name?: string | null; last_name?: string | null } | null) ||
     (rpcCtx?.full_name || "").trim() ||
     (typeof profile?.full_name === "string" ? profile.full_name.trim() : "") ||
-    user.email ||
     "";
+  // Never treat role labels / codes as a person's name
+  const roleLike = /^(school\s*admin|examination\s*officer|departmental\s*officer|teacher|student|super\s*admin|user)$/i;
+  if (fullName && roleLike.test(fullName)) fullName = "";
+  if (!fullName && resolvedProfileId) {
+    try {
+      const { data: p2 } = await supabase
+        .from("profiles")
+        .select("full_name, first_name, last_name")
+        .eq("id", resolvedProfileId)
+        .maybeSingle();
+      fullName = displayNameFromProfile(p2 as { full_name?: string | null; first_name?: string | null; last_name?: string | null } | null);
+    } catch { /* ignore */ }
+  }
+  if (!fullName) {
+    // Last resort: email local-part only if it looks like a person (not role)
+    const local = (user.email || "").split("@")[0] || "";
+    if (local && !roleLike.test(local.replace(/[._]/g, " ")) && !/^\d+$/.test(local)) {
+      fullName = local.replace(/[._]/g, " ");
+    }
+  }
 
   if (primaryRole) clearPendingLoginRole();
   seedSchoolBrandFromSession(schoolId, schoolName, schoolLogoUrl);

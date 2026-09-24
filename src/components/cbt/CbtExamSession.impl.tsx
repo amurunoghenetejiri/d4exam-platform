@@ -175,11 +175,11 @@ export function CbtExamPage() {
   const examSafeToast = {
     message: (msg: string) => {
       if (startedRef.current && !doneRef.current) return;
-      toast.message(msg);
+      /* no toast during exam */ void msg;
     },
     success: (msg: string) => {
       if (startedRef.current && !doneRef.current) return;
-      toast.success(msg);
+      /* no toast during exam */ void msg;
     },
     error: (msg: string) => {
       if (startedRef.current && !doneRef.current) {
@@ -187,7 +187,7 @@ export function CbtExamPage() {
         window.setTimeout(() => setWarnBanner(null), 6000);
         return;
       }
-      toast.error(msg);
+      /* no toast during exam */ void msg;
     },
   };
 
