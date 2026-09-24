@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { parseExamMeta, assessmentKindLabel, type AssessmentKind } from "@/lib/exam-meta";
 import { gradeFromPercentage } from "@/lib/cbt-security";
 import type { AppRole, SessionUser } from "@/lib/session";
+import { resolveStudentDetails } from "@/lib/resolve-student-details";
 
 export type ResultsScope = "super_admin" | "school_admin" | "examination_officer" | "teacher";
 
@@ -34,6 +35,7 @@ export type ExamRecordHeader = {
   dateLabel: string;
   maxScore: number | null;
   schoolName: string | null;
+  schoolLogoUrl: string | null;
 };
 
 export type ResultStudentRow = {
@@ -351,9 +353,11 @@ export async function loadExamResultRecord(
   }
 
   let schoolName: string | null = user.schoolName;
+  let schoolLogoUrl: string | null = user.schoolLogoUrl ?? null;
   try {
-    const { data: sch } = await supabase.from("schools").select("name").eq("id", schoolId).maybeSingle();
+    const { data: sch } = await supabase.from("schools").select("name, logo_url").eq("id", schoolId).maybeSingle();
     if (sch?.name) schoolName = sch.name;
+    if (sch?.logo_url) schoolLogoUrl = sch.logo_url as string;
   } catch {
     /* ignore */
   }
@@ -406,61 +410,7 @@ export async function loadExamResultRecord(
   }
 
   const studentIds = [...new Set(resultRows.map((r) => r.student_id).filter(Boolean))];
-  const studentMap = new Map<
-    string,
-    {
-      full_name: string;
-      matric: string;
-      department_id: string | null;
-      level_id: string | null;
-      profile_id: string | null;
-    }
-  >();
-
-  if (studentIds.length) {
-    // Chunk in groups of 100
-    for (let i = 0; i < studentIds.length; i += 100) {
-      const chunk = studentIds.slice(i, i + 100);
-      const { data: students } = await supabase
-        .from("students")
-        .select("id, full_name, matric_number, student_id, department_id, level_id, profile_id")
-        .in("id", chunk);
-      for (const s of students ?? []) {
-        studentMap.set(s.id, {
-          full_name: (s.full_name || "").trim(),
-          matric: s.matric_number || s.student_id || "—",
-          department_id: s.department_id,
-          level_id: s.level_id,
-          profile_id: s.profile_id,
-        });
-      }
-    }
-    // Fill names from profiles if full_name empty
-    const needProfile = [...studentMap.entries()].filter(([, v]) => !v.full_name && v.profile_id);
-    if (needProfile.length) {
-      const pids = needProfile.map(([, v]) => v.profile_id!) as string[];
-      const { data: profiles } = await supabase.from("profiles").select("id, full_name").in("id", pids.slice(0, 200));
-      const pmap = new Map((profiles ?? []).map((p) => [p.id, (p.full_name || "").trim()]));
-      for (const [sid, v] of needProfile) {
-        const n = pmap.get(v.profile_id!);
-        if (n) studentMap.set(sid, { ...v, full_name: n });
-      }
-    }
-  }
-
-  // Department / level name maps for students
-  const deptIds = [...new Set([...studentMap.values()].map((s) => s.department_id).filter(Boolean))] as string[];
-  const levelIds = [...new Set([...studentMap.values()].map((s) => s.level_id).filter(Boolean))] as string[];
-  const deptNames = new Map<string, string>();
-  const levelNames = new Map<string, string>();
-  if (deptIds.length) {
-    const { data: ds } = await supabase.from("departments").select("id, name").in("id", deptIds.slice(0, 100));
-    for (const d of ds ?? []) deptNames.set(d.id, d.name);
-  }
-  if (levelIds.length) {
-    const { data: ls } = await supabase.from("levels").select("id, name").in("id", levelIds.slice(0, 100));
-    for (const l of ls ?? []) levelNames.set(l.id, l.name);
-  }
+  const details = await resolveStudentDetails(schoolId, studentIds);
 
   let carryoverStudentIds = new Set<string>();
   if (exam.course_id) {
@@ -480,7 +430,7 @@ export async function loadExamResultRecord(
   let maxScore: number | null = null;
   const rows: ResultStudentRow[] = [];
   for (const r of resultRows) {
-    const st = studentMap.get(r.student_id);
+    const st = details[r.student_id];
     const score = r.total_score != null ? Number(r.total_score) : null;
     const max = r.max_score != null ? Number(r.max_score) : null;
     if (max != null && (maxScore == null || max > maxScore)) maxScore = max;
@@ -491,10 +441,10 @@ export async function loadExamResultRecord(
     rows.push({
       resultId: r.id,
       studentId: r.student_id,
-      fullName: st?.full_name || "Student",
+      fullName: (st?.fullName && st.fullName !== "Student" ? st.fullName : st?.fullName) || "Student",
       matric: st?.matric || "—",
-      departmentName: (st?.department_id && deptNames.get(st.department_id)) || "—",
-      levelName: (st?.level_id && levelNames.get(st.level_id)) || "—",
+      departmentName: st?.departmentName || "—",
+      levelName: st?.levelName || "—",
       score,
       maxScore: max,
       grade: grade || null,
@@ -502,7 +452,7 @@ export async function loadExamResultRecord(
       percentage: r.percentage != null ? Number(r.percentage) : null,
     });
   }
-  rows.sort((a, b) => a.fullName.localeCompare(b.fullName));
+    rows.sort((a, b) => a.fullName.localeCompare(b.fullName));
 
   const header: ExamRecordHeader = {
     examId: exam.id,
@@ -518,6 +468,7 @@ export async function loadExamResultRecord(
     dateLabel,
     maxScore,
     schoolName,
+    schoolLogoUrl,
   };
 
   return { header, rows, assessment };

@@ -1,12 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
+import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import {
+  resolveStudentDetails,
+  integritySeverityBand,
+  integritySeverityClass,
+} from "@/lib/resolve-student-details";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/officer/integrity")({
   head: () => ({
@@ -38,7 +44,6 @@ type AttemptRow = {
   security_review_status: string | null;
   submitted_at: string | null;
   examinations: { title: string } | null;
-  students: { matric_number: string | null; profiles: { full_name: string | null } | null } | null;
 };
 
 function Page() {
@@ -48,6 +53,9 @@ function Page() {
   const [selectedAttempt, setSelectedAttempt] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [nameMap, setNameMap] = useState<
+    Record<string, { fullName: string; matric: string }>
+  >({});
 
   const attemptsQ = useQuery({
     queryKey: ["officer-security-attempts", schoolId],
@@ -55,30 +63,33 @@ function Page() {
     refetchInterval: 20_000,
     queryFn: async () => {
       if (!schoolId) return [] as AttemptRow[];
-      const full =
-        "id, exam_id, student_id, status, tab_switch_count, fullscreen_exit_count, total_score, security_review_status, submitted_at, examinations(title), students(matric_number, profiles(full_name))";
-      const basic =
-        "id, exam_id, student_id, status, tab_switch_count, fullscreen_exit_count, total_score, security_review_status, submitted_at, examinations(title), students(matric_number)";
-      let res = await supabase
+      const sel =
+        "id, exam_id, student_id, status, tab_switch_count, fullscreen_exit_count, total_score, security_review_status, submitted_at, examinations(title)";
+      const { data, error } = await supabase
         .from("exam_attempts")
-        .select(full)
+        .select(sel)
         .eq("school_id", schoolId)
-        .in("status", ["submitted", "terminated", "flagged"])
+        .in("status", ["submitted", "terminated", "flagged", "completed", "graded"])
         .order("submitted_at", { ascending: false, nullsFirst: false })
-        .limit(80);
-      if (res.error) {
-        res = await supabase
-          .from("exam_attempts")
-          .select(basic)
-          .eq("school_id", schoolId)
-          .in("status", ["submitted", "terminated", "flagged"])
-          .order("submitted_at", { ascending: false, nullsFirst: false })
-          .limit(80);
-      }
-      if (res.error) throw res.error;
-      return (res.data ?? []) as AttemptRow[];
+        .limit(100);
+      if (error) throw error;
+      return (data ?? []) as AttemptRow[];
     },
   });
+
+  const attempts = attemptsQ.data ?? [];
+
+  useEffect(() => {
+    const ids = [...new Set(attempts.map((a) => a.student_id).filter(Boolean))];
+    if (!ids.length || !schoolId) return;
+    void resolveStudentDetails(schoolId, ids).then((map) => {
+      const next: Record<string, { fullName: string; matric: string }> = {};
+      for (const [k, v] of Object.entries(map)) {
+        next[k] = { fullName: v.fullName, matric: v.matric };
+      }
+      setNameMap(next);
+    });
+  }, [attempts, schoolId]);
 
   const eventsQ = useQuery({
     queryKey: ["officer-security-events", schoolId, selectedAttempt],
@@ -100,7 +111,6 @@ function Page() {
     },
   });
 
-  const attempts = attemptsQ.data ?? [];
   const events = eventsQ.data ?? [];
 
   const summary = useMemo(() => {
@@ -108,6 +118,15 @@ function Page() {
     for (const e of events) counts[e.event_type] = (counts[e.event_type] ?? 0) + 1;
     return counts;
   }, [events]);
+
+  function studentLabel(studentId: string) {
+    const n = nameMap[studentId];
+    if (n?.fullName && n.fullName !== "Student") {
+      return `${n.fullName}${n.matric && n.matric !== "—" ? ` · ${n.matric}` : ""}`;
+    }
+    if (n?.matric && n.matric !== "—") return n.matric;
+    return "Student";
+  }
 
   async function decide(
     attempt: AttemptRow,
@@ -124,17 +143,22 @@ function Page() {
         } as never)
         .eq("id", attempt.id);
 
+      // Sync to results table — same student + exam
+      const resultStatus =
+        decision === "accepted"
+          ? "published"
+          : decision === "cancelled"
+            ? "cancelled"
+            : decision === "flagged"
+              ? "pending"
+              : "pending";
+
       await supabase
         .from("results")
         .update({
           security_review_status: decision,
           security_review_note: note.trim() || null,
-          status:
-            decision === "accepted"
-              ? "published"
-              : decision === "cancelled"
-                ? "cancelled"
-                : "pending",
+          status: resultStatus,
           released_at: decision === "accepted" ? new Date().toISOString() : null,
           released_by: decision === "accepted" ? user.userId : null,
         } as never)
@@ -151,9 +175,17 @@ function Page() {
         description: note.trim() || decision,
       } as never);
 
-      toast.success(`Security review: ${decision.replaceAll("_", " ")}`);
+      toast.success(
+        decision === "accepted"
+          ? "Result accepted — also updated on Results Release"
+          : decision === "flagged"
+            ? "Result flagged — held on Results Release"
+            : `Security review: ${decision.replaceAll("_", " ")}`,
+      );
       setNote("");
       await qc.invalidateQueries({ queryKey: ["officer-security-attempts"] });
+      await qc.invalidateQueries({ queryKey: ["officer-exam-results"] });
+      await qc.invalidateQueries({ queryKey: ["officer-results-counts"] });
       await attemptsQ.refetch();
     } catch (err) {
       toast.error((err as Error).message || "Could not update review");
@@ -165,15 +197,18 @@ function Page() {
   return (
     <>
       <PageHeader
-        title="Security Review"
-        description={`${user?.fullName ?? "Officer"} · Timeline of integrity events · Accept / Flag / Cancel results`}
+        title="Integrity Review"
+        description={`${user?.fullName ?? "Officer"} · Expand a student for details · Accept / Flag syncs with Results Release`}
       />
 
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
         {Object.entries(summary)
           .slice(0, 8)
           .map(([k, v]) => (
-            <span key={k} className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-700">
+            <span
+              key={k}
+              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-700"
+            >
               {k}: {v}
             </span>
           ))}
@@ -190,134 +225,152 @@ function Page() {
             />
           ) : (
             <ul className="space-y-3">
-              {attempts.map((a) => (
-                <li
-                  key={a.id}
-                  className={`rounded-xl border p-3 ${selectedAttempt === a.id ? "border-primary bg-primary/5" : "border-slate-100"}`}
-                >
-                  <button type="button" className="w-full text-left" onClick={() => setSelectedAttempt(a.id)}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-bold text-slate-900">
-                        {a.students?.profiles?.full_name ?? a.students?.matric_number ?? "Student"} · {a.students?.matric_number ?? "—"}
-                      </p>
-                      <StatusBadge status={(a.security_review_status || "pending").replaceAll("_", " ")} />
-                    </div>
-                    <p className="mt-1 text-xs font-semibold text-slate-700">
-                      {a.examinations?.title ?? "Exam"}
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-slate-500">
-                      Score {a.total_score ?? "—"} · Tabs {a.tab_switch_count} · FS {a.fullscreen_exit_count ?? 0}
-                      {" · "}Attempt {String(a.id).slice(0, 8)}…
-                    </p>
-                  </button>
-                  {selectedAttempt === a.id && (
-                    <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-                      <Textarea
-                        rows={2}
-                        placeholder="Review note (optional)"
-                        value={note}
-                        onChange={(e) => setNote(e.target.value)}
-                      />
-                      <div className="flex flex-wrap gap-2">
-                        <Button size="sm" disabled={busy} className="font-semibold" onClick={() => void decide(a, "accepted")}>
-                          Accept result
-                        </Button>
-                        <Button size="sm" variant="outline" disabled={busy} onClick={() => void decide(a, "flagged")}>
-                          Flag result
-                        </Button>
-                        <Button size="sm" variant="outline" disabled={busy} onClick={() => void decide(a, "further_review")}>
-                          Further review
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-red-600"
-                          disabled={busy}
-                          onClick={() => void decide(a, "cancelled")}
+              {attempts.map((a) => {
+                const open = selectedAttempt === a.id;
+                const review = (a.security_review_status || "pending").toLowerCase();
+                return (
+                  <li
+                    key={a.id}
+                    className={cn(
+                      "rounded-xl border p-3 transition",
+                      open ? "border-primary bg-primary/5" : "border-slate-100 bg-white",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      className="w-full text-left"
+                      onClick={() => setSelectedAttempt(open ? null : a.id)}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-bold text-slate-900">
+                          {studentLabel(a.student_id)}
+                        </p>
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
+                            review === "accepted"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : review === "flagged"
+                                ? "bg-red-100 text-red-800"
+                                : review === "further_review"
+                                  ? "bg-amber-100 text-amber-900"
+                                  : "bg-orange-100 text-orange-900",
+                          )}
                         >
-                          Cancel result
-                        </Button>
+                          {review.replaceAll("_", " ")}
+                        </span>
                       </div>
-                    </div>
-                  )}
-                </li>
-              ))}
+                      <p className="mt-1 text-xs text-slate-500">
+                        {a.examinations?.title || "Examination"}
+                        {a.total_score != null ? ` · Score ${a.total_score}` : ""}
+                        {` · Tabs ${a.tab_switch_count ?? 0}`}
+                        {a.fullscreen_exit_count != null
+                          ? ` · FS ${a.fullscreen_exit_count}`
+                          : ""}
+                      </p>
+                      <p className="mt-0.5 text-[10px] text-slate-400">
+                        {open ? "Tap again to collapse" : "Tap to expand actions & timeline"}
+                      </p>
+                    </button>
+
+                    {open ? (
+                      <div className="mt-3 space-y-3 border-t border-slate-200 pt-3">
+                        <Textarea
+                          value={note}
+                          onChange={(e) => setNote(e.target.value)}
+                          placeholder="Review note (optional)"
+                          className="min-h-[72px] text-sm"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={busy}
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                            onClick={() => void decide(a, "accepted")}
+                          >
+                            Accept result
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            disabled={busy}
+                            onClick={() => void decide(a, "flagged")}
+                          >
+                            Flag result
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => void decide(a, "further_review")}
+                          >
+                            Further review
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="border-red-200 text-red-700"
+                            disabled={busy}
+                            onClick={() => void decide(a, "cancelled")}
+                          >
+                            Cancel result
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </SectionCard>
 
-        <SectionCard
-          title="Event timeline"
-          description={
-            selectedAttempt
+        <SectionCard title="Event timeline">
+          <p className="mb-3 text-xs text-slate-500">
+            {selectedAttempt
               ? "Events for the selected examination attempt only"
-              : "Grouped by exam attempt — each examination session is listed separately"
-          }
-        >
-          {eventsQ.isLoading ? (
-            <p className="text-sm text-slate-500">Loading…</p>
-          ) : events.length === 0 ? (
+              : "Select a student attempt to filter events"}
+          </p>
+          {!selectedAttempt ? (
             <EmptyState
-              title="No security events"
-              description="Tab switches, fullscreen exits, copy attempts, face events and connection changes appear here."
+              title="No attempt selected"
+              description="Tap a submitted attempt on the left to view its integrity timeline."
             />
+          ) : eventsQ.isLoading ? (
+            <p className="text-sm text-slate-500">Loading events…</p>
+          ) : events.length === 0 ? (
+            <EmptyState title="No events" description="No integrity events for this attempt." />
           ) : (
-            <div className="max-h-[70vh] space-y-4 overflow-y-auto">
-              {(() => {
-                // Group by attempt_id (preferred) or exam_id so Exam A / Exam B stay separate
-                const groups = new Map<string, { key: string; examId: string; attemptId: string | null; items: EventRow[] }>();
-                for (const ev of events) {
-                  const attemptId = ev.attempt_id ? String(ev.attempt_id) : null;
-                  const examId = String(ev.exam_id || "unknown");
-                  const key = attemptId ? `attempt:${attemptId}` : `exam:${examId}`;
-                  let g = groups.get(key);
-                  if (!g) {
-                    g = { key, examId, attemptId, items: [] };
-                    groups.set(key, g);
-                  }
-                  g.items.push(ev);
-                }
-                const attemptTitle = (examId: string) => {
-                  const a = attempts.find((x) => String(x.exam_id) === examId || String(x.id) === examId);
-                  return a?.examinations?.title ?? `Exam ${examId.slice(0, 8)}…`;
-                };
-                return Array.from(groups.values()).map((g) => {
-                  const title =
-                    attempts.find((a) => g.attemptId && String(a.id) === g.attemptId)?.examinations?.title ||
-                    attemptTitle(g.examId);
-                  const studentLabel =
-                    attempts.find((a) => g.attemptId && String(a.id) === g.attemptId)?.students?.profiles?.full_name ||
-                    attempts.find((a) => g.attemptId && String(a.id) === g.attemptId)?.students?.matric_number ||
-                    null;
-                  return (
-                    <div key={g.key} className="rounded-xl border border-slate-200 bg-slate-50/60 p-2">
-                      <div className="mb-2 border-b border-slate-200 px-1 pb-1.5">
-                        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-800">{title}</p>
-                        <p className="text-[10px] text-slate-500">
-                          {studentLabel ? `${studentLabel} · ` : ""}
-                          {g.attemptId ? `Attempt ${g.attemptId.slice(0, 8)}…` : `Exam ${g.examId.slice(0, 8)}…`}
-                          {" · "}
-                          {g.items.length} event{g.items.length === 1 ? "" : "s"}
-                        </p>
-                      </div>
-                      <ul className="space-y-2">
-                        {g.items.map((ev) => (
-                          <li key={ev.id} className="rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="font-bold text-slate-900">{ev.event_type}</p>
-                              <span className="text-[10px] font-semibold uppercase text-slate-500">{ev.severity}</span>
-                            </div>
-                            <p className="text-xs text-slate-500">
-                              {ev.description || "—"} · {new Date(ev.created_at).toLocaleString()}
-                            </p>
-                          </li>
-                        ))}
-                      </ul>
+            <ul className="max-h-[32rem] space-y-2 overflow-y-auto">
+              {events.map((ev) => {
+                const band = integritySeverityBand(ev.event_type, ev.severity);
+                return (
+                  <li
+                    key={ev.id}
+                    className="rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-bold text-slate-900">{ev.event_type}</p>
+                      <span
+                        className={cn(
+                          "rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase",
+                          integritySeverityClass(band),
+                        )}
+                      >
+                        {band}
+                      </span>
                     </div>
-                  );
-                });
-              })()}
-            </div>
+                    <p className="text-xs text-slate-500">
+                      {ev.description || "—"} · {new Date(ev.created_at).toLocaleString()}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </SectionCard>
       </div>

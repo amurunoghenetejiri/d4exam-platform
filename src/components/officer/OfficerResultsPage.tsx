@@ -16,6 +16,7 @@ import {
 } from "@/lib/notify";
 import { namedStudentsResultsReleased } from "@/lib/notify-named";
 import { cn } from "@/lib/utils";
+import { resolveStudentDetails } from "@/lib/resolve-student-details";
 import { resolveStudentNamesForOfficer } from "@/lib/officer-student-names.functions";
 import { humanEventLabel, relativeTime } from "@/lib/live-monitor";
 
@@ -175,33 +176,48 @@ export function OfficerResultsPage() {
         }
         console.warn("[officer-results] exam results select failed", error);
       }
-      // Resolve names server-side (reliable), then client fallback
+      // Resolve names: server fn when available, always client fallback
       const allIds = [...new Set(rows.map((r) => r.student_id).filter(Boolean))];
       if (allIds.length && schoolId) {
+        let map: Record<string, { full_name: string; matric_number: string | null; student_id: string | null }> = {};
         try {
-          const map = await resolveStudentNamesForOfficer({
+          map = (await resolveStudentNamesForOfficer({
             data: { schoolId, studentIds: allIds },
-          });
-          rows = rows.map((r) => {
-            const hit = map?.[r.student_id];
-            const prev = (r.students || {}) as Record<string, unknown>;
-            const full = (hit?.full_name || "").trim()
-              || (typeof prev.full_name === "string" ? prev.full_name.trim() : "")
-              || String((prev.profiles as { full_name?: string } | null)?.full_name || "").trim();
-            return {
-              ...r,
-              students: {
-                ...prev,
-                full_name: full || null,
-                matric_number: hit?.matric_number || prev.matric_number || null,
-                student_id: hit?.student_id || prev.student_id || null,
-                profiles: full ? { full_name: full } : (prev.profiles as { full_name: string | null } | null) || null,
-              },
-            } as ResultRow;
-          });
+          })) || {};
         } catch (e) {
-          console.warn("[officer-results] name resolve failed", e);
+          console.warn("[officer-results] server name resolve failed", e);
         }
+        try {
+          const clientMap = await resolveStudentDetails(schoolId, allIds);
+          for (const [id, d] of Object.entries(clientMap)) {
+            if (!map[id]?.full_name) {
+              map[id] = {
+                full_name: d.fullName,
+                matric_number: d.matric === "—" ? null : d.matric,
+                student_id: d.matric === "—" ? null : d.matric,
+              };
+            }
+          }
+        } catch (e) {
+          console.warn("[officer-results] client name resolve failed", e);
+        }
+        rows = rows.map((r) => {
+          const hit = map?.[r.student_id];
+          const prev = (r.students || {}) as Record<string, unknown>;
+          const full = (hit?.full_name || "").trim()
+            || (typeof prev.full_name === "string" ? prev.full_name.trim() : "")
+            || String((prev.profiles as { full_name?: string } | null)?.full_name || "").trim();
+          return {
+            ...r,
+            students: {
+              ...prev,
+              full_name: full || null,
+              matric_number: hit?.matric_number || prev.matric_number || null,
+              student_id: hit?.student_id || prev.student_id || null,
+              profiles: full ? { full_name: full } : (prev.profiles as { full_name: string | null } | null) || null,
+            },
+          } as ResultRow;
+        });
       }
       return rows;
     },
@@ -311,14 +327,46 @@ export function OfficerResultsPage() {
     setBusy(true);
     try {
       const now = new Date().toISOString();
-      const { data, error } = await supabase.from("results").update({ status: "published", released_at: now, released_by: user.userId } as never)
-        .eq("exam_id", examId).eq("school_id", schoolId).neq("security_review_status", "flagged").neq("status", "terminated").select("id, student_id");
+      // Skip results under integrity review / flagged / further review / cancelled
+      const { data: candidates } = await supabase
+        .from("results")
+        .select("id, student_id, security_review_status, status")
+        .eq("exam_id", examId)
+        .eq("school_id", schoolId)
+        .neq("status", "terminated");
+      const skipStatuses = new Set(["flagged", "further_review", "cancelled", "under_review"]);
+      const toRelease = (candidates ?? []).filter((r) => {
+        const sec = String((r as { security_review_status?: string }).security_review_status || "").toLowerCase();
+        const st = String((r as { status?: string }).status || "").toLowerCase();
+        if (skipStatuses.has(sec)) return false;
+        if (st === "terminated" || st === "cancelled") return false;
+        return true;
+      });
+      const skipCount = (candidates ?? []).length - toRelease.length;
+      if (!toRelease.length) {
+        toast.error(
+          skipCount
+            ? `No results released — ${skipCount} still under integrity review / flagged.`
+            : "No held results to release.",
+        );
+        return;
+      }
+      const ids = toRelease.map((r) => r.id);
+      const { data, error } = await supabase
+        .from("results")
+        .update({ status: "published", released_at: now, released_by: user.userId } as never)
+        .in("id", ids)
+        .select("id, student_id");
       if (error) throw error;
       const released = data ?? [];
       const studentIds = [...new Set(released.map((r) => r.student_id).filter(Boolean))] as string[];
       const examTitle = (examsQ.data ?? []).find((e) => e.id === examId)?.title ?? "your examination";
       if (studentIds.length) void namedStudentsResultsReleased({ schoolId, studentIds, examTitle });
-      toast.success(`Released ${released.length} result(s)`);
+      toast.success(
+        skipCount
+          ? `Released ${released.length} result(s); ${skipCount} held under integrity review`
+          : `Released ${released.length} result(s)`,
+      );
       await qc.invalidateQueries({ queryKey: ["officer-results-exams"] });
       await qc.invalidateQueries({ queryKey: ["officer-results-counts"] });
       await qc.invalidateQueries({ queryKey: ["officer-exam-results"] });
@@ -634,6 +682,8 @@ export function OfficerResultsPage() {
                       </div>
                       {term ? (
                         <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-800">Term.</span>
+                      ) : ["flagged", "further_review", "under_review"].includes(String(r.security_review_status || "").toLowerCase()) ? (
+                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-900">Integrity review</span>
                       ) : h ? (
                         <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700">Held</span>
                       ) : (
