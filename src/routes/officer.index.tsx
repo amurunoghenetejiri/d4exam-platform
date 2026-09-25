@@ -320,12 +320,11 @@ function Page() {
 
       <div
         ref={dashSplitRef}
-        className="mt-4 flex flex-row gap-0 sm:mt-6"
-        style={{ height: "22rem" }}
+        className="mt-4 flex flex-col gap-4 sm:mt-6 lg:flex-row lg:gap-0"
+        style={{ ["--dash-left" as any]: `${dashLeftPct}%` }}
       >
         <div
-          className="flex min-h-0 min-w-0 flex-col"
-          style={{ width: `${dashLeftPct}%`, height: "100%" }}
+          className="flex min-h-0 w-full flex-col max-lg:min-h-[26rem] lg:h-[min(28rem,55vh)] lg:w-[var(--dash-left)]"
         >
         <SectionCard
           className="flex h-full min-h-0 flex-col overflow-hidden"
@@ -368,6 +367,7 @@ function Page() {
           )}
         </SectionCard>
         </div>
+        <div className="hidden lg:block">
         <SplitHandle
           onPointerDown={(e) => {
             e.preventDefault();
@@ -397,7 +397,8 @@ function Page() {
             }
           }}
         />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={{ width: `${100 - dashLeftPct}%`, height: "100%" }}>
+        </div>
+        <div className="flex min-h-0 w-full flex-col max-lg:min-h-[26rem] lg:h-[min(28rem,55vh)] lg:min-w-0 lg:flex-1">
         <SectionCard
           className="flex h-full min-h-0 flex-col overflow-hidden"
           bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"

@@ -216,8 +216,8 @@ function Page() {
       </div>
 
       <div
-        className="flex flex-col gap-3 lg:flex-row lg:gap-0"
-        style={{ minHeight: "22rem", height: "clamp(22rem, 52vh, 36rem)" }}
+        className="flex flex-col gap-4 lg:flex-row lg:gap-0 lg:items-stretch"
+        className="min-h-[32rem] lg:h-[min(44rem,70vh)]"
       >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:max-w-[42%]">
           <SectionCard
@@ -354,12 +354,12 @@ function Page() {
                     </div>
                   ) : null}
                 </div>
-                <div className="shrink-0 space-y-2 border-t border-slate-100 pt-2">
+                <div className="mt-auto shrink-0 space-y-2 border-t border-slate-100 bg-white pt-3">
                   <Textarea
                     value={reply}
                     onChange={(e) => setReply(e.target.value)}
                     placeholder="Write a clear reply to this student…"
-                    className="min-h-[96px] rounded-xl text-sm"
+                    className="min-h-[140px] rounded-xl text-sm sm:min-h-[160px]"
                   />
                   <Button
                     type="button"

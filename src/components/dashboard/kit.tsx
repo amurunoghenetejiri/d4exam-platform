@@ -160,7 +160,7 @@ export function SectionCard({
 }) {
   const right = actions ?? action;
   return (
-    <Card className={cn("overflow-hidden rounded-xl border-slate-200/90 shadow-sm sm:rounded-2xl", className)}>
+    <Card className={cn("flex flex-col overflow-hidden rounded-xl border-slate-200/90 shadow-sm sm:rounded-2xl", className)}>
       {(title || description || right) && (
         <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-5 sm:py-4 lg:px-6 lg:py-5">
           <div className="min-w-0">
@@ -172,7 +172,7 @@ export function SectionCard({
           {right ? <div className="flex shrink-0 flex-wrap gap-1.5">{right}</div> : null}
         </CardHeader>
       )}
-      <CardContent className={cn("px-3 py-2.5 sm:px-5 sm:py-4 lg:px-6 lg:py-5", bodyClassName)}>
+      <CardContent className={cn("min-h-0 flex-1 px-3 py-2.5 sm:px-5 sm:py-4 lg:px-6 lg:py-5", bodyClassName)}>
         {children}
       </CardContent>
     </Card>

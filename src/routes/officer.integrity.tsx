@@ -353,12 +353,11 @@ function Page() {
 
       <div
         ref={splitRef}
-        className="flex flex-row gap-0"
-        style={{ height: "clamp(20rem, 52vh, 36rem)" }}
+        className="flex flex-col gap-4 lg:flex-row lg:gap-0"
+        style={{ ["--split-left" as any]: `${leftPct}%` }}
       >
         <div
-          className="flex min-h-0 min-w-0 flex-col"
-          style={{ width: `${leftPct}%`, maxWidth: "100%" }}
+          className="flex min-h-0 w-full flex-col max-lg:min-h-[28rem] lg:h-[min(42rem,65vh)] lg:w-[var(--split-left)] lg:max-w-[78%]"
         >
         <SectionCard title="Submitted attempts" className="flex h-full min-h-0 flex-col overflow-hidden" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="mb-2 shrink-0">
@@ -378,7 +377,7 @@ function Page() {
               description="When students finish CBT, attempts appear here for security review."
             />
           ) : (
-            <ul className="space-y-3">
+            <ul className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1" style={{ WebkitOverflowScrolling: "touch" }}>
               {attempts.map((a) => {
                 const open = selectedAttempt === a.id;
                 const review = (a.security_review_status || "pending").toLowerCase();
@@ -484,15 +483,16 @@ function Page() {
         </SectionCard>
         </div>
 
+        <div className="hidden lg:block">
         <SplitHandle
           onPointerDown={onSplitPointerDown}
           onPointerMove={onSplitPointerMove}
           onPointerUp={onSplitPointerUp}
         />
+        </div>
 
         <div
-          className="flex min-h-0 min-w-0 flex-1 flex-col"
-          style={{ width: `${100 - leftPct}%` }}
+          className="flex min-h-0 w-full flex-col max-lg:min-h-[28rem] lg:h-[min(42rem,65vh)] lg:min-w-0 lg:flex-1"
         >
         <SectionCard title="Integrity details" className="flex h-full min-h-0 flex-col overflow-hidden" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden">
           <p className="mb-3 text-xs text-slate-500">

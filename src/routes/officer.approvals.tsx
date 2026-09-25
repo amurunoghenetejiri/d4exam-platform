@@ -571,10 +571,10 @@ function Page() {
 
       <div
         ref={approvalsSplitRef}
-        className="flex flex-row gap-0"
-        style={{ height: "clamp(20rem, 52vh, 36rem)" }}
+        className="flex flex-col gap-4 lg:flex-row lg:gap-0"
+        style={{ ["--ap-left" as any]: `${approvalsLeftPct}%` }}
       >
-        <div className="flex min-h-0 min-w-0 flex-col" style={{ width: `${approvalsLeftPct}%` }}>
+        <div className="flex min-h-0 w-full flex-col max-lg:min-h-[28rem] lg:h-[min(42rem,65vh)] lg:w-[var(--ap-left)]">
         <SectionCard
           title="Awaiting your decision"
           description={listQ.isFetching ? "Refreshing…" : "Teachers submit → you approve → Post to students (makes exam live)"}
@@ -665,13 +665,15 @@ function Page() {
         </SectionCard>
         </div>
 
+        <div className="hidden lg:block">
         <SplitHandle
           onPointerDown={onApprovalsSplitDown}
           onPointerMove={onApprovalsSplitMove}
           onPointerUp={onApprovalsSplitUp}
         />
+        </div>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={{ width: `${100 - approvalsLeftPct}%` }}>
+        <div className="flex min-h-0 w-full flex-col max-lg:min-h-[28rem] lg:h-[min(42rem,65vh)] lg:min-w-0 lg:flex-1">
         <SectionCard
           title="Recent decisions"
           className="flex h-full min-h-0 flex-col overflow-hidden"

@@ -124,7 +124,7 @@ function NavLinks({
 }: {
   config: RoleConfig;
   onNavigate?: () => void;
-  badges?: Record<string, { dot?: "green" | "blue" | "red"; live?: boolean }>;
+  badges?: Record<string, { dot?: "green" | "blue" | "red"; live?: boolean; count?: number }>;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const t = useT();
@@ -181,7 +181,11 @@ function NavLinks({
                       />
                     </span>
                     <span className="truncate">{translateNav(item.label)}</span>
-                    {!isLive && badge?.dot ? (
+                    {!isLive && badge?.count != null && badge.count > 0 ? (
+                      <span className="ml-auto grid h-5 min-w-5 place-items-center rounded-full bg-sky-500 px-1.5 text-[10px] font-bold text-white">
+                        {badge.count > 99 ? "99+" : badge.count}
+                      </span>
+                    ) : !isLive && badge?.dot ? (
                       <span
                         className={cn(
                           "ml-auto h-2 w-2 shrink-0 rounded-full",
@@ -369,14 +373,43 @@ export function AppShell({
     },
   });
 
+  const studentReportsQ = useQuery({
+    queryKey: ["nav-student-reports-open", session?.schoolId, session?.role],
+    enabled:
+      Boolean(session?.schoolId) &&
+      (session?.role === "examination_officer" || session?.role === "school_admin"),
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+    queryFn: async () => {
+      const sid = session?.schoolId;
+      if (!sid) return 0;
+      const { data, error } = await supabase
+        .from("student_officer_reports")
+        .select("id, status")
+        .eq("school_id", sid)
+        .limit(150);
+      if (error) {
+        console.warn("[nav-student-reports]", error.message);
+        return 0;
+      }
+      return (data ?? []).filter(
+        (r) => String((r as { status?: string }).status || "open").toLowerCase() !== "replied",
+      ).length;
+    },
+  });
+
   const navBadges = (() => {
-    const b: Record<string, { dot?: "green" | "blue" | "red"; live?: boolean }> = {};
+    const b: Record<string, { dot?: "green" | "blue" | "red"; live?: boolean; count?: number }> = {};
     if ((liveMonQ.data ?? 0) > 0) {
       b["/officer/live-monitor"] = { live: true, dot: "green" };
       b["/teacher/live-exams"] = { live: true, dot: "green" };
     }
     if ((pendingApprovalQ.data ?? 0) > 0) {
-      b["/officer/approvals"] = { dot: "blue" };
+      b["/officer/approvals"] = { dot: "blue", count: pendingApprovalQ.data ?? 0 };
+    }
+    const repN = studentReportsQ.data ?? 0;
+    if (repN > 0) {
+      b["/officer/reports"] = { dot: "blue", count: repN };
     }
     if (unreadCount > 0) {
       b[`${config.home}/notifications`] = { dot: "blue" };
