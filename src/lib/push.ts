@@ -22,6 +22,28 @@ import { notificationsEnabledConfirm } from "@/lib/notify-messages";
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
 let nativePermissionCache: "granted" | "denied" | "default" | "unsupported" | null = null;
+
+/** Native permission via D4NativeAuth (POST_NOTIFICATIONS) — works with server.url WebView. */
+async function d4NativeNotifPermission(request: boolean): Promise<"granted" | "denied" | "default" | null> {
+  try {
+    const { registerPlugin } = await import("@capacitor/core");
+    const plugin = registerPlugin<{
+      checkNotificationPermission: () => Promise<{ display?: string }>;
+      requestNotificationPermission: () => Promise<{ display?: string }>;
+    }>("D4NativeAuth");
+    const st = request
+      ? await plugin.requestNotificationPermission()
+      : await plugin.checkNotificationPermission();
+    const d = (st?.display || "").toLowerCase();
+    if (d === "granted") return "granted";
+    if (d === "denied") return "denied";
+    return "default";
+  } catch {
+    return null;
+  }
+}
+
+
 let nativeListenersBound = false;
 let webOnMessageBound = false;
 
@@ -42,9 +64,22 @@ export function getPushPermissionState(): PushPermissionState {
 
 export async function refreshNativePushPermissionState(): Promise<PushPermissionState> {
   if (!isNativeShell()) {
-    await waitForNativeShell(3_000);
+    await waitForNativeShell(5_000);
   }
   if (!isNativeShell()) return getPushPermissionState();
+  try {
+    const d4 = await d4NativeNotifPermission(false);
+    if (d4 === "granted") {
+      nativePermissionCache = "granted";
+      return "granted";
+    }
+    if (d4 === "denied") {
+      nativePermissionCache = "denied";
+      return "denied";
+    }
+  } catch {
+    /* fall through */
+  }
   try {
     const { LocalNotifications } = await import("@capacitor/local-notifications");
     const status = await LocalNotifications.checkPermissions();
@@ -299,10 +334,22 @@ async function enableNativePushNotifications(
     await disableWebPushInNativeShell();
     await disableWebPushDevicesForUser(userId);
 
+    // 1) D4NativeAuth — real Android POST_NOTIFICATIONS dialog
+    try {
+      if (opts?.requestPermission !== false) {
+        const d4 = await d4NativeNotifPermission(true);
+        if (d4 === "granted") nativePermissionCache = "granted";
+        if (d4 === "denied") nativePermissionCache = "denied";
+      } else {
+        const d4 = await d4NativeNotifPermission(false);
+        if (d4 === "granted") nativePermissionCache = "granted";
+      }
+    } catch { /* continue */ }
+
     try {
       const { LocalNotifications } = await import("@capacitor/local-notifications");
       let lp = await LocalNotifications.checkPermissions();
-      const wasGranted = lp.display === "granted";
+      const wasGranted = lp.display === "granted" || nativePermissionCache === "granted";
       if (!wasGranted && opts?.requestPermission !== false) {
         lp = await LocalNotifications.requestPermissions();
       }

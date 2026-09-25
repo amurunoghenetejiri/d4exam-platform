@@ -26,6 +26,7 @@ public class MainActivity extends BridgeActivity {
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(ExamImmersivePlugin.class);
     registerPlugin(ScreenSharePlugin.class);
+    registerPlugin(D4NativeAuthPlugin.class);
     // server.url loads D4EXAM inside this WebView; never hand off to Chrome.
     super.onCreate(savedInstanceState);
     applyChromeColors();

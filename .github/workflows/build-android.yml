@@ -139,6 +139,7 @@ jobs:
 
           test -f android/app/src/main/java/com/d4exam/app/ExamImmersivePlugin.java
           test -f android/app/src/main/java/com/d4exam/app/ScreenSharePlugin.java
+          test -f android/app/src/main/java/com/d4exam/app/D4NativeAuthPlugin.java
           test -f android/app/src/main/java/com/d4exam/app/MainActivity.java
           if grep -E '^[[:space:]]*import[[:space:]]+androidx\.core\.splashscreen' \
               android/app/src/main/java/com/d4exam/app/MainActivity.java; then
@@ -147,6 +148,7 @@ jobs:
           fi
           grep -q 'ExamImmersivePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'ScreenSharePlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
+          grep -q 'D4NativeAuthPlugin' android/app/src/main/java/com/d4exam/app/MainActivity.java
           grep -q 'android.permission.VIBRATE' "$MAN"
           grep -q 'android.permission.USE_BIOMETRIC' "$MAN"
           echo "OK: native plugins + themes + icon + biometric perms"
@@ -160,6 +162,22 @@ jobs:
             sed -i 's/minSdkVersion *= *[0-9]*/minSdkVersion = 24/' android/variables.gradle
             cat android/variables.gradle
           fi
+
+
+      - name: Add androidx.biometric for D4NativeAuth
+        run: |
+          set -euo pipefail
+          BG="android/app/build.gradle"
+          if ! grep -q 'androidx.biometric' "$BG"; then
+            sed -i '/implementation "androidx.appcompat:appcompat/a\    implementation "androidx.biometric:biometric:1.1.0"' "$BG"
+          fi
+          grep -q 'androidx.biometric' "$BG"
+          # Ensure Transparent theme for Capgo AuthActivity
+          STYLES="android/app/src/main/res/values/styles.xml"
+          if [ -f "$STYLES" ] && ! grep -q 'AppTheme.Transparent' "$STYLES"; then
+            sed -i 's|</resources>|    <style name="AppTheme.Transparent" parent="Theme.AppCompat.NoActionBar">\n        <item name="android:windowIsTranslucent">true</item>\n        <item name="android:windowBackground">@android:color/transparent</item>\n        <item name="android:windowNoTitle">true</item>\n    </style>\n</resources>|' "$STYLES"
+          fi
+          echo "OK: androidx.biometric + transparent theme"
 
       - name: Setup Java 21
         uses: actions/setup-java@v4

@@ -12,6 +12,7 @@
  * silently and never pause the student exam. Share only stops on submit.
  */
 import { Capacitor, registerPlugin } from "@capacitor/core";
+import { waitForNativeShell, isNativeShell } from "@/native/platform";
 
 export type ScreenShareStartResult =
   | { ok: true; stream: MediaStream }
@@ -514,6 +515,18 @@ async function startWebScreenShare(): Promise<ScreenShareStartResult> {
 async function ensureNotifForScreenShare(): Promise<void> {
   try {
     if (typeof window === "undefined") return;
+    // D4NativeAuth first (always registered in D4EXAM APK)
+    try {
+      const { registerPlugin } = await import("@capacitor/core");
+      const auth = registerPlugin<{
+        checkNotificationPermission: () => Promise<{ display?: string }>;
+        requestNotificationPermission: () => Promise<{ display?: string }>;
+      }>("D4NativeAuth");
+      const cur = await auth.checkNotificationPermission();
+      if ((cur?.display || "").toLowerCase() !== "granted") {
+        await auth.requestNotificationPermission();
+      }
+    } catch { /* fall through */ }
     const { Capacitor } = await import("@capacitor/core");
     if (!Capacitor.isNativePlatform?.()) return;
     const { LocalNotifications } = await import("@capacitor/local-notifications");

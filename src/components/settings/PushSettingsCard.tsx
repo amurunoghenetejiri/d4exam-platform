@@ -119,9 +119,29 @@ export function PushSettingsCard({ scope }: { scope?: string }) {
           {enabled ? "Notifications enabled" : pushBusy ? "Requesting permission…" : "Enable notifications"}
         </Button>
         {pushStatus === "denied" ? (
-          <p className="text-xs text-amber-800">
-            Notifications are blocked. Open phone Settings → Apps → D4EXAM → Notifications and turn them on, then return here and tap Enable again.
-          </p>
+          <div className="space-y-2">
+            <p className="text-xs text-amber-800">
+              Notifications are blocked. Open phone Settings → Apps → D4EXAM → Notifications and turn them on, then return here and tap Enable again.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void (async () => {
+                  try {
+                    const { registerPlugin } = await import("@capacitor/core");
+                    const auth = registerPlugin<{ openNotificationSettings: () => Promise<unknown> }>("D4NativeAuth");
+                    await auth.openNotificationSettings();
+                  } catch {
+                    toast.message("Open Settings → Apps → D4EXAM → Notifications");
+                  }
+                })();
+              }}
+            >
+              Open notification settings
+            </Button>
+          </div>
         ) : null}
       </div>
     </SectionCard>

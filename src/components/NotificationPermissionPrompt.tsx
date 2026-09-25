@@ -68,22 +68,33 @@ export function NotificationPermissionPrompt() {
         // Let splash / dashboard settle
         await new Promise((r) => setTimeout(r, 1_500));
         if (cancelled) return;
-        const { LocalNotifications } = await import("@capacitor/local-notifications");
-        const cur = await LocalNotifications.checkPermissions();
-        if (cur.display === "granted" || cur.display === "denied") {
-          try {
-            localStorage.setItem("d4_native_os_notif_asked_v2", "1");
-          } catch { /* ignore */ }
-          await refreshNativePushPermissionState();
-          return;
+        let display = "default";
+        try {
+          const { registerPlugin } = await import("@capacitor/core");
+          const auth = registerPlugin<{
+            checkNotificationPermission: () => Promise<{ display?: string }>;
+            requestNotificationPermission: () => Promise<{ display?: string }>;
+          }>("D4NativeAuth");
+          const cur = await auth.checkNotificationPermission();
+          display = (cur?.display || "default").toLowerCase();
+          if (display !== "granted" && display !== "denied") {
+            const req = await auth.requestNotificationPermission();
+            display = (req?.display || display).toLowerCase();
+          }
+        } catch {
+          const { LocalNotifications } = await import("@capacitor/local-notifications");
+          const cur = await LocalNotifications.checkPermissions();
+          display = (cur.display || "default").toLowerCase();
+          if (display !== "granted" && display !== "denied") {
+            const req = await LocalNotifications.requestPermissions();
+            display = (req.display || display).toLowerCase();
+          }
         }
-        // Shows the system Android permission dialog
-        const res = await LocalNotifications.requestPermissions();
         try {
           localStorage.setItem("d4_native_os_notif_asked_v2", "1");
         } catch { /* ignore */ }
         await refreshNativePushPermissionState();
-        if (res.display === "granted") {
+        if (display === "granted") {
           toast.success("Notifications enabled");
           try {
             const { showD4ExamNativeNotification } = await import("@/native/localNotify");
