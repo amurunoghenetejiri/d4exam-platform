@@ -1166,10 +1166,21 @@ export function CbtExamPage() {
       const needScreen = Boolean(security.requireScreenShare) && !_opts.skipScreenShare;
       if (needScreen) {
         holdExamScreenShare(true);
-        const share = await startScreenShareStream();
+        try {
+          examSafeToast.message("Preparing screen sharing…");
+        } catch { /* ignore */ }
+        let share = await startScreenShareStream();
+        // Recoverable native races (FGS/MediaProjection timing): one automatic retry
+        if (!share.ok && share.reason !== "denied") {
+          await new Promise((r) => window.setTimeout(r, 900));
+          share = await startScreenShareStream();
+        }
         if (!share.ok) {
           holdExamScreenShare(false);
-          examSafeToast.error(share.message || "Screen sharing is required for this examination.");
+          examSafeToast.error(
+            share.message ||
+              "Screen sharing could not start. Allow notifications and screen capture, then try Start again.",
+          );
           setStarted(false);
           startedRef.current = false;
           setFsGate(false);

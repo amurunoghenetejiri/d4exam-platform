@@ -125,31 +125,30 @@ export const getRouter = () => {
     },
   });
 
-  // Capacitor local shell: hash history so /login and menu links always navigate.
-  // Online WebView (server.url) uses normal browser history on https://d4exam.name.ng.
+  // Android Capacitor APK always uses hash history (local bundled shell at localhost).
+  // Public website in Chrome keeps path history (browser history default).
   let history: ReturnType<typeof createBrowserHistory> | ReturnType<typeof createHashHistory> | undefined;
   try {
     if (typeof window !== "undefined") {
       const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
       const ua = navigator.userAgent || "";
+      const host = (window.location.hostname || "").toLowerCase();
       const native =
         Boolean(cap?.isNativePlatform?.()) ||
         (/; wv\)/i.test(ua) && /Android/i.test(ua)) ||
         /Capacitor/i.test(ua);
-      // Only hash when serving from local capacitor host (bundled), not when on d4exam.name.ng
-      const host = window.location.hostname || "";
-      const localShell =
-        native &&
-        (host === "localhost" ||
-          host === "127.0.0.1" ||
-          host === "" ||
-          window.location.protocol === "file:");
-      if (localShell) {
+      const localHost =
+        host === "localhost" ||
+        host === "127.0.0.1" ||
+        host === "" ||
+        window.location.protocol === "file:";
+      // Never use remote website hostname inside APK; always hash for native/local.
+      if (native || localHost) {
         history = createHashHistory();
       }
     }
   } catch {
-    /* default history */
+    /* default history for pure web */
   }
 
   const router = createRouter({

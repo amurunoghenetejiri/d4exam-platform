@@ -27,7 +27,7 @@ public class MainActivity extends BridgeActivity {
     registerPlugin(ExamImmersivePlugin.class);
     registerPlugin(ScreenSharePlugin.class);
     registerPlugin(D4NativeAuthPlugin.class);
-    // server.url loads D4EXAM inside this WebView; never hand off to Chrome.
+    // Loads local bundled D4EXAM (webDir=dist); never hand off internal routes to Chrome.
     super.onCreate(savedInstanceState);
     applyChromeColors();
     installInAppNavigationClient();
