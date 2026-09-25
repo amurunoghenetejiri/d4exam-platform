@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-Force Capacitor Android assets to use the LOCAL bundled SPA (webDir=dist).
+Configure Capacitor Android assets for hybrid APK:
 
-CRITICAL: Must NOT set server.url to d4exam.name.ng / Vercel.
-When server.url is remote, the APK is only a browser shell:
-  - feels like a website
-  - native plugins (fingerprint, notifications, MediaProjection screen share) break
-  - offline mode does not work
+  UI / menu / deep links  → live site (Vercel / d4exam.name.ng)
+  Permissions / biometrics / notifications / screen share → native Capacitor plugins
 
-Correct APK model:
-  APK → local dist/assets → Capacitor bridge → native plugins → Supabase (online)
-  Offline: local UI + cached data still open.
+server.url loads the production website inside the WebView so menus and pages
+match the live site. Native plugins (D4NativeAuth, D4ScreenShare, Capgo, etc.)
+still run in the APK process and can request real OS permissions.
 """
 from __future__ import annotations
 
@@ -21,6 +18,8 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CFG = ROOT / "android" / "app" / "src" / "main" / "assets" / "capacitor.config.json"
 
+LIVE_URL = "https://d4exam.name.ng"
+
 
 def main() -> int:
     if not CFG.exists():
@@ -30,16 +29,17 @@ def main() -> int:
     d = json.loads(CFG.read_text(encoding="utf-8"))
     server = dict(d.get("server") or {})
 
-    # Strip remote shell URL if any build step injected it
-    if "url" in server:
-        print("REMOVED remote server.url =", server.get("url"))
-        del server["url"]
-
+    server["url"] = LIVE_URL
     server["androidScheme"] = "https"
-    server["hostname"] = "localhost"
     server["cleartext"] = False
-    server["errorPath"] = "index.html"
+    server["errorPath"] = "offline.html"
+    # Hostname kept for local asset fallback when offline
+    server["hostname"] = "localhost"
     server["allowNavigation"] = [
+        "d4exam.name.ng",
+        "*.d4exam.name.ng",
+        "d4exam-platform.vercel.app",
+        "*.vercel.app",
         "*.supabase.co",
         "*.googleapis.com",
         "*.gstatic.com",
@@ -55,8 +55,7 @@ def main() -> int:
     d["appName"] = d.get("appName") or "D4EXAM"
 
     CFG.write_text(json.dumps(d, indent=2) + "\n", encoding="utf-8")
-    print("OK: local Capacitor shell (no server.url, hostname=localhost)")
-    print(json.dumps(d.get("server"), indent=2))
+    print("OK: hybrid APK — server.url =", LIVE_URL, "+ native plugins")
     return 0
 
 

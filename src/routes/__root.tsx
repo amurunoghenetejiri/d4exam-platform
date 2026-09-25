@@ -215,7 +215,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
           "D4EXAM is a professional CBT and examination management platform for schools, colleges and universities. Secure online exams, question banks, live monitoring, automated marking and results.",
       },
       { name: "author", content: "D4EXAM" },
-      { name: "theme-color", content: "#0b1b3a" },
+      { name: "theme-color", content: "#ffffff" },
       { name: "robots", content: "index, follow, max-image-preview:large" },
       { name: "googlebot", content: "index, follow" },
       { property: "og:type", content: "website" },
@@ -277,11 +277,23 @@ const BOOT_SPLASH_SCRIPT = `
       if (window.matchMedia && (window.matchMedia('(display-mode: standalone)').matches || window.matchMedia('(display-mode: fullscreen)').matches)) shell = true;
       if (navigator.standalone === true) shell = true;
     } catch(e){}
-    if (!shell) return;
-    if (sessionStorage.getItem('d4exam_splash_shown_v6') === '1') return;
     var el = document.getElementById('d4-boot-splash');
-    if (el) el.style.display = 'flex';
-    // Stay up until React signals ready — avoids white gap between boot + app splash / fingerprint
+    if (!el) return;
+    // Website (Chrome): white screen + centered blue spinner (never navy branding flash)
+    if (!shell) {
+      el.className = (el.className || '') + ' d4-web-loading';
+      el.style.display = 'flex';
+      try { document.documentElement.style.backgroundColor = '#ffffff'; } catch(e){}
+      try { document.body.style.backgroundColor = '#ffffff'; } catch(e){}
+      try {
+        var mt = document.querySelector('meta[name="theme-color"]');
+        if (mt) mt.setAttribute('content', '#ffffff');
+      } catch(e){}
+    } else {
+      // Native APK shell: navy branded splash once per session
+      if (sessionStorage.getItem('d4exam_splash_shown_v6') === '1') return;
+      el.style.display = 'flex';
+    }
     var hidden = false;
     function hideBoot(){
       if (hidden) return;
@@ -296,11 +308,11 @@ const BOOT_SPLASH_SCRIPT = `
       } catch(e){}
     }
     window.addEventListener('d4-hide-boot-splash', hideBoot);
-    // Absolute safety only (never leave forever)
-    setTimeout(hideBoot, 1800);
+    setTimeout(hideBoot, shell ? 1800 : 1200);
   } catch(e){}
 })();
 `;
+
 
 function RootShell({ children }: { children: ReactNode }) {
 
@@ -333,7 +345,7 @@ function RootShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <html lang="en" style={{ backgroundColor: "#0b1b3a" }}>
+    <html lang="en" style={{ backgroundColor: "#ffffff" }}>
       <head>
         <HeadContent />
         <style
@@ -347,18 +359,30 @@ function RootShell({ children }: { children: ReactNode }) {
 #d4-boot-splash .s{margin-top:.5rem;font-size:10px;letter-spacing:.28em;color:#94a3b8;font-weight:600}
 #d4-boot-splash .slogan{position:absolute;bottom:max(1.5rem,env(safe-area-inset-bottom));left:0;right:0;text-align:center;font-size:10px;letter-spacing:.28em;color:#94a3b8;font-weight:600;padding:0 2rem}
 #d4-boot-splash .slogan span.hi{color:#60a5fa}
+/* Chrome / website: white + centered spinner only */
+#d4-boot-splash.d4-web-loading{background:#ffffff;color:#0f172a}
+#d4-boot-splash.d4-web-loading .boot-brand{display:none!important}
+#d4-boot-splash.d4-web-loading .slogan{display:none!important}
+#d4-boot-splash.d4-web-loading .boot-spinner-wrap{display:flex!important}
+#d4-boot-splash .boot-spinner-wrap{display:none;flex-direction:column;align-items:center;justify-content:center;gap:0.75rem}
+#d4-boot-splash .boot-spinner{width:2.25rem;height:2.25rem;border-radius:9999px;border:3px solid #e2e8f0;border-top-color:#2563eb;animation:d4-boot-spin 0.7s linear infinite}
+@keyframes d4-boot-spin{to{transform:rotate(360deg)}}
 `,
           }}
         />
       </head>
-      <body className="min-h-dvh text-foreground antialiased" style={{ backgroundColor: "#0b1b3a" }}>
+      <body className="min-h-dvh text-foreground antialiased" style={{ backgroundColor: "#ffffff" }}>
         <div id="d4-boot-splash" aria-hidden="true">
-          <div className="boot-main">
+          <div className="boot-main boot-brand">
             <img src="/logo.png" alt="" width="160" height="160" />
             <div className="t">
               D<span className="b">4</span>EXAM
             </div>
             <div className="s">Smart Examination System</div>
+          </div>
+          <div className="boot-spinner-wrap" aria-label="Loading">
+            <div className="boot-spinner" />
+            <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "#64748b" }}>Loading…</div>
           </div>
           <div className="slogan">
             SMART. <span className="hi">SECURE.</span> SEAMLESS.
