@@ -58,6 +58,15 @@ public class D4NativeAuthPlugin extends Plugin {
           bm.canAuthenticate(
               BiometricManager.Authenticators.BIOMETRIC_WEAK
                   | BiometricManager.Authenticators.BIOMETRIC_STRONG);
+      if (can != BiometricManager.BIOMETRIC_SUCCESS
+          && can != BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
+        // Some OEMs reject STRONG|WEAK; retry WEAK only
+        int weakOnly = bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK);
+        if (weakOnly == BiometricManager.BIOMETRIC_SUCCESS
+            || weakOnly == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
+          can = weakOnly;
+        }
+      }
       JSObject r = new JSObject();
       r.put("canAuthenticate", can);
       if (can == BiometricManager.BIOMETRIC_SUCCESS) {
