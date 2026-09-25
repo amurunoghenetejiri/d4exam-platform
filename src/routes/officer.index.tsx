@@ -320,12 +320,12 @@ function Page() {
 
       <div
         ref={dashSplitRef}
-        className={`mt-4 gap-0 sm:mt-6 ${dashStacked ? "flex flex-col" : "flex flex-col md:flex-row"}`}
-        style={{ minHeight: "12rem" }}
+        className="mt-4 flex flex-row gap-0 sm:mt-6"
+        style={{ height: "22rem" }}
       >
         <div
-          className="min-w-0"
-          style={{ width: `${dashLeftPct}%` }} className="flex min-h-0 min-w-0 flex-col"
+          className="flex min-h-0 min-w-0 flex-col"
+          style={{ width: `${dashLeftPct}%`, height: "100%" }}
         >
         <SectionCard
           className="flex h-full min-h-0 flex-col overflow-hidden"
@@ -343,7 +343,7 @@ function Page() {
               description="When teachers create and submit exams, they appear here."
             />
           ) : (
-            <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-0.5 sm:space-y-2">
+            <ul className="h-full min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-0.5 sm:space-y-2" style={{ WebkitOverflowScrolling: "touch" }}>
               {(exams.data ?? []).map((e) => (
                 <li key={e.id}>
                   <NavCard
@@ -397,7 +397,7 @@ function Page() {
             }
           }}
         />
-        <div className="min-w-0 flex-1" style={{ width: `${100 - dashLeftPct}%` }} className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={{ width: `${100 - dashLeftPct}%`, height: "100%" }}>
         <SectionCard
           className="flex h-full min-h-0 flex-col overflow-hidden"
           bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -414,7 +414,7 @@ function Page() {
               description="Face, tab, and proctoring alerts from live exams appear here."
             />
           ) : (
-            <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-0.5 sm:space-y-2">
+            <ul className="h-full min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-0.5 sm:space-y-2" style={{ WebkitOverflowScrolling: "touch" }}>
               {(integrityRecent.data ?? []).map((l) => (
                 <li key={l.id}>
                   <NavCard

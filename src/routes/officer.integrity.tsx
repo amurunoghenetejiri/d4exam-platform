@@ -354,7 +354,7 @@ function Page() {
       <div
         ref={splitRef}
         className="flex flex-row gap-0"
-        style={{ height: "clamp(18rem, 58vh, 42rem)" }}
+        style={{ height: "clamp(20rem, 52vh, 36rem)" }}
       >
         <div
           className="flex min-h-0 min-w-0 flex-col"

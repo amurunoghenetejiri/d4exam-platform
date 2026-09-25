@@ -401,7 +401,7 @@ export function AppShell({
   const role = session?.role ?? null;
 
   return (
-    <div className="relative min-h-dvh bg-slate-50">
+    <div className="relative min-h-dvh overflow-x-hidden overflow-y-visible bg-slate-50">
       <NetworkBanner />
       <Watermark opacity={0.08} size="xl" className="pointer-events-none lg:left-64" />
 
@@ -620,7 +620,7 @@ export function AppShell({
 
       <div className="sa-main relative z-10 d4-shell-main-offset lg:pl-64" style={{ paddingTop: "calc(3rem + env(safe-area-inset-top, 0px))" }}>
         <main className="mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:max-w-[1400px] lg:px-8 lg:pb-12 lg:pt-8 xl:max-w-[1480px]">
-          <div className="min-w-0 w-full">{children}</div>
+          <div className="min-w-0 w-full overflow-visible">{children}</div>
         </main>
       </div>
 
