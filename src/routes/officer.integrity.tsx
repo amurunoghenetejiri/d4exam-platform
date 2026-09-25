@@ -353,11 +353,12 @@ function Page() {
 
       <div
         ref={splitRef}
-        className="flex flex-col gap-4 lg:flex-row lg:gap-0"
-        style={{ ["--split-left" as any]: `${leftPct}%` }}
+        className="flex flex-row gap-0"
+        style={{ height: "min(36rem, 62vh)" }}
       >
         <div
-          className="flex min-h-0 w-full flex-col max-lg:min-h-[28rem] lg:h-[min(42rem,65vh)] lg:w-[var(--split-left)] lg:max-w-[78%]"
+          className="flex h-full min-h-0 min-w-0 flex-col"
+          style={{ width: `${leftPct}%`, maxWidth: "100%" }}
         >
         <SectionCard title="Submitted attempts" className="flex h-full min-h-0 flex-col overflow-hidden" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="mb-2 shrink-0">
@@ -385,7 +386,7 @@ function Page() {
                   <li
                     key={a.id}
                     className={cn(
-                      "rounded-xl border p-3 transition",
+                      "rounded-lg border p-2 transition sm:rounded-xl sm:p-3",
                       open ? "border-primary bg-primary/5" : "border-slate-100 bg-white",
                     )}
                   >
@@ -395,7 +396,7 @@ function Page() {
                       onClick={() => setSelectedAttempt(open ? null : a.id)}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-bold text-slate-900">
+                        <p className="text-xs font-bold text-slate-900 sm:text-sm">
                           {studentLabel(a.student_id)}
                         </p>
                         <span
@@ -483,16 +484,15 @@ function Page() {
         </SectionCard>
         </div>
 
-        <div className="hidden lg:block">
         <SplitHandle
           onPointerDown={onSplitPointerDown}
           onPointerMove={onSplitPointerMove}
           onPointerUp={onSplitPointerUp}
         />
-        </div>
 
         <div
-          className="flex min-h-0 w-full flex-col max-lg:min-h-[28rem] lg:h-[min(42rem,65vh)] lg:min-w-0 lg:flex-1"
+          className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+          style={{ width: `${100 - leftPct}%` }}
         >
         <SectionCard title="Integrity details" className="flex h-full min-h-0 flex-col overflow-hidden" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden">
           <p className="mb-3 text-xs text-slate-500">

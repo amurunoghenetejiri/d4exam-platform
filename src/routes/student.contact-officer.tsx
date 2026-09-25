@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, MessageSquare, Search, Send, Sparkles } from "lucide-react";
+import { Check, MessageSquare, Search, Send, GraduationCap } from "lucide-react";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -180,7 +180,7 @@ function Page() {
       <div className="overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-4 shadow-sm sm:p-5">
         <div className="mb-3 flex items-center gap-2">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-600 text-white shadow-sm">
-            <Sparkles className="h-4 w-4" />
+            <GraduationCap className="h-4 w-4" />
           </span>
           <div>
             <p className="text-sm font-bold text-slate-900">New message</p>

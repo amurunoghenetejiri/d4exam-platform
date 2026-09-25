@@ -320,11 +320,12 @@ function Page() {
 
       <div
         ref={dashSplitRef}
-        className="mt-4 flex flex-col gap-4 sm:mt-6 lg:flex-row lg:gap-0"
-        style={{ ["--dash-left" as any]: `${dashLeftPct}%` }}
+        className="mt-4 flex flex-row gap-0 sm:mt-6"
+        style={{ height: "min(30rem, 58vh)" }}
       >
         <div
-          className="flex min-h-0 w-full flex-col max-lg:min-h-[26rem] lg:h-[min(28rem,55vh)] lg:w-[var(--dash-left)]"
+          className="flex h-full min-h-0 min-w-0 flex-col"
+          style={{ width: `${dashLeftPct}%` }}
         >
         <SectionCard
           className="flex h-full min-h-0 flex-col overflow-hidden"
@@ -348,11 +349,11 @@ function Page() {
                   <NavCard
                     to="/officer/approvals"
                     ariaLabel={`Review ${e.title}`}
-                    className="flex items-center justify-between gap-2 rounded-lg border-slate-100 px-2.5 py-2 sm:rounded-xl sm:px-3.5 sm:py-3 lg:px-4 lg:py-3.5"
+                    className="flex items-center justify-between gap-1.5 rounded-lg border-slate-100 px-2 py-1.5 sm:gap-2 sm:rounded-xl sm:px-3.5 sm:py-3 lg:px-4 lg:py-3.5"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-[13px] font-bold text-slate-900 sm:text-sm lg:text-[15px]">{e.title}</p>
-                      <p className="truncate text-[11px] text-slate-500 sm:text-xs lg:text-[13px]">
+                      <p className="truncate text-[11px] font-bold text-slate-900 sm:text-sm lg:text-[15px]">{e.title}</p>
+                      <p className="truncate text-[10px] text-slate-500 sm:text-xs lg:text-[13px]">
                         {e.courses?.code ?? "—"} ·{" "}
                         {e.scheduled_start
                           ? new Date(e.scheduled_start).toLocaleString()
@@ -367,7 +368,6 @@ function Page() {
           )}
         </SectionCard>
         </div>
-        <div className="hidden lg:block">
         <SplitHandle
           onPointerDown={(e) => {
             e.preventDefault();
@@ -397,8 +397,10 @@ function Page() {
             }
           }}
         />
-        </div>
-        <div className="flex min-h-0 w-full flex-col max-lg:min-h-[26rem] lg:h-[min(28rem,55vh)] lg:min-w-0 lg:flex-1">
+        <div
+          className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
+          style={{ width: `${100 - dashLeftPct}%` }}
+        >
         <SectionCard
           className="flex h-full min-h-0 flex-col overflow-hidden"
           bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -421,7 +423,7 @@ function Page() {
                   <NavCard
                     to="/officer/integrity"
                     ariaLabel={l.event_type}
-                    className="rounded-lg border-slate-100 px-2.5 py-2 sm:rounded-xl sm:px-3.5 sm:py-3 lg:px-4 lg:py-3.5"
+                    className="rounded-lg border-slate-100 px-2 py-1.5 sm:rounded-xl sm:px-3.5 sm:py-3 lg:px-4 lg:py-3.5"
                   >
                     <p className="truncate text-[13px] font-semibold text-slate-900 sm:text-sm lg:text-[15px]">
                       {String(l.event_type || "event").replaceAll("_", " ")}

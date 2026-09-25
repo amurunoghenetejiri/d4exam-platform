@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, MessageSquare, Search, Send, Sparkles } from "lucide-react";
+import { Inbox, MessageSquare, Search, Send, User } from "lucide-react";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -258,7 +258,11 @@ function Page() {
                         )}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600">
+                              <User className="h-4 w-4" />
+                            </span>
+                            <div className="min-w-0">
                             <p className="truncate text-sm font-bold text-slate-900">
                               {r.student_name || "Student"}
                               {r.student_matric ? (
@@ -270,6 +274,7 @@ function Page() {
                             <p className="truncate text-xs text-slate-500">
                               {titles} · {r.subject || "Report"}
                             </p>
+                            </div>
                           </div>
                           <span
                             className={cn(
@@ -312,7 +317,7 @@ function Page() {
                 <div className="shrink-0 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white p-3.5">
                   <div className="flex items-center gap-2">
                     <span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-600 text-white">
-                      <Inbox className="h-4 w-4" />
+                      <User className="h-4 w-4" />
                     </span>
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-slate-900">
@@ -343,7 +348,7 @@ function Page() {
                   {selected.officer_reply ? (
                     <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-3">
                       <p className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-blue-700">
-                        <Sparkles className="h-3 w-3" /> Your reply
+                        <MessageSquare className="h-3 w-3" /> Your reply
                         {selected.replied_at
                           ? ` · ${new Date(selected.replied_at).toLocaleString()}`
                           : ""}
