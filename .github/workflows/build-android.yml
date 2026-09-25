@@ -49,10 +49,10 @@ jobs:
           # Ensure Capgo biometric is present for Capacitor 8
           bun add @capgo/capacitor-native-biometric@^8.6.4 || true
 
-      - name: Build bundled offline shell + verify in-WebView production URL
+      - name: Build local SPA into dist/ for Capacitor
         run: |
           set -euo pipefail
-          # Offline fallback assets (errorPath). Online app = https://d4exam.name.ng inside WebView.
+          # Build local SPA into dist/ for Capacitor webDir (standalone APK, no remote website shell).
           if ! node scripts/prepare-capacitor-dist.mjs; then
             echo "WARN: local SPA build failed — minimal offline shell"
             mkdir -p dist
@@ -64,16 +64,24 @@ jobs:
           test -f dist/index.html
           ls -la dist | head -30
 
-      - name: Verify Capacitor loads D4EXAM inside WebView (not Chrome)
+      - name: Verify Capacitor uses local bundled assets (no remote website shell)
         run: |
           set -euo pipefail
           CFG="capacitor.config.ts"
-          if ! grep -E 'url: "https://(www\.)?d4exam\.name\.ng"' "$CFG"; then
-            echo "FATAL: capacitor.config.ts must load https://www.d4exam.name.ng inside the APK WebView"
-            head -40 "$CFG" || true
+          if grep -E 'url:[[:space:]]*"https?://' "$CFG"; then
+            echo "FATAL: capacitor.config.ts must NOT use production server.url"
+            head -50 "$CFG" || true
             exit 1
           fi
-          echo "OK: server.url = https://d4exam.name.ng (in-app WebView, MainActivity blocks Chrome)"
+          if ! grep -q 'webDir: "dist"' "$CFG"; then
+            echo "FATAL: webDir must be dist"
+            exit 1
+          fi
+          if ! grep -q 'hostname: "localhost"' "$CFG"; then
+            echo "FATAL: server.hostname must be localhost"
+            exit 1
+          fi
+          echo "OK: local bundled APK (webDir=dist, hostname=localhost, no server.url)"
 
       - name: Ensure complete Android platform
         run: |
