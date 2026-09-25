@@ -316,36 +316,6 @@ function Page() {
         />
       </div>
 
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:mt-3 sm:gap-3 xl:grid-cols-4">
-        <Stat
-          to="/officer/results"
-          label="Results release"
-          value="Open"
-          icon={FileText}
-          color="bg-indigo-50 text-indigo-600"
-        />
-        <Stat
-          to="/officer/reports"
-          label="Reports"
-          value="Open"
-          icon={FileText}
-          color="bg-slate-50 text-slate-600"
-        />
-        <Stat
-          to="/officer/notifications"
-          label="Notifications"
-          value="Open"
-          icon={Send}
-          color="bg-violet-50 text-violet-600"
-        />
-        <Stat
-          to="/officer/settings"
-          label="Settings"
-          value="Open"
-          icon={CheckSquare}
-          color="bg-cyan-50 text-cyan-700"
-        />
-      </div>
 
       <div
         ref={dashSplitRef}

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useCallback, type PointerEvent as ReactPointerEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -111,6 +111,26 @@ function Page() {
   const [scheduleEnd, setScheduleEnd] = useState("");
   const [busy, setBusy] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [approvalsLeftPct, setApprovalsLeftPct] = useState(55);
+  const approvalsSplitRef = useRef<HTMLDivElement | null>(null);
+  const approvalsDragging = useRef(false);
+  const onApprovalsSplitDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    approvalsDragging.current = true;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  }, []);
+  const onApprovalsSplitMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!approvalsDragging.current || !approvalsSplitRef.current) return;
+    e.preventDefault();
+    const rect = approvalsSplitRef.current.getBoundingClientRect();
+    if (rect.width < 48) return;
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    setApprovalsLeftPct(Math.max(28, Math.min(72, pct)));
+  }, []);
+  const onApprovalsSplitUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    approvalsDragging.current = false;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+  }, []);
   /** After approve: ask whether to post to students now */
   const [postPromptExam, setPostPromptExam] = useState<ExamRow | null>(null);
   const [postBusy, setPostBusy] = useState(false);
@@ -548,10 +568,16 @@ function Page() {
         <Stat label="In queue" value={stats.total} icon={FileText} tone="primary" />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      <div
+        ref={approvalsSplitRef}
+        className="flex flex-row gap-0"
+        style={{ height: "min(70vh, 36rem)" }}
+      >
+        <div className="flex min-h-0 min-w-0 flex-col" style={{ width: `${approvalsLeftPct}%` }}>
         <SectionCard
           title="Awaiting your decision"
           description={listQ.isFetching ? "Refreshing…" : "Teachers submit → you approve → Post to students (makes exam live)"}
+          className="flex h-full min-h-0 flex-col"
         >
           {listQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading examinations…</p>
@@ -566,7 +592,7 @@ function Page() {
               description="When a teacher submits an exam, it appears here."
             />
           ) : (
-            <ul className="space-y-4">
+            <ul className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
               {activeQueue.map((item) => {
                 const bank = item.course_id ? qCounts[item.course_id] ?? 0 : 0;
                 const toAnswer = questionsToAnswerFor(item);
@@ -635,15 +661,32 @@ function Page() {
             </ul>
           )}
         </SectionCard>
+        </div>
 
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Drag to resize panels"
+          className="relative z-20 flex w-4 shrink-0 cursor-col-resize touch-none items-stretch select-none"
+          style={{ touchAction: "none" }}
+          onPointerDown={onApprovalsSplitDown}
+          onPointerMove={onApprovalsSplitMove}
+          onPointerUp={onApprovalsSplitUp}
+          onPointerCancel={onApprovalsSplitUp}
+        >
+          <div className="mx-auto my-2 w-[3px] rounded-full bg-blue-500/80 shadow-sm shadow-blue-500/30" />
+        </div>
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={{ width: `${100 - approvalsLeftPct}%` }}>
         <SectionCard
           title="Recent decisions"
+          className="flex h-full min-h-0 flex-col"
           description="After you approve, click Post to students so the exam appears live for eligible students. Release hides it again."
         >
           {history.length === 0 ? (
             <EmptyState title="No decisions yet" description="Processed examinations will show here." />
           ) : (
-            <ul className="space-y-3">
+            <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 space-y-3">
               {history.slice(0, 20).map((item) => {
                 const st = String(item.status).toLowerCase();
                 const canPost = ["approved", "scheduled"].includes(st);
@@ -695,6 +738,7 @@ function Page() {
             </ul>
           )}
         </SectionCard>
+        </div>
       </div>
 
       <Dialog open={Boolean(action && selected)} onOpenChange={(o) => !o && closeDialog()}>

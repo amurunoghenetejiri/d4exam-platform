@@ -156,7 +156,7 @@ function Page() {
   const attemptsAll = attemptsQ.data ?? [];
 
   useEffect(() => {
-    const ids = [...new Set(attempts.map((a) => a.student_id).filter(Boolean))];
+    const ids = [...new Set(attemptsAll.map((a) => a.student_id).filter(Boolean))];
     if (!ids.length || !schoolId) return;
     void resolveStudentDetails(schoolId, ids).then((map) => {
       const next: Record<string, { fullName: string; matric: string }> = {};
@@ -165,7 +165,7 @@ function Page() {
       }
       setNameMap(next);
     });
-  }, [attempts, schoolId]);
+  }, [attemptsAll, schoolId]);
 
   const eventsQ = useQuery({
     queryKey: ["officer-security-events", schoolId, selectedAttempt],

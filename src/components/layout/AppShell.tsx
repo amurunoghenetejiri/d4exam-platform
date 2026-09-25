@@ -172,6 +172,9 @@ function NavLinks({
                       <item.icon
                         className={cn(
                           "h-4 w-4",
+                          (item.to.includes("live-monitor") || item.to.includes("live-exams")) &&
+                            !isLive &&
+                            "text-white",
                           isLive && "animate-pulse text-emerald-400",
                         )}
                         aria-hidden
@@ -640,6 +643,8 @@ export function AppShell({
                   : pathname === item.to || pathname.startsWith(`${item.to}/`);
               const badge = navBadges[item.to];
               const isLive = Boolean(badge?.live);
+              const isMonitor =
+                item.to.includes("live-monitor") || item.to.includes("live-exams");
               return (
                 <li key={item.to} className="flex">
                   <Link
@@ -648,13 +653,18 @@ export function AppShell({
                     className={cn(
                       "pressable relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors",
                       active ? "text-white" : "text-slate-400 hover:text-white",
+                      isMonitor && !isLive && "text-white",
                       isLive && "text-emerald-400",
                     )}
                     aria-current={active ? "page" : undefined}
                   >
                     <span className="relative">
                       <item.icon
-                        className={cn("h-5 w-5", isLive && "animate-pulse text-emerald-400")}
+                        className={cn(
+                          "h-5 w-5",
+                          isMonitor && !isLive && "text-white",
+                          isLive && "animate-pulse text-emerald-400",
+                        )}
                         aria-hidden
                       />
                       {!isLive && badge?.dot ? (
