@@ -83,6 +83,17 @@ let starting = false;
 
 export function isNativeAndroid(): boolean {
   try {
+    if (typeof isNativeShell === "function" && isNativeShell()) {
+      try {
+        if (Capacitor.getPlatform() === "android") return true;
+      } catch {
+        return true; // native shell on this app is Android-only
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android") return true;
   } catch {
     /* ignore */
@@ -99,8 +110,15 @@ export function isNativeAndroid(): boolean {
 }
 
 /** Wait for Capacitor before MediaProjection calls. */
-export async function waitNativeAndroid(timeoutMs = 6_000): Promise<boolean> {
+export async function waitNativeAndroid(timeoutMs = 12_000): Promise<boolean> {
   if (isNativeAndroid()) return true;
+  try {
+    if (await waitForNativeShell(Math.min(timeoutMs, 12_000))) {
+      if (isNativeAndroid()) return true;
+    }
+  } catch {
+    /* ignore */
+  }
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (isNativeAndroid()) return true;
@@ -336,7 +354,7 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
     starting = true;
     try {
       status = "requesting";
-      await waitNativeAndroid(6_000);
+      await waitNativeAndroid(12_000);
       // FGS on Android 13+ needs notification permission BEFORE MediaProjection
       try {
         await ensureNotifForScreenShare();
@@ -569,7 +587,7 @@ async function ensureNotifForScreenShare(): Promise<void> {
 }
 
 export async function startScreenShareStream(): Promise<ScreenShareStartResult> {
-  await waitNativeAndroid(6_000);
+  await waitNativeAndroid(12_000);
   if (isNativeAndroid()) return startNativeScreenShare();
   return startWebScreenShare();
 }

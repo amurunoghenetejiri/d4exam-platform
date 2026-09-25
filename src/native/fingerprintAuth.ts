@@ -72,6 +72,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 async function ensureNative(): Promise<boolean> {
   if (isNativeShell()) return true;
+  // Capacitor injects after WebView load — give the bridge more time on cold start
+  if (await waitForNativeShell(12_000)) return true;
+  await new Promise((r) => setTimeout(r, 1_500));
   return waitForNativeShell(8_000);
 }
 
@@ -82,8 +85,8 @@ function d4Auth(): D4NativeAuthPlugin {
 async function tryD4Available(): Promise<FingerprintAvailability | null> {
   try {
     const p = d4Auth();
-    await withTimeout(p.ping(), 4_000, "d4_ping");
-    const info = await withTimeout(p.isBiometricAvailable(), 8_000, "d4_avail");
+    await withTimeout(p.ping(), 8_000, "d4_ping");
+    const info = await withTimeout(p.isBiometricAvailable(), 12_000, "d4_avail");
     if (info?.available) return { ok: true, hasFingerprint: true };
     if (info?.status === "not_enrolled") {
       return {
@@ -178,7 +181,7 @@ export async function authenticateWithFingerprint(opts?: {
   // 1) Preferred: D4NativeAuth (BiometricPrompt)
   try {
     const p = d4Auth();
-    await withTimeout(p.ping(), 3_000, "d4_ping");
+    await withTimeout(p.ping(), 8_000, "d4_ping");
     const result = await withTimeout(
       p.authenticate({
         title: opts?.title || "D4EXAM",

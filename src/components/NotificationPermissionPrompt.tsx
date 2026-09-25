@@ -49,24 +49,32 @@ export function NotificationPermissionPrompt() {
   const [busy, setBusy] = useState(false);
 
 
-  // After login: request REAL Android notification permission (POST_NOTIFICATIONS)
-  // once per install — not a fake web dialog.
+  // After login: request REAL Android notification permission (POST_NOTIFICATIONS).
+  // Only mark "asked" after the OS returns granted/denied — never after a failed plugin call.
   useEffect(() => {
     const uid = session?.userId;
     if (!uid) return;
+    let alreadyAsked = false;
     try {
-      if (localStorage.getItem("d4_native_os_notif_asked_v2") === "1") return;
+      alreadyAsked = localStorage.getItem("d4_native_os_notif_asked_v2") === "1";
     } catch {
-      return;
+      alreadyAsked = false;
     }
+    if (alreadyAsked) return;
     let cancelled = false;
     (async () => {
       try {
-        // Wait for Capacitor bridge (critical with server.url remote load)
-        const nativeReady = await waitForNativeShell(8_000);
-        if (cancelled || !nativeReady) return;
-        // Let splash / dashboard settle
-        await new Promise((r) => setTimeout(r, 1_500));
+        // Wait longer for Capacitor bridge (WebView + plugins inject async)
+        let nativeReady = await waitForNativeShell(12_000);
+        if (!nativeReady) {
+          await new Promise((r) => setTimeout(r, 2_000));
+          nativeReady = await waitForNativeShell(8_000);
+        }
+        if (cancelled || !nativeReady) {
+          console.warn("[D4EXAM] native shell not ready — will retry notification prompt next visit");
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1_200));
         if (cancelled) return;
         let display = "default";
         try {
@@ -74,25 +82,43 @@ export function NotificationPermissionPrompt() {
           const auth = registerPlugin<{
             checkNotificationPermission: () => Promise<{ display?: string }>;
             requestNotificationPermission: () => Promise<{ display?: string }>;
+            ping?: () => Promise<{ ok?: boolean }>;
           }>("D4NativeAuth");
+          try {
+            await auth.ping?.();
+          } catch {
+            /* plugin may still work without ping */
+          }
           const cur = await auth.checkNotificationPermission();
           display = (cur?.display || "default").toLowerCase();
+          if (display === "prompt") display = "default";
           if (display !== "granted" && display !== "denied") {
             const req = await auth.requestNotificationPermission();
             display = (req?.display || display).toLowerCase();
           }
-        } catch {
-          const { LocalNotifications } = await import("@capacitor/local-notifications");
-          const cur = await LocalNotifications.checkPermissions();
-          display = (cur.display || "default").toLowerCase();
-          if (display !== "granted" && display !== "denied") {
-            const req = await LocalNotifications.requestPermissions();
-            display = (req.display || display).toLowerCase();
+        } catch (e1) {
+          console.warn("[D4EXAM] D4NativeAuth notif failed, trying LocalNotifications", e1);
+          try {
+            const { LocalNotifications } = await import("@capacitor/local-notifications");
+            const cur = await LocalNotifications.checkPermissions();
+            display = (cur.display || "default").toLowerCase();
+            if (display !== "granted" && display !== "denied") {
+              const req = await LocalNotifications.requestPermissions();
+              display = (req.display || display).toLowerCase();
+            }
+          } catch (e2) {
+            console.warn("[D4EXAM] LocalNotifications notif failed", e2);
+            return; // do NOT mark asked — retry next session
           }
         }
-        try {
-          localStorage.setItem("d4_native_os_notif_asked_v2", "1");
-        } catch { /* ignore */ }
+        // Only persist "asked" when the OS dialog actually resolved
+        if (display === "granted" || display === "denied") {
+          try {
+            localStorage.setItem("d4_native_os_notif_asked_v2", "1");
+          } catch {
+            /* ignore */
+          }
+        }
         await refreshNativePushPermissionState();
         if (display === "granted") {
           toast.success("Notifications enabled");
@@ -101,8 +127,9 @@ export function NotificationPermissionPrompt() {
             const { notificationsEnabledConfirm } = await import("@/lib/notify-messages");
             const copy = notificationsEnabledConfirm();
             await showD4ExamNativeNotification(copy.title, copy.message, "/");
-          } catch { /* ignore */ }
-          // Register push listeners / token path if any
+          } catch {
+            /* ignore */
+          }
           if (session?.userId) {
             void enablePushNotifications(session.userId, session.role, { requestPermission: false });
           }
