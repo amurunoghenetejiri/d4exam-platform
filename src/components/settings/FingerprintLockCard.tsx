@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { SectionCard } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
 import { useSessionUser } from "@/lib/session";
-import { isNativeShell, waitForNativeShell } from "@/native/platform";
+import { isNativeShell, waitForNativeShell, pingNativeAuth } from "@/native/platform";
 import {
   authenticateWithFingerprint,
   checkFingerprintAvailable,

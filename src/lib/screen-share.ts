@@ -337,8 +337,20 @@ async function startNativeScreenShare(): Promise<ScreenShareStartResult> {
     try {
       status = "requesting";
       await waitNativeAndroid(6_000);
-      // FGS on Android 13+ needs notification permission or MediaProjection fails
-      await ensureNotifForScreenShare();
+      // FGS on Android 13+ needs notification permission BEFORE MediaProjection
+      try {
+        await ensureNotifForScreenShare();
+      } catch (ne) {
+        status = "error";
+        return {
+          ok: false,
+          reason: "denied",
+          message:
+            ne instanceof Error
+              ? ne.message
+              : "Allow notifications for screen monitoring, then try again.",
+        };
+      }
       await ensureNativeFrameListeners();
       try {
         const st = await D4ScreenShare().isActive();
@@ -515,18 +527,29 @@ async function startWebScreenShare(): Promise<ScreenShareStartResult> {
 async function ensureNotifForScreenShare(): Promise<void> {
   try {
     if (typeof window === "undefined") return;
-    // D4NativeAuth first (always registered in D4EXAM APK)
+    // Must complete before MediaProjection (Android 13+ FGS needs notification permission)
     try {
       const { registerPlugin } = await import("@capacitor/core");
       const auth = registerPlugin<{
         checkNotificationPermission: () => Promise<{ display?: string }>;
         requestNotificationPermission: () => Promise<{ display?: string }>;
       }>("D4NativeAuth");
-      const cur = await auth.checkNotificationPermission();
-      if ((cur?.display || "").toLowerCase() !== "granted") {
-        await auth.requestNotificationPermission();
+      let cur = await auth.checkNotificationPermission();
+      let display = (cur?.display || "").toLowerCase();
+      if (display !== "granted") {
+        const req = await auth.requestNotificationPermission();
+        display = (req?.display || display).toLowerCase();
       }
-    } catch { /* fall through */ }
+      if (display === "granted") return;
+      if (display === "denied") {
+        throw new Error(
+          "Allow notifications for D4EXAM (required for screen monitoring), then start the exam again.",
+        );
+      }
+    } catch (e) {
+      if (e instanceof Error && /Allow notifications/i.test(e.message)) throw e;
+      /* try LocalNotifications fallback */
+    }
     const { Capacitor } = await import("@capacitor/core");
     if (!Capacitor.isNativePlatform?.()) return;
     const { LocalNotifications } = await import("@capacitor/local-notifications");
@@ -534,8 +557,14 @@ async function ensureNotifForScreenShare(): Promise<void> {
     if (st.display !== "granted") {
       st = await LocalNotifications.requestPermissions();
     }
-  } catch {
-    /* non-fatal — start may still work if already granted */
+    if (st.display !== "granted") {
+      throw new Error(
+        "Allow notifications for D4EXAM (required for screen monitoring), then start the exam again.",
+      );
+    }
+  } catch (e) {
+    if (e instanceof Error && /Allow notifications/i.test(e.message)) throw e;
+    /* non-fatal only when native path unavailable */
   }
 }
 

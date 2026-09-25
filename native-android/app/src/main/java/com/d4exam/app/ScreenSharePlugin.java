@@ -176,14 +176,15 @@ public class ScreenSharePlugin extends Plugin {
       ensureMetrics(activity);
     } catch (Exception ignored) {
     }
-    try {
-      if (Build.VERSION.SDK_INT >= 33
-          && ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS)
-              != PackageManager.PERMISSION_GRANTED) {
-        ActivityCompat.requestPermissions(
-            activity, new String[] {Manifest.permission.POST_NOTIFICATIONS}, 4403);
-      }
-    } catch (Exception ignored) {
+    // Notification permission must already be granted by JS (D4NativeAuth) before start().
+    // Do NOT fire a non-blocking requestPermissions here — it races MediaProjection and
+    // leaves PluginCall unresolved.
+    if (Build.VERSION.SDK_INT >= 33
+        && ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) {
+      call.reject(
+          "Notification permission required for screen monitoring. Allow notifications, then try again.");
+      return;
     }
     projectionManager =
         (MediaProjectionManager) activity.getSystemService(Context.MEDIA_PROJECTION_SERVICE);
@@ -209,14 +210,12 @@ public class ScreenSharePlugin extends Plugin {
       call.reject("Activity not available");
       return;
     }
-    try {
-      if (Build.VERSION.SDK_INT >= 33
-          && ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS)
-              != PackageManager.PERMISSION_GRANTED) {
-        ActivityCompat.requestPermissions(
-            activity, new String[] {Manifest.permission.POST_NOTIFICATIONS}, 4403);
-      }
-    } catch (Exception ignored) {
+    if (Build.VERSION.SDK_INT >= 33
+        && ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) {
+      call.reject(
+          "Notification permission required for screen monitoring. Allow notifications in Settings, then try again.");
+      return;
     }
     final Intent data = result.getData();
     final int resultCode = result.getResultCode();

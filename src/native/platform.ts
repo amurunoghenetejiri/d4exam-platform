@@ -218,3 +218,28 @@ export function startNativeShellWatcher(): void {
   }, 500);
   window.setTimeout(() => window.clearInterval(id), 20_000);
 }
+
+/** Confirm native bridge + D4NativeAuth plugin (APK with registerPlugin). */
+export async function pingNativeAuth(timeoutMs = 4_000): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  try {
+    await waitForNativeShell(Math.min(timeoutMs, 8_000));
+    const { registerPlugin } = await import("@capacitor/core");
+    const auth = registerPlugin<{ ping: () => Promise<{ ok?: boolean }> }>("D4NativeAuth");
+    const r = await Promise.race([
+      auth.ping(),
+      new Promise<{ ok?: boolean }>((_, rej) =>
+        window.setTimeout(() => rej(new Error("ping_timeout")), timeoutMs),
+      ),
+    ]);
+    if (r?.ok) {
+      try {
+        window.localStorage.setItem("d4exam_native_shell_v1", "android");
+      } catch { /* ignore */ }
+      return true;
+    }
+  } catch {
+    /* plugin missing or web */
+  }
+  return isNativeShell();
+}

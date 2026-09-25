@@ -4,30 +4,37 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
-import android.net.Uri;
 import androidx.annotation.NonNull;
 import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
-import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 import java.util.concurrent.Executor;
 
 /**
- * D4EXAM native auth helpers — works with server.url remote WebView.
- * BiometricPrompt + POST_NOTIFICATIONS without relying solely on Capgo/LocalNotifications.
+ * Native biometric + notification permission for D4EXAM APK.
+ * Uses Capacitor's permission aliases so PluginCall always completes (unlike raw
+ * ActivityCompat request codes which Bridge often does not forward).
  */
-@CapacitorPlugin(name = "D4NativeAuth")
+@CapacitorPlugin(
+    name = "D4NativeAuth",
+    permissions = {
+      @Permission(
+          alias = "notifications",
+          strings = {Manifest.permission.POST_NOTIFICATIONS})
+    })
 public class D4NativeAuthPlugin extends Plugin {
-  private static final int REQ_POST_NOTIF = 4401;
-  private PluginCall pendingNotifCall;
 
   @PluginMethod
   public void ping(PluginCall call) {
@@ -52,33 +59,31 @@ public class D4NativeAuthPlugin extends Plugin {
               BiometricManager.Authenticators.BIOMETRIC_WEAK
                   | BiometricManager.Authenticators.BIOMETRIC_STRONG);
       JSObject r = new JSObject();
-      boolean ok =
-          can == BiometricManager.BIOMETRIC_SUCCESS
-              || can == BiometricManager.BIOMETRIC_STATUS_UNKNOWN;
-      r.put("available", ok || can == BiometricManager.BIOMETRIC_SUCCESS);
       r.put("canAuthenticate", can);
-      r.put(
-          "status",
-          can == BiometricManager.BIOMETRIC_SUCCESS
-              ? "available"
-              : can == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED
-                  ? "not_enrolled"
-              : can == BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE
-                  ? "no_hardware"
-              : can == BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE
-                  ? "hw_unavailable"
-                  : "unavailable");
-      // Treat SUCCESS as available
-      r.put("available", can == BiometricManager.BIOMETRIC_SUCCESS);
-      if (can == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
-        r.put("available", false);
-        r.put("message", "No fingerprint enrolled. Add one in phone Settings → Security.");
-      } else if (can == BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE) {
-        r.put("message", "This device has no fingerprint sensor.");
-      } else if (can == BiometricManager.BIOMETRIC_SUCCESS) {
+      if (can == BiometricManager.BIOMETRIC_SUCCESS) {
+        r.put("available", true);
+        r.put("status", "available");
         r.put("message", "Fingerprint ready");
+      } else if (can == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) {
+        r.put("available", false);
+        r.put("status", "not_enrolled");
+        r.put(
+            "message",
+            "No fingerprint enrolled. Open phone Settings → Security → Fingerprint and add one.");
+      } else if (can == BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE) {
+        r.put("available", false);
+        r.put("status", "no_hardware");
+        r.put("message", "This device has no fingerprint sensor.");
+      } else if (can == BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE) {
+        // Hardware exists but busy — still allow prompt attempt
+        r.put("available", true);
+        r.put("status", "hw_unavailable");
+        r.put("message", "Fingerprint sensor temporarily unavailable. Try again.");
       } else {
-        r.put("message", "Biometric not available (code " + can + ")");
+        // Unknown / other — still try prompt on device
+        r.put("available", true);
+        r.put("status", "unknown");
+        r.put("message", "Biometric status " + can);
       }
       call.resolve(r);
     } catch (Exception e) {
@@ -120,7 +125,6 @@ public class D4NativeAuthPlugin extends Plugin {
                       public void onAuthenticationError(int errorCode, @NonNull CharSequence err) {
                         JSObject r = new JSObject();
                         r.put("ok", false);
-                        // USER_CANCELED = 10, NEGATIVE_BUTTON = 13
                         boolean cancelled =
                             errorCode == BiometricPrompt.ERROR_USER_CANCELED
                                 || errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON
@@ -132,11 +136,11 @@ public class D4NativeAuthPlugin extends Plugin {
 
                       @Override
                       public void onAuthenticationFailed() {
-                        // Keep prompt open; do not resolve yet
+                        // Keep prompt open for another attempt
                       }
                     });
 
-            BiometricPrompt.PromptInfo.Builder builder =
+            BiometricPrompt.PromptInfo info =
                 new BiometricPrompt.PromptInfo.Builder()
                     .setTitle(title != null ? title : "D4EXAM")
                     .setSubtitle(subtitle)
@@ -144,9 +148,10 @@ public class D4NativeAuthPlugin extends Plugin {
                     .setAllowedAuthenticators(
                         BiometricManager.Authenticators.BIOMETRIC_STRONG
                             | BiometricManager.Authenticators.BIOMETRIC_WEAK)
-                    .setNegativeButtonText(negative != null ? negative : "Use password");
+                    .setNegativeButtonText(negative != null ? negative : "Use password")
+                    .build();
 
-            prompt.authenticate(builder.build());
+            prompt.authenticate(info);
           } catch (Exception e) {
             call.reject(e.getMessage() != null ? e.getMessage() : "auth_failed");
           }
@@ -156,60 +161,81 @@ public class D4NativeAuthPlugin extends Plugin {
   @PluginMethod
   public void checkNotificationPermission(PluginCall call) {
     JSObject r = new JSObject();
-    Activity act = getActivity();
-    if (act == null) {
-      r.put("display", "denied");
-      call.resolve(r);
-      return;
-    }
     if (Build.VERSION.SDK_INT < 33) {
       r.put("display", "granted");
       call.resolve(r);
       return;
     }
-    int st =
-        ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS);
-    r.put("display", st == PackageManager.PERMISSION_GRANTED ? "granted" : "prompt");
+    try {
+      PermissionState state = getPermissionState("notifications");
+      if (state == PermissionState.GRANTED) {
+        r.put("display", "granted");
+      } else if (state == PermissionState.DENIED) {
+        Activity act = getActivity();
+        if (act != null
+            && ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED) {
+          r.put("display", "granted");
+        } else {
+          r.put("display", "denied");
+        }
+      } else {
+        r.put("display", "prompt");
+      }
+    } catch (Exception e) {
+      Activity act = getActivity();
+      if (act != null
+          && ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS)
+              == PackageManager.PERMISSION_GRANTED) {
+        r.put("display", "granted");
+      } else {
+        r.put("display", "prompt");
+      }
+    }
     call.resolve(r);
   }
 
   @PluginMethod
   public void requestNotificationPermission(PluginCall call) {
-    Activity act = getActivity();
-    if (act == null) {
-      call.reject("no_activity");
-      return;
-    }
     if (Build.VERSION.SDK_INT < 33) {
       JSObject r = new JSObject();
       r.put("display", "granted");
       call.resolve(r);
       return;
     }
-    int st =
-        ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS);
-    if (st == PackageManager.PERMISSION_GRANTED) {
+    Activity act = getActivity();
+    if (act == null) {
+      call.reject("no_activity");
+      return;
+    }
+    if (ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS)
+        == PackageManager.PERMISSION_GRANTED) {
       JSObject r = new JSObject();
       r.put("display", "granted");
       call.resolve(r);
       return;
     }
-    pendingNotifCall = call;
-    ActivityCompat.requestPermissions(
-        act, new String[] {Manifest.permission.POST_NOTIFICATIONS}, REQ_POST_NOTIF);
+    // Capacitor tracks this request and invokes notifPermCallback — PluginCall completes
+    requestPermissionForAlias("notifications", call, "notifPermCallback");
   }
 
-  @Override
-  protected void handleRequestPermissionsResult(
-      int requestCode, String[] permissions, int[] grantResults) {
-    super.handleRequestPermissionsResult(requestCode, permissions, grantResults);
-    if (requestCode != REQ_POST_NOTIF || pendingNotifCall == null) return;
-    PluginCall call = pendingNotifCall;
-    pendingNotifCall = null;
+  @PermissionCallback
+  private void notifPermCallback(PluginCall call) {
     JSObject r = new JSObject();
-    boolean granted =
-        grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
-    r.put("display", granted ? "granted" : "denied");
+    try {
+      if (getPermissionState("notifications") == PermissionState.GRANTED) {
+        r.put("display", "granted");
+      } else {
+        r.put("display", "denied");
+      }
+    } catch (Exception e) {
+      Activity act = getActivity();
+      boolean granted =
+          act != null
+              && ContextCompat.checkSelfPermission(act, Manifest.permission.POST_NOTIFICATIONS)
+                  == PackageManager.PERMISSION_GRANTED;
+      r.put("display", granted ? "granted" : "denied");
+    }
     call.resolve(r);
   }
 

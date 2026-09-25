@@ -58,6 +58,22 @@ if (hasProperty('postBuildExtras')) {{
 """
     )
     print("Linked:", ", ".join(n for n, _ in present))
+
+    # Ensure AndroidX Biometric for D4NativeAuth BiometricPrompt
+    app_bg = ANDROID / "app" / "build.gradle"
+    if app_bg.is_file():
+        bg = app_bg.read_text()
+        if "androidx.biometric" not in bg:
+            needle = 'implementation "androidx.appcompat:appcompat'
+            if needle in bg:
+                bg = bg.replace(
+                    needle,
+                    'implementation "androidx.biometric:biometric:1.1.0"\n    ' + needle,
+                    1,
+                )
+                app_bg.write_text(bg)
+                print("Added androidx.biometric to app/build.gradle")
+
     return 0
 if __name__ == "__main__":
     sys.exit(main())
