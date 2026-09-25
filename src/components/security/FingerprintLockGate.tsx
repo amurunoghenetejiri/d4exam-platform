@@ -386,6 +386,11 @@ export function FingerprintLockGate() {
         hwState !== "no",
     );
     const unlockConfigured = hasAppPw || fpEnabled;
+    if (!native) {
+      // Website / non-Capacitor: never full-screen lock (blocks menu & taps)
+      setLocked(false);
+      return;
+    }
     if (!uid || !unlockConfigured) {
       setLocked(false);
       return;
@@ -682,6 +687,13 @@ export function FingerprintLockGate() {
   }, [locked]);
 
   if (!locked || isPublicAuthPath) {
+    try {
+      document.body.classList.remove("d4-fp-lock-active");
+      document.body.style.pointerEvents = "";
+      document.documentElement.style.pointerEvents = "";
+    } catch {
+      /* ignore */
+    }
     return null;
   }
   // Never return a blank navy: if splash is slow, still render unlock UI

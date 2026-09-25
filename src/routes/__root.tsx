@@ -407,6 +407,16 @@ function RootComponent() {
       document.body.style.overflow = "";
       document.documentElement.style.overflow = "";
       document.body.classList.remove("d4-fp-lock-active", "d4-setup-lock-active");
+      document.body.style.pointerEvents = "";
+      document.documentElement.style.pointerEvents = "";
+      // Clear stuck modal overlays that can freeze taps after crash/reload
+      document.querySelectorAll("[data-radix-dialog-overlay]").forEach((el) => {
+        try {
+          (el as HTMLElement).style.pointerEvents = "none";
+        } catch {
+          /* ignore */
+        }
+      });
     } catch {
       /* ignore */
     }

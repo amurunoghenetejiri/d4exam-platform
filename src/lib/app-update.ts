@@ -24,8 +24,8 @@ const DEFAULT_CONFIG: AppVersionConfig = {
   minBuild: 1,
   latestBuild: 1,
   apkUrl: "/downloads/d4exam.apk",
-  forceUpdate: true,
-  message: "A new version of D4EXAM is required. Please update to continue.",
+  forceUpdate: false,
+  message: "A newer version of D4EXAM is available. Update when you can.",
   installMessage:
     "Install the D4EXAM Android app for the full exam experience (camera, mic, screen share).",
 };
@@ -90,7 +90,7 @@ export async function fetchAppVersionConfig(): Promise<AppVersionConfig> {
         ...data,
         minBuild: Number(data.minBuild ?? DEFAULT_CONFIG.minBuild) || 1,
         latestBuild: Number(data.latestBuild ?? DEFAULT_CONFIG.latestBuild) || 1,
-        forceUpdate: data.forceUpdate !== false,
+        forceUpdate: data.forceUpdate === true,
         apkUrl: (() => {
           const u = String(data.apkUrl || DEFAULT_CONFIG.apkUrl);
           if (/github\.com/i.test(u)) return "/downloads/d4exam.apk";

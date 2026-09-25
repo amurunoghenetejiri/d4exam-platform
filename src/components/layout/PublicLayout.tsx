@@ -1,4 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
+import { appNavigate } from "@/lib/app-navigate";
 import { useMemo, useState, type ReactNode } from "react";
 import { Menu, X } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
@@ -62,6 +63,12 @@ export function PublicLayout({ children }: { children: ReactNode }) {
     setOpen(false);
     // Let the close animation start, then navigate. Works on Capacitor WebView.
     window.setTimeout(() => {
+      try {
+        appNavigate(to);
+        return;
+      } catch {
+        /* fall through */
+      }
       try {
         void navigate({ to: to as never });
       } catch {

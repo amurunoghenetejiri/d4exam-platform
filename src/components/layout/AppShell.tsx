@@ -37,6 +37,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useRealtimeInvalidate } from "@/lib/realtime";
 import type { RoleConfig } from "@/components/navigation/navConfig";
 import { useT } from "@/lib/i18n";
+import { appNavigate } from "@/lib/app-navigate";
 
 import { GlobalSearchPage } from "@/components/search/GlobalSearchPage";
 
@@ -148,7 +149,16 @@ function NavLinks({
                   <Link
                     to={item.to}
                     preload={false}
-                    onClick={onNavigate}
+                    onClick={(e) => {
+                      onNavigate?.();
+                      // Capacitor WebView: ensure route change even if Link is swallowed
+                      try {
+                        e.preventDefault();
+                        appNavigate(item.to);
+                      } catch {
+                        /* Link default */
+                      }
+                    }}
                     className={cn(
                       "pressable relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors",
                       "active:scale-[0.98] active:bg-white/10",
@@ -427,12 +437,14 @@ export function AppShell({
       >
         <div className="mx-auto grid h-12 max-w-[1400px] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2.5 sm:h-16 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-            <Sheet open={open} onOpenChange={setOpen}>
+            <Sheet open={open} onOpenChange={setOpen} modal>
               <SheetTrigger asChild>
                 <Button
+                  type="button"
                   variant="outline"
                   size="icon"
                   className="sa-mobile-menu h-9 w-9 shrink-0 border-white/25 bg-white/5 text-white hover:bg-white/10 hover:text-white lg:hidden"
+                  onClick={() => setOpen(true)}
                   aria-label="Open menu"
                 >
                   <Menu className="h-5 w-5" />
