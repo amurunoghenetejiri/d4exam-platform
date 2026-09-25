@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader, SectionCard, StatusBadge, EmptyState, NavCard } from "@/components/dashboard/kit";
@@ -65,6 +66,10 @@ function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId ?? null;
   const enabled = Boolean(schoolId);
+  const [dashLeftPct, setDashLeftPct] = useState(50);
+  const [dashStacked, setDashStacked] = useState(false);
+  const dashSplitRef = useRef<HTMLDivElement | null>(null);
+  const dashDrag = useRef(false);
 
   useRealtimeInvalidate(
     `officer-dash-${schoolId ?? "x"}`,
@@ -286,7 +291,31 @@ function Page() {
         />
       </div>
 
-      <div className="mt-4 grid gap-4 sm:mt-6 sm:gap-6 lg:grid-cols-2">
+      {/* Quick tips for officers */}
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+        <div className="rounded-xl border border-blue-100 bg-blue-50/80 px-3 py-2.5">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-blue-700">Approvals</p>
+          <p className="mt-0.5 text-xs text-blue-900/80">Review teacher papers before students can sit them.</p>
+        </div>
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2.5">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Live monitor</p>
+          <p className="mt-0.5 text-xs text-emerald-900/80">Watch camera, screen and integrity while exams run.</p>
+        </div>
+        <div className="rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-2.5">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">Integrity</p>
+          <p className="mt-0.5 text-xs text-amber-900/80">Accept or hold results after proctoring review.</p>
+        </div>
+      </div>
+
+      <div
+        ref={dashSplitRef}
+        className={`mt-4 gap-0 sm:mt-6 ${dashStacked ? "flex flex-col" : "flex flex-col md:flex-row"}`}
+        style={{ minHeight: "12rem" }}
+      >
+        <div
+          className="min-w-0"
+          style={dashStacked ? undefined : { width: `${dashLeftPct}%` }}
+        >
         <SectionCard
           title="Examinations (pending first)"
           action={
@@ -325,7 +354,43 @@ function Page() {
             </ul>
           )}
         </SectionCard>
-
+        </div>
+        {!dashStacked ? (
+          <div
+            role="separator"
+            className="relative z-10 hidden w-3 shrink-0 cursor-col-resize md:flex"
+            onPointerDown={() => {
+              dashDrag.current = true;
+            }}
+            onPointerMove={(e) => {
+              if (!dashDrag.current || !dashSplitRef.current) return;
+              const rect = dashSplitRef.current.getBoundingClientRect();
+              if (rect.width < 40) return;
+              const pct = ((e.clientX - rect.left) / rect.width) * 100;
+              const next = Math.max(25, Math.min(75, pct));
+              setDashLeftPct(next);
+              setDashStacked(next >= 74);
+            }}
+            onPointerUp={() => {
+              dashDrag.current = false;
+            }}
+          >
+            <div className="mx-auto my-4 w-1 rounded-full bg-slate-200 hover:bg-blue-400" />
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="flex h-3 w-full items-center justify-center"
+            onClick={() => {
+              setDashStacked(false);
+              setDashLeftPct(50);
+            }}
+            aria-label="Restore side by side"
+          >
+            <span className="h-1 w-16 rounded-full bg-slate-200" />
+          </button>
+        )}
+        <div className="min-w-0 flex-1" style={dashStacked ? undefined : { width: `${100 - dashLeftPct}%` }}>
         <SectionCard
           title="Recent integrity alerts"
           action={
@@ -363,6 +428,7 @@ function Page() {
             </ul>
           )}
         </SectionCard>
+        </div>
       </div>
     </>
   );

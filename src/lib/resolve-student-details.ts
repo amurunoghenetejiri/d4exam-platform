@@ -166,21 +166,69 @@ export function gradeColorClass(grade: string | null | undefined): string {
   return "text-slate-800 font-bold";
 }
 
+/**
+ * Officer integrity chip colors (product rules):
+ * - MULTIPLE_FACES / TAB_SWITCH / OFFICER_PAUSE → red (high)
+ * - FACE_NOT_DETECTED → amber (medium)
+ * - ONE_FACE_DETECTED / OFFICER_RELEASE → green (low)
+ */
 export function integritySeverityBand(
   eventType: string,
   severity: string | null | undefined,
 ): "low" | "medium" | "high" {
+  const t = String(eventType || "").toUpperCase().replace(/\s+/g, "_");
+  if (
+    t.includes("MULTIPLE_FACE") ||
+    t.includes("MULTI_FACE") ||
+    t.includes("TAB_SWITCH") ||
+    t.includes("TAB SWITCH") ||
+    t.includes("OFFICER_PAUSE") ||
+    t.includes("OFFICER_PAUSE") ||
+    t === "OFFICER_PAUSE"
+  ) {
+    return "high";
+  }
+  if (t.includes("FACE_NOT") || t.includes("NO_FACE") || t.includes("FACE_NOT_DETECTED")) {
+    return "medium";
+  }
+  if (
+    t.includes("ONE_FACE") ||
+    t.includes("OFFICER_RELEASE") ||
+    (t.includes("FACE_DETECTED") && !t.includes("NOT") && !t.includes("MULTI"))
+  ) {
+    return "low";
+  }
   const s = String(severity || "").toLowerCase();
   if (s === "high" || s === "critical") return "high";
   if (s === "medium" || s === "warn" || s === "warning") return "medium";
-  const t = String(eventType || "").toUpperCase();
-  if (t.includes("MULTI") || t.includes("FACE") || t.includes("TAB")) return "medium";
+  if (t.includes("TAB")) return "high";
+  if (t.includes("MULTI")) return "high";
+  if (t.includes("FACE")) return "medium";
   return "low";
 }
 
 /** Tailwind classes for integrity event severity (green / amber / red). */
 export function integritySeverityClass(band: "low" | "medium" | "high"): string {
-  if (band === "high") return "text-red-600 bg-red-50 border-red-200";
-  if (band === "medium") return "text-amber-700 bg-amber-50 border-amber-200";
+  if (band === "high") return "text-red-700 bg-red-50 border-red-200";
+  if (band === "medium") return "text-amber-800 bg-amber-50 border-amber-200";
   return "text-emerald-700 bg-emerald-50 border-emerald-200";
 }
+
+/** 0–100 integrity health from event counts (higher = better). */
+export function integrityScoreFromSummary(summary: Record<string, number>): number {
+  let score = 100;
+  for (const [k, v] of Object.entries(summary)) {
+    const n = Number(v) || 0;
+    if (!n) continue;
+    const t = k.toUpperCase();
+    if (t.includes("MULTIPLE_FACE") || t.includes("TAB_SWITCH") || t.includes("OFFICER_PAUSE")) {
+      score -= Math.min(40, n * 8);
+    } else if (t.includes("FACE_NOT") || t.includes("NO_FACE")) {
+      score -= Math.min(25, n * 4);
+    } else if (t.includes("OFFICER_RELEASE") || t.includes("ONE_FACE")) {
+      score += Math.min(10, n);
+    }
+  }
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+

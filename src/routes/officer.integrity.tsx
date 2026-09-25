@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import {
   resolveStudentDetails,
   integritySeverityBand,
   integritySeverityClass,
+  integrityScoreFromSummary,
 } from "@/lib/resolve-student-details";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +52,28 @@ function Page() {
   const schoolId = user?.schoolId ?? null;
   const qc = useQueryClient();
   const [selectedAttempt, setSelectedAttempt] = useState<string | null>(null);
+  const [leftPct, setLeftPct] = useState(50);
+  const [stacked, setStacked] = useState(false);
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  const dragging = useRef(false);
+
+  const onSplitPointerDown = useCallback((e: { pointerId: number; clientX: number; target: EventTarget }) => {
+    dragging.current = true;
+    try { (e.target as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
+  }, []);
+  const onSplitPointerMove = useCallback((e: { pointerId: number; clientX: number; target: EventTarget }) => {
+    if (!dragging.current || !splitRef.current) return;
+    const rect = splitRef.current.getBoundingClientRect();
+    if (rect.width < 40) return;
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    const next = Math.max(22, Math.min(78, pct));
+    setLeftPct(next);
+    // If dragged almost fully right, stack detail under list
+    setStacked(next >= 76);
+  }, []);
+  const onSplitPointerUp = useCallback(() => {
+    dragging.current = false;
+  }, []);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [nameMap, setNameMap] = useState<
@@ -236,6 +259,10 @@ function Page() {
     }
   }
 
+  const integrityScore = integrityScoreFromSummary(summary);
+  const scoreBand =
+    integrityScore >= 70 ? "low" : integrityScore >= 40 ? "medium" : "high";
+
   return (
     <>
       <PageHeader
@@ -243,20 +270,70 @@ function Page() {
         description={`${user?.fullName ?? "Officer"} · Expand a student for details · Accept / Flag syncs with Results Release`}
       />
 
-      <div className="mb-4 flex flex-wrap gap-2 text-xs">
-        {Object.entries(summary)
-          .slice(0, 8)
-          .map(([k, v]) => (
+      <div className="mb-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {Object.entries(summary)
+            .slice(0, 10)
+            .map(([k, v]) => {
+              const band = integritySeverityBand(k, null);
+              return (
+                <span
+                  key={k}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 font-semibold",
+                    integritySeverityClass(band),
+                  )}
+                >
+                  {k.replaceAll("_", " ")}: {v}
+                </span>
+              );
+            })}
+        </div>
+        <div className="rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              School integrity health
+            </p>
             <span
-              key={k}
-              className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-700"
+              className={cn(
+                "text-sm font-extrabold tabular-nums",
+                scoreBand === "low" && "text-emerald-600",
+                scoreBand === "medium" && "text-amber-600",
+                scoreBand === "high" && "text-red-600",
+              )}
             >
-              {k}: {v}
+              {integrityScore}%
             </span>
-          ))}
+          </div>
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all",
+                scoreBand === "low" && "bg-emerald-500",
+                scoreBand === "medium" && "bg-amber-500",
+                scoreBand === "high" && "bg-red-500",
+              )}
+              style={{ width: `${integrityScore}%` }}
+            />
+          </div>
+          <p className="mt-1 text-[10px] text-slate-400">
+            Green = strong · Amber = average · Red = needs attention
+          </p>
+        </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div
+        ref={splitRef}
+        className={cn(
+          "gap-0",
+          stacked ? "flex flex-col" : "flex flex-col md:flex-row",
+        )}
+        style={{ minHeight: "min(70vh, 36rem)" }}
+      >
+        <div
+          className={cn("min-w-0", stacked ? "w-full" : "")}
+          style={stacked ? undefined : { width: `${leftPct}%`, maxWidth: "100%" }}
+        >
         <SectionCard title="Submitted attempts">
           {attemptsQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading…</p>
@@ -370,7 +447,38 @@ function Page() {
             </ul>
           )}
         </SectionCard>
+        </div>
 
+        {!stacked ? (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize panels"
+            className="relative z-10 mx-0 hidden w-3 shrink-0 cursor-col-resize items-stretch md:flex"
+            onPointerDown={onSplitPointerDown}
+            onPointerMove={onSplitPointerMove}
+            onPointerUp={onSplitPointerUp}
+            onPointerCancel={onSplitPointerUp}
+          >
+            <div className="mx-auto my-6 w-1 rounded-full bg-slate-200 hover:bg-blue-400" />
+          </div>
+        ) : (
+          <div
+            role="separator"
+            className="flex h-3 w-full cursor-row-resize items-center justify-center"
+            onClick={() => {
+              setStacked(false);
+              setLeftPct(50);
+            }}
+          >
+            <div className="h-1 w-16 rounded-full bg-slate-200" />
+          </div>
+        )}
+
+        <div
+          className="min-w-0 flex-1"
+          style={stacked ? undefined : { width: `${100 - leftPct}%` }}
+        >
         <SectionCard title="Event timeline">
           <p className="mb-3 text-xs text-slate-500">
             {selectedAttempt
@@ -415,6 +523,7 @@ function Page() {
             </ul>
           )}
         </SectionCard>
+        </div>
       </div>
     </>
   );

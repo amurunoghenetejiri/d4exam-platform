@@ -76,52 +76,78 @@ async function fetchStudentResults(studentId: string): Promise<ResultRow[]> {
 
   if (!rows.length) return [];
 
-  // 3) Enrich exam + course titles in a second query (avoids nested embed failures)
+  // 3) Enrich exam + course titles (multiple fallbacks — RLS-safe)
   const examIds = [...new Set(rows.map((r) => r.exam_id).filter(Boolean))];
   if (examIds.length) {
-    const examsQ = await supabase
-      .from("examinations")
-      .select("id, title, course_id, assessment_type, courses(code, name)")
-      .in("id", examIds);
+    type ExamMeta = {
+      id: string;
+      title?: string | null;
+      course_id?: string | null;
+      assessment_type?: string | null;
+      assessment_kind?: string | null;
+      courses?: { code?: string; name?: string } | null;
+    };
+    const byId = new Map<string, ExamMeta>();
 
-    if (examsQ.error) {
-      // courses embed may fail — fall back to examinations only
-      const simple = await supabase
-        .from("examinations")
-        .select("id, title, course_id, assessment_type")
-        .in("id", examIds);
-      const byId = new Map(
-        ((simple.data ?? []) as { id: string; title?: string; assessment_type?: string }[]).map(
-          (e) => [e.id, e],
-        ),
-      );
-      rows = rows.map((r) => {
-        const e = byId.get(r.exam_id);
-        return {
-          ...r,
-          exam_title: e?.title ?? null,
-          assessment: e?.assessment_type ?? null,
-        };
-      });
-    } else {
-      type ExamRow = {
-        id: string;
-        title?: string;
-        assessment_type?: string;
-        courses?: { code?: string; name?: string } | null;
-      };
-      const byId = new Map(((examsQ.data ?? []) as ExamRow[]).map((e) => [e.id, e]));
-      rows = rows.map((r) => {
-        const e = byId.get(r.exam_id);
-        return {
-          ...r,
-          exam_title: e?.title ?? null,
-          course_code: e?.courses?.code ?? null,
-          course_name: e?.courses?.name ?? null,
-          assessment: e?.assessment_type ?? null,
-        };
-      });
+    const trySelect = async (cols: string) => {
+      const { data, error } = await supabase.from("examinations").select(cols).in("id", examIds);
+      if (error) {
+        console.warn("[student-results] examinations", cols, error.message);
+        return;
+      }
+      for (const e of (data ?? []) as ExamMeta[]) {
+        const prev = byId.get(e.id) || { id: e.id };
+        byId.set(e.id, {
+          ...prev,
+          ...e,
+          title: e.title || prev.title,
+          courses: e.courses || prev.courses,
+        });
+      }
+    };
+
+    await trySelect("id, title, course_id, assessment_type, courses(code, name)");
+    if ([...byId.values()].some((e) => !e.title)) {
+      await trySelect("id, title, course_id, assessment_type");
     }
+    // Course names when embed blocked
+    const courseIds = [
+      ...new Set(
+        [...byId.values()].map((e) => e.course_id).filter(Boolean).map(String),
+      ),
+    ];
+    const courseMap = new Map<string, { code?: string; name?: string }>();
+    if (courseIds.length) {
+      const { data: courses } = await supabase
+        .from("courses")
+        .select("id, code, name")
+        .in("id", courseIds.slice(0, 200));
+      for (const c of courses ?? []) {
+        courseMap.set(String((c as { id: string }).id), {
+          code: (c as { code?: string }).code,
+          name: (c as { name?: string }).name,
+        });
+      }
+    }
+
+    rows = rows.map((r) => {
+      const e = byId.get(r.exam_id);
+      const course =
+        e?.courses ||
+        (e?.course_id ? courseMap.get(String(e.course_id)) : null) ||
+        null;
+      const title =
+        (e?.title && String(e.title).trim()) ||
+        (course?.code ? `${course.code} Examination` : null) ||
+        null;
+      return {
+        ...r,
+        exam_title: title,
+        course_code: course?.code ?? null,
+        course_name: course?.name ?? null,
+        assessment: e?.assessment_type || e?.assessment_kind || null,
+      };
+    });
   }
 
   return rows;
@@ -212,35 +238,79 @@ function ResultsList() {
         <ul className="space-y-3">
           {rows.map((r) => {
             const st = (r.status || "").toLowerCase();
+            const srs = String(r.security_review_status || "").toLowerCase();
             const published = st === "published" || Boolean(r.released_at);
-            const flagged = (r.security_review_status || "").toLowerCase() === "flagged";
-            const terminated =
-              st === "terminated" ||
-              String(r.security_review_status || "").toLowerCase() === "terminated";
-            const statusLabel = terminated
-              ? "Terminated"
-              : published
-                ? "Released"
-                : flagged
-                  ? "Pending officer review"
-                  : st === "pending"
-                    ? "Result held"
-                    : st === "processing"
-                      ? "Processing"
-                      : String(r.status || "Pending");
+            const terminated = st === "terminated" || srs === "terminated" || srs === "cancelled";
+            const officerReview =
+              !published &&
+              !terminated &&
+              (srs === "flagged" ||
+                srs === "pending" ||
+                srs === "under_review" ||
+                srs === "review" ||
+                st === "flagged");
+            const teacherMark =
+              !published &&
+              !terminated &&
+              !officerReview &&
+              (st === "processing" ||
+                st === "awaiting_marking" ||
+                st === "pending_marking" ||
+                srs === "awaiting_marking" ||
+                srs === "pending_marking");
+            const autoSubmitted = st === "auto_submitted" || srs === "auto_submitted";
+            const held = !published && !terminated && !officerReview && !teacherMark;
+
+            let statusLabel: string | null = null;
+            let statusMsg = "";
+            let msgClass = "text-amber-700";
+            if (terminated) {
+              statusLabel = "Terminated";
+              statusMsg = "This examination was terminated. Scores are not released.";
+              msgClass = "text-red-700";
+            } else if (published) {
+              statusLabel = null;
+              statusMsg = "";
+            } else if (officerReview) {
+              statusLabel = "Under officer review";
+              statusMsg =
+                "Your result is under officer review. Scores stay hidden until the review is complete.";
+              msgClass = "text-amber-700";
+            } else if (teacherMark) {
+              statusLabel = "Awaiting teacher mark";
+              statusMsg =
+                "Not yet marked by the teacher. Essay or written parts still need marking before release.";
+              msgClass = "text-sky-700";
+            } else if (autoSubmitted && held) {
+              statusLabel = "Waiting for release";
+              statusMsg =
+                "Your paper was auto-submitted. Result is waiting for officer release.";
+              msgClass = "text-amber-700";
+            } else {
+              statusLabel = "Waiting for release";
+              statusMsg =
+                "Result is held pending officer release. Scores stay hidden until released.";
+              msgClass = "text-amber-700";
+            }
+
             const targetId = r.id || r.exam_id;
-            const title = r.exam_title || "Exam";
+            const title =
+              (r.exam_title && String(r.exam_title).trim()) ||
+              (r.course_code ? `${r.course_code} Examination` : null) ||
+              "Examination";
             const courseLine = [r.course_code, r.course_name].filter(Boolean).join(" — ");
             const typeLabel =
               r.assessment === "test" || r.assessment === "Test"
                 ? "Test"
-                : r.assessment
+                : r.assessment === "exam" || r.assessment === "examination"
                   ? "Exam"
-                  : null;
+                  : r.assessment
+                    ? String(r.assessment)
+                    : null;
             return (
               <li key={r.id} className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold text-slate-900">
                       {title}
                       {typeLabel ? (
@@ -250,11 +320,7 @@ function ResultsList() {
                       ) : null}
                     </p>
                     {courseLine ? <p className="text-xs text-slate-500">{courseLine}</p> : null}
-                    {terminated ? (
-                      <p className="mt-1 text-xs font-semibold text-red-700">
-                        This examination was terminated. Scores are not released.
-                      </p>
-                    ) : published ? (
+                    {published ? (
                       <p className="mt-1 text-sm font-semibold text-slate-800">
                         {r.percentage != null ? `${Math.round(Number(r.percentage))}%` : "—"}
                         {r.total_score != null && r.max_score != null
@@ -265,14 +331,12 @@ function ResultsList() {
                         {r.grade ? ` · Grade ${r.grade}` : ""}
                         {r.pass_fail ? ` · ${r.pass_fail}` : ""}
                       </p>
-                    ) : (
-                      <p className="mt-1 text-xs font-semibold text-amber-700">
-                        Result is held pending officer release. Scores stay hidden until released.
-                      </p>
-                    )}
+                    ) : statusMsg ? (
+                      <p className={`mt-1 text-xs font-semibold ${msgClass}`}>{statusMsg}</p>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge status={statusLabel} />
+                    {statusLabel ? <StatusBadge status={statusLabel} /> : null}
                     <Button
                       type="button"
                       size="sm"
