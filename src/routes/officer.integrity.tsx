@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
 import { Button } from "@/components/ui/button";
@@ -54,25 +54,36 @@ function Page() {
   const [selectedAttempt, setSelectedAttempt] = useState<string | null>(null);
   const [leftPct, setLeftPct] = useState(50);
   const [stacked, setStacked] = useState(false);
+  const [search, setSearch] = useState("");
   const splitRef = useRef<HTMLDivElement | null>(null);
   const dragging = useRef(false);
 
-  const onSplitPointerDown = useCallback((e: { pointerId: number; clientX: number; target: EventTarget }) => {
+  const onSplitPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
     dragging.current = true;
-    try { (e.target as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* ignore */ }
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
   }, []);
-  const onSplitPointerMove = useCallback((e: { pointerId: number; clientX: number; target: EventTarget }) => {
+  const onSplitPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragging.current || !splitRef.current) return;
+    e.preventDefault();
     const rect = splitRef.current.getBoundingClientRect();
-    if (rect.width < 40) return;
+    if (rect.width < 48) return;
     const pct = ((e.clientX - rect.left) / rect.width) * 100;
-    const next = Math.max(22, Math.min(78, pct));
+    const next = Math.max(28, Math.min(72, pct));
     setLeftPct(next);
-    // If dragged almost fully right, stack detail under list
-    setStacked(next >= 76);
+    setStacked(false);
   }, []);
-  const onSplitPointerUp = useCallback(() => {
+  const onSplitPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     dragging.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
   }, []);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -142,7 +153,7 @@ function Page() {
     },
   });
 
-  const attempts = attemptsQ.data ?? [];
+  const attemptsAll = attemptsQ.data ?? [];
 
   useEffect(() => {
     const ids = [...new Set(attempts.map((a) => a.student_id).filter(Boolean))];
@@ -192,6 +203,17 @@ function Page() {
     if (n?.matric && n.matric !== "—") return n.matric;
     return "Student";
   }
+
+  const attempts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return attemptsAll.filter((a) => {
+      const rev = String(a.security_review_status || "").toLowerCase();
+      if (rev === "accepted") return false;
+      if (!q) return true;
+      const label = `${studentLabel(a.student_id)} ${a.examinations?.title || ""} ${a.id}`.toLowerCase();
+      return label.includes(q);
+    });
+  }, [attemptsAll, search, nameMap]);
 
   async function decide(
     attempt: AttemptRow,
@@ -248,6 +270,9 @@ function Page() {
             : `Security review: ${decision.replaceAll("_", " ")}`,
       );
       setNote("");
+      if (decision === "accepted" && selectedAttempt === attempt.id) {
+        setSelectedAttempt(null);
+      }
       await qc.invalidateQueries({ queryKey: ["officer-security-attempts"] });
       await qc.invalidateQueries({ queryKey: ["officer-exam-results"] });
       await qc.invalidateQueries({ queryKey: ["officer-results-counts"] });
@@ -273,6 +298,7 @@ function Page() {
       <div className="mb-3 space-y-2">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           {Object.entries(summary)
+            .filter(([, v]) => Number(v) > 0)
             .slice(0, 10)
             .map(([k, v]) => {
               const band = integritySeverityBand(k, null);
@@ -289,10 +315,11 @@ function Page() {
               );
             })}
         </div>
+        {Object.keys(summary).length > 0 ? (
         <div className="rounded-xl border border-slate-100 bg-white px-3 py-2.5 shadow-sm">
           <div className="mb-1 flex items-center justify-between gap-2">
             <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-              School integrity health
+              {selectedAttempt ? "Attempt integrity health" : "Integrity health"}
             </p>
             <span
               className={cn(
@@ -320,21 +347,28 @@ function Page() {
             Green = strong · Amber = average · Red = needs attention
           </p>
         </div>
+        ) : null}
       </div>
 
       <div
         ref={splitRef}
-        className={cn(
-          "gap-0",
-          stacked ? "flex flex-col" : "flex flex-col md:flex-row",
-        )}
-        style={{ minHeight: "min(70vh, 36rem)" }}
+        className="flex flex-row gap-0"
+        style={{ height: "min(70vh, 34rem)" }}
       >
         <div
-          className={cn("min-w-0", stacked ? "w-full" : "")}
-          style={stacked ? undefined : { width: `${leftPct}%`, maxWidth: "100%" }}
+          className="flex min-h-0 min-w-0 flex-col"
+          style={{ width: `${leftPct}%`, maxWidth: "100%" }}
         >
-        <SectionCard title="Submitted attempts">
+        <SectionCard title="Submitted attempts" className="flex h-full min-h-0 flex-col">
+          <div className="mb-2 shrink-0">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search student, matric, exam…"
+              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
           {attemptsQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading…</p>
           ) : attempts.length === 0 ? (
@@ -449,37 +483,25 @@ function Page() {
         </SectionCard>
         </div>
 
-        {!stacked ? (
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize panels"
-            className="relative z-10 mx-0 hidden w-3 shrink-0 cursor-col-resize items-stretch md:flex"
-            onPointerDown={onSplitPointerDown}
-            onPointerMove={onSplitPointerMove}
-            onPointerUp={onSplitPointerUp}
-            onPointerCancel={onSplitPointerUp}
-          >
-            <div className="mx-auto my-6 w-1 rounded-full bg-slate-200 hover:bg-blue-400" />
-          </div>
-        ) : (
-          <div
-            role="separator"
-            className="flex h-3 w-full cursor-row-resize items-center justify-center"
-            onClick={() => {
-              setStacked(false);
-              setLeftPct(50);
-            }}
-          >
-            <div className="h-1 w-16 rounded-full bg-slate-200" />
-          </div>
-        )}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Drag to resize panels"
+          className="relative z-20 flex w-4 shrink-0 cursor-col-resize touch-none items-stretch select-none"
+          style={{ touchAction: "none" }}
+          onPointerDown={onSplitPointerDown}
+          onPointerMove={onSplitPointerMove}
+          onPointerUp={onSplitPointerUp}
+          onPointerCancel={onSplitPointerUp}
+        >
+          <div className="mx-auto my-2 w-[3px] rounded-full bg-blue-500/80 shadow-sm shadow-blue-500/30" />
+        </div>
 
         <div
-          className="min-w-0 flex-1"
-          style={stacked ? undefined : { width: `${100 - leftPct}%` }}
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          style={{ width: `${100 - leftPct}%` }}
         >
-        <SectionCard title="Event timeline">
+        <SectionCard title="Integrity details" className="flex h-full min-h-0 flex-col">
           <p className="mb-3 text-xs text-slate-500">
             {selectedAttempt
               ? "Events for the selected examination attempt only"
@@ -495,7 +517,7 @@ function Page() {
           ) : events.length === 0 ? (
             <EmptyState title="No events" description="No integrity events for this attempt." />
           ) : (
-            <ul className="max-h-[32rem] space-y-2 overflow-y-auto">
+            <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
               {events.map((ev) => {
                 const band = integritySeverityBand(ev.event_type, ev.severity);
                 return (

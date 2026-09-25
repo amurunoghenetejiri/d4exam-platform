@@ -244,6 +244,31 @@ function Page() {
   const liveValue = liveStatsQ.isLoading ? "…" : String(liveStatsQ.data?.liveExams ?? 0);
   const integrityValue = liveStatsQ.isLoading ? "…" : String(liveStatsQ.data?.writers ?? 0);
 
+  const integrityQueueQ = useQuery({
+    queryKey: ["officer-dash-integrity-queue", schoolId],
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: 12_000,
+    queryFn: async () => {
+      if (!schoolId) return 0;
+      const { data, error } = await supabase
+        .from("exam_attempts")
+        .select("id, security_review_status")
+        .eq("school_id", schoolId)
+        .in("status", ["submitted", "completed", "flagged", "graded", "terminated"])
+        .limit(250);
+      if (error) {
+        console.warn("[officer-dash] integrity queue", error.message);
+        return 0;
+      }
+      return (data ?? []).filter((a) => {
+        const s = String((a as { security_review_status?: string }).security_review_status || "").toLowerCase();
+        return s !== "accepted";
+      }).length;
+    },
+  });
+  const integrityQueueValue = integrityQueueQ.isLoading ? "…" : String(integrityQueueQ.data ?? 0);
+
   return (
     <>
       <PageHeader
@@ -276,11 +301,11 @@ function Page() {
           color="bg-blue-50 text-blue-600"
         />
         <Stat
-          to="/officer/live-monitor"
-          label="Active writers"
-          value={integrityValue}
-          icon={Radio}
-          color="bg-sky-50 text-sky-600"
+          to="/officer/integrity"
+          label="Integrity queue"
+          value={integrityQueueValue}
+          icon={ShieldAlert}
+          color="bg-amber-50 text-amber-700"
         />
         <Stat
           to="/officer/post-to-students"
@@ -291,20 +316,35 @@ function Page() {
         />
       </div>
 
-      {/* Quick tips for officers */}
-      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
-        <div className="rounded-xl border border-blue-100 bg-blue-50/80 px-3 py-2.5">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-blue-700">Approvals</p>
-          <p className="mt-0.5 text-xs text-blue-900/80">Review teacher papers before students can sit them.</p>
-        </div>
-        <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2.5">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Live monitor</p>
-          <p className="mt-0.5 text-xs text-emerald-900/80">Watch camera, screen and integrity while exams run.</p>
-        </div>
-        <div className="rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-2.5">
-          <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">Integrity</p>
-          <p className="mt-0.5 text-xs text-amber-900/80">Accept or hold results after proctoring review.</p>
-        </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:mt-3 sm:gap-3 xl:grid-cols-4">
+        <Stat
+          to="/officer/results"
+          label="Results release"
+          value="Open"
+          icon={FileText}
+          color="bg-indigo-50 text-indigo-600"
+        />
+        <Stat
+          to="/officer/reports"
+          label="Reports"
+          value="Open"
+          icon={FileText}
+          color="bg-slate-50 text-slate-600"
+        />
+        <Stat
+          to="/officer/notifications"
+          label="Notifications"
+          value="Open"
+          icon={Send}
+          color="bg-violet-50 text-violet-600"
+        />
+        <Stat
+          to="/officer/settings"
+          label="Settings"
+          value="Open"
+          icon={CheckSquare}
+          color="bg-cyan-50 text-cyan-700"
+        />
       </div>
 
       <div

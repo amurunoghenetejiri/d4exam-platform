@@ -130,14 +130,48 @@ async function fetchStudentResults(studentId: string): Promise<ResultRow[]> {
       }
     }
 
+    // Extra fallback: exam_attempts → examinations(title) for this student
+    const stillMissing = rows
+      .map((r) => r.exam_id)
+      .filter((id) => {
+        const e = byId.get(id);
+        return !e?.title || !String(e.title).trim();
+      });
+    if (stillMissing.length) {
+      try {
+        const { data: atts } = await supabase
+          .from("exam_attempts")
+          .select("exam_id, examinations(title, course_id)")
+          .eq("student_id", studentId)
+          .in("exam_id", stillMissing.slice(0, 100));
+        for (const a of atts ?? []) {
+          const examId = String((a as { exam_id?: string }).exam_id || "");
+          const ex = (a as { examinations?: { title?: string; course_id?: string } | null }).examinations;
+          if (!examId || !ex?.title) continue;
+          const prev = byId.get(examId) || { id: examId };
+          byId.set(examId, {
+            ...prev,
+            title: String(ex.title).trim() || prev.title,
+            course_id: ex.course_id || prev.course_id,
+          });
+        }
+      } catch (e) {
+        console.warn("[student-results] attempt title fallback", e);
+      }
+    }
+
     rows = rows.map((r) => {
       const e = byId.get(r.exam_id);
       const course =
         e?.courses ||
         (e?.course_id ? courseMap.get(String(e.course_id)) : null) ||
         null;
+      const rawTitle = e?.title ? String(e.title).trim() : "";
       const title =
-        (e?.title && String(e.title).trim()) ||
+        rawTitle ||
+        (course?.code && course?.name
+          ? `${course.code} — ${course.name}`
+          : null) ||
         (course?.code ? `${course.code} Examination` : null) ||
         null;
       return {
@@ -237,18 +271,32 @@ function ResultsList() {
       ) : (
         <ul className="space-y-3">
           {rows.map((r) => {
-            const st = (r.status || "").toLowerCase();
-            const srs = String(r.security_review_status || "").toLowerCase();
-            const published = st === "published" || Boolean(r.released_at);
-            const terminated = st === "terminated" || srs === "terminated" || srs === "cancelled";
+            const st = (r.status || "").toLowerCase().replace(/\s+/g, "_");
+            const srs = String(r.security_review_status || "")
+              .toLowerCase()
+              .replace(/\s+/g, "_");
+            const published =
+              st === "published" ||
+              srs === "accepted" ||
+              Boolean(r.released_at);
+            const terminated =
+              st === "terminated" ||
+              srs === "terminated" ||
+              srs === "cancelled" ||
+              st === "cancelled";
+            // Officer review takes priority over generic "held/pending"
             const officerReview =
               !published &&
               !terminated &&
               (srs === "flagged" ||
-                srs === "pending" ||
+                srs === "further_review" ||
                 srs === "under_review" ||
                 srs === "review" ||
-                st === "flagged");
+                srs === "pending_review" ||
+                srs === "security_review" ||
+                st === "flagged" ||
+                // explicit pending security review on attempt-linked results
+                (srs === "pending" && st !== "held"));
             const teacherMark =
               !published &&
               !terminated &&
@@ -257,9 +305,9 @@ function ResultsList() {
                 st === "awaiting_marking" ||
                 st === "pending_marking" ||
                 srs === "awaiting_marking" ||
-                srs === "pending_marking");
+                srs === "pending_marking" ||
+                (st === "submitted" && !r.released_at && r.percentage == null && r.grade == null));
             const autoSubmitted = st === "auto_submitted" || srs === "auto_submitted";
-            const held = !published && !terminated && !officerReview && !teacherMark;
 
             let statusLabel: string | null = null;
             let statusMsg = "";
@@ -275,19 +323,19 @@ function ResultsList() {
               statusLabel = "Under officer review";
               statusMsg =
                 "Your result is under officer review. Scores stay hidden until the review is complete.";
-              msgClass = "text-amber-700";
+              msgClass = "text-amber-800";
             } else if (teacherMark) {
               statusLabel = "Awaiting teacher mark";
               statusMsg =
-                "Not yet marked by the teacher. Essay or written parts still need marking before release.";
+                "Not yet marked by the teacher. Written/essay parts still need marking before release.";
               msgClass = "text-sky-700";
-            } else if (autoSubmitted && held) {
+            } else if (autoSubmitted) {
               statusLabel = "Waiting for release";
               statusMsg =
                 "Your paper was auto-submitted. Result is waiting for officer release.";
               msgClass = "text-amber-700";
             } else {
-              statusLabel = "Waiting for release";
+              statusLabel = "Result held";
               statusMsg =
                 "Result is held pending officer release. Scores stay hidden until released.";
               msgClass = "text-amber-700";
