@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader, SectionCard, StatusBadge, EmptyState, NavCard } from "@/components/dashboard/kit";
+import { SplitHandle } from "@/components/dashboard/SplitHandle";
 import { Button } from "@/components/ui/button";
 import { CheckSquare, Radio, FileText, ShieldAlert, Send } from "lucide-react";
 import { useCount, useRows } from "@/lib/queries";
@@ -324,9 +325,11 @@ function Page() {
       >
         <div
           className="min-w-0"
-          style={dashStacked ? undefined : { width: `${dashLeftPct}%` }}
+          style={{ width: `${dashLeftPct}%` }} className="flex min-h-0 min-w-0 flex-col"
         >
         <SectionCard
+          className="flex h-full min-h-0 flex-col overflow-hidden"
+          bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
           title="Examinations (pending first)"
           action={
             <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
@@ -340,7 +343,7 @@ function Page() {
               description="When teachers create and submit exams, they appear here."
             />
           ) : (
-            <ul className="max-h-[14rem] space-y-1.5 overflow-y-auto overscroll-contain pr-0.5 sm:max-h-[18rem] lg:max-h-[24rem] sm:space-y-2">
+            <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-0.5 sm:space-y-2">
               {(exams.data ?? []).map((e) => (
                 <li key={e.id}>
                   <NavCard
@@ -365,43 +368,39 @@ function Page() {
           )}
         </SectionCard>
         </div>
-        {!dashStacked ? (
-          <div
-            role="separator"
-            className="relative z-10 hidden w-3 shrink-0 cursor-col-resize md:flex"
-            onPointerDown={() => {
-              dashDrag.current = true;
-            }}
-            onPointerMove={(e) => {
-              if (!dashDrag.current || !dashSplitRef.current) return;
-              const rect = dashSplitRef.current.getBoundingClientRect();
-              if (rect.width < 40) return;
-              const pct = ((e.clientX - rect.left) / rect.width) * 100;
-              const next = Math.max(25, Math.min(75, pct));
-              setDashLeftPct(next);
-              setDashStacked(next >= 74);
-            }}
-            onPointerUp={() => {
-              dashDrag.current = false;
-            }}
-          >
-            <div className="mx-auto my-4 w-1 rounded-full bg-slate-200 hover:bg-blue-400" />
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="flex h-3 w-full items-center justify-center"
-            onClick={() => {
-              setDashStacked(false);
-              setDashLeftPct(50);
-            }}
-            aria-label="Restore side by side"
-          >
-            <span className="h-1 w-16 rounded-full bg-slate-200" />
-          </button>
-        )}
-        <div className="min-w-0 flex-1" style={dashStacked ? undefined : { width: `${100 - dashLeftPct}%` }}>
+        <SplitHandle
+          onPointerDown={(e) => {
+            e.preventDefault();
+            dashDrag.current = true;
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId);
+            } catch {
+              /* ignore */
+            }
+          }}
+          onPointerMove={(e) => {
+            if (!dashDrag.current || !dashSplitRef.current) return;
+            e.preventDefault();
+            const rect = dashSplitRef.current.getBoundingClientRect();
+            if (rect.width < 40) return;
+            const pct = ((e.clientX - rect.left) / rect.width) * 100;
+            const next = Math.max(28, Math.min(72, pct));
+            setDashLeftPct(next);
+            setDashStacked(false);
+          }}
+          onPointerUp={(e) => {
+            dashDrag.current = false;
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            } catch {
+              /* ignore */
+            }
+          }}
+        />
+        <div className="min-w-0 flex-1" style={{ width: `${100 - dashLeftPct}%` }} className="flex min-h-0 min-w-0 flex-1 flex-col">
         <SectionCard
+          className="flex h-full min-h-0 flex-col overflow-hidden"
+          bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
           title="Recent integrity alerts"
           action={
             <Button variant="ghost" size="sm" className="font-semibold text-primary" asChild>
@@ -415,7 +414,7 @@ function Page() {
               description="Face, tab, and proctoring alerts from live exams appear here."
             />
           ) : (
-            <ul className="max-h-[14rem] space-y-1.5 overflow-y-auto overscroll-contain pr-0.5 sm:max-h-[18rem] lg:max-h-[24rem] sm:space-y-2">
+            <ul className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-0.5 sm:space-y-2">
               {(integrityRecent.data ?? []).map((l) => (
                 <li key={l.id}>
                   <NavCard

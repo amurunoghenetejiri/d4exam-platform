@@ -16,6 +16,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { PageHeader, SectionCard, StatusBadge, EmptyState } from "@/components/dashboard/kit";
+import { SplitHandle } from "@/components/dashboard/SplitHandle";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -571,13 +572,14 @@ function Page() {
       <div
         ref={approvalsSplitRef}
         className="flex flex-row gap-0"
-        style={{ height: "min(70vh, 36rem)" }}
+        style={{ height: "clamp(18rem, 58vh, 42rem)" }}
       >
         <div className="flex min-h-0 min-w-0 flex-col" style={{ width: `${approvalsLeftPct}%` }}>
         <SectionCard
           title="Awaiting your decision"
           description={listQ.isFetching ? "Refreshing…" : "Teachers submit → you approve → Post to students (makes exam live)"}
-          className="flex h-full min-h-0 flex-col"
+          className="flex h-full min-h-0 flex-col overflow-hidden"
+          bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           {listQ.isLoading ? (
             <p className="text-sm text-slate-500">Loading examinations…</p>
@@ -663,24 +665,17 @@ function Page() {
         </SectionCard>
         </div>
 
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Drag to resize panels"
-          className="relative z-20 flex w-4 shrink-0 cursor-col-resize touch-none items-stretch select-none"
-          style={{ touchAction: "none" }}
+        <SplitHandle
           onPointerDown={onApprovalsSplitDown}
           onPointerMove={onApprovalsSplitMove}
           onPointerUp={onApprovalsSplitUp}
-          onPointerCancel={onApprovalsSplitUp}
-        >
-          <div className="mx-auto my-2 w-[3px] rounded-full bg-blue-500/80 shadow-sm shadow-blue-500/30" />
-        </div>
+        />
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col" style={{ width: `${100 - approvalsLeftPct}%` }}>
         <SectionCard
           title="Recent decisions"
-          className="flex h-full min-h-0 flex-col"
+          className="flex h-full min-h-0 flex-col overflow-hidden"
+          bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
           description="After you approve, click Post to students so the exam appears live for eligible students. Release hides it again."
         >
           {history.length === 0 ? (

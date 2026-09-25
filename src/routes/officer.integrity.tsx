@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
+import { SplitHandle } from "@/components/dashboard/SplitHandle";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useSessionUser } from "@/lib/session";
@@ -353,13 +354,13 @@ function Page() {
       <div
         ref={splitRef}
         className="flex flex-row gap-0"
-        style={{ height: "min(70vh, 34rem)" }}
+        style={{ height: "clamp(18rem, 58vh, 42rem)" }}
       >
         <div
           className="flex min-h-0 min-w-0 flex-col"
           style={{ width: `${leftPct}%`, maxWidth: "100%" }}
         >
-        <SectionCard title="Submitted attempts" className="flex h-full min-h-0 flex-col">
+        <SectionCard title="Submitted attempts" className="flex h-full min-h-0 flex-col overflow-hidden" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="mb-2 shrink-0">
             <input
               type="search"
@@ -483,25 +484,17 @@ function Page() {
         </SectionCard>
         </div>
 
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Drag to resize panels"
-          className="relative z-20 flex w-4 shrink-0 cursor-col-resize touch-none items-stretch select-none"
-          style={{ touchAction: "none" }}
+        <SplitHandle
           onPointerDown={onSplitPointerDown}
           onPointerMove={onSplitPointerMove}
           onPointerUp={onSplitPointerUp}
-          onPointerCancel={onSplitPointerUp}
-        >
-          <div className="mx-auto my-2 w-[3px] rounded-full bg-blue-500/80 shadow-sm shadow-blue-500/30" />
-        </div>
+        />
 
         <div
           className="flex min-h-0 min-w-0 flex-1 flex-col"
           style={{ width: `${100 - leftPct}%` }}
         >
-        <SectionCard title="Integrity details" className="flex h-full min-h-0 flex-col">
+        <SectionCard title="Integrity details" className="flex h-full min-h-0 flex-col overflow-hidden" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden">
           <p className="mb-3 text-xs text-slate-500">
             {selectedAttempt
               ? "Events for the selected examination attempt only"

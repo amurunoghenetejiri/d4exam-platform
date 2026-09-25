@@ -69,6 +69,7 @@ import { Route as StudentNotificationsRouteImport } from './routes/student.notif
 import { Route as StudentProfileRouteImport } from './routes/student.profile'
 import { Route as StudentResultsRouteImport } from './routes/student.results'
 import { Route as StudentSettingsRouteImport } from './routes/student.settings'
+import { Route as StudentContactOfficerRouteImport } from './routes/student.contact-officer'
 import { Route as SuperAdminIndexRouteImport } from './routes/super-admin.index'
 import { Route as SuperAdminApplicationsRouteImport } from './routes/super-admin.applications'
 import { Route as SuperAdminAuditLogsRouteImport } from './routes/super-admin.audit-logs'
@@ -399,6 +400,11 @@ const StudentResultsRoute = StudentResultsRouteImport.update({
   path: '/results',
   getParentRoute: () => StudentRoute,
 } as any)
+const StudentContactOfficerRoute = StudentContactOfficerRouteImport.update({
+  id: '/contact-officer',
+  path: '/contact-officer',
+  getParentRoute: () => StudentRoute,
+} as any)
 const StudentSettingsRoute = StudentSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -631,6 +637,7 @@ export interface FileRoutesByFullPath {
   '/student/profile': typeof StudentProfileRoute
   '/student/results': typeof StudentResultsRouteWithChildren
   '/student/settings': typeof StudentSettingsRoute
+  '/student/contact-officer': typeof StudentContactOfficerRoute
   '/super-admin/applications': typeof SuperAdminApplicationsRoute
   '/super-admin/audit-logs': typeof SuperAdminAuditLogsRoute
   '/super-admin/examinations': typeof SuperAdminExaminationsRoute
@@ -719,6 +726,7 @@ export interface FileRoutesByTo {
   '/student/profile': typeof StudentProfileRoute
   '/student/results': typeof StudentResultsRouteWithChildren
   '/student/settings': typeof StudentSettingsRoute
+  '/student/contact-officer': typeof StudentContactOfficerRoute
   '/super-admin/applications': typeof SuperAdminApplicationsRoute
   '/super-admin/audit-logs': typeof SuperAdminAuditLogsRoute
   '/super-admin/examinations': typeof SuperAdminExaminationsRoute
@@ -812,6 +820,7 @@ export interface FileRoutesById {
   '/student/profile': typeof StudentProfileRoute
   '/student/results': typeof StudentResultsRouteWithChildren
   '/student/settings': typeof StudentSettingsRoute
+  '/student/contact-officer': typeof StudentContactOfficerRoute
   '/super-admin/applications': typeof SuperAdminApplicationsRoute
   '/super-admin/audit-logs': typeof SuperAdminAuditLogsRoute
   '/super-admin/examinations': typeof SuperAdminExaminationsRoute
@@ -1906,6 +1915,7 @@ interface StudentRouteChildren {
   StudentProfileRoute: typeof StudentProfileRoute
   StudentResultsRoute: typeof StudentResultsRouteWithChildren
   StudentSettingsRoute: typeof StudentSettingsRoute
+  StudentContactOfficerRoute: typeof StudentContactOfficerRoute
   StudentIndexRoute: typeof StudentIndexRoute
   StudentExamIdRoute: typeof StudentExamIdRoute
 }
@@ -1921,6 +1931,7 @@ const StudentRouteChildren: StudentRouteChildren = {
   StudentSettingsRoute: StudentSettingsRoute,
   StudentIndexRoute: StudentIndexRoute,
   StudentExamIdRoute: StudentExamIdRoute,
+  StudentContactOfficerRoute: StudentContactOfficerRoute,
 }
 
 const StudentRouteWithChildren =

@@ -146,6 +146,7 @@ export function SectionCard({
   actions,
   action,
   className,
+  bodyClassName,
 }: {
   title?: string;
   description?: string;
@@ -154,12 +155,14 @@ export function SectionCard({
   /** @deprecated use actions */
   action?: ReactNode;
   className?: string;
+  /** Applied to the scrollable body (CardContent). Use flex min-h-0 flex-1 flex-col overflow-hidden for split panels. */
+  bodyClassName?: string;
 }) {
   const right = actions ?? action;
   return (
     <Card className={cn("overflow-hidden rounded-xl border-slate-200/90 shadow-sm sm:rounded-2xl", className)}>
       {(title || description || right) && (
-        <CardHeader className="flex flex-row items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-5 sm:py-4 lg:px-6 lg:py-5">
+        <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 sm:px-5 sm:py-4 lg:px-6 lg:py-5">
           <div className="min-w-0">
             {title ? <CardTitle className="text-[13px] font-bold text-slate-900 sm:text-base lg:text-lg">{title}</CardTitle> : null}
             {description ? (
@@ -169,7 +172,9 @@ export function SectionCard({
           {right ? <div className="flex shrink-0 flex-wrap gap-1.5">{right}</div> : null}
         </CardHeader>
       )}
-      <CardContent className="px-3 py-2.5 sm:px-5 sm:py-4 lg:px-6 lg:py-5">{children}</CardContent>
+      <CardContent className={cn("px-3 py-2.5 sm:px-5 sm:py-4 lg:px-6 lg:py-5", bodyClassName)}>
+        {children}
+      </CardContent>
     </Card>
   );
 }

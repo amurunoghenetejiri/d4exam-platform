@@ -59,6 +59,7 @@ export const studentNav: RoleConfig = {
         { label: "Results", to: "/student/results", icon: BarChart3 },
         { label: "My Courses", to: "/student/courses", icon: BookOpen },
         { label: "Materials", to: "/student/materials", icon: FolderOpen },
+        { label: "Contact officer", to: "/student/contact-officer", icon: MessageSquare },
       ],
     },
     {
@@ -195,8 +196,7 @@ export const officerNav: RoleConfig = {
       items: [
         { label: "Results", to: "/officer/results", icon: BarChart3 },
         { label: "Carryover Students", to: "/officer/carryovers", icon: GraduationCap },
-        { label: "Reports", to: "/officer/reports", icon: ScrollText },
-        { label: "Audit Logs", to: "/officer/audit-logs", icon: ScrollText },
+        { label: "Student reports", to: "/officer/reports", icon: MessageSquare },
       ],
     },
     {
