@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
-import { VoiceBubble, ImageBubble, ImageLightbox, LongPressMenu, VoiceRecorderBar, lastSeenLabel } from "@/components/messaging/MessageMedia";
+import { VoiceBubble, ImageBubble, ImageLightbox, LongPressMenu, VoiceRecorderBar, lastSeenLabel, parseMediaUrls, attachmentLabel } from "@/components/messaging/MessageMedia";
 
 export const Route = createFileRoute("/student/contact-officer")({
   head: () => ({ meta: [{ title: "Messages — D4EXAM" }] }),
@@ -323,6 +323,26 @@ function Page() {
   }, [inChat, chatMessages.length, officerTyping]);
 
   useEffect(() => {
+    (window as unknown as { __d4MsgInChat?: boolean }).__d4MsgInChat = inChat || composeOpen;
+    return () => { (window as unknown as { __d4MsgInChat?: boolean }).__d4MsgInChat = false; };
+  }, [inChat, composeOpen]);
+
+  useEffect(() => {
+    const onBack = () => {
+      if (composeOpen) {
+        setComposeOpen(false);
+        return;
+      }
+      if (inChat) {
+        setInChat(false);
+        return;
+      }
+    };
+    window.addEventListener("d4-messaging-back", onBack);
+    return () => window.removeEventListener("d4-messaging-back", onBack);
+  }, [inChat, composeOpen]);
+
+  useEffect(() => {
     if (!recording) {
       if (recTimer.current) clearInterval(recTimer.current);
       setRecSecs(0);
@@ -493,10 +513,20 @@ function Page() {
     }
   }
 
-  async function onFile(file: File) {
+  async function onFile(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (!list.length) return;
     try {
-      const up = await uploadMessageMedia(file, file.type || "application/octet-stream", `msg/${schoolId}/${userId}`);
-      setPendingAttach({ url: up.url, type: up.type });
+      const uploaded: string[] = [];
+      let kind: "image" | "audio" | "file" = "file";
+      for (const file of list) {
+        const up = await uploadMessageMedia(file, file.type || "application/octet-stream", `msg/${schoolId}/${userId}`);
+        uploaded.push(up.url);
+        if (up.type === "image") kind = "image";
+        else if (up.type === "audio") kind = "audio";
+      }
+      const url = uploaded.length > 1 ? JSON.stringify(uploaded) : uploaded[0];
+      await sendMessage("", { url, type: kind });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed");
     }
@@ -594,7 +624,7 @@ function Page() {
   );
 
   const chatPane = inChat ? (
-    <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-slate-50">
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-slate-50 select-none">
       <div className="flex shrink-0 items-center gap-3 border-b bg-white px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3">
         <button type="button" onClick={() => setInChat(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden">
           <ArrowLeft className="h-5 w-5" />
@@ -681,15 +711,21 @@ function Page() {
               ) : null}
               {m.attachment_type === "audio" && m.attachment_url ? (
                 <VoiceBubble id={`msg-${m.key}`} src={m.attachment_url} mine={m.side === "out"} timeLabel={formatTime(m.at)} tick={m.side === "out" ? outTick : "none"} />
-              ) : m.attachment_type === "image" && m.attachment_url ? (
-                <ImageBubble
-                  id={`msg-${m.key}`}
-                  src={m.attachment_url}
-                  mine={m.side === "out"}
-                  timeLabel={formatTime(m.at)}
-                  tick={m.side === "out" ? outTick : "none"}
-                  onOpen={() => setLightboxSrc(m.attachment_url!)}
-                />
+              ) : (m.attachment_type === "image" || m.attachment_type === "images") && m.attachment_url ? (
+                (() => {
+                  const urls = parseMediaUrls(m.attachment_url);
+                  return (
+                    <ImageBubble
+                      id={`msg-${m.key}`}
+                      src={urls[0]}
+                      count={urls.length}
+                      mine={m.side === "out"}
+                      timeLabel={formatTime(m.at)}
+                      tick={m.side === "out" ? outTick : "none"}
+                      onOpen={() => setLightboxSrc(JSON.stringify(urls))}
+                    />
+                  );
+                })()
               ) : (
                 <div
                   id={`msg-${m.key}`}
@@ -765,25 +801,42 @@ function Page() {
               }
               setPendingAudio(null);
             }}
-            onPauseToggle={() => {
+            onPause={() => {
               try {
-                if (recPaused) {
-                  mediaRec.current?.resume();
-                  setRecPaused(false);
-                } else {
-                  mediaRec.current?.pause();
-                  setRecPaused(true);
+                mediaRec.current?.pause();
+                setRecPaused(true);
+                // snapshot for preview while paused
+                const blob = new Blob(chunks.current, { type: "audio/webm" });
+                if (blob.size >= 200) {
+                  if (pendingAudioUrl) URL.revokeObjectURL(pendingAudioUrl);
+                  setPendingAudio(blob);
+                  setPendingAudioUrl(URL.createObjectURL(blob));
                 }
               } catch { /* ignore */ }
             }}
-            onDone={() => stopRecKeep()}
+            onContinue={() => {
+              try {
+                mediaRec.current?.resume();
+                setRecPaused(false);
+              } catch { /* ignore */ }
+            }}
+            onPreviewPlay={() => {
+              if (!pendingAudioUrl) return;
+              const a = new Audio(pendingAudioUrl);
+              void a.play().catch(() => {});
+            }}
             onSend={() => {
-              if (recording) stopRecKeep();
-              window.setTimeout(() => void sendPendingAudio(), recording ? 150 : 0);
+              void (async () => {
+                if (recording) {
+                  try { mediaRec.current?.stop(); } catch { /* ignore */ }
+                  await new Promise((r) => setTimeout(r, 180));
+                }
+                await sendPendingAudio();
+              })();
             }}
           />
         ) : null}
-        <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ""; }} />
+        <input ref={fileRef} type="file" accept="image/*,video/*,.pdf,.doc,.docx" multiple className="hidden" onChange={(e) => { const fs = e.target.files; if (fs?.length) void onFile(fs); e.target.value = ""; }} />
         <div className="flex items-end gap-1.5">
           <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-500" onClick={() => fileRef.current?.click()} aria-label="Attach file">
             <Paperclip className="h-5 w-5" />
@@ -925,7 +978,18 @@ function Page() {
         </div>
       ) : null}
 
-      {lightboxSrc ? <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} /> : null}
+      {lightboxSrc ? (
+        <ImageLightbox
+          urls={(() => {
+            try {
+              const p = JSON.parse(lightboxSrc);
+              if (Array.isArray(p)) return p as string[];
+            } catch { /* single */ }
+            return [lightboxSrc];
+          })()}
+          onClose={() => setLightboxSrc(null)}
+        />
+      ) : null}
       <LongPressMenu
         open={Boolean(menuMsg)}
         onClose={() => setMenuMsg(null)}

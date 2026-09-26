@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
-import { VoiceBubble, ImageBubble, ImageLightbox, lastSeenLabel } from "@/components/messaging/MessageMedia";
+import { VoiceBubble, ImageBubble, ImageLightbox, VoiceRecorderBar, lastSeenLabel, parseMediaUrls, attachmentLabel } from "@/components/messaging/MessageMedia";
 
 export const Route = createFileRoute("/officer/reports")({
   head: () => ({
@@ -109,6 +109,15 @@ function Page() {
   const [sending, setSending] = useState(false);
   const [presenceMap, setPresenceMap] = useState<Map<string, { online: boolean; typing?: boolean; recording?: boolean }>>(new Map());
   const [recording, setRecording] = useState(false);
+  const [recPaused, setRecPaused] = useState(false);
+  const [recSecs, setRecSecs] = useState(0);
+  const [pendingAudio, setPendingAudio] = useState<Blob | null>(null);
+  const [pendingAudioUrl, setPendingAudioUrl] = useState<string | null>(null);
+  const recTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [listPct, setListPct] = useState(36);
+  const dragRef = useRef<{ startX: number; startPct: number } | null>(null);
+  const swipeRef = useRef<{ id: string; x: number } | null>(null);
+  const [replyTo, setReplyTo] = useState<{ id: string; text: string } | null>(null);
   const mediaRec = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const presenceApi = useRef<ReturnType<typeof joinMessagingPresence> | null>(null);
@@ -187,6 +196,9 @@ function Page() {
       if (new Date(lastAt) >= new Date(t.latestAt)) {
         t.latestAt = lastAt;
         t.preview = r.officer_reply || r.body;
+        if (!t.preview || t.preview === "(attachment)") {
+          t.preview = attachmentLabel(r.attachment_type, r.attachment_url);
+        }
       }
     }
     for (const t of map.values()) {
@@ -307,8 +319,7 @@ function Page() {
   }, [active]);
 
   async function uploadBlob(blob: Blob, kind: string) {
-    const up = await uploadMessageMedia(blob, kind, `msg/${schoolId}/${userId}`);
-    return up;
+    return uploadMessageMedia(blob, kind || blob.type || "application/octet-stream", `officer-msg/${schoolId || "s"}/${userId || "u"}`);
   }
 
   const sendReply = useCallback(async (text: string, attach?: { url: string; type: string } | null) => {
@@ -389,39 +400,90 @@ function Page() {
       rec.ondataavailable = (e) => {
         if (e.data.size) chunks.current.push(e.data);
       };
-      rec.onstop = async () => {
+      rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         presenceApi.current?.setRecording(false, active?.key);
-        setRecording(false);
         const blob = new Blob(chunks.current, { type: "audio/webm" });
-        if (blob.size < 200) return;
-        try {
-          const up = await uploadBlob(blob, "audio/webm");
-          await sendReply("", { url: up.url, type: up.type });
-        } catch {
-          toast.error("Could not upload voice note");
+        if (blob.size >= 200) {
+          setPendingAudio(blob);
+          if (pendingAudioUrl) URL.revokeObjectURL(pendingAudioUrl);
+          setPendingAudioUrl(URL.createObjectURL(blob));
         }
+        setRecording(false);
+        setRecPaused(false);
+        if (recTimer.current) clearInterval(recTimer.current);
       };
       mediaRec.current = rec;
-      rec.start();
+      rec.start(250);
       setRecording(true);
+      setRecPaused(false);
+      setRecSecs(0);
+      setPendingAudio(null);
+      if (recTimer.current) clearInterval(recTimer.current);
+      recTimer.current = setInterval(() => setRecSecs((s) => s + 1), 1000);
       presenceApi.current?.setRecording(true, active?.key);
     } catch {
       toast.error("Microphone permission required");
     }
   }
-  function stopRec() {
+
+  function cancelRec() {
+    try { mediaRec.current?.stop(); } catch { /* ignore */ }
+    chunks.current = [];
+    setPendingAudio(null);
+    if (pendingAudioUrl) { URL.revokeObjectURL(pendingAudioUrl); setPendingAudioUrl(null); }
+    setRecording(false);
+    setRecPaused(false);
+    setRecSecs(0);
+    if (recTimer.current) clearInterval(recTimer.current);
+    presenceApi.current?.setRecording(false, active?.key);
+  }
+
+  async function sendVoiceNow() {
+    if (recording) {
+      try { mediaRec.current?.stop(); } catch { /* ignore */ }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    const blob = pendingAudio || (chunks.current.length ? new Blob(chunks.current, { type: "audio/webm" }) : null);
+    if (!blob || blob.size < 200) {
+      cancelRec();
+      return;
+    }
     try {
-      mediaRec.current?.stop();
+      const up = await uploadBlob(blob, "audio/webm");
+      await sendReply("", { url: up.url, type: "audio" });
     } catch {
-      /* ignore */
+      toast.error("Could not upload voice note");
+    } finally {
+      setPendingAudio(null);
+      if (pendingAudioUrl) { URL.revokeObjectURL(pendingAudioUrl); setPendingAudioUrl(null); }
+      setRecSecs(0);
     }
   }
 
+  useEffect(() => {
+    const onBack = () => {
+      if (threadKey) setThreadKey(null);
+    };
+    window.addEventListener("d4-messaging-back", onBack);
+    return () => window.removeEventListener("d4-messaging-back", onBack);
+  }, [threadKey]);
+
+  useEffect(() => {
+    (window as unknown as { __d4MsgInChat?: boolean }).__d4MsgInChat = Boolean(threadKey);
+    return () => { (window as unknown as { __d4MsgInChat?: boolean }).__d4MsgInChat = false; };
+  }, [threadKey]);
+
   return (
-    <div className="flex h-dvh max-h-dvh w-full flex-col bg-white lg:flex-row lg:overflow-hidden">
-      {!threadKey ? (
-        <>
+    <div className="flex h-dvh max-h-dvh w-full flex-col bg-white lg:flex-row lg:overflow-hidden select-none">
+      <div
+        className={cn(
+          "flex min-h-0 flex-col bg-white",
+          threadKey ? "hidden lg:flex" : "flex w-full flex-1",
+          "lg:w-[min(var(--lp),48%)] lg:min-w-[280px] lg:max-w-[48%] lg:flex-none lg:border-r lg:border-slate-200",
+        )}
+        style={{ ["--lp"]: `${listPct}%` } as Record<string, string>}
+      >
           <div className="shrink-0 border-b px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <div className="mb-2 flex items-center gap-2">
               <button type="button" onClick={() => navigate({ to: "/officer" })} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100" aria-label="Back">
@@ -495,9 +557,26 @@ function Page() {
               })
             )}
           </ul>
-        </>
-      ) : active ? (
-        <>
+      </div>
+
+      <div
+        className="relative z-10 hidden w-3 shrink-0 cursor-col-resize items-center justify-center bg-slate-100 lg:flex"
+        onPointerDown={(e) => {
+          dragRef.current = { startX: e.clientX, startPct: listPct };
+          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          if (!dragRef.current) return;
+          const dx = e.clientX - dragRef.current.startX;
+          setListPct(Math.min(55, Math.max(22, dragRef.current.startPct + (dx / window.innerWidth) * 100)));
+        }}
+        onPointerUp={() => { dragRef.current = null; }}
+      >
+        <span className="h-10 w-1 rounded-full bg-[#2563eb]" />
+      </div>
+
+      {active ? (
+        <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !threadKey && "hidden lg:flex")}>
           <div className="flex shrink-0 items-center gap-3 border-b px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <button type="button" onClick={() => setThreadKey(null)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100">
               <ArrowLeft className="h-5 w-5" />
@@ -546,7 +625,19 @@ function Page() {
                   : "none";
               const outTick = tick === "read" ? "read" : tick === "none" ? "none" : "delivered";
               return (
-                <div key={m.key} className={cn("flex w-full select-none", m.side === "out" ? "justify-end" : "justify-start gap-2")} onCopy={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
+                <div key={m.key} className={cn("flex w-full select-none", m.side === "out" ? "justify-end" : "justify-start gap-2")}
+                  onCopy={(e) => e.preventDefault()}
+                  onContextMenu={(e) => e.preventDefault()}
+                  onTouchStart={(e) => { swipeRef.current = { id: m.reportId, x: e.touches[0]?.clientX ?? 0 }; }}
+                  onTouchEnd={(e) => {
+                    const s = swipeRef.current;
+                    swipeRef.current = null;
+                    if (!s) return;
+                    const x = e.changedTouches[0]?.clientX ?? 0;
+                    if (x - s.x > 56) {
+                      setReplyTo({ id: m.reportId, text: (m.text && m.text !== "(attachment)" ? m.text : attachmentLabel(m.attachment_type, m.attachment_url)).slice(0, 120) });
+                    }
+                  }}>
                   {m.side === "in" ? (
                     <span className={cn("mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white", avatarColor(active.key))}>
                       {initials(active.student_name)}
@@ -554,8 +645,19 @@ function Page() {
                   ) : null}
                   {m.attachment_type === "audio" && m.attachment_url ? (
                     <VoiceBubble src={m.attachment_url} mine={m.side === "out"} timeLabel={formatTime(m.at)} tick={m.side === "out" ? outTick : "none"} />
-                  ) : m.attachment_type === "image" && m.attachment_url ? (
-                    <ImageBubble src={m.attachment_url} timeLabel={formatTime(m.at)} tick={m.side === "out" ? outTick : "none"} onOpen={() => setLightboxSrc(m.attachment_url!)} />
+                  ) : (m.attachment_type === "image" || m.attachment_type === "images") && m.attachment_url ? (
+                    (() => {
+                      const urls = parseMediaUrls(m.attachment_url);
+                      return (
+                        <ImageBubble
+                          src={urls[0]}
+                          count={urls.length}
+                          timeLabel={formatTime(m.at)}
+                          tick={m.side === "out" ? outTick : "none"}
+                          onOpen={() => setLightboxSrc(JSON.stringify(urls))}
+                        />
+                      );
+                    })()
                   ) : (
                     <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white")}>
                       {m.subject && m.side === "in" ? <p className="mb-0.5 text-[11px] font-semibold text-slate-500">{m.subject}</p> : null}
@@ -574,18 +676,37 @@ function Page() {
             <div ref={chatEndRef} />
           </div>
           <div className="shrink-0 border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+            {replyTo ? (
+              <div className="mb-2 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-bold text-blue-800">Replying</p>
+                  <p className="line-clamp-2 text-xs text-slate-700">{replyTo.text}</p>
+                </div>
+                <button type="button" onClick={() => setReplyTo(null)} className="text-slate-400" aria-label="Cancel reply">×</button>
+              </div>
+            ) : null}
             <input
               ref={fileRef}
               type="file"
-              accept="image/*,.pdf"
+              accept="image/*,video/*,.pdf" multiple
               className="hidden"
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (!f) return;
+                const files = e.target.files;
+                if (!files?.length) return;
                 void (async () => {
                   try {
-                    const up = await uploadBlob(f, f.type);
-                    setPendingAttach({ url: up.url, type: up.type });
+                    const urls: string[] = [];
+                    let kind: "image" | "audio" | "file" = "file";
+                    for (const f of Array.from(files)) {
+                      const up = await uploadBlob(f, f.type);
+                      urls.push(up.url);
+                      if (up.type === "image") kind = "image";
+                    }
+                    const url = urls.length > 1 ? JSON.stringify(urls) : urls[0];
+                    setPendingAttach({ url, type: kind });
+                    // auto-send multi immediately
+                    await sendReply("", { url, type: kind });
+                    setPendingAttach(null);
                   } catch (err) {
                     toast.error(err instanceof Error ? err.message : "Upload failed");
                   }
@@ -608,18 +729,61 @@ function Page() {
                 <button
                   type="button"
                   className={cn("mb-0.5 grid h-10 w-10 place-items-center rounded-full text-white", recording ? "bg-red-500" : "bg-[#0b1b3a]")}
-                  onClick={() => (recording ? stopRec() : void startRec())}
+                  onClick={() => { if (!recording) void startRec(); }}
                 >
                   <Mic className="h-4 w-4" />
                 </button>
               )}
             </div>
-            {recording ? <p className="mt-1 text-center text-[11px] font-medium text-red-600">Recording… tap mic again when done, then send will upload</p> : null}
+            {recording || pendingAudioUrl ? (
+              <VoiceRecorderBar
+                recording={recording}
+                paused={recPaused}
+                seconds={recSecs}
+                previewUrl={pendingAudioUrl}
+                onCancel={cancelRec}
+                onPause={() => {
+                  try {
+                    mediaRec.current?.pause();
+                    setRecPaused(true);
+                    const blob = new Blob(chunks.current, { type: "audio/webm" });
+                    if (blob.size >= 200) {
+                      if (pendingAudioUrl) URL.revokeObjectURL(pendingAudioUrl);
+                      setPendingAudio(blob);
+                      setPendingAudioUrl(URL.createObjectURL(blob));
+                    }
+                  } catch { /* ignore */ }
+                }}
+                onContinue={() => {
+                  try { mediaRec.current?.resume(); setRecPaused(false); } catch { /* ignore */ }
+                }}
+                onPreviewPlay={() => {
+                  if (pendingAudioUrl) void new Audio(pendingAudioUrl).play().catch(() => {});
+                }}
+                onSend={() => void sendVoiceNow()}
+              />
+            ) : null}
           </div>
-        </>
-      ) : null}
+        </div>
+      ) : (
+        <div className="hidden min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-slate-50 p-8 text-center lg:flex">
+          <p className="text-sm font-semibold text-slate-600">Select a conversation</p>
+          <p className="text-xs text-slate-400">Messages appear here when you open a student thread</p>
+        </div>
+      )}
 
-      {lightboxSrc ? <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} /> : null}
+      {lightboxSrc ? (
+        <ImageLightbox
+          urls={(() => {
+            try {
+              const p = JSON.parse(lightboxSrc);
+              if (Array.isArray(p)) return p as string[];
+            } catch { /* single */ }
+            return [lightboxSrc];
+          })()}
+          onClose={() => setLightboxSrc(null)}
+        />
+      ) : null}
       {renameOpen && active ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
