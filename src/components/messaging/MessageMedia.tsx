@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, CheckCheck, Download, Mic, Pause, Play, Pencil, Trash2, X } from "lucide-react";
+import { Check, CheckCheck, Download, Mic, Pause, Play, Pencil, Trash2, X, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const SPEEDS = [1, 1.25, 1.5, 2] as const;
@@ -297,10 +297,10 @@ export function VoiceRecorderBar({
           </button>
         )}
         <button type="button" onClick={onSend} className="flex flex-col items-center gap-1">
-          <span className="grid h-11 w-11 place-items-center rounded-full bg-[#2563eb] text-white shadow-md">
-            <Play className="ml-0.5 h-5 w-5" />
+          <span className="grid h-14 w-14 place-items-center rounded-full bg-[#2563eb] text-white shadow-lg ring-2 ring-blue-200">
+            <Send className="h-6 w-6" />
           </span>
-          <span className="text-[10px] font-semibold text-[#2563eb]">Send</span>
+          <span className="text-[10px] font-bold text-[#2563eb]">Send</span>
         </button>
       </div>
     </div>
