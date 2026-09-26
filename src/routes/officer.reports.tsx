@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
+import { uploadMessageMedia } from "@/lib/message-media";
 
 export const Route = createFileRoute("/officer/reports")({
   head: () => ({
@@ -115,6 +116,10 @@ function Page() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [pendingAttach, setPendingAttach] = useState<{ url: string; type: string } | null>(null);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const [locallyReadThreads, setLocallyReadThreads] = useState<Record<string, boolean>>({});
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [renameVal, setRenameVal] = useState("");
   const [nickMap, setNickMap] = useState<Record<string, string>>(() => {
     try {
       return JSON.parse(localStorage.getItem("d4exam.msg.nick.students") || "{}") as Record<string, string>;
@@ -185,10 +190,9 @@ function Page() {
     for (const t of map.values()) {
       t.unread = t.rows.filter((r) => {
         if (String(r.status || "open").toLowerCase() === "replied" && r.officer_reply) {
-          // student msg still unread for officer if never officer_read
           return !r.officer_read_at;
         }
-        return String(r.status || "open").toLowerCase() !== "replied";
+        return String(r.status || "open").toLowerCase() !== "replied" || !r.officer_read_at;
       }).length;
     }
     return [...map.values()].sort((a, b) => new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime());
@@ -297,11 +301,8 @@ function Page() {
   }, [active]);
 
   async function uploadBlob(blob: Blob, kind: string) {
-    const ext = kind.startsWith("audio") ? "webm" : "bin";
-    const path = `msg/${schoolId}/${userId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from("message-media").upload(path, blob, { contentType: kind, upsert: false });
-    if (error) throw error;
-    return supabase.storage.from("message-media").getPublicUrl(path).data.publicUrl;
+    const up = await uploadMessageMedia(blob, kind, `msg/${schoolId}/${userId}`);
+    return up;
   }
 
   const sendReply = useCallback(async (text: string, attach?: { url: string; type: string } | null) => {
@@ -389,8 +390,8 @@ function Page() {
         const blob = new Blob(chunks.current, { type: "audio/webm" });
         if (blob.size < 200) return;
         try {
-          const url = await uploadBlob(blob, "audio/webm");
-          await sendReply("", { url, type: "audio" });
+          const up = await uploadBlob(blob, "audio/webm");
+          await sendReply("", { url: up.url, type: up.type });
         } catch {
           toast.error("Could not upload voice note");
         }
@@ -459,8 +460,8 @@ function Page() {
                   <li key={t.key}>
                     <button
                       type="button"
-                      onClick={() => setThreadKey(t.key)}
-                      className="flex w-full items-start gap-3 border-b border-slate-50 px-4 py-3 text-left hover:bg-slate-50"
+                      onClick={() => { setThreadKey(t.key); setLocallyReadThreads((m) => ({ ...m, [t.key]: true })); }}
+                      className="mx-3 mb-2 flex w-[calc(100%-1.5rem)] items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm hover:border-blue-200 hover:shadow-md"
                     >
                       <span className={cn("relative grid h-12 w-12 place-items-center rounded-full text-sm font-bold text-white", avatarColor(t.key))}>
                         {initials(t.student_name)}
@@ -477,7 +478,7 @@ function Page() {
                         </p>
                         <p className="line-clamp-1 text-xs text-slate-500">{t.preview}</p>
                       </div>
-                      {t.unread > 0 ? (
+                      {t.unread > 0 && !locallyReadThreads[t.key] ? (
                         <span className="mt-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
                           {t.unread > 99 ? "99+" : t.unread}
                         </span>
@@ -515,13 +516,8 @@ function Page() {
               {chatMenuOpen ? (
                 <div className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
                   <button type="button" className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50" onClick={() => {
-                    const cur = nickMap[active.key] || active.student_name || "Student";
-                    const n = window.prompt("Nickname for this student", cur);
-                    if (n && n.trim()) {
-                      const next = { ...nickMap, [active.key]: n.trim() };
-                      setNickMap(next);
-                      try { localStorage.setItem("d4exam.msg.nick.students", JSON.stringify(next)); } catch { /* ignore */ }
-                    }
+                    setRenameOpen(true);
+                    setRenameVal(nickMap[active.key] || active.student_name || "Student");
                     setChatMenuOpen(false);
                   }}>Rename contact</button>
                   <button type="button" className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50" onClick={() => {
@@ -529,10 +525,9 @@ function Page() {
                     void qc.invalidateQueries({ queryKey: ["officer-student-reports"] });
                   }}>Refresh chat</button>
                   <button type="button" className="block w-full px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => {
-                    if (!window.confirm("Hide this conversation from your open view? (Does not delete school records.)")) return;
-                    setThreadKey(null);
+                    setClearOpen(true);
                     setChatMenuOpen(false);
-                  }}>Close conversation</button>
+                  }}>Clear chat</button>
                 </div>
               ) : null}
             </div>
@@ -541,7 +536,7 @@ function Page() {
             {chatMessages.map((m) => {
               const tick =
                 m.side === "out"
-                  ? ticksFor({ isMine: true, createdAt: m.at, peerOnline: studentOnline, peerReadAt: studentReadAt })
+                  ? ticksFor({ isMine: true, createdAt: m.at, peerOnline: true, peerReadAt: studentReadAt })
                   : "none";
               return (
                 <div key={m.key} className={cn("flex", m.side === "out" ? "justify-end" : "justify-start gap-2")}>
@@ -552,7 +547,7 @@ function Page() {
                   ) : null}
                   <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white")}>
                     {m.subject && m.side === "in" ? <p className="mb-0.5 text-[11px] font-semibold text-slate-500">{m.subject}</p> : null}
-                    {m.attachment_type === "image" && m.attachment_url ? <img src={m.attachment_url} alt="" className="mb-1 max-h-40 rounded-lg" /> : null}
+                    {m.attachment_type === "image" && m.attachment_url ? <img src={m.attachment_url} alt="" className="mb-1 max-h-64 w-full max-w-[260px] rounded-xl object-contain bg-black/5" /> : null}
                     {m.attachment_type === "audio" && m.attachment_url ? <audio controls src={m.attachment_url} className="mb-1 max-w-full" /> : null}
                     {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap">{m.text}</p> : null}
                     <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
@@ -578,10 +573,10 @@ function Page() {
                 if (!f) return;
                 void (async () => {
                   try {
-                    const url = await uploadBlob(f, f.type);
-                    setPendingAttach({ url, type: f.type.startsWith("image/") ? "image" : "file" });
-                  } catch {
-                    toast.error("Upload failed — create storage bucket message-media");
+                    const up = await uploadBlob(f, f.type);
+                    setPendingAttach({ url: up.url, type: up.type });
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Upload failed");
                   }
                 })();
                 e.target.value = "";
@@ -602,18 +597,57 @@ function Page() {
                 <button
                   type="button"
                   className={cn("mb-0.5 grid h-10 w-10 place-items-center rounded-full text-white", recording ? "bg-red-500" : "bg-[#0b1b3a]")}
-                  onMouseDown={() => void startRec()}
-                  onMouseUp={stopRec}
-                  onTouchStart={(e) => { e.preventDefault(); void startRec(); }}
-                  onTouchEnd={(e) => { e.preventDefault(); stopRec(); }}
+                  onClick={() => (recording ? stopRec() : void startRec())}
                 >
-                  {recording ? <X className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                  <Mic className="h-4 w-4" />
                 </button>
               )}
             </div>
-            {recording ? <p className="mt-1 text-center text-[11px] font-medium text-red-600">Recording… release to send</p> : null}
+            {recording ? <p className="mt-1 text-center text-[11px] font-medium text-red-600">Recording… tap mic again when done, then send will upload</p> : null}
           </div>
         </>
+      ) : null}
+
+      {renameOpen && active ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-extrabold text-slate-900">Rename contact</h3>
+            <p className="mt-1 text-xs text-slate-500">Display name only on your device.</p>
+            <input value={renameVal} onChange={(e) => setRenameVal(e.target.value)} className="mt-3 h-11 w-full rounded-xl border px-3 text-sm" autoFocus />
+            <div className="mt-4 flex gap-2">
+              <button type="button" className="flex-1 rounded-xl border py-2.5 text-sm font-bold" onClick={() => setRenameOpen(false)}>Cancel</button>
+              <button type="button" className="flex-1 rounded-xl bg-[#2563eb] py-2.5 text-sm font-bold text-white" onClick={() => {
+                const n = renameVal.trim() || active.student_name || "Student";
+                const next = { ...nickMap, [active.key]: n };
+                setNickMap(next);
+                try { localStorage.setItem("d4exam.msg.nick.students", JSON.stringify(next)); } catch { /* ignore */ }
+                setRenameOpen(false);
+              }}>Save</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {clearOpen && active ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-extrabold text-slate-900">Clear this chat?</h3>
+            <p className="mt-1 text-xs text-slate-500">All messages with this student will be deleted.</p>
+            <div className="mt-4 flex gap-2">
+              <button type="button" className="flex-1 rounded-xl border py-2.5 text-sm font-bold" onClick={() => setClearOpen(false)}>Cancel</button>
+              <button type="button" className="flex-1 rounded-xl bg-red-600 py-2.5 text-sm font-bold text-white" onClick={async () => {
+                const ids = active.rows.map((r) => r.id);
+                const { error } = await supabase.from("student_officer_reports").delete().in("id", ids);
+                if (error) toast.error(error.message);
+                else {
+                  setThreadKey(null);
+                  setClearOpen(false);
+                  await qc.invalidateQueries({ queryKey: ["officer-student-reports"] });
+                }
+              }}>Clear chat</button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

@@ -19,8 +19,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
       closeButton
       expand={false}
       gap={10}
-      offset={12}
-      mobileOffset={10}
+      offset={{ top: "max(12px, env(safe-area-inset-top))", right: 16, left: 16 }}
+      mobileOffset={{ top: "max(10px, env(safe-area-inset-top))", right: 14, left: 14 }}
       duration={3400}
       visibleToasts={3}
       swipeDirections={["left", "right", "top"]}
@@ -34,7 +34,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       toastOptions={{
         classNames: {
           toast:
-            "group toast d4-toast group-[.toaster]:border-2 group-[.toaster]:shadow-lg group-[.toaster]:rounded-2xl group-[.toaster]:cursor-grab active:group-[.toaster]:cursor-grabbing group-[.toaster]:w-[min(100vw-1.25rem,22rem)] group-[.toaster]:max-w-[min(100vw-1.25rem,22rem)] group-[.toaster]:mx-auto group-[.toaster]:px-3.5 group-[.toaster]:py-3 group-[.toaster]:bg-white group-[.toaster]:border-primary/25 group-[.toaster]:text-slate-900",
+            "group toast d4-toast group-[.toaster]:border-2 group-[.toaster]:shadow-lg group-[.toaster]:rounded-2xl group-[.toaster]:cursor-grab active:group-[.toaster]:cursor-grabbing group-[.toaster]:w-[min(calc(100vw-2.5rem),22rem)] group-[.toaster]:max-w-[min(calc(100vw-2.5rem),22rem)] group-[.toaster]:mx-auto group-[.toaster]:box-border group-[.toaster]:px-3.5 group-[.toaster]:py-3 group-[.toaster]:bg-white group-[.toaster]:border-primary/25 group-[.toaster]:text-slate-900",
           title:
             "group-[.toast]:text-[13px] group-[.toast]:font-bold group-[.toast]:leading-snug group-[.toast]:pr-5 group-[.toast]:text-slate-900",
           description:

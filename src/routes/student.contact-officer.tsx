@@ -22,11 +22,10 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
+import { uploadMessageMedia } from "@/lib/message-media";
 
 export const Route = createFileRoute("/student/contact-officer")({
-  head: () => ({
-    meta: [{ title: "Messages — D4EXAM" }],
-  }),
+  head: () => ({ meta: [{ title: "Messages — D4EXAM" }] }),
   component: Page,
 });
 
@@ -49,7 +48,6 @@ type ReportRow = {
   reply_to_id?: string | null;
 };
 
-type TabKey = "inbox" | "sent" | "all";
 type ChatMsg = {
   key: string;
   side: "out" | "in";
@@ -59,15 +57,16 @@ type ChatMsg = {
   attachment_url?: string | null;
   attachment_type?: string | null;
   reportId: string;
+  replyPreview?: string | null;
 };
+
+type TabKey = "inbox" | "sent" | "all";
 
 function formatWhen(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const now = new Date();
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const y = new Date(now);
   y.setDate(y.getDate() - 1);
   if (d.toDateString() === y.toDateString()) return "Yesterday";
@@ -77,12 +76,10 @@ function formatTime(iso: string) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
-
 function Ticks({ state }: { state: "none" | "sent" | "delivered" | "read" }) {
   if (state === "none") return null;
   if (state === "sent") return <Check className="inline h-3.5 w-3.5 text-blue-100" aria-label="Sent" />;
-  if (state === "delivered")
-    return <CheckCheck className="inline h-3.5 w-3.5 text-blue-100" aria-label="Delivered" />;
+  if (state === "delivered") return <CheckCheck className="inline h-3.5 w-3.5 text-blue-100" aria-label="Delivered" />;
   return <CheckCheck className="inline h-3.5 w-3.5 text-[#0b1b3a]" aria-label="Read" />;
 }
 
@@ -104,22 +101,14 @@ function Page() {
   const [officerOnline, setOfficerOnline] = useState(false);
   const [officerTyping, setOfficerTyping] = useState(false);
   const [officerRecording, setOfficerRecording] = useState(false);
-  const [peerReadAt, setPeerReadAt] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
-  const mediaRec = useRef<MediaRecorder | null>(null);
-  const chunks = useRef<Blob[]>([]);
-  const presenceApi = useRef<ReturnType<typeof joinMessagingPresence> | null>(null);
-  const sendLock = useRef(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const [examSearch, setExamSearch] = useState("");
-  const [selectedExamIds, setSelectedExamIds] = useState<string[]>([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
+  const [recSecs, setRecSecs] = useState(0);
+  const [pendingAudio, setPendingAudio] = useState<Blob | null>(null);
   const [pendingAttach, setPendingAttach] = useState<{ url: string; type: string } | null>(null);
+  const [replyTo, setReplyTo] = useState<{ id: string; text: string } | null>(null);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [clearOpen, setClearOpen] = useState(false);
   const [officerNickname, setOfficerNickname] = useState(() => {
     try {
       return localStorage.getItem("d4exam.msg.nick.officer") || "Departmental Officer";
@@ -127,6 +116,24 @@ function Page() {
       return "Departmental Officer";
     }
   });
+  const [renameVal, setRenameVal] = useState("");
+  const [listPct, setListPct] = useState(38);
+  const [locallyRead, setLocallyRead] = useState(false);
+  const dragRef = useRef<{ startX: number; startPct: number } | null>(null);
+  const mediaRec = useRef<MediaRecorder | null>(null);
+  const chunks = useRef<Blob[]>([]);
+  const recTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const presenceApi = useRef<ReturnType<typeof joinMessagingPresence> | null>(null);
+  const sendLock = useRef(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const swipeRef = useRef<{ id: string; x: number } | null>(null);
+
+  const [examSearch, setExamSearch] = useState("");
+  const [selectedExamIds, setSelectedExamIds] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
 
   const examsQ = useQuery({
     queryKey: ["student-contact-exams", schoolId, studentId],
@@ -180,7 +187,6 @@ function Page() {
       else if (userId) q = q.eq("student_user_id", userId);
       const { data, error } = await q;
       if (error) {
-        // fallback without new columns
         let q2 = supabase
           .from("student_officer_reports")
           .select("id, exam_id, exam_title, exam_titles, subject, body, status, officer_reply, replied_at, created_at")
@@ -199,10 +205,15 @@ function Page() {
   const rows = mineQ.data ?? [];
   const exams = examsQ.data ?? [];
 
-  // One conversation with officer — all rows
   const chatMessages: ChatMsg[] = useMemo(() => {
+    const byId = new Map(rows.map((r) => [r.id, r]));
     const out: ChatMsg[] = [];
     for (const r of rows) {
+      let replyPreview: string | null = null;
+      if (r.reply_to_id && byId.has(r.reply_to_id)) {
+        const parent = byId.get(r.reply_to_id)!;
+        replyPreview = parent.officer_reply || parent.body;
+      }
       out.push({
         key: `${r.id}-s`,
         side: "out",
@@ -212,6 +223,7 @@ function Page() {
         attachment_url: r.attachment_url,
         attachment_type: r.attachment_type,
         reportId: r.id,
+        replyPreview,
       });
       if (r.officer_reply) {
         out.push({
@@ -227,79 +239,49 @@ function Page() {
   }, [rows]);
 
   const latest = rows.length ? rows[rows.length - 1] : null;
-  const inboxUnread = useMemo(
-    () =>
-      rows.filter((r) => {
-        if (!r.officer_reply) return false;
-        if (!r.student_read_at) return true;
-        const read = new Date(r.student_read_at).getTime();
-        const replyAt = new Date(r.replied_at || r.created_at).getTime();
-        return replyAt > read;
-      }).length,
-    [rows],
-  );
+  const inboxUnread = useMemo(() => {
+    if (locallyRead) return 0;
+    return rows.filter((r) => {
+      if (!r.officer_reply) return false;
+      if (!r.student_read_at) return true;
+      return new Date(r.replied_at || r.created_at).getTime() > new Date(r.student_read_at).getTime();
+    }).length;
+  }, [rows, locallyRead]);
 
   const listPreview = useMemo(() => {
     if (!latest) return null;
     const lastMsg = chatMessages[chatMessages.length - 1];
-    return {
-      preview: lastMsg?.text || "",
-      at: lastMsg?.at || latest.created_at,
-      unread: inboxUnread,
-    };
+    return { preview: lastMsg?.text || "", at: lastMsg?.at || latest.created_at, unread: inboxUnread };
   }, [latest, chatMessages, inboxUnread]);
-
-  const showInList = useMemo(() => {
-    if (!listPreview) return false;
-    if (tab === "inbox") return inboxUnread > 0 || rows.some((r) => r.officer_reply);
-    if (tab === "sent") return rows.length > 0;
-    return rows.length > 0 || true;
-  }, [tab, listPreview, inboxUnread, rows.length]);
-
-  const filteredShow =
-    !search.trim() ||
-    (listPreview &&
-      `${listPreview.preview} Departmental Officer`.toLowerCase().includes(search.trim().toLowerCase()));
 
   useEffect(() => {
     if (!schoolId || !userId) return;
-    const api = joinMessagingPresence(
-      schoolId,
-      { userId, role: "student", conversationKey: studentId || userId },
-      {
-        onPresence(map) {
-          let online = false;
-          let typing = false;
-          let recording = false;
-          map.forEach((p) => {
-            if (p.role === "officer" && p.online) {
-              online = true;
-              if (p.typing) typing = true;
-              if (p.recording) recording = true;
-            }
-          });
-          setOfficerOnline(online);
-          setOfficerTyping(typing);
-          setOfficerRecording(recording);
-        },
+    const api = joinMessagingPresence(schoolId, { userId, role: "student", conversationKey: studentId || userId }, {
+      onPresence(map) {
+        let online = false;
+        let typing = false;
+        let recording = false;
+        map.forEach((p) => {
+          if (p.role === "officer" && p.online) {
+            online = true;
+            if (p.typing) typing = true;
+            if (p.recording) recording = true;
+          }
+        });
+        setOfficerOnline(online);
+        setOfficerTyping(typing);
+        setOfficerRecording(recording);
       },
-    );
+    });
     presenceApi.current = api;
     return () => api.leave();
   }, [schoolId, userId, studentId]);
 
-  // Mark read when opening chat
   useEffect(() => {
     if (!inChat || !rows.length) return;
+    setLocallyRead(true);
     const now = new Date().toISOString();
-    setPeerReadAt((prev) => {
-      const maxOfficer = rows.reduce((m, r) => {
-        const t = r.officer_read_at ? new Date(r.officer_read_at).getTime() : 0;
-        return Math.max(m, t);
-      }, 0);
-      return maxOfficer ? new Date(maxOfficer).toISOString() : prev;
-    });
-    const ids = rows.filter((r) => r.officer_reply).map((r) => r.id);
+    const ids = rows.map((r) => r.id);
     if (ids.length) {
       void supabase
         .from("student_officer_reports")
@@ -307,11 +289,24 @@ function Page() {
         .in("id", ids)
         .then(() => qc.invalidateQueries({ queryKey: ["student-my-reports"] }));
     }
-  }, [inChat, rows.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [inChat]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (inChat) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [inChat, chatMessages.length, officerTyping]);
+
+  useEffect(() => {
+    if (!recording) {
+      if (recTimer.current) clearInterval(recTimer.current);
+      setRecSecs(0);
+      return;
+    }
+    setRecSecs(0);
+    recTimer.current = setInterval(() => setRecSecs((s) => s + 1), 1000);
+    return () => {
+      if (recTimer.current) clearInterval(recTimer.current);
+    };
+  }, [recording]);
 
   const selectedTitles = useMemo(
     () => exams.filter((e) => selectedExamIds.includes(e.id)).map((e) => e.title),
@@ -322,17 +317,13 @@ function Page() {
     return q ? exams.filter((e) => e.title.toLowerCase().includes(q)) : exams;
   }, [exams, examSearch]);
 
-  async function uploadBlob(blob: Blob, kind: string) {
-    const ext = kind.startsWith("audio") ? "webm" : kind.includes("png") ? "png" : "bin";
-    const path = `msg/${schoolId}/${userId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from("message-media").upload(path, blob, {
-      contentType: kind,
-      upsert: false,
-    });
-    if (error) throw error;
-    const { data } = supabase.storage.from("message-media").getPublicUrl(path);
-    return data.publicUrl;
-  }
+  const maxOfficerRead = useMemo(() => {
+    let m = 0;
+    for (const r of rows) {
+      if (r.officer_read_at) m = Math.max(m, new Date(r.officer_read_at).getTime());
+    }
+    return m ? new Date(m).toISOString() : null;
+  }, [rows]);
 
   const sendMessage = useCallback(
     async (text: string, attach?: { url: string; type: string } | null) => {
@@ -345,32 +336,27 @@ function Page() {
       }
       sendLock.current = true;
       setSending(true);
-      const tempId = `tmp-${Date.now()}`;
-      // optimistic: invalidate after real insert only for speed
       try {
         const name = session?.fullName || student?.fullName || "Student";
-        const { data, error } = await supabase
-          .from("student_officer_reports")
-          .insert({
-            school_id: schoolId,
-            student_id: studentId || null,
-            student_user_id: userId || null,
-            student_name: name,
-            student_matric: student?.matric || null,
-            exam_id: selectedExamIds[0] || null,
-            exam_title: selectedTitles[0] || null,
-            exam_ids: selectedExamIds.length ? selectedExamIds : [],
-            exam_titles: selectedTitles.length ? selectedTitles : [],
-            subject: subject.trim() || "Message",
-            body: text.trim() || (attach ? "(attachment)" : ""),
-            status: "open",
-            attachment_url: attach?.url || null,
-            attachment_type: attach?.type || null,
-          } as never)
-          .select("id")
-          .maybeSingle();
+        const payload: Record<string, unknown> = {
+          school_id: schoolId,
+          student_id: studentId || null,
+          student_user_id: userId || null,
+          student_name: name,
+          student_matric: student?.matric || null,
+          exam_id: selectedExamIds[0] || null,
+          exam_title: selectedTitles[0] || null,
+          exam_ids: selectedExamIds.length ? selectedExamIds : [],
+          exam_titles: selectedTitles.length ? selectedTitles : [],
+          subject: replyTo ? `Re: ${(replyTo.text || "").slice(0, 40)}` : subject.trim() || null,
+          body: text.trim() || (attach ? "(attachment)" : ""),
+          status: "open",
+          attachment_url: attach?.url || null,
+          attachment_type: attach?.type || null,
+          reply_to_id: replyTo?.id || null,
+        };
+        let { error } = await supabase.from("student_officer_reports").insert(payload as never);
         if (error) {
-          // retry without attachment columns
           const { error: e2 } = await supabase.from("student_officer_reports").insert({
             school_id: schoolId,
             student_id: studentId || null,
@@ -385,14 +371,14 @@ function Page() {
           } as never);
           if (e2) throw e2;
         }
-        void data;
-        void tempId;
         setBody("");
         setSubject("");
         setReplyText("");
         setPendingAttach(null);
+        setReplyTo(null);
         setComposeOpen(false);
         setInChat(true);
+        setLocallyRead(false);
         await qc.invalidateQueries({ queryKey: ["student-my-reports"] });
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Could not send");
@@ -401,18 +387,7 @@ function Page() {
         sendLock.current = false;
       }
     },
-    [
-      schoolId,
-      session?.fullName,
-      student?.fullName,
-      student?.matric,
-      studentId,
-      userId,
-      selectedExamIds,
-      selectedTitles,
-      subject,
-      qc,
-    ],
+    [schoolId, session, student, studentId, userId, selectedExamIds, selectedTitles, subject, replyTo, qc],
   );
 
   function onTyping(v: string) {
@@ -421,6 +396,7 @@ function Page() {
   }
 
   async function startRec() {
+    if (recording) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const rec = new MediaRecorder(stream);
@@ -428,29 +404,36 @@ function Page() {
       rec.ondataavailable = (e) => {
         if (e.data.size) chunks.current.push(e.data);
       };
-      rec.onstop = async () => {
+      rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         presenceApi.current?.setRecording(false, studentId || userId);
-        setRecording(false);
         const blob = new Blob(chunks.current, { type: "audio/webm" });
-        if (blob.size < 200) return;
-        try {
-          const url = await uploadBlob(blob, "audio/webm");
-          await sendMessage("", { url, type: "audio" });
-        } catch {
-          toast.error("Could not upload voice note");
-        }
+        if (blob.size >= 200) setPendingAudio(blob);
+        setRecording(false);
       };
       mediaRec.current = rec;
       rec.start();
       setRecording(true);
+      setPendingAudio(null);
       presenceApi.current?.setRecording(true, studentId || userId);
     } catch {
       toast.error("Microphone permission is required for voice notes");
     }
   }
 
-  function stopRec() {
+  function cancelRec() {
+    try {
+      mediaRec.current?.stop();
+    } catch {
+      /* ignore */
+    }
+    chunks.current = [];
+    setPendingAudio(null);
+    setRecording(false);
+    presenceApi.current?.setRecording(false, studentId || userId);
+  }
+
+  function stopRecKeep() {
     try {
       mediaRec.current?.stop();
     } catch {
@@ -458,349 +441,408 @@ function Page() {
     }
   }
 
-  async function onFile(file: File) {
+  async function sendPendingAudio() {
+    if (!pendingAudio && !recording) return;
+    if (recording) {
+      stopRecKeep();
+      // wait briefly for onstop
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    const blob = pendingAudio || (chunks.current.length ? new Blob(chunks.current, { type: "audio/webm" }) : null);
+    if (!blob || blob.size < 200) {
+      cancelRec();
+      return;
+    }
     try {
-      const url = await uploadBlob(file, file.type || "application/octet-stream");
-      setPendingAttach({ url, type: file.type.startsWith("image/") ? "image" : "file" });
-    } catch {
-      toast.error("Upload failed. Ask admin to create storage bucket message-media.");
+      const up = await uploadMessageMedia(blob, "audio/webm", `msg/${schoolId}/${userId}`);
+      setPendingAudio(null);
+      await sendMessage("", { url: up.url, type: "audio" });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not send voice note");
     }
   }
 
-  const maxOfficerRead = useMemo(() => {
-    let m = 0;
-    for (const r of rows) {
-      if (r.officer_read_at) m = Math.max(m, new Date(r.officer_read_at).getTime());
+  async function onFile(file: File) {
+    try {
+      const up = await uploadMessageMedia(file, file.type || "application/octet-stream", `msg/${schoolId}/${userId}`);
+      setPendingAttach({ url: up.url, type: up.type });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload failed");
     }
-    return m ? new Date(m).toISOString() : peerReadAt;
-  }, [rows, peerReadAt]);
+  }
 
-  return (
-    <div className="flex h-dvh max-h-dvh flex-col bg-white">
-      {!inChat && !composeOpen ? (
-        <>
-          <div className="shrink-0 border-b border-slate-100 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-            <div className="mb-2 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => navigate({ to: "/student" })}
-                className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100"
-                aria-label="Back"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </button>
+  async function clearChat() {
+    if (!rows.length) {
+      setClearOpen(false);
+      return;
+    }
+    const ids = rows.map((r) => r.id);
+    const { error } = await supabase.from("student_officer_reports").delete().in("id", ids);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setClearOpen(false);
+    setInChat(false);
+    setChatMenuOpen(false);
+    await qc.invalidateQueries({ queryKey: ["student-my-reports"] });
+  }
+
+  const filteredShow =
+    !search.trim() ||
+    (listPreview && `${listPreview.preview} ${officerNickname}`.toLowerCase().includes(search.trim().toLowerCase()));
+
+  const showDesktopSplit = true; // layout handles lg
+
+  const listPane = (
+    <div className="flex min-h-0 flex-1 flex-col bg-slate-50 lg:bg-white">
+      <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-4">
+        <div className="mb-2 flex items-center gap-2">
+          <button type="button" onClick={() => navigate({ to: "/student" })} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden" aria-label="Back">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-extrabold text-slate-900">Messages</h1>
+            <p className="text-[11px] text-slate-500">Contact your departmental officer</p>
+          </div>
+        </div>
+        <Button type="button" className="h-11 w-full rounded-xl bg-[#2563eb] font-bold hover:bg-[#1d4ed8]" onClick={() => setComposeOpen(true)}>
+          + New Message
+        </Button>
+        <div className="mt-3 flex gap-1 rounded-full bg-slate-100 p-1">
+          {([
+            { k: "inbox" as const, label: "Inbox", count: inboxUnread },
+            { k: "sent" as const, label: "Sent" },
+            { k: "all" as const, label: "All" },
+          ] as const).map((t) => (
+            <button key={t.k} type="button" onClick={() => setTab(t.k)} className={cn("flex flex-1 items-center justify-center gap-1 rounded-full py-2 text-xs font-bold", tab === t.k ? "bg-[#2563eb] text-white" : "text-slate-600")}>
+              {t.label}
+              {"count" in t && t.count > 0 ? <span className="grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[10px] text-white">{t.count > 99 ? "99+" : t.count}</span> : null}
+            </button>
+          ))}
+        </div>
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search messages…" className="h-10 rounded-xl bg-slate-50 pl-9" />
+        </div>
+      </div>
+      <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+        {listPreview && filteredShow && (tab !== "inbox" || inboxUnread > 0 || rows.some((r) => r.officer_reply)) ? (
+          <li>
+            <button
+              type="button"
+              onClick={() => {
+                setInChat(true);
+                setComposeOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm transition hover:border-blue-200 hover:shadow-md",
+                inChat && "border-blue-300 ring-2 ring-blue-100",
+              )}
+            >
+              <span className="relative grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#0b1b3a] text-white">
+                <User className="h-5 w-5" />
+                <span className={cn("absolute bottom-0.5 right-0.5 h-3 w-3 rounded-full border-2 border-white", officerOnline ? "bg-emerald-400" : "bg-slate-300")} />
+              </span>
               <div className="min-w-0 flex-1">
-                <h1 className="text-lg font-extrabold text-slate-900">Messages</h1>
-                <p className="text-[11px] text-slate-500">Contact your departmental officer</p>
+                <div className="flex justify-between gap-2">
+                  <p className="truncate text-sm font-bold">{officerNickname}</p>
+                  <span className="text-[10px] text-slate-400">{formatWhen(listPreview.at)}</span>
+                </div>
+                <p className="line-clamp-1 text-xs text-slate-500">{listPreview.preview}</p>
+                <p className={cn("text-[10px] font-medium", officerOnline ? "text-emerald-600" : "text-slate-400")}>{officerOnline ? "● Online" : "○ Offline"}</p>
+              </div>
+              {listPreview.unread > 0 ? <span className="mt-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">{listPreview.unread}</span> : null}
+            </button>
+          </li>
+        ) : (
+          <li className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-12 text-center text-sm text-slate-500">No messages yet. Tap New Message.</li>
+        )}
+      </ul>
+    </div>
+  );
+
+  const chatPane = inChat ? (
+    <div className="flex min-h-0 flex-1 flex-col bg-slate-50">
+      <div className="flex shrink-0 items-center gap-3 border-b bg-white px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3">
+        <button type="button" onClick={() => setInChat(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <span className="relative grid h-10 w-10 place-items-center rounded-full bg-[#0b1b3a] text-white">
+          <User className="h-5 w-5" />
+          <span className={cn("absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white", officerOnline ? "bg-emerald-400" : "bg-slate-300")} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-bold">{officerNickname}</p>
+          <p className={cn("text-[11px] font-medium", officerOnline ? "text-emerald-600" : "text-slate-400")}>
+            {officerRecording ? "Recording…" : officerTyping ? "Typing…" : officerOnline ? "Online" : "Offline"}
+          </p>
+        </div>
+        <div className="relative">
+          <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100" onClick={() => setChatMenuOpen((v) => !v)} aria-label="Chat actions">
+            <span className="text-lg leading-none">⋮</span>
+          </button>
+          {chatMenuOpen ? (
+            <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+              <button type="button" className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50" onClick={() => { setRenameVal(officerNickname); setRenameOpen(true); setChatMenuOpen(false); }}>Rename</button>
+              <button type="button" className="block w-full px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => { setClearOpen(true); setChatMenuOpen(false); }}>Clear chat</button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
+        {chatMessages.map((m) => {
+          const tick =
+            m.side === "out"
+              ? ticksFor({
+                  isMine: true,
+                  createdAt: m.at,
+                  // Delivered once saved on server (double white). Navy when officer opened chat.
+                  peerOnline: true,
+                  peerReadAt: maxOfficerRead,
+                })
+              : "none";
+          return (
+            <div
+              key={m.key}
+              className={cn("flex touch-pan-y", m.side === "out" ? "justify-end" : "justify-start gap-2")}
+              onTouchStart={(e) => {
+                swipeRef.current = { id: m.reportId, x: e.touches[0]?.clientX ?? 0 };
+              }}
+              onTouchEnd={(e) => {
+                const s = swipeRef.current;
+                swipeRef.current = null;
+                if (!s) return;
+                const x = e.changedTouches[0]?.clientX ?? 0;
+                if (x - s.x > 56) {
+                  setReplyTo({ id: m.reportId, text: m.text.slice(0, 120) });
+                }
+              }}
+            >
+              {m.side === "in" ? (
+                <span className="mt-1 grid h-7 w-7 place-items-center rounded-full bg-[#0b1b3a] text-white">
+                  <User className="h-3.5 w-3.5" />
+                </span>
+              ) : null}
+              <div
+                className={cn(
+                  "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm",
+                  m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white text-slate-800",
+                )}
+              >
+                {m.replyPreview ? (
+                  <div className={cn("mb-1.5 rounded-lg border-l-2 px-2 py-1 text-[11px]", m.side === "out" ? "border-white/50 bg-white/15 text-blue-50" : "border-blue-400 bg-slate-50 text-slate-600")}>
+                    {m.replyPreview.slice(0, 100)}
+                  </div>
+                ) : null}
+                {m.attachment_type === "image" && m.attachment_url ? (
+                  <img src={m.attachment_url} alt="" className="mb-1 max-h-64 w-full max-w-[260px] rounded-xl object-contain bg-black/5" />
+                ) : null}
+                {m.attachment_type === "audio" && m.attachment_url ? <audio controls src={m.attachment_url} className="mb-1 max-w-full" /> : null}
+                {m.attachment_type === "file" && m.attachment_url ? (
+                  <a href={m.attachment_url} target="_blank" rel="noreferrer" className="mb-1 block underline">
+                    Attachment
+                  </a>
+                ) : null}
+                {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap">{m.text}</p> : null}
+                <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
+                  {formatTime(m.at)}
+                  {m.side === "out" ? <Ticks state={tick === "read" ? "read" : "delivered"} /> : null}
+                </p>
               </div>
             </div>
-            <Button
-              type="button"
-              className="h-11 w-full rounded-xl bg-[#2563eb] font-bold hover:bg-[#1d4ed8]"
-              onClick={() => setComposeOpen(true)}
-            >
-              + New Message
-            </Button>
-            <div className="mt-3 flex gap-1 rounded-full bg-slate-100 p-1">
-              {(
-                [
-                  { k: "inbox" as const, label: "Inbox", count: inboxUnread },
-                  { k: "sent" as const, label: "Sent" },
-                  { k: "all" as const, label: "All" },
-                ] as const
-              ).map((t) => (
-                <button
-                  key={t.k}
-                  type="button"
-                  onClick={() => setTab(t.k)}
-                  className={cn(
-                    "flex flex-1 items-center justify-center gap-1 rounded-full py-2 text-xs font-bold",
-                    tab === t.k ? "bg-[#2563eb] text-white" : "text-slate-600",
-                  )}
-                >
-                  {t.label}
-                  {"count" in t && t.count > 0 ? (
-                    <span className="grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[10px] text-white">
-                      {t.count > 99 ? "99+" : t.count}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
+          );
+        })}
+        {officerTyping ? <p className="text-center text-xs text-slate-500">Officer is typing…</p> : null}
+        <div ref={chatEndRef} />
+      </div>
+      <div className="shrink-0 border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        {replyTo ? (
+          <div className="mb-2 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-bold uppercase text-blue-700">Replying</p>
+              <p className="line-clamp-2 text-xs text-slate-700">{replyTo.text}</p>
             </div>
-            <div className="relative mt-3">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search messages…"
-                className="h-10 rounded-xl bg-slate-50 pl-9"
-              />
-            </div>
-          </div>
-          <ul className="min-h-0 flex-1 overflow-y-auto">
-            {showInList && filteredShow && listPreview ? (
-              <li>
-                <button
-                  type="button"
-                  onClick={() => setInChat(true)}
-                  className="flex w-full items-start gap-3 border-b border-slate-50 px-4 py-3 text-left hover:bg-slate-50"
-                >
-                  <span className="relative grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#0b1b3a] text-white">
-                    <User className="h-5 w-5" />
-                    <span
-                      className={cn(
-                        "absolute bottom-0.5 right-0.5 h-3 w-3 rounded-full border-2 border-white",
-                        officerOnline ? "bg-emerald-400" : "bg-slate-300",
-                      )}
-                    />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex justify-between gap-2">
-                      <p className="truncate text-sm font-bold">{officerNickname}</p>
-                      <span className="text-[10px] text-slate-400">{formatWhen(listPreview.at)}</span>
-                    </div>
-                    <p className="line-clamp-1 text-xs text-slate-500">{listPreview.preview}</p>
-                    <p className={cn("text-[10px] font-medium", officerOnline ? "text-emerald-600" : "text-slate-400")}>
-                      {officerOnline ? "● Online" : "○ Offline"}
-                    </p>
-                  </div>
-                  {listPreview.unread > 0 ? (
-                    <span className="mt-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
-                      {listPreview.unread}
-                    </span>
-                  ) : null}
-                </button>
-              </li>
-            ) : (
-              <li className="px-4 py-12 text-center text-sm text-slate-500">
-                No messages yet. Tap New Message to contact your officer.
-              </li>
-            )}
-          </ul>
-        </>
-      ) : null}
-
-      {composeOpen ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-center gap-2 border-b px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-            <button type="button" onClick={() => setComposeOpen(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100">
-              <ArrowLeft className="h-5 w-5" />
+            <button type="button" onClick={() => setReplyTo(null)} className="text-slate-400" aria-label="Cancel reply">
+              <X className="h-4 w-4" />
             </button>
-            <h2 className="font-extrabold">New Message</h2>
           </div>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-            <div>
-              <label className="text-xs font-bold uppercase text-slate-500">Examination(s)</label>
-              <button
-                type="button"
-                onClick={() => setPickerOpen((o) => !o)}
-                className="mt-1 flex h-11 w-full items-center justify-between rounded-xl border px-3 text-sm"
-              >
-                <span className="truncate">
-                  {selectedTitles.length ? selectedTitles.join(", ") : "Select examination(s)…"}
-                </span>
-                <Search className="h-4 w-4 text-slate-400" />
+        ) : null}
+        {pendingAttach ? (
+          <div className="mb-2 flex items-center gap-2 rounded-xl border bg-slate-50 px-3 py-2 text-xs">
+            {pendingAttach.type === "image" ? <img src={pendingAttach.url} alt="" className="h-12 w-12 rounded object-cover" /> : <span>Attachment ready</span>}
+            <button type="button" onClick={() => setPendingAttach(null)} className="ml-auto text-slate-500">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
+        {recording || pendingAudio ? (
+          <div className="mb-2 flex items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2">
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
+            <p className="flex-1 text-sm font-semibold text-red-700">
+              {recording ? `Recording… ${recSecs}s` : "Voice note ready"}
+            </p>
+            <button type="button" onClick={cancelRec} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-700 shadow-sm">
+              Cancel
+            </button>
+            <button type="button" onClick={() => void sendPendingAudio()} className="rounded-full bg-[#2563eb] px-3 py-1 text-xs font-bold text-white">
+              Send
+            </button>
+          </div>
+        ) : null}
+        <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ""; }} />
+        <div className="flex items-end gap-1.5">
+          <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-500" onClick={() => fileRef.current?.click()} aria-label="Attach file">
+            <Paperclip className="h-5 w-5" />
+          </button>
+          <div className="flex min-w-0 flex-1 items-end rounded-full border bg-slate-50 px-3">
+            <textarea value={replyText} onChange={(e) => onTyping(e.target.value)} rows={1} placeholder="Type your message…" className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm outline-none" />
+          </div>
+          {replyText.trim() || pendingAttach ? (
+            <button type="button" disabled={sending} onClick={() => void sendMessage(replyText, pendingAttach)} className="mb-0.5 grid h-10 w-10 place-items-center rounded-full bg-[#2563eb] text-white" aria-label="Send">
+              <Send className="h-4 w-4" />
+            </button>
+          ) : (
+            <button type="button" className={cn("mb-0.5 grid h-10 w-10 place-items-center rounded-full text-white", recording ? "bg-red-500" : "bg-[#0b1b3a]")} onClick={() => (recording ? stopRecKeep() : void startRec())} aria-label="Record voice">
+              <Mic className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : (
+    <div className="hidden flex-1 flex-col items-center justify-center gap-2 p-8 text-center lg:flex">
+      <span className="grid h-16 w-16 place-items-center rounded-full bg-slate-100 text-slate-400">
+        <User className="h-8 w-8" />
+      </span>
+      <p className="text-sm font-semibold text-slate-700">Select a conversation</p>
+      <p className="max-w-xs text-xs text-slate-500">Choose a message on the left, or start a new one.</p>
+    </div>
+  );
+
+  return (
+    <div className="flex h-dvh max-h-dvh flex-col bg-white lg:flex-row">
+      {/* List — full on mobile when not in chat; left column on desktop */}
+      <div
+        className={cn(
+          "flex min-h-0 flex-col border-slate-200 lg:border-r",
+          (inChat || composeOpen) && "hidden lg:flex",
+          "lg:h-full",
+        )}
+        style={{ flexBasis: `${listPct}%`, flexGrow: 0, flexShrink: 0, maxWidth: "55%", minWidth: 260 }}
+      >
+        {listPane}
+      </div>
+
+      <div
+        className="relative z-10 hidden w-3 shrink-0 cursor-col-resize items-center justify-center bg-slate-100 lg:flex"
+        onPointerDown={(e) => {
+          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          dragRef.current = { startX: e.clientX, startPct: listPct };
+        }}
+        onPointerMove={(e) => {
+          if (!dragRef.current) return;
+          const parent = e.currentTarget.parentElement?.clientWidth || 800;
+          const dx = e.clientX - dragRef.current.startX;
+          const next = Math.min(55, Math.max(28, dragRef.current.startPct + (dx / parent) * 100));
+          setListPct(next);
+        }}
+        onPointerUp={() => {
+          dragRef.current = null;
+        }}
+      >
+        <div className="relative h-16 w-[3px] overflow-hidden rounded-full bg-[#2563eb]">
+          <div className="absolute inset-0 animate-[shimmer_1.5s_linear_infinite] bg-gradient-to-b from-transparent via-white/70 to-transparent" />
+        </div>
+      </div>
+
+      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !inChat && !composeOpen && "hidden lg:flex")}>
+        {composeOpen ? (
+          <div className="flex min-h-0 flex-1 flex-col bg-white">
+            <div className="flex items-center gap-2 border-b px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+              <button type="button" onClick={() => setComposeOpen(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100">
+                <ArrowLeft className="h-5 w-5" />
               </button>
-              {pickerOpen ? (
-                <div className="mt-2 rounded-xl border shadow-lg">
-                  <Input value={examSearch} onChange={(e) => setExamSearch(e.target.value)} placeholder="Search…" className="border-0" />
-                  <ul className="max-h-40 overflow-y-auto">
-                    {filteredExams.map((e) => {
-                      const on = selectedExamIds.includes(e.id);
-                      return (
-                        <li key={e.id}>
-                          <button
-                            type="button"
-                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
-                            onClick={() =>
-                              setSelectedExamIds((p) => (on ? p.filter((x) => x !== e.id) : [...p, e.id]))
-                            }
-                          >
-                            <span className={cn("grid h-5 w-5 place-items-center rounded border", on && "bg-blue-600 text-white")}>
-                              {on ? <Check className="h-3 w-3" /> : null}
-                            </span>
-                            {e.title}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  <Button size="sm" className="m-2" onClick={() => setPickerOpen(false)}>
-                    Done
-                  </Button>
-                </div>
-              ) : null}
+              <h2 className="font-extrabold">New Message</h2>
             </div>
-            <div>
-              <label className="text-xs font-bold uppercase text-slate-500">Subject</label>
-              <Input value={subject} onChange={(e) => setSubject(e.target.value)} className="mt-1 h-11 rounded-xl" placeholder="Subject" />
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+              <div>
+                <label className="text-xs font-bold uppercase text-slate-500">Examination(s)</label>
+                <button type="button" onClick={() => setPickerOpen((o) => !o)} className="mt-1 flex h-11 w-full items-center justify-between rounded-xl border px-3 text-sm">
+                  <span className="truncate">{selectedTitles.length ? selectedTitles.join(", ") : "Select examination(s)…"}</span>
+                  <Search className="h-4 w-4 text-slate-400" />
+                </button>
+                {pickerOpen ? (
+                  <div className="mt-2 rounded-xl border shadow-lg">
+                    <Input value={examSearch} onChange={(e) => setExamSearch(e.target.value)} placeholder="Search…" className="border-0" />
+                    <ul className="max-h-40 overflow-y-auto">
+                      {filteredExams.map((e) => {
+                        const on = selectedExamIds.includes(e.id);
+                        return (
+                          <li key={e.id}>
+                            <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => setSelectedExamIds((p) => (on ? p.filter((x) => x !== e.id) : [...p, e.id]))}>
+                              <span className={cn("grid h-5 w-5 place-items-center rounded border", on && "bg-blue-600 text-white")}>{on ? <Check className="h-3 w-3" /> : null}</span>
+                              {e.title}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <Button size="sm" className="m-2" onClick={() => setPickerOpen(false)}>Done</Button>
+                  </div>
+                ) : null}
+              </div>
+              <div>
+                <label className="text-xs font-bold uppercase text-slate-500">Subject</label>
+                <Input value={subject} onChange={(e) => setSubject(e.target.value)} className="mt-1 h-11 rounded-xl" placeholder="Subject" />
+              </div>
+              <div>
+                <label className="text-xs font-bold uppercase text-slate-500">Message</label>
+                <Textarea value={body} onChange={(e) => setBody(e.target.value)} className="mt-1 min-h-[120px] rounded-xl" placeholder="Write your message…" />
+              </div>
             </div>
-            <div>
-              <label className="text-xs font-bold uppercase text-slate-500">Message</label>
-              <Textarea value={body} onChange={(e) => setBody(e.target.value)} className="mt-1 min-h-[120px] rounded-xl" placeholder="Write your message…" />
+            <div className="border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+              <Button className="h-12 w-full rounded-xl bg-[#2563eb] font-bold" disabled={sending || !body.trim()} onClick={() => void sendMessage(body, pendingAttach)}>
+                <Send className="mr-2 h-4 w-4" /> Send
+              </Button>
             </div>
-            {pendingAttach ? (
-              <p className="text-xs text-slate-600">Attachment ready · {pendingAttach.type}</p>
-            ) : null}
           </div>
-          <div className="border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            <Button
-              className="h-12 w-full rounded-xl bg-[#2563eb] font-bold"
-              disabled={sending || (!body.trim() && !pendingAttach)}
-              onClick={() => void sendMessage(body, pendingAttach)}
-            >
-              <Send className="mr-2 h-4 w-4" /> Send
-            </Button>
+        ) : (
+          chatPane
+        )}
+      </div>
+
+      {/* Branded rename dialog */}
+      {renameOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-extrabold text-slate-900">Rename contact</h3>
+            <p className="mt-1 text-xs text-slate-500">Choose a display name for this officer in your messages list.</p>
+            <Input value={renameVal} onChange={(e) => setRenameVal(e.target.value)} className="mt-3 h-11 rounded-xl" autoFocus />
+            <div className="mt-4 flex gap-2">
+              <Button type="button" variant="outline" className="flex-1 rounded-xl" onClick={() => setRenameOpen(false)}>Cancel</Button>
+              <Button type="button" className="flex-1 rounded-xl bg-[#2563eb] font-bold" onClick={() => {
+                const n = renameVal.trim() || "Departmental Officer";
+                setOfficerNickname(n);
+                try { localStorage.setItem("d4exam.msg.nick.officer", n); } catch { /* ignore */ }
+                setRenameOpen(false);
+              }}>Save</Button>
+            </div>
           </div>
         </div>
       ) : null}
 
-      {inChat ? (
-        <>
-          <div className="flex shrink-0 items-center gap-3 border-b bg-white px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-            <button type="button" onClick={() => setInChat(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-            <span className="relative grid h-10 w-10 place-items-center rounded-full bg-[#0b1b3a] text-white">
-              <User className="h-5 w-5" />
-              <span className={cn("absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white", officerOnline ? "bg-emerald-400" : "bg-slate-300")} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold">{officerNickname}</p>
-              <p className={cn("text-[11px] font-medium", officerOnline ? "text-emerald-600" : "text-slate-400")}>
-                {officerRecording ? "Recording…" : officerTyping ? "Typing…" : officerOnline ? "Online" : "Offline"}
-              </p>
-            </div>
-            <div className="relative">
-              <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100" onClick={() => setChatMenuOpen((v) => !v)} aria-label="Chat actions">
-                <span className="text-lg leading-none">⋮</span>
-              </button>
-              {chatMenuOpen ? (
-                <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
-                  <button type="button" className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50" onClick={() => {
-                    const n = window.prompt("Nickname for this officer", officerNickname);
-                    if (n && n.trim()) {
-                      setOfficerNickname(n.trim());
-                      try { localStorage.setItem("d4exam.msg.nick.officer", n.trim()); } catch { /* ignore */ }
-                    }
-                    setChatMenuOpen(false);
-                  }}>Rename chat</button>
-                  <button type="button" className="block w-full px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => {
-                    if (!window.confirm("Clear this conversation from your list view? Messages stay on the server for the officer.")) return;
-                    setInChat(false);
-                    setChatMenuOpen(false);
-                  }}>Close chat</button>
-                </div>
-              ) : null}
+      {clearOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-extrabold text-slate-900">Clear this chat?</h3>
+            <p className="mt-1 text-xs text-slate-500">All messages in this conversation will be deleted. This cannot be undone.</p>
+            <div className="mt-4 flex gap-2">
+              <Button type="button" variant="outline" className="flex-1 rounded-xl" onClick={() => setClearOpen(false)}>Cancel</Button>
+              <Button type="button" className="flex-1 rounded-xl bg-red-600 font-bold hover:bg-red-700" onClick={() => void clearChat()}>Clear chat</Button>
             </div>
           </div>
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3">
-            {chatMessages.map((m) => {
-              const tick =
-                m.side === "out"
-                  ? ticksFor({
-                      isMine: true,
-                      createdAt: m.at,
-                      peerOnline: officerOnline,
-                      peerReadAt: maxOfficerRead,
-                    })
-                  : "none";
-              return (
-                <div key={m.key} className={cn("flex", m.side === "out" ? "justify-end" : "justify-start gap-2")}>
-                  {m.side === "in" ? (
-                    <span className="mt-1 grid h-7 w-7 place-items-center rounded-full bg-[#0b1b3a] text-white">
-                      <User className="h-3.5 w-3.5" />
-                    </span>
-                  ) : null}
-                  <div
-                    className={cn(
-                      "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm",
-                      m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white text-slate-800",
-                    )}
-                  >
-                    {m.subject && m.side === "out" ? (
-                      <p className="mb-0.5 text-[11px] font-semibold opacity-80">{m.subject}</p>
-                    ) : null}
-                    {m.attachment_type === "image" && m.attachment_url ? (
-                      <img src={m.attachment_url} alt="" className="mb-1 max-h-40 rounded-lg" />
-                    ) : null}
-                    {m.attachment_type === "audio" && m.attachment_url ? (
-                      <audio controls src={m.attachment_url} className="mb-1 max-w-full" />
-                    ) : null}
-                    {m.attachment_type === "file" && m.attachment_url ? (
-                      <a href={m.attachment_url} target="_blank" rel="noreferrer" className="mb-1 block underline">
-                        Attachment
-                      </a>
-                    ) : null}
-                    {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap">{m.text}</p> : null}
-                    <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
-                      {formatTime(m.at)}
-                      {m.side === "out" ? <Ticks state={tick} /> : null}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-            {officerTyping ? (
-              <p className="text-center text-xs text-slate-500">Officer is typing…</p>
-            ) : null}
-            {officerRecording ? (
-              <p className="text-center text-xs text-slate-500">Officer is recording…</p>
-            ) : null}
-            <div ref={chatEndRef} />
-          </div>
-          <div className="shrink-0 border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-            <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void onFile(f);
-              e.target.value = "";
-            }} />
-            <div className="flex items-end gap-1.5">
-              <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-500" onClick={() => fileRef.current?.click()} aria-label="Attach file">
-                <Paperclip className="h-5 w-5" />
-              </button>
-              <div className="flex min-w-0 flex-1 items-end rounded-full border bg-slate-50 px-3">
-                <textarea
-                  value={replyText}
-                  onChange={(e) => onTyping(e.target.value)}
-                  rows={1}
-                  placeholder="Type your message…"
-                  className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm outline-none"
-                />
-              </div>
-              {replyText.trim() || pendingAttach ? (
-                <button
-                  type="button"
-                  disabled={sending}
-                  onClick={() => void sendMessage(replyText, pendingAttach)}
-                  className="mb-0.5 grid h-10 w-10 place-items-center rounded-full bg-[#2563eb] text-white"
-                  aria-label="Send"
-                >
-                  <Send className="h-4 w-4" />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={cn("mb-0.5 grid h-10 w-10 place-items-center rounded-full text-white", recording ? "bg-red-500" : "bg-[#0b1b3a]")}
-                  onMouseDown={() => void startRec()}
-                  onMouseUp={stopRec}
-                  onTouchStart={(e) => {
-                    e.preventDefault();
-                    void startRec();
-                  }}
-                  onTouchEnd={(e) => {
-                    e.preventDefault();
-                    stopRec();
-                  }}
-                  aria-label="Hold to record"
-                >
-                  {recording ? <X className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                </button>
-              )}
-            </div>
-            {recording ? <p className="mt-1 text-center text-[11px] font-medium text-red-600">Recording… release to send</p> : null}
-          </div>
-        </>
+        </div>
       ) : null}
     </div>
   );
