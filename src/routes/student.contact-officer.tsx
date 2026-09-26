@@ -110,7 +110,7 @@ function Page() {
   const [recSecs, setRecSecs] = useState(0);
   const [pendingAudio, setPendingAudio] = useState<Blob | null>(null);
   const [pendingAttach, setPendingAttach] = useState<{ url: string; type: string } | null>(null);
-  const [replyTo, setReplyTo] = useState<{ id: string; text: string } | null>(null);
+  const [replyTo, setReplyTo] = useState<{ id: string; text: string; fromSelf?: boolean } | null>(null);
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
@@ -905,7 +905,8 @@ function Page() {
                   if (x - s.x > 56 || finalDx > 48) {
                     setReplyTo({
                       id: m.reportId,
-                      text: (m.text && m.text !== "(attachment)" ? m.text : m.attachment_type || "Attachment").slice(0, 120),
+                      text: (m.text && m.text !== "(attachment)" ? m.text : attachmentLabel(m.attachment_type, m.attachment_url)).slice(0, 120),
+                      fromSelf: m.side === "out",
                     });
                   }
                 }}
@@ -999,7 +1000,7 @@ function Page() {
               <User className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-bold text-blue-800">{officerNickname}</p>
+              <p className="text-[11px] font-bold text-blue-800">{replyTo.fromSelf ? "You" : officerNickname}</p>
               <p className="line-clamp-2 text-xs text-slate-700">{replyTo.text}</p>
             </div>
             <button type="button" onClick={() => setReplyTo(null)} className="text-slate-400" aria-label="Cancel reply">
@@ -1077,7 +1078,7 @@ function Page() {
             </button>
           ) : (
             <button type="button" className={cn("mb-0.5 grid h-12 w-12 place-items-center rounded-full shadow-md", recording || pendingAudio || pendingAudioUrl ? "bg-[#2563eb] text-white ring-2 ring-white/40" : "bg-white text-[#0b1b3a] ring-2 ring-white/70")} onClick={() => (recording || pendingAudio || pendingAudioUrl ? void sendPendingAudio() : void startRec())} aria-label={recording || pendingAudio || pendingAudioUrl ? "Send voice note" : "Record voice"}>
-              {recording || pendingAudio || pendingAudioUrl ? <Send className="h-5 w-5" /> : <Mic className="h-7 w-7 stroke-[2.5]" />}
+              {recording || pendingAudio || pendingAudioUrl ? <Send className="h-5 w-5" /> : <Mic className="h-5 w-5 stroke-[2.5]" />}
             </button>
           )}
         </div>
