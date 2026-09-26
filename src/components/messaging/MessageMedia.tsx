@@ -31,14 +31,16 @@ function WaveBars({
     const el = trackRef.current;
     if (!el || !onSeek) return;
     const rect = el.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    const pad = 6;
+    const usable = Math.max(1, rect.width - pad * 2);
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left - pad) / usable));
     onSeek(ratio);
   };
 
   return (
     <div
       ref={trackRef}
-      className={cn("relative flex h-7 flex-1 items-center gap-[2.5px] overflow-hidden", onSeek && "cursor-pointer touch-none")}
+      className={cn("relative flex h-7 w-full items-center gap-[2.5px] overflow-visible px-1.5", onSeek && "cursor-pointer touch-none")}
       onPointerDown={(e) => {
         if (!onSeek) return;
         (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -73,7 +75,7 @@ function WaveBars({
             "pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow",
             light ? "bg-white" : "bg-[#2563eb]",
           )}
-          style={{ left: `${pct * 100}%` }}
+          style={{ left: `${6 + pct * 88}%` }}
         />
       ) : null}
     </div>
@@ -356,6 +358,27 @@ export function parseMediaUrls(url: string | null | undefined): string[] {
   }
   if (s.includes("||")) return s.split("||").map((x) => x.trim()).filter(Boolean);
   return [s];
+}
+
+export function encodeOfficerMedia(text: string, type: string, url: string): string {
+  const body = (text || "").trim();
+  const marker = `__media__|${type}|${url}`;
+  return body ? `${body}\n${marker}` : marker;
+}
+
+export function parseOfficerReply(raw: string | null | undefined): {
+  text: string;
+  mediaType?: string;
+  mediaUrl?: string;
+} {
+  const s = (raw || "").trim();
+  if (!s) return { text: "" };
+  const m = s.match(/(?:^|\n)__media__\|([^|]+)\|(.+)$/);
+  if (m) {
+    const text = s.replace(/(?:^|\n)__media__\|[^|]+\|.+$/, "").trim();
+    return { text: text === "(attachment)" ? "" : text, mediaType: m[1], mediaUrl: m[2] };
+  }
+  return { text: s === "(attachment)" ? "" : s };
 }
 
 export function attachmentLabel(type: string | null | undefined, url?: string | null): string {

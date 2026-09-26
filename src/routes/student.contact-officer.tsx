@@ -25,7 +25,7 @@ import { SplitHandle } from "@/components/dashboard/SplitHandle";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
-import { VoiceBubble, ImageBubble, ImageLightbox, LongPressMenu, VoiceRecorderBar, lastSeenLabel, parseMediaUrls, attachmentLabel } from "@/components/messaging/MessageMedia";
+import { VoiceBubble, ImageBubble, ImageLightbox, LongPressMenu, VoiceRecorderBar, lastSeenLabel, parseMediaUrls, attachmentLabel, parseOfficerReply } from "@/components/messaging/MessageMedia";
 
 export const Route = createFileRoute("/student/contact-officer")({
   head: () => ({ meta: [{ title: "Messages — D4EXAM" }] }),
@@ -283,9 +283,11 @@ function Page() {
         out.push({
           key: `${r.id}-o`,
           side: "in",
-          text: r.officer_reply!,
+          text: (parseOfficerReply(r.officer_reply).text || (parseOfficerReply(r.officer_reply).mediaUrl ? "(attachment)" : r.officer_reply!)),
           at: r.replied_at || r.created_at,
           reportId: r.id,
+          attachment_url: parseOfficerReply(r.officer_reply).mediaUrl || undefined,
+          attachment_type: parseOfficerReply(r.officer_reply).mediaType || undefined,
         });
       }
     }
@@ -669,7 +671,7 @@ function Page() {
     <div className="flex min-h-0 flex-1 flex-col bg-slate-50 lg:bg-white">
       <div className="shrink-0 border-b border-slate-100 bg-white px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-4">
         <div className="mb-2 flex items-center gap-2">
-          <button type="button" onClick={() => navigate({ to: "/student" })} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden" aria-label="Back">
+          <button type="button" onClick={() => navigate({ to: "/student" })} className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10 lg:hidden" aria-label="Back">
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div className="min-w-0 flex-1">
@@ -785,11 +787,11 @@ function Page() {
         )}
       </div>
       <div className="relative z-30 flex shrink-0 items-center gap-3 border-b border-white/10 bg-[#0b1b3a] px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white lg:pt-3">
-        <button type="button" onClick={() => setInChat(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden">
+        <button type="button" onClick={() => setInChat(false)} className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10 lg:hidden">
           <ArrowLeft className="h-5 w-5" />
         </button>
-        <span className="relative grid h-10 w-10 place-items-center rounded-full bg-[#0b1b3a] text-white">
-          <User className="h-5 w-5" />
+        <span className="relative grid h-10 w-10 place-items-center rounded-full bg-white/15 ring-2 ring-white/90 shadow-md">
+          <User className="h-5 w-5 text-white" />
           <span className={cn("absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white", officerOnline ? "bg-emerald-400" : "bg-slate-300")} />
         </span>
         <div className="min-w-0 flex-1">
@@ -805,11 +807,11 @@ function Page() {
           </p>
         </div>
         <div className="relative">
-          <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100" onClick={() => setChatMenuOpen((v) => !v)} aria-label="Chat actions">
+          <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10" onClick={() => setChatMenuOpen((v) => !v)} aria-label="Chat actions">
             <span className="text-lg leading-none">⋮</span>
           </button>
           {chatMenuOpen ? (
-            <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+            <div className="absolute right-0 z-[70] mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
               <button type="button" className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50" onClick={() => { setRenameVal(officerNickname); setRenameOpen(true); setChatMenuOpen(false); }}>Rename</button>
               <button type="button" className="block w-full px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => { setClearOpen(true); setChatMenuOpen(false); }}>Clear chat</button>
             </div>
@@ -985,7 +987,7 @@ function Page() {
         {officerTyping ? <p className="text-center text-xs text-slate-500">Officer is typing…</p> : null}
         <div ref={chatEndRef} />
       </div>
-      <div className="relative z-10 shrink-0 border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className="relative z-10 shrink-0 border-t border-white/10 bg-[#0b1b3a] px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] text-white">
         {replyTo ? (
           <div className="mb-2 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
             <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#0b1b3a] text-white">
@@ -1058,11 +1060,11 @@ function Page() {
         ) : null}
         <input ref={fileRef} type="file" accept="image/*,video/*,.pdf,.doc,.docx" multiple className="hidden" onChange={(e) => { const fs = e.target.files; if (fs?.length) void onFile(fs); e.target.value = ""; }} />
         <div className="flex items-end gap-1.5">
-          <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-500" onClick={() => fileRef.current?.click()} aria-label="Attach file">
+          <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-white/90 hover:bg-white/10" onClick={() => fileRef.current?.click()} aria-label="Attach file">
             <Paperclip className="h-5 w-5" />
           </button>
-          <div className="flex min-w-0 flex-1 items-end rounded-full border bg-slate-50 px-3">
-            <textarea value={replyText} onChange={(e) => onTyping(e.target.value)} rows={1} placeholder="Type your message…" className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm outline-none" />
+          <div className="flex min-w-0 flex-1 items-end rounded-full border border-white/20 bg-white px-3">
+            <textarea value={replyText} onChange={(e) => onTyping(e.target.value)} rows={1} placeholder="Type your message…" className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400" />
           </div>
           {replyText.trim() || pendingAttach ? (
             <button type="button" disabled={sending} onClick={() => void sendMessage(replyText, pendingAttach)} className="mb-0.5 grid h-10 w-10 place-items-center rounded-full bg-[#2563eb] text-white" aria-label="Send">
@@ -1121,7 +1123,7 @@ function Page() {
         {composeOpen ? (
           <div className="flex min-h-0 flex-1 flex-col bg-white">
             <div className="flex items-center gap-2 border-b px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-              <button type="button" onClick={() => setComposeOpen(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100">
+              <button type="button" onClick={() => setComposeOpen(false)} className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10">
                 <ArrowLeft className="h-5 w-5" />
               </button>
               <h2 className="font-extrabold">New Message</h2>

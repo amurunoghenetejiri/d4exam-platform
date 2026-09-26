@@ -21,7 +21,7 @@ import { SplitHandle } from "@/components/dashboard/SplitHandle";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
-import { VoiceBubble, ImageBubble, ImageLightbox, VoiceRecorderBar, lastSeenLabel, parseMediaUrls, attachmentLabel } from "@/components/messaging/MessageMedia";
+import { VoiceBubble, ImageBubble, ImageLightbox, VoiceRecorderBar, lastSeenLabel, parseMediaUrls, attachmentLabel, encodeOfficerMedia, parseOfficerReply } from "@/components/messaging/MessageMedia";
 
 export const Route = createFileRoute("/officer/reports")({
   head: () => ({
@@ -252,9 +252,11 @@ function Page() {
         out.push({
           key: `${r.id}-o`,
           side: "out",
-          text: r.officer_reply!,
+          text: (parseOfficerReply(r.officer_reply).text || (parseOfficerReply(r.officer_reply).mediaUrl ? "(attachment)" : r.officer_reply!)),
           at: r.replied_at || r.created_at,
           reportId: r.id,
+          attachment_url: parseOfficerReply(r.officer_reply).mediaUrl || undefined,
+          attachment_type: parseOfficerReply(r.officer_reply).mediaType || undefined,
         });
       }
     }
@@ -338,16 +340,12 @@ function Page() {
       const target = openRow || active.rows[active.rows.length - 1];
       if (!target) return;
       const payload: Record<string, unknown> = {
-        officer_reply: text.trim() || (attach ? "(attachment)" : ""),
+        officer_reply: (attach ? encodeOfficerMedia(text, attach.type, attach.url) : text.trim()) || "(attachment)",
         replied_at: new Date().toISOString(),
         status: "replied",
         officer_user_id: userId,
         updated_at: new Date().toISOString(),
       };
-      if (attach) {
-        payload.attachment_url = attach.url;
-        payload.attachment_type = attach.type;
-      }
       let { error } = await supabase.from("student_officer_reports").update(payload as never).eq("id", target.id);
       if (error) {
         const { error: e2 } = await supabase
@@ -487,7 +485,7 @@ function Page() {
       >
           <div className="shrink-0 border-b px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <div className="mb-2 flex items-center gap-2">
-              <button type="button" onClick={() => navigate({ to: "/officer" })} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100" aria-label="Back">
+              <button type="button" onClick={() => navigate({ to: "/officer" })} className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10" aria-label="Back">
                 <ArrowLeft className="h-5 w-5" />
               </button>
               <div>
@@ -576,8 +574,8 @@ function Page() {
 
       {active ? (
         <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !threadKey && "hidden lg:flex")}>
-          <div className="flex shrink-0 items-center gap-3 border-b px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-            <button type="button" onClick={() => setThreadKey(null)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100">
+          <div className="relative z-40 flex shrink-0 items-center gap-3 border-b border-white/10 bg-[#0b1b3a] px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white">
+            <button type="button" onClick={() => setThreadKey(null)} className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10">
               <ArrowLeft className="h-5 w-5" />
             </button>
             <span className={cn("relative grid h-10 w-10 place-items-center rounded-full text-sm font-bold text-white", avatarColor(active.key))}>
@@ -594,11 +592,11 @@ function Page() {
               </p>
             </div>
             <div className="relative">
-              <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100" onClick={() => setChatMenuOpen((v) => !v)} aria-label="Chat actions">
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10" onClick={() => setChatMenuOpen((v) => !v)} aria-label="Chat actions">
                 <span className="text-lg leading-none">⋮</span>
               </button>
               {chatMenuOpen ? (
-                <div className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                <div className="absolute right-0 z-[70] mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
                   <button type="button" className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50" onClick={() => {
                     setRenameOpen(true);
                     setRenameVal(nickMap[active.key] || active.student_name || "Student");
@@ -678,7 +676,7 @@ function Page() {
             {studentRecording ? <p className="text-center text-xs text-slate-500">Student is recording…</p> : null}
             <div ref={chatEndRef} />
           </div>
-          <div className="shrink-0 border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="shrink-0 border-t border-white/10 bg-[#0b1b3a] px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] text-white">
             {replyTo ? (
               <div className="mb-2 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
                 <div className="min-w-0 flex-1">
@@ -718,11 +716,11 @@ function Page() {
               }}
             />
             <div className="flex items-end gap-1.5">
-              <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-500" onClick={() => fileRef.current?.click()}>
+              <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-white/90 hover:bg-white/10" onClick={() => fileRef.current?.click()}>
                 <Paperclip className="h-5 w-5" />
               </button>
-              <div className="flex min-w-0 flex-1 items-end rounded-full border bg-slate-50 px-3">
-                <textarea value={reply} onChange={(e) => onTyping(e.target.value)} rows={1} placeholder="Type your message…" className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm outline-none" />
+              <div className="flex min-w-0 flex-1 items-end rounded-full border border-white/20 bg-white px-3">
+                <textarea value={reply} onChange={(e) => onTyping(e.target.value)} rows={1} placeholder="Type your message…" className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400" />
               </div>
               {reply.trim() || pendingAttach ? (
                 <button type="button" disabled={sending} onClick={() => void sendReply(reply, pendingAttach)} className="mb-0.5 grid h-10 w-10 place-items-center rounded-full bg-[#2563eb] text-white">
