@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
-import { VoiceBubble, ImageBubble, ImageLightbox } from "@/components/messaging/MessageMedia";
+import { VoiceBubble, ImageBubble, ImageLightbox, lastSeenLabel } from "@/components/messaging/MessageMedia";
 
 export const Route = createFileRoute("/officer/reports")({
   head: () => ({
@@ -221,21 +221,25 @@ function Page() {
     if (!active) return [];
     const out: { key: string; side: "in" | "out"; text: string; at: string; subject?: string | null; attachment_url?: string | null; attachment_type?: string | null; reportId: string }[] = [];
     for (const r of active.rows) {
-      out.push({
-        key: `${r.id}-s`,
-        side: "in",
-        text: r.body,
-        at: r.created_at,
-        subject: r.subject,
-        attachment_url: r.attachment_url,
-        attachment_type: r.attachment_type,
-        reportId: r.id,
-      });
-      if (r.officer_reply) {
+      const bodyText = (r.body || "").trim();
+      if (bodyText || r.attachment_url) {
+        out.push({
+          key: `${r.id}-s`,
+          side: "in",
+          text: r.body,
+          at: r.created_at,
+          subject: r.subject,
+          attachment_url: r.attachment_url,
+          attachment_type: r.attachment_type,
+          reportId: r.id,
+        });
+      }
+      const replyText = (r.officer_reply || "").trim();
+      if (replyText) {
         out.push({
           key: `${r.id}-o`,
           side: "out",
-          text: r.officer_reply,
+          text: r.officer_reply!,
           at: r.replied_at || r.created_at,
           reportId: r.id,
         });
@@ -415,7 +419,7 @@ function Page() {
   }
 
   return (
-    <div className="flex h-dvh max-h-dvh w-full flex-col bg-white lg:flex-row">
+    <div className="flex h-dvh max-h-dvh w-full flex-col bg-white lg:flex-row lg:overflow-hidden">
       {!threadKey ? (
         <>
           <div className="shrink-0 border-b px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">

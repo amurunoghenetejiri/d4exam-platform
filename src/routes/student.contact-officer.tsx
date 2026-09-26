@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
-import { VoiceBubble, ImageBubble, ImageLightbox, LongPressMenu, RecordingWave } from "@/components/messaging/MessageMedia";
+import { VoiceBubble, ImageBubble, ImageLightbox, LongPressMenu, VoiceRecorderBar, lastSeenLabel } from "@/components/messaging/MessageMedia";
 
 export const Route = createFileRoute("/student/contact-officer")({
   head: () => ({ meta: [{ title: "Messages — D4EXAM" }] }),
@@ -100,6 +100,7 @@ function Page() {
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   const [officerOnline, setOfficerOnline] = useState(false);
+  const [officerLastSeen, setOfficerLastSeen] = useState<number | null>(null);
   const [officerTyping, setOfficerTyping] = useState(false);
   const [officerRecording, setOfficerRecording] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -213,6 +214,14 @@ function Page() {
   const rows = mineQ.data ?? [];
   const exams = examsQ.data ?? [];
 
+  const hiddenKeys = useMemo(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem("d4exam.msg.hidden") || "[]") as string[]);
+    } catch {
+      return new Set<string>();
+    }
+  }, [rows]);
+
   const chatMessages: ChatMsg[] = useMemo(() => {
     const byId = new Map(rows.map((r) => [r.id, r]));
     const out: ChatMsg[] = [];
@@ -222,29 +231,34 @@ function Page() {
         const parent = byId.get(r.reply_to_id)!;
         replyPreview = parent.officer_reply || parent.body;
       }
-      out.push({
-        key: `${r.id}-s`,
-        side: "out",
-        text: r.body,
-        at: r.created_at,
-        subject: r.subject,
-        attachment_url: r.attachment_url,
-        attachment_type: r.attachment_type,
-        reportId: r.id,
-        replyPreview,
-      });
-      if (r.officer_reply) {
+      const bodyText = (r.body || "").trim();
+      const hasMedia = Boolean(r.attachment_url);
+      if (bodyText || hasMedia) {
+        out.push({
+          key: `${r.id}-s`,
+          side: "out",
+          text: r.body,
+          at: r.created_at,
+          subject: r.subject,
+          attachment_url: r.attachment_url,
+          attachment_type: r.attachment_type,
+          reportId: r.id,
+          replyPreview,
+        });
+      }
+      const replyText = (r.officer_reply || "").trim();
+      if (replyText) {
         out.push({
           key: `${r.id}-o`,
           side: "in",
-          text: r.officer_reply,
+          text: r.officer_reply!,
           at: r.replied_at || r.created_at,
           reportId: r.id,
         });
       }
     }
-    return out;
-  }, [rows]);
+    return out.filter((m) => !hiddenKeys.has(m.key));
+  }, [rows, hiddenKeys]);
 
   const latest = rows.length ? rows[rows.length - 1] : null;
   const inboxUnread = useMemo(() => {
@@ -269,14 +283,19 @@ function Page() {
         let online = false;
         let typing = false;
         let recording = false;
+        let lastAt: number | null = null;
         map.forEach((p) => {
-          if (p.role === "officer" && p.online) {
-            online = true;
-            if (p.typing) typing = true;
-            if (p.recording) recording = true;
+          if (p.role === "officer") {
+            if (p.at) lastAt = Math.max(lastAt || 0, p.at);
+            if (p.online) {
+              online = true;
+              if (p.typing) typing = true;
+              if (p.recording) recording = true;
+            }
           }
         });
         setOfficerOnline(online);
+        if (lastAt) setOfficerLastSeen(lastAt);
         setOfficerTyping(typing);
         setOfficerRecording(recording);
       },
@@ -587,7 +606,13 @@ function Page() {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-bold">{officerNickname}</p>
           <p className={cn("text-[11px] font-medium", officerOnline ? "text-emerald-600" : "text-slate-400")}>
-            {officerRecording ? "Recording…" : officerTyping ? "Typing…" : officerOnline ? "Online" : "Offline"}
+            {officerRecording
+              ? "Recording…"
+              : officerTyping
+                ? "Typing…"
+                : officerOnline
+                  ? "Online"
+                  : lastSeenLabel(officerLastSeen)}
           </p>
         </div>
         <div className="relative">
@@ -655,9 +680,10 @@ function Page() {
                 </span>
               ) : null}
               {m.attachment_type === "audio" && m.attachment_url ? (
-                <VoiceBubble src={m.attachment_url} mine={m.side === "out"} timeLabel={formatTime(m.at)} tick={m.side === "out" ? outTick : "none"} />
+                <VoiceBubble id={`msg-${m.key}`} src={m.attachment_url} mine={m.side === "out"} timeLabel={formatTime(m.at)} tick={m.side === "out" ? outTick : "none"} />
               ) : m.attachment_type === "image" && m.attachment_url ? (
                 <ImageBubble
+                  id={`msg-${m.key}`}
                   src={m.attachment_url}
                   mine={m.side === "out"}
                   timeLabel={formatTime(m.at)}
@@ -666,15 +692,23 @@ function Page() {
                 />
               ) : (
                 <div
+                  id={`msg-${m.key}`}
                   className={cn(
                     "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm",
                     m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white text-slate-800",
                   )}
                 >
                   {m.replyPreview ? (
-                    <div className={cn("mb-1.5 rounded-lg border-l-2 px-2 py-1 text-[11px]", m.side === "out" ? "border-white/50 bg-white/15 text-blue-50" : "border-blue-400 bg-slate-50 text-slate-600")}>
+                    <button
+                      type="button"
+                      className={cn("mb-1.5 w-full rounded-lg border-l-2 px-2 py-1 text-left text-[11px]", m.side === "out" ? "border-white/50 bg-white/15 text-blue-50" : "border-blue-400 bg-slate-50 text-slate-600")}
+                      onClick={() => {
+                        const el = document.getElementById(`msg-${m.reportId}`);
+                        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }}
+                    >
                       {m.replyPreview.slice(0, 100)}
-                    </div>
+                    </button>
                   ) : null}
                   {m.attachment_type === "file" && m.attachment_url ? (
                     <button type="button" className="mb-1 block text-left underline" onClick={() => setLightboxSrc(m.attachment_url!)}>
@@ -717,43 +751,37 @@ function Page() {
             </button>
           </div>
         ) : null}
-        {recording || pendingAudio ? (
-          <div className="mb-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2.5">
-            <div className="flex items-center gap-2">
-              <RecordingWave active={recording && !recPaused} />
-              <p className="flex-1 text-sm font-semibold text-red-700">
-                {recording ? (recPaused ? "Paused" : `Recording ${recSecs}s`) : "Voice note ready"}
-              </p>
-            </div>
-            {pendingAudioUrl ? (
-              <audio controls src={pendingAudioUrl} className="mt-2 w-full" />
-            ) : null}
-            <div className="mt-2 flex flex-wrap gap-2">
-              {recording ? (
-                <button type="button" onClick={() => {
-                  try {
-                    if (recPaused) { mediaRec.current?.resume(); setRecPaused(false); }
-                    else { mediaRec.current?.pause(); setRecPaused(true); }
-                  } catch { /* ignore */ }
-                }} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm">
-                  {recPaused ? "Resume" : "Pause"}
-                </button>
-              ) : null}
-              {recording ? (
-                <button type="button" onClick={stopRecKeep} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm">
-                  Done
-                </button>
-              ) : null}
-              <button type="button" onClick={() => { cancelRec(); if (pendingAudioUrl) { URL.revokeObjectURL(pendingAudioUrl); setPendingAudioUrl(null); } }} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm">
-                Cancel
-              </button>
-              {!recording && pendingAudio ? (
-                <button type="button" onClick={() => void sendPendingAudio()} className="rounded-full bg-[#2563eb] px-3 py-1.5 text-xs font-bold text-white">
-                  Send
-                </button>
-              ) : null}
-            </div>
-          </div>
+        {recording || pendingAudio || pendingAudioUrl ? (
+          <VoiceRecorderBar
+            recording={recording}
+            paused={recPaused}
+            seconds={recSecs}
+            previewUrl={pendingAudioUrl}
+            onCancel={() => {
+              cancelRec();
+              if (pendingAudioUrl) {
+                URL.revokeObjectURL(pendingAudioUrl);
+                setPendingAudioUrl(null);
+              }
+              setPendingAudio(null);
+            }}
+            onPauseToggle={() => {
+              try {
+                if (recPaused) {
+                  mediaRec.current?.resume();
+                  setRecPaused(false);
+                } else {
+                  mediaRec.current?.pause();
+                  setRecPaused(true);
+                }
+              } catch { /* ignore */ }
+            }}
+            onDone={() => stopRecKeep()}
+            onSend={() => {
+              if (recording) stopRecKeep();
+              window.setTimeout(() => void sendPendingAudio(), recording ? 150 : 0);
+            }}
+          />
         ) : null}
         <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ""; }} />
         <div className="flex items-end gap-1.5">
@@ -790,10 +818,11 @@ function Page() {
       {/* List — full on mobile when not in chat; left column on desktop */}
       <div
         className={cn(
-          "flex h-full min-h-0 w-full flex-1 flex-col bg-white lg:w-[var(--list-pct)] lg:max-w-[55%] lg:flex-none lg:border-r lg:border-slate-200",
-          (inChat || composeOpen) && "hidden lg:flex",
+          "flex h-full min-h-0 flex-col bg-white",
+          (inChat || composeOpen) ? "hidden lg:flex" : "flex w-full flex-1",
+          "lg:w-[min(var(--list-pct),55%)] lg:min-w-[280px] lg:max-w-[55%] lg:flex-none lg:border-r lg:border-slate-200",
         )}
-        style={{ ["--list-pct"]: `${listPct}%`, width: "100%" } as Record<string, string>}
+        style={{ ["--list-pct"]: `${listPct}%` } as Record<string, string>}
       >
         {listPane}
       </div>
@@ -903,8 +932,16 @@ function Page() {
         items={
           menuMsg
             ? [
+                ...(menuMsg.text && menuMsg.text !== "(attachment)"
+                  ? [{
+                      label: "Copy",
+                      onClick: () => {
+                        void navigator.clipboard?.writeText(menuMsg.text).catch(() => {});
+                      },
+                    }]
+                  : []),
                 ...(menuMsg.side === "out" && menuMsg.text && menuMsg.text !== "(attachment)"
-                  ? [{ label: "Edit message", icon: "edit" as const, onClick: () => { setEditText(menuMsg.text); setEditOpen(true); } }]
+                  ? [{ label: "Edit", icon: "edit" as const, onClick: () => { setEditText(menuMsg.text); setEditOpen(true); } }]
                   : []),
                 ...(menuMsg.attachment_url
                   ? [{
@@ -914,21 +951,35 @@ function Page() {
                         const a = document.createElement("a");
                         a.href = menuMsg.attachment_url!;
                         a.download = menuMsg.attachment_type === "audio" ? "voice-note.webm" : "photo.jpg";
-                        a.rel = "noopener";
                         a.click();
                       },
                     }]
                   : []),
                 {
-                  label: "Delete",
+                  label: "Delete for me",
                   icon: "delete" as const,
                   danger: true,
                   onClick: () => {
-                    void supabase.from("student_officer_reports").delete().eq("id", menuMsg.reportId).then(() =>
-                      qc.invalidateQueries({ queryKey: ["student-my-reports"] }),
-                    );
+                    try {
+                      const key = "d4exam.msg.hidden";
+                      const prev = JSON.parse(localStorage.getItem(key) || "[]") as string[];
+                      localStorage.setItem(key, JSON.stringify([...new Set([...prev, menuMsg.key])]));
+                    } catch { /* ignore */ }
+                    void qc.invalidateQueries({ queryKey: ["student-my-reports"] });
                   },
                 },
+                ...(menuMsg.side === "out"
+                  ? [{
+                      label: "Delete for everyone",
+                      icon: "delete" as const,
+                      danger: true,
+                      onClick: () => {
+                        void supabase.from("student_officer_reports").delete().eq("id", menuMsg.reportId).then(() =>
+                          qc.invalidateQueries({ queryKey: ["student-my-reports"] }),
+                        );
+                      },
+                    }]
+                  : []),
               ]
             : []
         }
