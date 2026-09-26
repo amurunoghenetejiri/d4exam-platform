@@ -454,10 +454,6 @@ function Page() {
       if (sendLock.current) return;
       if (!schoolId) return;
       if (!text.trim() && !attach) return;
-      if (!isOnlineNow()) {
-        toast.error("Internet connection is required to send messages.");
-        return;
-      }
       sendLock.current = true;
       setSending(true);
       try {

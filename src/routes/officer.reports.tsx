@@ -328,11 +328,7 @@ function Page() {
   const sendReply = useCallback(async (text: string, attach?: { url: string; type: string } | null) => {
     if (sendLock.current || !active || !userId) return;
     if (!text.trim() && !attach) return;
-    if (!isOnlineNow()) {
-      toast.error("Internet connection is required to send messages.");
-      return;
-    }
-    sendLock.current = true;
+sendLock.current = true;
     setSending(true);
     try {
       // Prefer reply on latest student message without officer_reply
