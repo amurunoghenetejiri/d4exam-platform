@@ -142,12 +142,22 @@ export function VoiceBubble({
     setCur(t);
   };
 
+  // Own messages = white; received = blue (WhatsApp-like inverse brand)
+  const own = mine;
   return (
-    <div id={id} className="flex max-w-[min(78vw,300px)] flex-col items-end gap-0.5 select-none">
+    <div
+      id={id}
+      className={cn(
+        "flex w-[min(78vw,280px)] min-w-[220px] flex-col gap-0.5 select-none",
+        own ? "items-end" : "items-start",
+      )}
+    >
       <div
         className={cn(
-          "relative flex w-full items-center gap-2 rounded-2xl px-2.5 py-2 shadow-sm",
-          mine ? "bg-[#2563eb] text-white" : "border border-slate-200 bg-white text-slate-800",
+          "relative flex w-full items-center gap-2.5 rounded-2xl px-3 py-2.5 shadow-sm",
+          own
+            ? "border border-slate-200 bg-white text-slate-800"
+            : "bg-[#2563eb] text-white",
         )}
         onCopy={(e) => e.preventDefault()}
         onContextMenu={(e) => e.preventDefault()}
@@ -156,15 +166,19 @@ export function VoiceBubble({
           type="button"
           onClick={toggle}
           className={cn(
-            "grid h-9 w-9 shrink-0 place-items-center rounded-full",
-            mine ? "bg-white text-[#2563eb]" : "bg-[#2563eb] text-white",
+            "grid h-10 w-10 shrink-0 place-items-center rounded-full shadow-sm",
+            own ? "bg-[#2563eb] text-white" : "bg-white text-[#2563eb]",
           )}
           aria-label={playing ? "Pause" : "Play"}
         >
           {playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
         </button>
-        <div className="min-w-0 flex-1">
-          <SeekBar value={cur} max={dur || 1} light={mine} onSeek={seek} />
+        <div className="min-w-0 flex-1 py-0.5">
+          <SeekBar value={cur} max={Math.max(dur, 0.1)} light={!own} onSeek={seek} />
+          <div className={cn("mt-1 flex justify-between text-[10px] font-medium", own ? "text-slate-400" : "text-white/80")}>
+            <span>{fmtDur(cur)}</span>
+            <span>{fmtDur(dur)}</span>
+          </div>
         </div>
         <div className="relative shrink-0">
           <button
@@ -172,7 +186,7 @@ export function VoiceBubble({
             onClick={() => setSpeedOpen((v) => !v)}
             className={cn(
               "rounded-md px-1.5 py-0.5 text-[10px] font-bold",
-              mine ? "bg-white/20 text-white" : "bg-slate-100 text-slate-700",
+              own ? "bg-slate-100 text-slate-700" : "bg-white/20 text-white",
             )}
           >
             {SPEEDS[speedIdx]}x
@@ -200,13 +214,11 @@ export function VoiceBubble({
           ) : null}
         </div>
       </div>
-      <div className="flex items-center gap-1 px-1 text-[10px] text-slate-400">
-        <span>{fmtDur(playing || cur > 0 ? cur : dur)}</span>
-        <span>·</span>
+      <div className={cn("flex items-center gap-1 px-1 text-[10px]", own ? "text-slate-400" : "text-slate-400")}>
         <span>{timeLabel}</span>
         {tick && tick !== "none" ? (
           tick === "read" ? (
-            <CheckCheck className="h-3.5 w-3.5 text-[#0b1b3a]" />
+            <CheckCheck className="h-3.5 w-3.5 text-[#2563eb]" />
           ) : tick === "sent" ? (
             <Check className="h-3.5 w-3.5 text-slate-400" />
           ) : (

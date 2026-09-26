@@ -20,6 +20,7 @@ import { useStudentContext } from "@/lib/student";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { SplitHandle } from "@/components/dashboard/SplitHandle";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
@@ -610,8 +611,7 @@ function Page() {
                   <p className="truncate text-sm font-bold">{officerNickname}</p>
                   <span className="text-[10px] text-slate-400">{formatWhen(listPreview.at)}</span>
                 </div>
-                <p className="line-clamp-1 text-xs text-slate-500">{listPreview.preview}</p>
-                <p className={cn("text-[10px] font-medium", officerOnline ? "text-emerald-600" : "text-slate-400")}>{officerOnline ? "● Online" : "○ Offline"}</p>
+                <p className="line-clamp-1 text-xs text-slate-500">{listPreview.preview || "Conversation"}</p>
               </div>
               {listPreview.unread > 0 ? <span className="mt-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">{listPreview.unread}</span> : null}
             </button>
@@ -624,7 +624,7 @@ function Page() {
   );
 
   const chatPane = inChat ? (
-    <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-slate-50 select-none">
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col select-none" style={{ background: "linear-gradient(180deg, #f0f7ff 0%, #f8fafc 40%, #eef6ff 100%)" }}>
       <div className="flex shrink-0 items-center gap-3 border-b bg-white px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3">
         <button type="button" onClick={() => setInChat(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden">
           <ArrowLeft className="h-5 w-5" />
@@ -657,7 +657,7 @@ function Page() {
           ) : null}
         </div>
       </div>
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         {chatMessages.map((m) => {
           const tick =
             m.side === "out"
@@ -676,6 +676,10 @@ function Page() {
             if (longPressTimer.current) clearTimeout(longPressTimer.current);
           };
           const outTick = tick === "read" ? "read" : tick === "none" ? "none" : "delivered";
+          const hasContent =
+            Boolean(m.attachment_url) ||
+            (Boolean(m.text) && m.text.trim() !== "" && m.text.trim() !== "(attachment)");
+          if (!hasContent) return null;
           return (
             <div
               key={m.key}
@@ -731,13 +735,13 @@ function Page() {
                   id={`msg-${m.key}`}
                   className={cn(
                     "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm",
-                    m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white text-slate-800",
+                    m.side === "out" ? "rounded-br-md border border-slate-200 bg-white text-slate-800" : "rounded-bl-md bg-[#2563eb] text-white",
                   )}
                 >
                   {m.replyPreview ? (
                     <button
                       type="button"
-                      className={cn("mb-1.5 w-full rounded-lg border-l-2 px-2 py-1 text-left text-[11px]", m.side === "out" ? "border-white/50 bg-white/15 text-blue-50" : "border-blue-400 bg-slate-50 text-slate-600")}
+                      className={cn("mb-1.5 w-full rounded-lg border-l-2 px-2 py-1 text-left text-[11px]", m.side === "out" ? "border-blue-400 bg-slate-50 text-slate-600" : "border-white/50 bg-white/15 text-blue-50")}
                       onClick={() => {
                         const el = document.getElementById(`msg-${m.reportId}`);
                         el?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -752,7 +756,7 @@ function Page() {
                     </button>
                   ) : null}
                   {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : null}
-                  <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
+                  <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-slate-400" : "text-blue-100")}>
                     {formatTime(m.at)}
                     {m.side === "out" ? <Ticks state={outTick === "none" ? "delivered" : outTick} /> : null}
                   </p>
@@ -880,27 +884,22 @@ function Page() {
         {listPane}
       </div>
 
-      <div
-        className="relative z-10 hidden w-3 shrink-0 cursor-col-resize items-center justify-center bg-slate-100 lg:flex"
+      <SplitHandle
+        className="hidden lg:flex"
         onPointerDown={(e) => {
           (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
           dragRef.current = { startX: e.clientX, startPct: listPct };
         }}
         onPointerMove={(e) => {
           if (!dragRef.current) return;
-          const parent = e.currentTarget.parentElement?.clientWidth || 800;
+          const parent = e.currentTarget.parentElement?.clientWidth || window.innerWidth;
           const dx = e.clientX - dragRef.current.startX;
-          const next = Math.min(55, Math.max(28, dragRef.current.startPct + (dx / parent) * 100));
-          setListPct(next);
+          setListPct(Math.min(58, Math.max(20, dragRef.current.startPct + (dx / parent) * 100)));
         }}
         onPointerUp={() => {
           dragRef.current = null;
         }}
-      >
-        <div className="relative h-16 w-[3px] overflow-hidden rounded-full bg-[#2563eb]">
-          <div className="absolute inset-0 animate-[shimmer_1.5s_linear_infinite] bg-gradient-to-b from-transparent via-white/70 to-transparent" />
-        </div>
-      </div>
+      />
 
       <div className={cn("flex h-full min-h-0 w-full min-w-0 flex-1 flex-col", !inChat && !composeOpen && "hidden lg:flex")}>
         {composeOpen ? (

@@ -28,7 +28,7 @@ export function SplitHandle({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
-      <div className="relative h-20 w-[3px] overflow-hidden rounded-full bg-blue-500 shadow-sm shadow-blue-500/40 sm:h-24">
+      <div className="relative h-28 w-[3px] overflow-hidden rounded-full bg-blue-500 shadow-sm shadow-blue-500/40 sm:h-32">
         <span
           className="pointer-events-none absolute inset-x-0 top-0 h-1/2 w-full bg-gradient-to-b from-white/70 via-white/25 to-transparent"
           style={{ animation: "d4-split-shimmer 1.6s ease-in-out infinite" }}

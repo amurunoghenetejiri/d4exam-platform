@@ -17,6 +17,7 @@ import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { SplitHandle } from "@/components/dashboard/SplitHandle";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
@@ -559,8 +560,8 @@ function Page() {
           </ul>
       </div>
 
-      <div
-        className="relative z-10 hidden w-3 shrink-0 cursor-col-resize items-center justify-center bg-slate-100 lg:flex"
+      <SplitHandle
+        className="hidden lg:flex"
         onPointerDown={(e) => {
           dragRef.current = { startX: e.clientX, startPct: listPct };
           (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -568,12 +569,10 @@ function Page() {
         onPointerMove={(e) => {
           if (!dragRef.current) return;
           const dx = e.clientX - dragRef.current.startX;
-          setListPct(Math.min(55, Math.max(22, dragRef.current.startPct + (dx / window.innerWidth) * 100)));
+          setListPct(Math.min(58, Math.max(20, dragRef.current.startPct + (dx / window.innerWidth) * 100)));
         }}
         onPointerUp={() => { dragRef.current = null; }}
-      >
-        <span className="h-10 w-1 rounded-full bg-[#2563eb]" />
-      </div>
+      />
 
       {active ? (
         <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !threadKey && "hidden lg:flex")}>
@@ -591,7 +590,7 @@ function Page() {
                 {active.student_matric ? <span className="ml-1 text-xs font-semibold text-slate-500">· {active.student_matric}</span> : null}
               </p>
               <p className={cn("text-[11px] font-medium", studentOnline ? "text-emerald-600" : "text-slate-400")}>
-                {studentRecording ? "Recording…" : studentTyping ? "Typing…" : studentOnline ? "Online" : "Offline"}
+                {studentRecording ? "Recording…" : studentTyping ? "Typing…" : studentRecording ? "Recording…" : studentTyping ? "Typing…" : studentOnline ? "Online" : lastSeenLabel(null)}
               </p>
             </div>
             <div className="relative">
@@ -617,13 +616,17 @@ function Page() {
               ) : null}
             </div>
           </div>
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3" style={{ background: "linear-gradient(180deg, #f0f7ff 0%, #f8fafc 40%, #eef6ff 100%)" }}>
             {chatMessages.map((m) => {
               const tick =
                 m.side === "out"
                   ? ticksFor({ isMine: true, createdAt: m.at, peerOnline: true, peerReadAt: studentReadAt })
                   : "none";
               const outTick = tick === "read" ? "read" : tick === "none" ? "none" : "delivered";
+              const hasContent =
+                Boolean(m.attachment_url) ||
+                (Boolean(m.text) && m.text.trim() !== "" && m.text.trim() !== "(attachment)");
+              if (!hasContent) return null;
               return (
                 <div key={m.key} className={cn("flex w-full select-none", m.side === "out" ? "justify-end" : "justify-start gap-2")}
                   onCopy={(e) => e.preventDefault()}
@@ -659,10 +662,10 @@ function Page() {
                       );
                     })()
                   ) : (
-                    <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white")}>
+                    <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.side === "out" ? "rounded-br-md border border-slate-200 bg-white text-slate-800" : "rounded-bl-md bg-[#2563eb] text-white")}>
                       {m.subject && m.side === "in" ? <p className="mb-0.5 text-[11px] font-semibold text-slate-500">{m.subject}</p> : null}
                       {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : null}
-                      <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
+                      <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-slate-400" : "text-blue-100")}>
                         {formatTime(m.at)}
                         {m.side === "out" ? <Ticks state={outTick === "none" ? "delivered" : outTick} /> : null}
                       </p>
