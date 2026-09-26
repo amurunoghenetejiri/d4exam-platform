@@ -12,18 +12,26 @@ function fmtDur(s: number) {
 }
 
 function WaveBars({ active, light }: { active?: boolean; light?: boolean }) {
+  // Continuous wave-line style (matches messaging mockup)
+  const heights = [6, 10, 14, 18, 12, 8, 16, 20, 14, 9, 13, 19, 11, 7, 15, 17, 12, 8, 14, 18, 10, 6, 12, 16, 11, 8, 13, 9];
   return (
-    <div className="flex h-6 flex-1 items-center gap-[2px] overflow-hidden">
-      {Array.from({ length: 28 }).map((_, i) => {
-        const h = 4 + ((i * 11) % 18);
-        return (
-          <span
-            key={i}
-            className={cn("w-[2px] shrink-0 rounded-full", light ? "bg-white/80" : "bg-blue-400/80", active && "animate-pulse")}
-            style={{ height: h, animationDelay: `${i * 30}ms` }}
-          />
-        );
-      })}
+    <div className="flex h-7 flex-1 items-center gap-[2.5px] overflow-hidden">
+      {heights.map((h, i) => (
+        <span
+          key={i}
+          className={cn(
+            "w-[2.5px] shrink-0 rounded-full transition-all",
+            light ? "bg-white/85" : "bg-[#60a5fa]",
+            active && "animate-pulse",
+          )}
+          style={{
+            height: active ? h + (i % 3) : h,
+            opacity: active ? 1 : 0.85,
+            animationDelay: `${i * 28}ms`,
+            animationDuration: "0.9s",
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -135,14 +143,7 @@ export function VoiceBubble({
     }
   };
 
-  const seek = (t: number) => {
-    const a = audioRef.current;
-    if (!a) return;
-    a.currentTime = t;
-    setCur(t);
-  };
-
-  // Own messages = white; received = blue (WhatsApp-like inverse brand)
+  // Own messages = white (right); received = blue (left)
   const own = mine;
   return (
     <div
@@ -174,10 +175,11 @@ export function VoiceBubble({
           {playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
         </button>
         <div className="min-w-0 flex-1 py-0.5">
-          <SeekBar value={cur} max={Math.max(dur, 0.1)} light={!own} onSeek={seek} />
-          <div className={cn("mt-1 flex justify-between text-[10px] font-medium", own ? "text-slate-400" : "text-white/80")}>
-            <span>{fmtDur(cur)}</span>
-            <span>{fmtDur(dur)}</span>
+          <WaveBars active={playing} light={!own} />
+          <div className={cn("mt-1 flex items-center gap-1 text-[10px] font-medium tabular-nums", own ? "text-slate-400" : "text-white/80")}>
+            <span>{fmtDur(playing ? cur : 0)}</span>
+            <span className="opacity-50">/</span>
+            <span className="opacity-80">{fmtDur(dur)}</span>
           </div>
         </div>
         <div className="relative shrink-0">
