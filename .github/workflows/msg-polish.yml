@@ -1,0 +1,149 @@
+name: Messaging polish
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/msg-polish.yml"
+jobs:
+  polish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply messaging polish
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          mm = Path("src/components/messaging/MessageMedia.tsx")
+          if mm.exists():
+              t = mm.read_text()
+              old_seek = """  const seekFromClientX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el || !onSeek) return;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    onSeek(ratio);
+  };
+
+  return (
+    <div
+      ref={trackRef}
+      className={cn("relative flex h-7 flex-1 items-center gap-[2.5px] overflow-hidden", onSeek && "cursor-pointer touch-none")}"""
+              new_seek = """  const seekFromClientX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el || !onSeek) return;
+    const rect = el.getBoundingClientRect();
+    const pad = 6;
+    const usable = Math.max(1, rect.width - pad * 2);
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left - pad) / usable));
+    onSeek(ratio);
+  };
+  const knobLeft = `${6 + pct * 88}%`;
+
+  return (
+    <div
+      ref={trackRef}
+      className={cn("relative flex h-7 w-full items-center gap-[2.5px] overflow-visible px-1.5", onSeek && "cursor-pointer touch-none")}"""
+              if old_seek in t:
+                  t = t.replace(old_seek, new_seek, 1)
+                  t = t.replace('style={{ left: `${pct * 100}%` }}', 'style={{ left: knobLeft }}', 1)
+                  print("MessageMedia seek fixed")
+              if "export function parseOfficerReply" not in t:
+                  insert = '''\n/** Encode officer media into officer_reply so student attachment is never overwritten */\nexport function encodeOfficerMedia(text: string, type: string, url: string): string {\n  const body = (text || "").trim();\n  const marker = `__media__|${type}|${url}`;\n  return body ? `${body}\\n${marker}` : marker;\n}\n\nexport function parseOfficerReply(raw: string | null | undefined): {\n  text: string;\n  mediaType?: string;\n  mediaUrl?: string;\n} {\n  const s = (raw || "").trim();\n  if (!s) return { text: "" };\n  const m = s.match(/(?:^|\\n)__media__\\|([^|]+)\\|(.+)$/);\n  if (m) {\n    const text = s.replace(/(?:^|\\n)__media__\\|[^|]+\\|.+$/, "").trim();\n    return { text: text === "(attachment)" ? "" : text, mediaType: m[1], mediaUrl: m[2] };\n  }\n  return { text: s === "(attachment)" ? "" : s };\n}\n\n'''
+                  t = t.replace("export function attachmentLabel", insert + "export function attachmentLabel", 1)
+                  print("parseOfficerReply added")
+              mm.write_text(t)
+
+          p = Path("src/routes/student.contact-officer.tsx")
+          if p.exists() and p.stat().st_size > 500:
+              t = p.read_text()
+              if "parseOfficerReply" not in t:
+                  t = t.replace('attachmentLabel } from "@/components/messaging/MessageMedia";', 'attachmentLabel, parseOfficerReply } from "@/components/messaging/MessageMedia";', 1)
+              old = '''      const replyText = (r.officer_reply || "").trim();\n      if (replyText) {\n        out.push({\n          key: `${r.id}-o`,\n          side: "in",\n          text: r.officer_reply!,\n          at: r.replied_at || r.created_at,\n          reportId: r.id,\n        });\n      }'''
+              new = '''      const replyText = (r.officer_reply || "").trim();\n      if (replyText) {\n        const parsed = parseOfficerReply(r.officer_reply);\n        out.push({\n          key: `${r.id}-o`,\n          side: "in",\n          text: parsed.text || (parsed.mediaUrl ? "(attachment)" : r.officer_reply!),\n          at: r.replied_at || r.created_at,\n          reportId: r.id,\n          attachment_url: parsed.mediaUrl || undefined,\n          attachment_type: parsed.mediaType || undefined,\n        });\n      }'''
+              if old in t:
+                  t = t.replace(old, new, 1)
+              t = t.replace('className="relative z-30 flex shrink-0 items-center gap-3 border-b border-white/10 bg-[#0b1b3a] px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white lg:pt-3"', 'className="relative z-40 flex shrink-0 items-center gap-3 border-b border-white/10 bg-[#0b1b3a] px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white lg:pt-3"', 1)
+              t = t.replace('className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden"', 'className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10 lg:hidden"', 1)
+              t = t.replace('className="relative grid h-10 w-10 place-items-center rounded-full bg-[#0b1b3a] text-white"', 'className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/15 ring-2 ring-white/90 shadow-md"', 1)
+              t = t.replace('className={cn("text-[11px] font-medium", officerOnline ? "text-emerald-600" : "text-slate-400")}', 'className={cn("text-[11px] font-medium", officerOnline ? "text-emerald-300" : "text-white/55")}', 1)
+              t = t.replace('className="grid h-9 w-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100" onClick={() => setChatMenuOpen((v) => !v)}', 'className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10" onClick={() => setChatMenuOpen((v) => !v)}', 1)
+              t = t.replace('className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg"', 'className="absolute right-0 z-[70] mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl"', 1)
+              t = t.replace('border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]', 'border-t border-white/10 bg-[#0b1b3a] px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] text-white', 1)
+              t = t.replace('className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-500" onClick={() => fileRef.current?.click()}', 'className="mb-1 grid h-9 w-9 place-items-center rounded-full text-white/90 hover:bg-white/10" onClick={() => fileRef.current?.click()}', 1)
+              t = t.replace('className="flex min-w-0 flex-1 items-end rounded-full border bg-slate-50 px-3"', 'className="flex min-w-0 flex-1 items-end rounded-full border border-white/20 bg-white px-3"', 1)
+              t = t.replace('className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm outline-none"', 'className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400"', 1)
+              p.write_text(t)
+              print("student polished")
+
+          p = Path("src/routes/officer.reports.tsx")
+          if p.exists() and p.stat().st_size > 500:
+              t = p.read_text()
+              if "encodeOfficerMedia" not in t:
+                  t = t.replace('attachmentLabel } from "@/components/messaging/MessageMedia";', 'attachmentLabel, encodeOfficerMedia, parseOfficerReply } from "@/components/messaging/MessageMedia";', 1)
+              t = t.replace('''      const payload: Record<string, unknown> = {
+        officer_reply: text.trim() || (attach ? "(attachment)" : ""),
+        replied_at: new Date().toISOString(),
+        status: "replied",
+        officer_user_id: userId,
+        updated_at: new Date().toISOString(),
+      };
+      if (attach) {
+        payload.attachment_url = attach.url;
+        payload.attachment_type = attach.type;
+      }''', '''      const officerBody = attach
+        ? encodeOfficerMedia(text, attach.type, attach.url)
+        : text.trim();
+      const payload: Record<string, unknown> = {
+        officer_reply: officerBody || "(attachment)",
+        replied_at: new Date().toISOString(),
+        status: "replied",
+        officer_user_id: userId,
+        updated_at: new Date().toISOString(),
+      };''', 1)
+              old = '''      const replyText = (r.officer_reply || "").trim();
+      if (replyText) {
+        out.push({
+          key: `${r.id}-o`,
+          side: "out",
+          text: r.officer_reply!,
+          at: r.replied_at || r.created_at,
+          reportId: r.id,
+        });
+      }'''
+              new = '''      const replyText = (r.officer_reply || "").trim();
+      if (replyText) {
+        const parsed = parseOfficerReply(r.officer_reply);
+        out.push({
+          key: `${r.id}-o`,
+          side: "out",
+          text: parsed.text || (parsed.mediaUrl ? "(attachment)" : r.officer_reply!),
+          at: r.replied_at || r.created_at,
+          reportId: r.id,
+          attachment_url: parsed.mediaUrl || undefined,
+          attachment_type: parsed.mediaType || undefined,
+        });
+      }'''
+              if old in t:
+                  t = t.replace(old, new, 1)
+              t = t.replace('className="flex shrink-0 items-center gap-3 border-b px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]"', 'className="relative z-40 flex shrink-0 items-center gap-3 border-b border-white/10 bg-[#0b1b3a] px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white"', 1)
+              t = t.replace('className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100"', 'className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10"', 1)
+              t = t.replace('className="grid h-9 w-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100" onClick={() => setChatMenuOpen((v) => !v)}', 'className="grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/10" onClick={() => setChatMenuOpen((v) => !v)}', 1)
+              t = t.replace('className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg"', 'className="absolute right-0 z-[70] mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl"', 1)
+              t = t.replace('border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]', 'border-t border-white/10 bg-[#0b1b3a] px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] text-white', 1)
+              t = t.replace('className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-500" onClick={() => fileRef.current?.click()}', 'className="mb-1 grid h-9 w-9 place-items-center rounded-full text-white/90 hover:bg-white/10" onClick={() => fileRef.current?.click()}', 1)
+              t = t.replace('className="flex min-w-0 flex-1 items-end rounded-full border bg-slate-50 px-3"', 'className="flex min-w-0 flex-1 items-end rounded-full border border-white/20 bg-white px-3"', 1)
+              t = t.replace('className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm outline-none"', 'className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400"', 1)
+              p.write_text(t)
+              print("officer polished")
+          print("DONE")
+          PY
+          git config user.name d4exam-bot
+          git config user.email bot@d4exam.local
+          git add src/components/messaging/MessageMedia.tsx src/routes/student.contact-officer.tsx src/routes/officer.reports.tsx || true
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git commit -m "fix(messaging): seek within waves, header ring, menu rename z-70, navy composer, officer voice media"
+          git push
