@@ -7,6 +7,7 @@ import {
   CheckCheck,
   Mic,
   Paperclip,
+  Reply,
   Search,
   Send,
   User,
@@ -60,6 +61,7 @@ type ChatMsg = {
   attachment_type?: string | null;
   reportId: string;
   replyPreview?: string | null;
+  replyToKey?: string | null;
 };
 
 type TabKey = "inbox" | "sent" | "all";
@@ -80,9 +82,9 @@ function formatTime(iso: string) {
 }
 function Ticks({ state }: { state: "none" | "sent" | "delivered" | "read" }) {
   if (state === "none") return null;
-  if (state === "sent") return <Check className="inline h-3.5 w-3.5 text-blue-100" aria-label="Sent" />;
-  if (state === "delivered") return <CheckCheck className="inline h-3.5 w-3.5 text-blue-100" aria-label="Delivered" />;
-  return <CheckCheck className="inline h-3.5 w-3.5 text-[#0b1b3a]" aria-label="Read" />;
+  if (state === "sent") return <Check className="inline h-3.5 w-3.5 text-slate-400" aria-label="Sent" />;
+  if (state === "delivered") return <CheckCheck className="inline h-3.5 w-3.5 text-slate-400" aria-label="Delivered" />;
+  return <CheckCheck className="inline h-3.5 w-3.5 text-[#2563eb]" aria-label="Read" />;
 }
 
 function Page() {
@@ -137,7 +139,27 @@ function Page() {
   const sendLock = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const swipeRef = useRef<{ id: string; x: number } | null>(null);
+  const swipeRef = useRef<{ key: string; id: string; x: number } | null>(null);
+  const [swipeDx, setSwipeDx] = useState<Record<string, number>>({});
+  const [highlightKey, setHighlightKey] = useState<string | null>(null);
+
+  const scrollToMessage = useCallback((reportId: string, prefer: "s" | "o" | "any" = "any") => {
+    const tryIds =
+      prefer === "s"
+        ? [`msg-${reportId}-s`, `msg-${reportId}-o`]
+        : prefer === "o"
+          ? [`msg-${reportId}-o`, `msg-${reportId}-s`]
+          : [`msg-${reportId}-s`, `msg-${reportId}-o`, `msg-${reportId}`];
+    for (const id of tryIds) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setHighlightKey(id.replace(/^msg-/, ""));
+        window.setTimeout(() => setHighlightKey(null), 1600);
+        return;
+      }
+    }
+  }, []);
 
   const [examSearch, setExamSearch] = useState("");
   const [selectedExamIds, setSelectedExamIds] = useState<string[]>([]);
@@ -228,9 +250,17 @@ function Page() {
     const out: ChatMsg[] = [];
     for (const r of rows) {
       let replyPreview: string | null = null;
+      let replyToKey: string | null = null;
       if (r.reply_to_id && byId.has(r.reply_to_id)) {
         const parent = byId.get(r.reply_to_id)!;
-        replyPreview = parent.officer_reply || parent.body;
+        // Prefer linking to the officer bubble if that report was answered, else student body
+        if ((parent.officer_reply || "").trim()) {
+          replyPreview = parent.officer_reply;
+          replyToKey = `${parent.id}-o`;
+        } else {
+          replyPreview = parent.body;
+          replyToKey = `${parent.id}-s`;
+        }
       }
       const bodyText = (r.body || "").trim();
       const hasMedia = Boolean(r.attachment_url);
@@ -245,6 +275,7 @@ function Page() {
           attachment_type: r.attachment_type,
           reportId: r.id,
           replyPreview,
+          replyToKey,
         });
       }
       const replyText = (r.officer_reply || "").trim();
@@ -271,11 +302,6 @@ function Page() {
     }).length;
   }, [rows, locallyRead]);
 
-  const listPreview = useMemo(() => {
-    if (!latest) return null;
-    const lastMsg = chatMessages[chatMessages.length - 1];
-    return { preview: lastMsg?.text || "", at: lastMsg?.at || latest.created_at, unread: inboxUnread };
-  }, [latest, chatMessages, inboxUnread]);
 
   useEffect(() => {
     if (!schoolId || !userId) return;
@@ -346,15 +372,26 @@ function Page() {
   useEffect(() => {
     if (!recording) {
       if (recTimer.current) clearInterval(recTimer.current);
+      recTimer.current = null;
       setRecSecs(0);
       return;
     }
-    setRecSecs(0);
-    recTimer.current = setInterval(() => setRecSecs((s) => s + 1), 1000);
-    return () => {
+    if (recPaused) {
       if (recTimer.current) clearInterval(recTimer.current);
+      recTimer.current = null;
+      return;
+    }
+    // Keep seconds when resuming; only start interval when actively recording
+    if (!recTimer.current) {
+      recTimer.current = setInterval(() => setRecSecs((s) => s + 1), 1000);
+    }
+    return () => {
+      if (recTimer.current) {
+        clearInterval(recTimer.current);
+        recTimer.current = null;
+      }
     };
-  }, [recording]);
+  }, [recording, recPaused]);
 
   const selectedTitles = useMemo(
     () => exams.filter((e) => selectedExamIds.includes(e.id)).map((e) => e.title),
@@ -372,6 +409,37 @@ function Page() {
     }
     return m ? new Date(m).toISOString() : null;
   }, [rows]);
+
+  const listPreview = useMemo(() => {
+    if (!latest) return null;
+    const lastMsg = chatMessages[chatMessages.length - 1];
+    let preview = "";
+    if (lastMsg) {
+      if (lastMsg.attachment_type) {
+        preview = attachmentLabel(lastMsg.attachment_type, lastMsg.attachment_url);
+      } else if (lastMsg.text && lastMsg.text !== "(attachment)") {
+        preview = lastMsg.text;
+      } else {
+        preview = "Conversation";
+      }
+    }
+    const isOut = lastMsg?.side === "out";
+    const tick = isOut
+      ? ticksFor({
+          isMine: true,
+          createdAt: lastMsg?.at || latest.created_at,
+          peerOnline: true,
+          peerReadAt: maxOfficerRead,
+        })
+      : "none";
+    return {
+      preview,
+      at: lastMsg?.at || latest.created_at,
+      unread: inboxUnread,
+      isOut,
+      tick: tick as "none" | "sent" | "delivered" | "read",
+    };
+  }, [latest, chatMessages, inboxUnread, maxOfficerRead]);
 
   const sendMessage = useCallback(
     async (text: string, attach?: { url: string; type: string } | null) => {
@@ -458,15 +526,25 @@ function Page() {
         const blob = new Blob(chunks.current, { type: "audio/webm" });
         if (blob.size >= 200) {
           setPendingAudio(blob);
-          setPendingAudioUrl(URL.createObjectURL(blob));
+          setPendingAudioUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return URL.createObjectURL(blob);
+          });
         }
         setRecording(false);
         setRecPaused(false);
       };
       mediaRec.current = rec;
-      rec.start();
+      // timeslice so pause captures data up to the pause point
+      rec.start(250);
       setRecording(true);
+      setRecPaused(false);
+      setRecSecs(0);
       setPendingAudio(null);
+      setPendingAudioUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
       presenceApi.current?.setRecording(true, studentId || userId);
     } catch {
       toast.error("Microphone permission is required for voice notes");
@@ -475,42 +553,67 @@ function Page() {
 
   function cancelRec() {
     try {
-      mediaRec.current?.stop();
+      if (mediaRec.current && mediaRec.current.state !== "inactive") {
+        mediaRec.current.stop();
+      }
     } catch {
       /* ignore */
     }
+    mediaRec.current = null;
     chunks.current = [];
     setPendingAudio(null);
+    setPendingAudioUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
     setRecording(false);
+    setRecPaused(false);
+    setRecSecs(0);
     presenceApi.current?.setRecording(false, studentId || userId);
   }
 
   function stopRecKeep() {
     try {
-      mediaRec.current?.stop();
+      if (mediaRec.current && mediaRec.current.state !== "inactive") {
+        mediaRec.current.stop();
+      }
     } catch {
       /* ignore */
     }
   }
 
   async function sendPendingAudio() {
+    if (sendLock.current) return;
     if (!pendingAudio && !recording) return;
-    if (recording) {
-      stopRecKeep();
-      // wait briefly for onstop
-      await new Promise((r) => setTimeout(r, 120));
-    }
-    const blob = pendingAudio || (chunks.current.length ? new Blob(chunks.current, { type: "audio/webm" }) : null);
-    if (!blob || blob.size < 200) {
-      cancelRec();
-      return;
-    }
+    sendLock.current = true;
+    const wasRecording = recording;
+    // Collapse recorder UI immediately
+    setRecording(false);
+    setRecPaused(false);
+    presenceApi.current?.setRecording(false, studentId || userId);
     try {
-      const up = await uploadMessageMedia(blob, "audio/webm", `msg/${schoolId}/${userId}`);
+      if (wasRecording) {
+        stopRecKeep();
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      const blob =
+        pendingAudio ||
+        (chunks.current.length ? new Blob(chunks.current, { type: "audio/webm" }) : null);
+      if (!blob || blob.size < 200) {
+        cancelRec();
+        return;
+      }
       setPendingAudio(null);
+      setPendingAudioUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      const up = await uploadMessageMedia(blob, "audio/webm", `msg/${schoolId}/${userId}`);
       await sendMessage("", { url: up.url, type: "audio" });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not send voice note");
+    } finally {
+      sendLock.current = false;
     }
   }
 
@@ -609,11 +712,30 @@ function Page() {
               <div className="min-w-0 flex-1">
                 <div className="flex justify-between gap-2">
                   <p className="truncate text-sm font-bold">{officerNickname}</p>
-                  <span className="text-[10px] text-slate-400">{formatWhen(listPreview.at)}</span>
+                  <span className="flex shrink-0 items-center gap-1 text-[10px] text-slate-400">
+                    {formatWhen(listPreview.at)}
+                    {listPreview.isOut && listPreview.tick !== "none" ? (
+                      listPreview.tick === "read" ? (
+                        <CheckCheck className="h-3.5 w-3.5 text-[#2563eb]" />
+                      ) : listPreview.tick === "sent" ? (
+                        <Check className="h-3.5 w-3.5 text-slate-400" />
+                      ) : (
+                        <CheckCheck className="h-3.5 w-3.5 text-slate-400" />
+                      )
+                    ) : null}
+                  </span>
                 </div>
-                <p className="line-clamp-1 text-xs text-slate-500">{listPreview.preview || "Conversation"}</p>
+                <p className="line-clamp-1 text-xs text-slate-500">
+                  {officerRecording
+                    ? "Recording voice note…"
+                    : officerTyping
+                      ? "Typing…"
+                      : listPreview.preview || "Conversation"}
+                </p>
               </div>
-              {listPreview.unread > 0 ? <span className="mt-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">{listPreview.unread}</span> : null}
+              {listPreview.unread > 0 ? (
+                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" title={`${listPreview.unread} unread`} />
+              ) : null}
             </button>
           </li>
         ) : (
@@ -623,9 +745,36 @@ function Page() {
     </div>
   );
 
+  const schoolLogoUrl = (student as { schoolLogoUrl?: string | null; logoUrl?: string | null } | null | undefined)?.schoolLogoUrl
+    || (student as { logoUrl?: string | null } | null | undefined)?.logoUrl
+    || null;
+  const schoolName = (student as { schoolName?: string | null } | null | undefined)?.schoolName || null;
+
   const chatPane = inChat ? (
-    <div className="flex h-full min-h-0 w-full flex-1 flex-col select-none" style={{ background: "linear-gradient(180deg, #f0f7ff 0%, #f8fafc 40%, #eef6ff 100%)" }}>
-      <div className="flex shrink-0 items-center gap-3 border-b bg-white px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3">
+    <div className="relative flex h-full min-h-0 w-full flex-1 flex-col select-none" style={{ background: "linear-gradient(180deg, #f0f7ff 0%, #f8fafc 40%, #eef6ff 100%)" }}>
+      {/* School logo watermark — soft, non-interactive */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
+        {schoolLogoUrl ? (
+          <img
+            src={schoolLogoUrl}
+            alt=""
+            className="h-[min(55vh,420px)] w-auto max-w-[70%] select-none object-contain opacity-[0.08]"
+            style={{ filter: "grayscale(1) brightness(0.95)" }}
+            loading="eager"
+            decoding="async"
+          />
+        ) : (
+          <img
+            src="/logo.png"
+            alt=""
+            className="h-[min(55vh,420px)] w-auto max-w-[70%] select-none object-contain opacity-[0.07]"
+            style={{ filter: "grayscale(1) brightness(0.9)" }}
+            loading="eager"
+            decoding="async"
+          />
+        )}
+      </div>
+      <div className="relative z-10 flex shrink-0 items-center gap-3 border-b bg-white px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3">
         <button type="button" onClick={() => setInChat(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden">
           <ArrowLeft className="h-5 w-5" />
         </button>
@@ -657,7 +806,7 @@ function Page() {
           ) : null}
         </div>
       </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+      <div className="relative z-10 min-h-0 flex-1 space-y-4 overflow-y-auto px-3 py-3">
         {chatMessages.map((m) => {
           const tick =
             m.side === "out"
@@ -680,34 +829,82 @@ function Page() {
             Boolean(m.attachment_url) ||
             (Boolean(m.text) && m.text.trim() !== "" && m.text.trim() !== "(attachment)");
           if (!hasContent) return null;
+          const dx = swipeDx[m.key] || 0;
+          const replyArmed = dx > 48;
           return (
             <div
               key={m.key}
-              className={cn("flex w-full touch-pan-y select-none", m.side === "out" ? "justify-end" : "justify-start gap-2")}
+              className={cn(
+                "relative flex w-full select-none",
+                m.side === "out" ? "justify-end" : "justify-start gap-2",
+                highlightKey === m.key && "z-10",
+              )}
               onCopy={(e) => e.preventDefault()}
               onContextMenu={(e) => e.preventDefault()}
-              onTouchStart={(e) => {
-                swipeRef.current = { id: m.reportId, x: e.touches[0]?.clientX ?? 0 };
-                startLP();
-              }}
-              onTouchMove={endLP}
-              onTouchEnd={(e) => {
-                endLP();
-                const s = swipeRef.current;
-                swipeRef.current = null;
-                if (!s) return;
-                const x = e.changedTouches[0]?.clientX ?? 0;
-                if (x - s.x > 56) {
-                  setReplyTo({
-                    id: m.reportId,
-                    text: (m.text && m.text !== "(attachment)" ? m.text : m.attachment_type || "Attachment").slice(0, 120),
-                  });
-                }
-              }}
-              onMouseDown={startLP}
-              onMouseUp={endLP}
-              onMouseLeave={endLP}
             >
+              {/* Reply affordance revealed while dragging */}
+              <div
+                className={cn(
+                  "pointer-events-none absolute left-2 top-1/2 z-0 flex -translate-y-1/2 items-center transition-opacity",
+                  replyArmed ? "opacity-100" : "opacity-0",
+                )}
+                aria-hidden
+              >
+                <span className="grid h-8 w-8 place-items-center rounded-full bg-[#2563eb] text-white shadow">
+                  <Reply className="h-4 w-4" />
+                </span>
+              </div>
+              <div
+                className={cn(
+                  "relative z-[1] flex max-w-full touch-pan-y will-change-transform",
+                  m.side === "out" ? "justify-end" : "justify-start gap-2",
+                  highlightKey === m.key && "rounded-2xl ring-2 ring-[#2563eb] ring-offset-2",
+                )}
+                style={{ transform: `translateX(${Math.min(Math.max(dx, 0), 72)}px)`, transition: dx === 0 ? "transform 0.2s ease-out" : "none" }}
+                onTouchStart={(e) => {
+                  swipeRef.current = { key: m.key, id: m.reportId, x: e.touches[0]?.clientX ?? 0 };
+                  startLP();
+                }}
+                onTouchMove={(e) => {
+                  endLP();
+                  const s = swipeRef.current;
+                  if (!s || s.key !== m.key) return;
+                  const x = e.touches[0]?.clientX ?? 0;
+                  const next = Math.min(Math.max(x - s.x, 0), 72);
+                  setSwipeDx((prev) => (prev[m.key] === next ? prev : { ...prev, [m.key]: next }));
+                }}
+                onTouchEnd={(e) => {
+                  endLP();
+                  const s = swipeRef.current;
+                  swipeRef.current = null;
+                  const finalDx = swipeDx[m.key] || 0;
+                  setSwipeDx((prev) => {
+                    const n = { ...prev };
+                    delete n[m.key];
+                    return n;
+                  });
+                  if (!s) return;
+                  const x = e.changedTouches[0]?.clientX ?? 0;
+                  if (x - s.x > 56 || finalDx > 48) {
+                    setReplyTo({
+                      id: m.reportId,
+                      text: (m.text && m.text !== "(attachment)" ? m.text : m.attachment_type || "Attachment").slice(0, 120),
+                    });
+                  }
+                }}
+                onTouchCancel={() => {
+                  endLP();
+                  swipeRef.current = null;
+                  setSwipeDx((prev) => {
+                    const n = { ...prev };
+                    delete n[m.key];
+                    return n;
+                  });
+                }}
+                onMouseDown={startLP}
+                onMouseUp={endLP}
+                onMouseLeave={endLP}
+              >
               {m.side === "in" ? (
                 <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#0b1b3a] text-white">
                   <User className="h-3.5 w-3.5" />
@@ -743,8 +940,17 @@ function Page() {
                       type="button"
                       className={cn("mb-1.5 w-full rounded-lg border-l-2 px-2 py-1 text-left text-[11px]", m.side === "out" ? "border-blue-400 bg-slate-50 text-slate-600" : "border-white/50 bg-white/15 text-blue-50")}
                       onClick={() => {
-                        const el = document.getElementById(`msg-${m.reportId}`);
-                        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        if (m.replyToKey) {
+                          const el = document.getElementById(`msg-${m.replyToKey}`);
+                          if (el) {
+                            el.scrollIntoView({ behavior: "smooth", block: "center" });
+                            setHighlightKey(m.replyToKey);
+                            window.setTimeout(() => setHighlightKey(null), 1600);
+                            return;
+                          }
+                        }
+                        const parentId = (rows.find((r) => r.id === m.reportId)?.reply_to_id) || m.reportId;
+                        scrollToMessage(parentId);
                       }}
                     >
                       {m.replyPreview.slice(0, 100)}
@@ -762,13 +968,14 @@ function Page() {
                   </p>
                 </div>
               )}
+              </div>
             </div>
           );
         })}
         {officerTyping ? <p className="text-center text-xs text-slate-500">Officer is typing…</p> : null}
         <div ref={chatEndRef} />
       </div>
-      <div className="shrink-0 border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className="relative z-10 shrink-0 border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         {replyTo ? (
           <div className="mb-2 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
             <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#0b1b3a] text-white">
@@ -807,21 +1014,26 @@ function Page() {
             }}
             onPause={() => {
               try {
-                mediaRec.current?.pause();
-                setRecPaused(true);
-                // snapshot for preview while paused
-                const blob = new Blob(chunks.current, { type: "audio/webm" });
-                if (blob.size >= 200) {
-                  if (pendingAudioUrl) URL.revokeObjectURL(pendingAudioUrl);
-                  setPendingAudio(blob);
-                  setPendingAudioUrl(URL.createObjectURL(blob));
+                if (mediaRec.current && mediaRec.current.state === "recording") {
+                  mediaRec.current.pause();
+                  setRecPaused(true);
+                  const blob = new Blob(chunks.current, { type: "audio/webm" });
+                  if (blob.size >= 200) {
+                    setPendingAudio(blob);
+                    setPendingAudioUrl((prev) => {
+                      if (prev) URL.revokeObjectURL(prev);
+                      return URL.createObjectURL(blob);
+                    });
+                  }
                 }
               } catch { /* ignore */ }
             }}
             onContinue={() => {
               try {
-                mediaRec.current?.resume();
-                setRecPaused(false);
+                if (mediaRec.current && mediaRec.current.state === "paused") {
+                  mediaRec.current.resume();
+                  setRecPaused(false);
+                }
               } catch { /* ignore */ }
             }}
             onPreviewPlay={() => {
@@ -830,13 +1042,7 @@ function Page() {
               void a.play().catch(() => {});
             }}
             onSend={() => {
-              void (async () => {
-                if (recording) {
-                  try { mediaRec.current?.stop(); } catch { /* ignore */ }
-                  await new Promise((r) => setTimeout(r, 180));
-                }
-                await sendPendingAudio();
-              })();
+              void sendPendingAudio();
             }}
           />
         ) : null}
