@@ -1,24 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Inbox, MessageSquare, Search, Send, User } from "lucide-react";
-import { PageHeader, SectionCard, EmptyState } from "@/components/dashboard/kit";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { ArrowLeft, MoreVertical, Paperclip, Search, Send, Smile, User } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { isOnlineNow } from "@/lib/offline-sync";
 
 export const Route = createFileRoute("/officer/reports")({
   head: () => ({
     meta: [
-      { title: "Student reports — D4EXAM" },
-      {
-        name: "description",
-        content: "Messages and exam reports from students to the departmental officer.",
-      },
+      { title: "Messages — D4EXAM" },
+      { name: "description", content: "View and reply to messages from your students." },
     ],
   }),
   component: Page,
@@ -42,16 +37,67 @@ type ReportRow = {
   created_at: string;
 };
 
+type TabKey = "inbox" | "sent" | "all";
+
+const AVATAR_COLORS = [
+  "bg-blue-600",
+  "bg-violet-600",
+  "bg-emerald-600",
+  "bg-rose-500",
+  "bg-amber-600",
+  "bg-cyan-600",
+];
+
+function avatarColor(seed: string) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h + seed.charCodeAt(i) * 17) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[h];
+}
+
+function initials(name: string | null) {
+  const p = (name || "S").trim().split(/\s+/);
+  if (p.length >= 2) return (p[0][0] + p[1][0]).toUpperCase();
+  return (p[0]?.[0] || "S").toUpperCase();
+}
+
+function formatWhen(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (
+    d.getFullYear() === yesterday.getFullYear() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getDate() === yesterday.getDate()
+  ) {
+    return "Yesterday";
+  }
+  return d.toLocaleDateString([], { weekday: "short" });
+}
+
+function formatTime(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 function Page() {
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId;
   const qc = useQueryClient();
+  const [tab, setTab] = useState<TabKey>("inbox");
   const [search, setSearch] = useState("");
-  const [examFilter, setExamFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "replied">("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reply, setReply] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+  const sendLock = useRef(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const listQ = useQuery({
     queryKey: ["officer-student-reports", schoolId],
@@ -68,7 +114,7 @@ function Page() {
         .order("created_at", { ascending: false })
         .limit(200);
       if (error) {
-        console.warn("[officer-reports]", error.message);
+        console.warn("[officer-messages]", error.message);
         return [] as ReportRow[];
       }
       return (data ?? []) as ReportRow[];
@@ -76,46 +122,42 @@ function Page() {
   });
 
   const rows = listQ.data ?? [];
-  const openCount = rows.filter((r) => String(r.status || "open").toLowerCase() !== "replied").length;
-  const repliedCount = rows.length - openCount;
-
-  const examOptions = useMemo(() => {
-    const set = new Map<string, string>();
-    for (const r of rows) {
-      if (r.exam_id && r.exam_title) set.set(r.exam_id, r.exam_title);
-      for (let i = 0; i < (r.exam_titles?.length || 0); i++) {
-        const t = r.exam_titles![i];
-        if (t) set.set(`t:${t}`, t);
-      }
-    }
-    return [...set.entries()];
-  }, [rows]);
+  const inboxCount = useMemo(
+    () => rows.filter((r) => String(r.status || "open").toLowerCase() !== "replied").length,
+    [rows],
+  );
 
   const filtered = useMemo(() => {
+    let list = rows;
+    if (tab === "inbox") {
+      list = rows.filter((r) => String(r.status || "open").toLowerCase() !== "replied");
+    } else if (tab === "sent") {
+      list = rows.filter((r) => Boolean(r.officer_reply));
+    }
     const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
-      const st = String(r.status || "open").toLowerCase();
-      if (statusFilter === "open" && st === "replied") return false;
-      if (statusFilter === "replied" && st !== "replied") return false;
-      if (examFilter) {
-        if (examFilter.startsWith("t:")) {
-          const title = examFilter.slice(2);
-          const titles = r.exam_titles || [];
-          if (r.exam_title !== title && !titles.includes(title)) return false;
-        } else if (r.exam_id !== examFilter) return false;
-      }
-      if (!q) return true;
-      const hay = `${r.student_name || ""} ${r.student_matric || ""} ${r.exam_title || ""} ${(r.exam_titles || []).join(" ")} ${r.subject || ""} ${r.body || ""}`.toLowerCase();
+    if (!q) return list;
+    return list.filter((r) => {
+      const hay = `${r.student_name || ""} ${r.student_matric || ""} ${r.subject || ""} ${r.body || ""} ${r.exam_title || ""} ${(r.exam_titles || []).join(" ")} ${r.officer_reply || ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [rows, search, examFilter, statusFilter]);
+  }, [rows, tab, search]);
 
-  const selected =
-    filtered.find((r) => r.id === selectedId) ?? rows.find((r) => r.id === selectedId) ?? null;
+  const selected = rows.find((r) => r.id === selectedId) ?? null;
 
-  async function sendReply() {
-    if (!selected || !reply.trim() || !user?.userId) return;
-    setBusy(true);
+  useEffect(() => {
+    if (selectedId && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [selectedId, selected?.officer_reply, selected?.body]);
+
+  const sendReply = useCallback(async () => {
+    if (sendLock.current || !selected || !reply.trim() || !user?.userId) return;
+    if (!isOnlineNow()) {
+      toast.error("Internet connection is required to send messages.");
+      return;
+    }
+    sendLock.current = true;
+    setSending(true);
     try {
       const { error } = await supabase
         .from("student_officer_reports")
@@ -133,7 +175,7 @@ function Page() {
           await supabase.from("notifications").insert({
             recipient_user_id: selected.student_user_id,
             school_id: schoolId,
-            title: "Officer replied to your report",
+            title: "Officer replied to your message",
             message: reply.trim().slice(0, 280),
             type: "info",
             entity_type: "student_officer_report",
@@ -147,239 +189,266 @@ function Page() {
       toast.success("Reply sent");
       setReply("");
       await qc.invalidateQueries({ queryKey: ["officer-student-reports"] });
+      await qc.invalidateQueries({ queryKey: ["nav-student-reports-open"] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not send reply");
     } finally {
-      setBusy(false);
+      setSending(false);
+      window.setTimeout(() => {
+        sendLock.current = false;
+      }, 400);
     }
-  }
+  }, [selected, reply, user?.userId, schoolId, qc]);
+
+  const showChat = Boolean(selectedId && selected);
 
   return (
-    <div className="space-y-4">
-      <PageHeader
-        title="Student reports"
-        description="Inbox for exam issues and messages from students. Search, filter, and reply."
-      />
-
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
-        <div className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Total</p>
-          <p className="mt-0.5 text-xl font-extrabold text-slate-900">{rows.length}</p>
-        </div>
-        <div className="rounded-2xl border border-amber-100 bg-amber-50/60 p-3 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Open</p>
-          <p className="mt-0.5 text-xl font-extrabold text-amber-900">{openCount}</p>
-        </div>
-        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-3 shadow-sm">
-          <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Replied</p>
-          <p className="mt-0.5 text-xl font-extrabold text-emerald-900">{repliedCount}</p>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        <div className="relative min-w-0 flex-1 sm:min-w-[12rem]">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, matric, exam, message…"
-            className="h-10 rounded-xl pl-9"
-          />
-        </div>
-        <select
-          value={examFilter}
-          onChange={(e) => setExamFilter(e.target.value)}
-          className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm"
-        >
-          <option value="">All examinations</option>
-          {examOptions.map(([id, title]) => (
-            <option key={id} value={id}>
-              {title}
-            </option>
-          ))}
-        </select>
-        <div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
-          {(["all", "open", "replied"] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatusFilter(s)}
-              className={cn(
-                "rounded-lg px-2.5 py-1.5 text-xs font-bold capitalize",
-                statusFilter === s ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50",
-              )}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
-
+    <div className="-mx-3 -mt-4 flex min-h-[calc(100dvh-8rem)] flex-col bg-slate-50 sm:-mx-6 sm:-mt-6 lg:min-h-[calc(100dvh-6rem)] lg:flex-row lg:overflow-hidden lg:rounded-2xl lg:border lg:border-slate-200 lg:bg-white lg:shadow-sm">
+      {/* List */}
       <div
-        className="flex flex-col gap-4 lg:flex-row lg:gap-0 lg:items-stretch"
-        className="min-h-[32rem] lg:h-[min(44rem,70vh)]"
+        className={cn(
+          "flex min-h-0 flex-col border-slate-200 bg-white lg:w-[380px] lg:shrink-0 lg:border-r",
+          showChat && "hidden lg:flex",
+        )}
       >
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:max-w-[42%]">
-          <SectionCard
-            title="Inbox"
-            description={`${filtered.length} message(s)`}
-            className="flex h-full min-h-0 flex-col overflow-hidden"
-            bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden !p-0"
-          >
-            {listQ.isLoading ? (
-              <p className="p-4 text-sm text-slate-500">Loading…</p>
-            ) : filtered.length === 0 ? (
-              <div className="p-4">
-                <EmptyState
-                  title="Inbox is clear"
-                  description="When students use Contact officer, messages appear here."
-                />
-              </div>
-            ) : (
-              <ul className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto overscroll-contain">
-                {filtered.map((r) => {
-                  const open = selectedId === r.id;
-                  const st = String(r.status || "open").toLowerCase();
-                  const titles =
-                    (r.exam_titles && r.exam_titles.length ? r.exam_titles.join(" · ") : null) ||
-                    r.exam_title ||
-                    "General";
-                  return (
-                    <li key={r.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedId(r.id);
-                          setReply(r.officer_reply || "");
-                        }}
-                        className={cn(
-                          "w-full px-3.5 py-3 text-left transition-colors hover:bg-slate-50",
-                          open && "bg-blue-50/90",
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex min-w-0 items-start gap-2">
-                            <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600">
-                              <User className="h-4 w-4" />
-                            </span>
-                            <div className="min-w-0">
-                            <p className="truncate text-sm font-bold text-slate-900">
-                              {r.student_name || "Student"}
-                              {r.student_matric ? (
-                                <span className="ml-1.5 text-xs font-semibold text-slate-500">
-                                  · {r.student_matric}
-                                </span>
-                              ) : null}
-                            </p>
-                            <p className="truncate text-xs text-slate-500">
-                              {titles} · {r.subject || "Report"}
-                            </p>
-                            </div>
-                          </div>
-                          <span
-                            className={cn(
-                              "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-                              st === "replied"
-                                ? "bg-emerald-50 text-emerald-700"
-                                : "bg-amber-50 text-amber-800",
-                            )}
-                          >
-                            {st}
-                          </span>
-                        </div>
-                        <p className="mt-1 line-clamp-2 text-xs text-slate-600">{r.body}</p>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </SectionCard>
+        <div className="shrink-0 border-b border-slate-100 px-4 pb-3 pt-4">
+          <h1 className="text-xl font-extrabold tracking-tight text-slate-900">Messages</h1>
+          <p className="mt-0.5 text-xs text-slate-500">
+            View and reply to messages from your students and other users.
+          </p>
+
+          <div className="mt-3 flex gap-1 rounded-full bg-slate-100 p-1">
+            {(
+              [
+                { k: "inbox" as const, label: "Inbox", count: inboxCount },
+                { k: "sent" as const, label: "Sent" },
+                { k: "all" as const, label: "All" },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.k}
+                type="button"
+                onClick={() => setTab(t.k)}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1 rounded-full py-2 text-xs font-bold transition",
+                  tab === t.k ? "bg-[#2563eb] text-white shadow-sm" : "text-slate-600 hover:bg-white",
+                )}
+              >
+                {t.label}
+                {"count" in t && t.count > 0 ? (
+                  <span
+                    className={cn(
+                      "grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px]",
+                      tab === t.k ? "bg-white/25 text-white" : "bg-red-500 text-white",
+                    )}
+                  >
+                    {t.count}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative mt-3">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search messages…"
+              className="h-10 rounded-xl border-slate-200 bg-slate-50 pl-9 text-sm"
+            />
+          </div>
         </div>
 
-        <div className="hidden w-5 shrink-0 items-center justify-center lg:flex">
-          <div className="h-20 w-[3px] rounded-full bg-blue-500/80" />
-        </div>
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <SectionCard
-            title="Reply"
-            className="flex h-full min-h-0 flex-col overflow-hidden"
-            bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
-          >
-            {!selected ? (
-              <EmptyState
-                title="Select a report"
-                description="Choose a student message on the left to read and reply."
-              />
-            ) : (
-              <div className="flex min-h-0 flex-1 flex-col gap-3">
-                <div className="shrink-0 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white p-3.5">
-                  <div className="flex items-center gap-2">
-                    <span className="grid h-9 w-9 place-items-center rounded-xl bg-blue-600 text-white">
-                      <User className="h-4 w-4" />
+        <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {listQ.isLoading ? (
+            <li className="px-4 py-8 text-center text-sm text-slate-500">Loading…</li>
+          ) : filtered.length === 0 ? (
+            <li className="px-4 py-10 text-center text-sm text-slate-500">No student messages yet.</li>
+          ) : (
+            filtered.map((r) => {
+              const active = selectedId === r.id;
+              const open = String(r.status || "open").toLowerCase() !== "replied";
+              const seed = r.student_id || r.student_name || r.id;
+              const titles =
+                (r.exam_titles && r.exam_titles.length ? r.exam_titles.join(" · ") : null) ||
+                r.exam_title ||
+                "General";
+              return (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(r.id);
+                      setReply(r.officer_reply || "");
+                    }}
+                    className={cn(
+                      "flex w-full items-start gap-3 border-b border-slate-50 px-4 py-3 text-left transition hover:bg-slate-50",
+                      active && "bg-blue-50/80",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "grid h-11 w-11 shrink-0 place-items-center rounded-full text-sm font-bold text-white",
+                        avatarColor(seed),
+                      )}
+                    >
+                      {initials(r.student_name)}
                     </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-slate-900">
-                        {selected.student_name || "Student"}
-                        {selected.student_matric ? ` · ${selected.student_matric}` : ""}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <p className="truncate text-sm font-bold text-slate-900">
+                          {r.student_name || "Student"}
+                        </p>
+                        <span className="shrink-0 text-[10px] text-slate-400">{formatWhen(r.created_at)}</span>
+                      </div>
+                      <p className="truncate text-xs font-medium text-slate-600">
+                        {r.subject || titles}
+                        {r.student_matric ? ` · ${r.student_matric}` : ""}
                       </p>
-                      <p className="truncate text-xs text-slate-500">
-                        {(selected.exam_titles && selected.exam_titles.length
-                          ? selected.exam_titles.join(" · ")
-                          : null) ||
-                          selected.exam_title ||
-                          "General"}{" "}
-                        · {new Date(selected.created_at).toLocaleString()}
-                      </p>
+                      <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">{r.body}</p>
                     </div>
-                  </div>
+                    {open ? (
+                      <span className="mt-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                        1
+                      </span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })
+          )}
+        </ul>
+      </div>
+
+      {/* Chat */}
+      <div
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col bg-[#f8fafc]",
+          !showChat && "hidden lg:flex",
+        )}
+      >
+        {showChat && selected ? (
+          <>
+            <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 py-3">
+              <button
+                type="button"
+                className="grid h-9 w-9 place-items-center rounded-full text-slate-600 hover:bg-slate-100 lg:hidden"
+                onClick={() => setSelectedId(null)}
+                aria-label="Back"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+              <span
+                className={cn(
+                  "grid h-10 w-10 place-items-center rounded-full text-sm font-bold text-white",
+                  avatarColor(selected.student_id || selected.student_name || selected.id),
+                )}
+              >
+                {initials(selected.student_name)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-bold text-slate-900">
+                  {selected.student_name || "Student"}
+                  {selected.student_matric ? (
+                    <span className="ml-1.5 text-xs font-semibold text-slate-500">
+                      · {selected.student_matric}
+                    </span>
+                  ) : null}
+                </p>
+                <p className="truncate text-[11px] text-slate-500">
+                  {(selected.exam_titles && selected.exam_titles.length
+                    ? selected.exam_titles.join(" · ")
+                    : null) ||
+                    selected.exam_title ||
+                    "General"}
+                </p>
+              </div>
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-slate-400" aria-label="More">
+                <MoreVertical className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5">
+              <p className="text-center text-[11px] font-medium text-slate-400">
+                {new Date(selected.created_at).toLocaleDateString(undefined, {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </p>
+              {/* Student message — incoming for officer */}
+              <div className="flex justify-start gap-2">
+                <span
+                  className={cn(
+                    "mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white",
+                    avatarColor(selected.student_id || selected.student_name || selected.id),
+                  )}
+                >
+                  {initials(selected.student_name)}
+                </span>
+                <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-slate-100 bg-white px-3.5 py-2.5 shadow-sm">
                   {selected.subject ? (
-                    <p className="mt-2 text-xs font-semibold text-slate-700">{selected.subject}</p>
+                    <p className="mb-1 text-[11px] font-semibold text-slate-500">{selected.subject}</p>
                   ) : null}
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{selected.body}</p>
+                  <p className="mt-1 text-[10px] text-slate-400">{formatTime(selected.created_at)}</p>
                 </div>
-                <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
-                  <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                    <p className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                      <MessageSquare className="h-3 w-3" /> Student
+              </div>
+              {selected.officer_reply ? (
+                <div className="flex justify-end">
+                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[#2563eb] px-3.5 py-2.5 text-white shadow-sm">
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{selected.officer_reply}</p>
+                    <p className="mt-1 text-right text-[10px] text-blue-100">
+                      {selected.replied_at ? formatTime(selected.replied_at) : ""} ✓
                     </p>
-                    <p className="whitespace-pre-wrap text-sm text-slate-800">{selected.body}</p>
                   </div>
-                  {selected.officer_reply ? (
-                    <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-3">
-                      <p className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-blue-700">
-                        <MessageSquare className="h-3 w-3" /> Your reply
-                        {selected.replied_at
-                          ? ` · ${new Date(selected.replied_at).toLocaleString()}`
-                          : ""}
-                      </p>
-                      <p className="whitespace-pre-wrap text-sm text-slate-800">
-                        {selected.officer_reply}
-                      </p>
-                    </div>
-                  ) : null}
                 </div>
-                <div className="mt-auto shrink-0 space-y-2 border-t border-slate-100 bg-white pt-3">
-                  <Textarea
+              ) : null}
+              <div ref={chatEndRef} />
+            </div>
+
+            <div className="shrink-0 border-t border-slate-200 bg-white px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+              <div className="flex items-end gap-2">
+                <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-400" disabled aria-label="Attach">
+                  <Paperclip className="h-5 w-5" />
+                </button>
+                <div className="flex min-w-0 flex-1 items-end rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+                  <textarea
                     value={reply}
                     onChange={(e) => setReply(e.target.value)}
-                    placeholder="Write a clear reply to this student…"
-                    className="min-h-[140px] rounded-xl text-sm sm:min-h-[160px]"
+                    rows={1}
+                    placeholder="Type your message…"
+                    className="max-h-28 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm outline-none"
                   />
-                  <Button
-                    type="button"
-                    className="h-10 w-full rounded-xl font-bold sm:w-auto"
-                    disabled={busy || !reply.trim()}
-                    onClick={() => void sendReply()}
-                  >
-                    <Send className="mr-1.5 h-4 w-4" />
-                    Send reply
-                  </Button>
+                  <button type="button" className="mb-1 text-slate-400" disabled aria-label="Emoji">
+                    <Smile className="h-5 w-5" />
+                  </button>
                 </div>
+                <button
+                  type="button"
+                  disabled={sending || !reply.trim()}
+                  onClick={() => void sendReply()}
+                  className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#2563eb] text-white shadow-md disabled:opacity-40"
+                  aria-label="Send"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
               </div>
-            )}
-          </SectionCard>
-        </div>
+            </div>
+          </>
+        ) : (
+          <div className="hidden flex-1 flex-col items-center justify-center gap-2 p-8 text-center lg:flex">
+            <span className="grid h-16 w-16 place-items-center rounded-full bg-slate-100 text-slate-400">
+              <User className="h-8 w-8" />
+            </span>
+            <p className="text-sm font-semibold text-slate-700">Select a conversation</p>
+            <p className="max-w-xs text-xs text-slate-500">
+              Choose a student message from the inbox to read and reply.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -59,7 +59,7 @@ export const studentNav: RoleConfig = {
         { label: "Results", to: "/student/results", icon: BarChart3 },
         { label: "My Courses", to: "/student/courses", icon: BookOpen },
         { label: "Materials", to: "/student/materials", icon: FolderOpen },
-        { label: "Contact officer", to: "/student/contact-officer", icon: MessageSquare },
+        { label: "Messages", to: "/student/contact-officer", icon: MessageSquare },
       ],
     },
     {
@@ -73,8 +73,8 @@ export const studentNav: RoleConfig = {
   ],
   bottomNav: [
     { label: "Home", to: "/student", icon: Home },
-    { label: "Exams", to: "/student/examinations", icon: FileText },
-    { label: "Results", to: "/student/results", icon: BarChart3 },
+    { label: "Examinations", to: "/student/examinations", icon: FileText },
+    { label: "Messages", to: "/student/contact-officer", icon: MessageSquare },
     { label: "Profile", to: "/student/profile", icon: User },
   ],
 };
@@ -196,7 +196,7 @@ export const officerNav: RoleConfig = {
       items: [
         { label: "Results", to: "/officer/results", icon: BarChart3 },
         { label: "Carryover Students", to: "/officer/carryovers", icon: GraduationCap },
-        { label: "Student reports", to: "/officer/reports", icon: MessageSquare },
+        { label: "Messages", to: "/officer/reports", icon: MessageSquare },
       ],
     },
     {
@@ -211,8 +211,8 @@ export const officerNav: RoleConfig = {
   bottomNav: [
     { label: "Home", to: "/officer", icon: Home },
     { label: "Approvals", to: "/officer/approvals", icon: CheckSquare },
-    { label: "Monitor", to: "/officer/live-monitor", icon: Radio },
-    { label: "Results", to: "/officer/results", icon: BarChart3 },
+    { label: "Messages", to: "/officer/reports", icon: MessageSquare },
+    { label: "Profile", to: "/officer/profile", icon: User },
   ],
 };
 
