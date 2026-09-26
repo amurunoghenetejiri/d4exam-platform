@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, CheckCheck, Download, Mic, Pause, Play, Pencil, Trash2, X, Send } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Check, CheckCheck, Download, Mic, Pause, Play, Pencil, Trash2, X, Send, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const SPEEDS = [1, 1.25, 1.5, 2] as const;
@@ -9,6 +9,38 @@ function fmtDur(s: number) {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
   return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+
+type VoiceReg = { id: string; play: () => void; pause: () => void };
+const voiceOrder: string[] = [];
+const voiceMap = new Map<string, VoiceReg>();
+let activeVoiceId: string | null = null;
+
+function registerVoice(id: string, reg: VoiceReg) {
+  if (!voiceMap.has(id)) voiceOrder.push(id);
+  voiceMap.set(id, reg);
+}
+function unregisterVoice(id: string) {
+  voiceMap.delete(id);
+  const i = voiceOrder.indexOf(id);
+  if (i >= 0) voiceOrder.splice(i, 1);
+  if (activeVoiceId === id) activeVoiceId = null;
+}
+function playVoice(id: string) {
+  if (activeVoiceId && activeVoiceId !== id) {
+    voiceMap.get(activeVoiceId)?.pause();
+  }
+  activeVoiceId = id;
+  voiceMap.get(id)?.play();
+}
+function onVoiceEnded(id: string) {
+  if (activeVoiceId !== id) return;
+  activeVoiceId = null;
+  const i = voiceOrder.indexOf(id);
+  if (i >= 0 && i < voiceOrder.length - 1) {
+    const next = voiceOrder[i + 1];
+    window.setTimeout(() => playVoice(next), 280);
+  }
 }
 
 function WaveBars({
@@ -43,13 +75,18 @@ function WaveBars({
       className={cn("relative flex h-7 w-full items-center gap-[2.5px] overflow-visible px-1.5", onSeek && "cursor-pointer touch-none")}
       onPointerDown={(e) => {
         if (!onSeek) return;
+        e.stopPropagation();
         (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
         seekFromClientX(e.clientX);
       }}
       onPointerMove={(e) => {
         if (!onSeek || e.buttons !== 1) return;
+        e.stopPropagation();
         seekFromClientX(e.clientX);
       }}
+      onClick={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchMove={(e) => e.stopPropagation()}
     >
       {heights.map((h, i) => {
         const passed = i < filledCount;
@@ -57,7 +94,7 @@ function WaveBars({
           <span
             key={i}
             className={cn(
-              "w-[2.5px] shrink-0 rounded-full transition-colors",
+              "w-[2.5px] shrink-0 rounded-full transition-colors duration-75",
               light ? (passed ? "bg-white" : "bg-white/35") : (passed ? "bg-[#2563eb]" : "bg-[#93c5fd]/70"),
               active && !passed && "animate-pulse",
             )}
@@ -72,7 +109,7 @@ function WaveBars({
       {onSeek ? (
         <span
           className={cn(
-            "pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow",
+            "pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow transition-[left] duration-75",
             light ? "bg-white" : "bg-[#2563eb]",
           )}
           style={{ left: `${6 + pct * 88}%` }}
@@ -92,7 +129,7 @@ export function VoiceBubble({
   src: string;
   mine: boolean;
   timeLabel: string;
-  tick?: "none" | "sent" | "delivered" | "read";
+  tick?: "none" | "sent" | "delivered" | "read" | "pending";
   id?: string;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -101,6 +138,7 @@ export function VoiceBubble({
   const [dur, setDur] = useState(0);
   const [speedIdx, setSpeedIdx] = useState(0);
   const [speedOpen, setSpeedOpen] = useState(false);
+  const voiceId = id || src;
 
   useEffect(() => {
     const a = new Audio(src);
@@ -110,30 +148,47 @@ export function VoiceBubble({
     const onEnd = () => {
       setPlaying(false);
       setCur(0);
+      try { a.currentTime = 0; } catch { /* ignore */ }
+      onVoiceEnded(voiceId);
     };
     a.addEventListener("loadedmetadata", onMeta);
     a.addEventListener("timeupdate", onTime);
     a.addEventListener("ended", onEnd);
+
+    registerVoice(voiceId, {
+      id: voiceId,
+      play: () => {
+        void a.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      },
+      pause: () => {
+        a.pause();
+        setPlaying(false);
+      },
+    });
+
     return () => {
       a.pause();
       a.removeEventListener("loadedmetadata", onMeta);
       a.removeEventListener("timeupdate", onTime);
       a.removeEventListener("ended", onEnd);
+      unregisterVoice(voiceId);
     };
-  }, [src]);
+  }, [src, voiceId]);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.playbackRate = SPEEDS[speedIdx];
   }, [speedIdx]);
 
-  const toggle = () => {
+  const toggle = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     const a = audioRef.current;
     if (!a) return;
     if (playing) {
       a.pause();
       setPlaying(false);
+      if (activeVoiceId === voiceId) activeVoiceId = null;
     } else {
-      void a.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      playVoice(voiceId);
     }
   };
 
@@ -147,6 +202,8 @@ export function VoiceBubble({
         "flex w-[min(78vw,280px)] min-w-[220px] flex-col gap-0.5 select-none",
         own ? "items-end" : "items-start",
       )}
+      onTouchStart={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
     >
       <div
         className={cn(
@@ -187,7 +244,10 @@ export function VoiceBubble({
         <div className="relative shrink-0">
           <button
             type="button"
-            onClick={() => setSpeedOpen((v) => !v)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSpeedOpen((v) => !v);
+            }}
             className={cn(
               "rounded-md px-1.5 py-0.5 text-[10px] font-bold",
               own ? "bg-slate-100 text-slate-700" : "bg-white/20 text-white",
@@ -205,7 +265,8 @@ export function VoiceBubble({
                     "flex w-full items-center justify-between px-2.5 py-1.5 text-left text-[11px] font-semibold text-slate-800 hover:bg-slate-50",
                     i === speedIdx && "text-[#2563eb]",
                   )}
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setSpeedIdx(i);
                     setSpeedOpen(false);
                   }}
@@ -221,7 +282,9 @@ export function VoiceBubble({
       <div className={cn("flex items-center gap-1 px-1 text-[10px]", own ? "text-slate-400" : "text-slate-400")}>
         <span>{timeLabel}</span>
         {tick && tick !== "none" ? (
-          tick === "read" ? (
+          tick === "pending" ? (
+            <Clock className="h-3.5 w-3.5 text-slate-400" />
+          ) : tick === "read" ? (
             <CheckCheck className="h-3.5 w-3.5 text-[#2563eb]" />
           ) : tick === "sent" ? (
             <Check className="h-3.5 w-3.5 text-slate-400" />
@@ -258,49 +321,49 @@ export function VoiceRecorderBar({
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
   return (
-    <div className="mb-0 select-none rounded-2xl border border-blue-200/80 bg-gradient-to-b from-[#eff6ff] to-white px-3 py-3 shadow-sm">
-      <div className="mb-3 flex flex-col items-center gap-1">
+    <div className="mb-0 select-none rounded-xl border border-blue-200/80 bg-gradient-to-b from-[#eff6ff] to-white px-2.5 py-2 shadow-sm">
+      <div className="mb-2 flex flex-col items-center gap-0.5">
         <WaveBars active={recording && !paused} />
         <p className="text-sm font-bold tabular-nums text-slate-800">{mm}:{ss}</p>
-        <p className="text-[11px] font-medium text-slate-500">
-          {recording && !paused ? "Recording…" : paused ? "Paused — play to preview or continue" : "Voice note"}
+        <p className="text-[10px] font-medium text-slate-500">
+          {recording && !paused ? "Recording…" : paused ? "Paused" : "Voice note"}
         </p>
       </div>
-      <div className="flex items-center justify-center gap-5">
-        <button type="button" onClick={onCancel} className="flex flex-col items-center gap-1 text-slate-500">
-          <span className="grid h-11 w-11 place-items-center rounded-full bg-slate-100">
-            <X className="h-5 w-5" />
+      <div className="flex items-center justify-center gap-4">
+        <button type="button" onClick={onCancel} className="flex flex-col items-center gap-0.5 text-slate-500">
+          <span className="grid h-9 w-9 place-items-center rounded-full bg-slate-100">
+            <X className="h-4 w-4" />
           </span>
-          <span className="text-[10px] font-semibold">Cancel</span>
+          <span className="text-[9px] font-semibold">Cancel</span>
         </button>
         {paused ? (
           <>
-            <button type="button" onClick={onPreviewPlay} className="flex flex-col items-center gap-1 text-slate-600">
-              <span className="grid h-11 w-11 place-items-center rounded-full bg-slate-800 text-white">
-                <Play className="ml-0.5 h-5 w-5" />
+            <button type="button" onClick={onPreviewPlay} className="flex flex-col items-center gap-0.5 text-slate-600">
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-slate-800 text-white">
+                <Play className="ml-0.5 h-4 w-4" />
               </span>
-              <span className="text-[10px] font-semibold">Play</span>
+              <span className="text-[9px] font-semibold">Play</span>
             </button>
-            <button type="button" onClick={onContinue} className="flex flex-col items-center gap-1">
-              <span className="grid h-14 w-14 place-items-center rounded-full bg-[#2563eb] text-white shadow-md">
-                <Mic className="h-6 w-6" />
+            <button type="button" onClick={onContinue} className="flex flex-col items-center gap-0.5">
+              <span className="grid h-11 w-11 place-items-center rounded-full bg-[#2563eb] text-white shadow-md">
+                <Mic className="h-5 w-5" />
               </span>
-              <span className="text-[10px] font-semibold text-slate-600">Continue</span>
+              <span className="text-[9px] font-semibold text-slate-600">Continue</span>
             </button>
           </>
         ) : (
-          <button type="button" onClick={onPause} className="flex flex-col items-center gap-1">
-            <span className="grid h-14 w-14 place-items-center rounded-full bg-slate-800 text-white shadow-md">
-              <Pause className="h-6 w-6" />
+          <button type="button" onClick={onPause} className="flex flex-col items-center gap-0.5">
+            <span className="grid h-11 w-11 place-items-center rounded-full bg-slate-800 text-white shadow-md">
+              <Pause className="h-5 w-5" />
             </span>
-            <span className="text-[10px] font-semibold text-slate-600">Pause</span>
+            <span className="text-[9px] font-semibold text-slate-600">Pause</span>
           </button>
         )}
-        <button type="button" onClick={onSend} className="flex flex-col items-center gap-1">
-          <span className="grid h-14 w-14 place-items-center rounded-full bg-[#2563eb] text-white shadow-lg ring-2 ring-blue-200">
-            <Send className="h-6 w-6" />
+        <button type="button" onClick={onSend} className="flex flex-col items-center gap-0.5">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-[#2563eb] text-white shadow-lg ring-2 ring-blue-200">
+            <Send className="h-5 w-5" />
           </span>
-          <span className="text-[10px] font-bold text-[#2563eb]">Send</span>
+          <span className="text-[9px] font-bold text-[#2563eb]">Send</span>
         </button>
       </div>
     </div>
@@ -362,7 +425,7 @@ export function ImageBubble({
   src: string;
   mine?: boolean;
   timeLabel: string;
-  tick?: "none" | "sent" | "delivered" | "read";
+  tick?: "none" | "sent" | "delivered" | "read" | "pending";
   onOpen: (index?: number) => void;
   id?: string;
   count?: number;
@@ -383,7 +446,9 @@ export function ImageBubble({
       ) : null}
       <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] text-white">
         <span>{timeLabel}</span>
-        {tick === "read" ? (
+        {tick === "pending" ? (
+          <Clock className="h-3 w-3 text-white/90" />
+        ) : tick === "read" ? (
           <CheckCheck className="h-3 w-3 text-sky-300" />
         ) : tick === "delivered" || tick === "sent" ? (
           <CheckCheck className="h-3 w-3 text-white/80" />
@@ -405,10 +470,15 @@ export function ImageLightbox({
 }) {
   const list = urls && urls.length ? urls : src ? [src] : [];
   const [i, setI] = useState(index);
-  const touchRef = useRef<{ x: number } | null>(null);
+  const [scale, setScale] = useState(1);
+  const touchRef = useRef<{ x: number; y: number; dist?: number } | null>(null);
+
   useEffect(() => setI(index), [index]);
+  useEffect(() => setScale(1), [i]);
+
   if (!list.length) return null;
   const cur = list[Math.min(i, list.length - 1)];
+
   const go = (dir: -1 | 1) => {
     setI((prev) => {
       const next = prev + dir;
@@ -416,39 +486,74 @@ export function ImageLightbox({
       if (next >= list.length) return 0;
       return next;
     });
+    setScale(1);
   };
+
   return (
     <div className="fixed inset-0 z-[90] flex flex-col bg-black">
-      <div className="flex items-center justify-between px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white" aria-label="Close">
+      <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <button
+          type="button"
+          onClick={onClose}
+          className="grid h-10 w-10 place-items-center rounded-full bg-black/40 text-white backdrop-blur-sm"
+          aria-label="Close"
+        >
           <X className="h-5 w-5" />
         </button>
-        <p className="text-sm font-semibold text-white">{list.length > 1 ? `${i + 1} / ${list.length}` : "Photo"}</p>
+        <p className="rounded-full bg-black/40 px-3 py-1 text-sm font-semibold text-white backdrop-blur-sm">
+          {list.length > 1 ? `${i + 1} / ${list.length}` : "Photo"}
+        </p>
         <span className="w-10" />
       </div>
+
       <div
-        className="flex min-h-0 flex-1 items-center justify-center touch-pan-y"
+        className="flex min-h-0 flex-1 items-center justify-center overflow-hidden touch-none"
         onTouchStart={(e) => {
-          touchRef.current = { x: e.touches[0]?.clientX ?? 0 };
+          if (e.touches.length === 2) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            touchRef.current = { x: 0, y: 0, dist: Math.hypot(dx, dy) };
+            return;
+          }
+          touchRef.current = { x: e.touches[0]?.clientX ?? 0, y: e.touches[0]?.clientY ?? 0 };
+        }}
+        onTouchMove={(e) => {
+          if (e.touches.length === 2 && touchRef.current?.dist) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const dist = Math.hypot(dx, dy);
+            const ratio = dist / touchRef.current.dist;
+            setScale((s) => Math.max(1, Math.min(4, s * ratio)));
+            touchRef.current.dist = dist;
+          }
         }}
         onTouchEnd={(e) => {
           const s = touchRef.current;
           touchRef.current = null;
-          if (!s || list.length < 2) return;
+          if (!s || list.length < 2 || scale > 1.05) return;
+          if (s.dist) return;
           const x = e.changedTouches[0]?.clientX ?? 0;
           const dx = x - s.x;
-          if (dx < -48) go(1);
-          else if (dx > 48) go(-1);
+          if (dx < -56) go(1);
+          else if (dx > 56) go(-1);
         }}
+        onDoubleClick={() => setScale((s) => (s > 1 ? 1 : 2))}
       >
-        <img src={cur} alt="" className="max-h-full max-w-full object-contain select-none" draggable={false} />
+        <img
+          src={cur}
+          alt=""
+          className="select-none transition-transform duration-150"
+          style={{
+            width: "100%",
+            height: "100%",
+            maxWidth: "100vw",
+            maxHeight: "100dvh",
+            objectFit: "contain",
+            transform: `scale(${scale})`,
+          }}
+          draggable={false}
+        />
       </div>
-      {list.length > 1 ? (
-        <div className="flex items-center justify-center gap-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <button type="button" className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold text-white" onClick={() => go(-1)}>Prev</button>
-          <button type="button" className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold text-white" onClick={() => go(1)}>Next</button>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -497,4 +602,12 @@ export function lastSeenLabel(atMs: number | null | undefined): string {
   const days = Math.floor(diff / 86400_000);
   if (days === 1) return "Last seen yesterday";
   return `Last seen ${days} days ago`;
+}
+
+export function MessageTicks({ state }: { state: "none" | "pending" | "sent" | "delivered" | "read" }) {
+  if (state === "none") return null;
+  if (state === "pending") return <Clock className="inline h-3.5 w-3.5 text-slate-400" aria-label="Pending" />;
+  if (state === "sent") return <Check className="inline h-3.5 w-3.5 text-slate-400" aria-label="Sent" />;
+  if (state === "delivered") return <CheckCheck className="inline h-3.5 w-3.5 text-slate-400" aria-label="Delivered" />;
+  return <CheckCheck className="inline h-3.5 w-3.5 text-[#2563eb]" aria-label="Read" />;
 }
