@@ -80,6 +80,46 @@ function WaveBars({
   );
 }
 
+function SeekBar({
+  value,
+  max,
+  light,
+  onSeek,
+}: {
+  value: number;
+  max: number;
+  light?: boolean;
+  onSeek: (t: number) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  const seekFromClientX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el || max <= 0) return;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    onSeek(ratio * max);
+  };
+  return (
+    <div
+      ref={trackRef}
+      className={cn("relative h-5 flex-1 cursor-pointer touch-none")}
+      onPointerDown={(e) => {
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        seekFromClientX(e.clientX);
+      }}
+      onPointerMove={(e) => {
+        if (e.buttons !== 1) return;
+        seekFromClientX(e.clientX);
+      }}
+    >
+      <div className={cn("absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full", light ? "bg-white/30" : "bg-slate-200")} />
+      <div className={cn("absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded-full", light ? "bg-white" : "bg-[#2563eb]")} style={{ width: `${pct}%` }} />
+      <div className={cn("absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow", light ? "bg-white" : "bg-[#2563eb]")} style={{ left: `${pct}%` }} />
+    </div>
+  );
+}
+
 export function VoiceBubble({
   src,
   mine,
@@ -216,7 +256,7 @@ export function VoiceBubble({
           ) : null}
         </div>
       </div>
-      <div className={cn("flex items-center gap-1 px-1 text-[10px]")}>
+      <div className={cn("flex items-center gap-1 px-1 text-[10px]", own ? "text-slate-400" : "text-slate-400")}>
         <span>{timeLabel}</span>
         {tick && tick !== "none" ? (
           tick === "read" ? (
@@ -266,28 +306,38 @@ export function VoiceRecorderBar({
       </div>
       <div className="flex items-center justify-center gap-5">
         <button type="button" onClick={onCancel} className="flex flex-col items-center gap-1 text-slate-500">
-          <span className="grid h-11 w-11 place-items-center rounded-full bg-slate-100"><X className="h-5 w-5" /></span>
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-slate-100">
+            <X className="h-5 w-5" />
+          </span>
           <span className="text-[10px] font-semibold">Cancel</span>
         </button>
         {paused ? (
           <>
             <button type="button" onClick={onPreviewPlay} className="flex flex-col items-center gap-1 text-slate-600">
-              <span className="grid h-11 w-11 place-items-center rounded-full bg-slate-800 text-white"><Play className="ml-0.5 h-5 w-5" /></span>
+              <span className="grid h-11 w-11 place-items-center rounded-full bg-slate-800 text-white">
+                <Play className="ml-0.5 h-5 w-5" />
+              </span>
               <span className="text-[10px] font-semibold">Play</span>
             </button>
             <button type="button" onClick={onContinue} className="flex flex-col items-center gap-1">
-              <span className="grid h-14 w-14 place-items-center rounded-full bg-red-500 text-white shadow-md"><Mic className="h-6 w-6" /></span>
+              <span className="grid h-14 w-14 place-items-center rounded-full bg-red-500 text-white shadow-md">
+                <Mic className="h-6 w-6" />
+              </span>
               <span className="text-[10px] font-semibold text-slate-600">Continue</span>
             </button>
           </>
         ) : (
           <button type="button" onClick={onPause} className="flex flex-col items-center gap-1">
-            <span className="grid h-14 w-14 place-items-center rounded-full bg-slate-800 text-white shadow-md"><Pause className="h-6 w-6" /></span>
+            <span className="grid h-14 w-14 place-items-center rounded-full bg-slate-800 text-white shadow-md">
+              <Pause className="h-6 w-6" />
+            </span>
             <span className="text-[10px] font-semibold text-slate-600">Pause</span>
           </button>
         )}
         <button type="button" onClick={onSend} className="flex flex-col items-center gap-1">
-          <span className="grid h-11 w-11 place-items-center rounded-full bg-[#2563eb] text-white shadow-md"><Play className="ml-0.5 h-5 w-5" /></span>
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-[#2563eb] text-white shadow-md">
+            <Play className="ml-0.5 h-5 w-5" />
+          </span>
           <span className="text-[10px] font-semibold text-[#2563eb]">Send</span>
         </button>
       </div>
@@ -302,7 +352,7 @@ export function parseMediaUrls(url: string | null | undefined): string[] {
     try {
       const arr = JSON.parse(s) as unknown;
       if (Array.isArray(arr)) return arr.map(String).filter(Boolean);
-    } catch { /* */ }
+    } catch { /* fall through */ }
   }
   if (s.includes("||")) return s.split("||").map((x) => x.trim()).filter(Boolean);
   return [s];
@@ -319,24 +369,58 @@ export function attachmentLabel(type: string | null | undefined, url?: string | 
 }
 
 export function ImageBubble({
-  src, timeLabel, tick, onOpen, id, count,
+  src,
+  timeLabel,
+  tick,
+  onOpen,
+  id,
+  count,
 }: {
-  src: string; mine?: boolean; timeLabel: string; tick?: "none" | "sent" | "delivered" | "read"; onOpen: (index?: number) => void; id?: string; count?: number;
+  src: string;
+  mine?: boolean;
+  timeLabel: string;
+  tick?: "none" | "sent" | "delivered" | "read";
+  onOpen: (index?: number) => void;
+  id?: string;
+  count?: number;
 }) {
   return (
-    <button id={id} type="button" onClick={() => onOpen(0)} className="relative block max-w-[min(72vw,280px)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" onContextMenu={(e) => e.preventDefault()}>
+    <button
+      id={id}
+      type="button"
+      onClick={() => onOpen(0)}
+      className="relative block max-w-[min(72vw,280px)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <img src={src} alt="" className="max-h-72 w-full object-cover" draggable={false} />
-      {(count || 0) > 1 ? <span className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-bold text-white">+{(count || 1) - 1}</span> : null}
+      {(count || 0) > 1 ? (
+        <span className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-bold text-white">
+          +{(count || 1) - 1}
+        </span>
+      ) : null}
       <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-md bg-black/55 px-1.5 py-0.5 text-[10px] text-white">
         <span>{timeLabel}</span>
-        {tick === "read" ? <CheckCheck className="h-3 w-3 text-sky-300" /> : tick === "delivered" || tick === "sent" ? <CheckCheck className="h-3 w-3 text-white/80" /> : null}
+        {tick === "read" ? (
+          <CheckCheck className="h-3 w-3 text-sky-300" />
+        ) : tick === "delivered" || tick === "sent" ? (
+          <CheckCheck className="h-3 w-3 text-white/80" />
+        ) : null}
       </div>
     </button>
   );
 }
 
-export function ImageLightbox({ urls, index = 0, onClose }: { src?: string; urls?: string[]; index?: number; onClose: () => void }) {
-  const list = urls && urls.length ? urls : [];
+export function ImageLightbox({
+  urls,
+  index = 0,
+  onClose,
+}: {
+  src?: string;
+  urls?: string[];
+  index?: number;
+  onClose: () => void;
+}) {
+  const list = urls && urls.length ? urls : src ? [src] : [];
   const [i, setI] = useState(index);
   useEffect(() => setI(index), [index]);
   if (!list.length) return null;
@@ -344,22 +428,42 @@ export function ImageLightbox({ urls, index = 0, onClose }: { src?: string; urls
   return (
     <div className="fixed inset-0 z-[90] flex flex-col bg-black">
       <div className="flex items-center justify-between px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white" aria-label="Close"><X className="h-5 w-5" /></button>
+        <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white" aria-label="Close">
+          <X className="h-5 w-5" />
+        </button>
         <p className="text-sm font-semibold text-white">{list.length > 1 ? `${i + 1} / ${list.length}` : "Photo"}</p>
         <span className="w-10" />
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center"><img src={cur} alt="" className="max-h-full max-w-full object-contain" /></div>
+      <div className="flex min-h-0 flex-1 items-center justify-center">
+        <img src={cur} alt="" className="max-h-full max-w-full object-contain" />
+      </div>
     </div>
   );
 }
 
-export function LongPressMenu({ open, onClose, items }: { open: boolean; onClose: () => void; items: { label: string; icon?: "edit" | "delete" | "download" | "copy"; danger?: boolean; onClick: () => void }[] }) {
+export function LongPressMenu({
+  open,
+  onClose,
+  items,
+}: {
+  open: boolean;
+  onClose: () => void;
+  items: { label: string; icon?: "edit" | "delete" | "download" | "copy"; danger?: boolean; onClick: () => void }[];
+}) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[85] flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
       <div className="mb-[max(0.5rem,env(safe-area-inset-bottom))] w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         {items.map((it) => (
-          <button key={it.label} type="button" className={cn("flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3.5 text-left text-sm font-semibold last:border-0", it.danger ? "text-red-600" : "text-slate-800")} onClick={() => { it.onClick(); onClose(); }}>
+          <button
+            key={it.label}
+            type="button"
+            className={cn("flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3.5 text-left text-sm font-semibold last:border-0", it.danger ? "text-red-600" : "text-slate-800")}
+            onClick={() => {
+              it.onClick();
+              onClose();
+            }}
+          >
             {it.icon === "edit" ? <Pencil className="h-4 w-4" /> : null}
             {it.icon === "delete" ? <Trash2 className="h-4 w-4" /> : null}
             {it.icon === "download" ? <Download className="h-4 w-4" /> : null}

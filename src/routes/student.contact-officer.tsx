@@ -415,8 +415,14 @@ function Page() {
     const lastMsg = chatMessages[chatMessages.length - 1];
     let preview = "";
     if (lastMsg) {
-      if (lastMsg.attachment_type) {
-        preview = attachmentLabel(lastMsg.attachment_type, lastMsg.attachment_url);
+      if (lastMsg.attachment_type === "audio") {
+        preview = "🎤 " + attachmentLabel(lastMsg.attachment_type, lastMsg.attachment_url);
+      } else if (lastMsg.attachment_type === "image" || lastMsg.attachment_type === "images") {
+        preview = "📷 " + attachmentLabel(lastMsg.attachment_type, lastMsg.attachment_url);
+      } else if (lastMsg.attachment_type === "video" || lastMsg.attachment_type === "videos") {
+        preview = "🎥 " + attachmentLabel(lastMsg.attachment_type, lastMsg.attachment_url);
+      } else if (lastMsg.attachment_type) {
+        preview = "📎 " + attachmentLabel(lastMsg.attachment_type, lastMsg.attachment_url);
       } else if (lastMsg.text && lastMsg.text !== "(attachment)") {
         preview = lastMsg.text;
       } else {
@@ -711,9 +717,18 @@ function Page() {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex justify-between gap-2">
-                  <p className="truncate text-sm font-bold">{officerNickname}</p>
-                  <span className="flex shrink-0 items-center gap-1 text-[10px] text-slate-400">
-                    {formatWhen(listPreview.at)}
+                  <p className="truncate text-sm font-bold text-slate-900">{officerNickname}</p>
+                  <span className="shrink-0 text-[10px] font-medium text-slate-400">{formatWhen(listPreview.at)}</span>
+                </div>
+                <div className="mt-0.5 flex items-center justify-between gap-2">
+                  <p className="line-clamp-1 min-w-0 flex-1 text-xs text-slate-500">
+                    {officerRecording
+                      ? "🎤 Recording…"
+                      : officerTyping
+                        ? "Typing…"
+                        : listPreview.preview || "Conversation"}
+                  </p>
+                  <span className="flex shrink-0 items-center gap-1">
                     {listPreview.isOut && listPreview.tick !== "none" ? (
                       listPreview.tick === "read" ? (
                         <CheckCheck className="h-3.5 w-3.5 text-[#2563eb]" />
@@ -723,19 +738,14 @@ function Page() {
                         <CheckCheck className="h-3.5 w-3.5 text-slate-400" />
                       )
                     ) : null}
+                    {listPreview.unread > 0 ? (
+                      <span className="grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                        {listPreview.unread > 99 ? "99+" : listPreview.unread}
+                      </span>
+                    ) : null}
                   </span>
                 </div>
-                <p className="line-clamp-1 text-xs text-slate-500">
-                  {officerRecording
-                    ? "Recording voice note…"
-                    : officerTyping
-                      ? "Typing…"
-                      : listPreview.preview || "Conversation"}
-                </p>
               </div>
-              {listPreview.unread > 0 ? (
-                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" title={`${listPreview.unread} unread`} />
-              ) : null}
             </button>
           </li>
         ) : (
@@ -774,7 +784,7 @@ function Page() {
           />
         )}
       </div>
-      <div className="relative z-10 flex shrink-0 items-center gap-3 border-b bg-white px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3">
+      <div className="relative z-30 flex shrink-0 items-center gap-3 border-b border-white/10 bg-[#0b1b3a] px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-white lg:pt-3">
         <button type="button" onClick={() => setInChat(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden">
           <ArrowLeft className="h-5 w-5" />
         </button>
