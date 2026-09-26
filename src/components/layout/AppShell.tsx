@@ -127,6 +127,9 @@ function NavLinks({
   badges?: Record<string, { dot?: "green" | "blue" | "red"; live?: boolean; count?: number }>;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const immersiveMessaging =
+    pathname.includes("/contact-officer") ||
+    pathname.includes("/officer/reports");
   const t = useT();
   const translateNav = (label: string) => translateNavLabel(label, t);
   return (
@@ -434,11 +437,11 @@ export function AppShell({
   const role = session?.role ?? null;
 
   return (
-    <div className="relative min-h-dvh overflow-x-hidden overflow-y-visible bg-slate-50">
+    <div className={cn("relative min-h-dvh overflow-x-hidden overflow-y-visible bg-slate-50", immersiveMessaging && "bg-white")}>
       <NetworkBanner />
       <Watermark opacity={0.08} size="xl" className="pointer-events-none lg:left-64" />
 
-      <aside className="sa-sidebar fixed inset-y-0 left-0 z-40 hidden h-dvh max-h-dvh w-64 flex-col bg-[#0b1b3a] lg:flex">
+      <aside className={cn("sa-sidebar fixed inset-y-0 left-0 z-40 hidden h-dvh max-h-dvh w-64 flex-col bg-[#0b1b3a] lg:flex", immersiveMessaging && "!hidden")}>
         <div className="flex h-[4.5rem] shrink-0 items-center border-b border-white/10 px-4">
           <PortalBrand
             isSchoolPortal={isSchoolPortal}
@@ -468,6 +471,7 @@ export function AppShell({
           "left-0 lg:left-64",
           "bg-[#0b1b3a] shadow-[0_4px_20px_rgba(11,27,58,0.35)]",
           "supports-[backdrop-filter]:bg-[#0b1b3a]/95 supports-[backdrop-filter]:backdrop-blur-md",
+          immersiveMessaging && "!hidden",
         )}
         style={{ position: "fixed", paddingTop: "env(safe-area-inset-top, 0px)" }}
       >
@@ -651,14 +655,18 @@ export function AppShell({
         </div>
       </header>
 
-      <div className="sa-main relative z-10 d4-shell-main-offset lg:pl-64" style={{ paddingTop: "calc(3rem + env(safe-area-inset-top, 0px))" }}>
-        <main className="mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:max-w-[1400px] lg:px-8 lg:pb-12 lg:pt-8 xl:max-w-[1480px]">
-          <div className="min-w-0 w-full overflow-visible">{children}</div>
+      <div className={cn("sa-main relative z-10", !immersiveMessaging && "d4-shell-main-offset lg:pl-64")} style={immersiveMessaging ? { paddingTop: 0 } : { paddingTop: "calc(3rem + env(safe-area-inset-top, 0px))" }}>
+        <main className={cn(
+            immersiveMessaging
+              ? "mx-auto h-dvh w-full max-w-none p-0"
+              : "mx-auto w-full max-w-[1200px] px-3 pb-28 pt-4 sm:px-6 sm:pt-6 lg:max-w-[1400px] lg:px-8 lg:pb-12 lg:pt-8 xl:max-w-[1480px]",
+          )}>
+          <div className={cn("min-w-0 w-full", immersiveMessaging ? "h-full" : "overflow-visible")}>{children}</div>
         </main>
       </div>
 
       {/* bottom nav hidden in sa-desktop-view via CSS */}
-      {config.bottomNav && (
+      {config.bottomNav && !immersiveMessaging && (
         <nav
           className={cn(
             "sa-bottom-nav d4-app-bottom-nav fixed inset-x-0 bottom-0 z-40 lg:hidden",

@@ -73,8 +73,8 @@ export const studentNav: RoleConfig = {
   ],
   bottomNav: [
     { label: "Home", to: "/student", icon: Home },
-    { label: "Examinations", to: "/student/examinations", icon: FileText },
-    { label: "Messages", to: "/student/contact-officer", icon: MessageSquare },
+    { label: "Exams", to: "/student/examinations", icon: FileText },
+    { label: "Results", to: "/student/results", icon: BarChart3 },
     { label: "Profile", to: "/student/profile", icon: User },
   ],
 };
@@ -211,8 +211,8 @@ export const officerNav: RoleConfig = {
   bottomNav: [
     { label: "Home", to: "/officer", icon: Home },
     { label: "Approvals", to: "/officer/approvals", icon: CheckSquare },
-    { label: "Messages", to: "/officer/reports", icon: MessageSquare },
-    { label: "Profile", to: "/officer/profile", icon: User },
+    { label: "Monitor", to: "/officer/live-monitor", icon: Radio },
+    { label: "Results", to: "/officer/results", icon: BarChart3 },
   ],
 };
 

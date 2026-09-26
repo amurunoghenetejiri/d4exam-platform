@@ -1,20 +1,28 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, MoreVertical, Paperclip, Search, Send, Smile, User } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  CheckCheck,
+  Mic,
+  Paperclip,
+  Search,
+  Send,
+  User,
+  X,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useSessionUser } from "@/lib/session";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { isOnlineNow } from "@/lib/offline-sync";
+import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 
 export const Route = createFileRoute("/officer/reports")({
   head: () => ({
-    meta: [
-      { title: "Messages — D4EXAM" },
-      { name: "description", content: "View and reply to messages from your students." },
-    ],
+    meta: [{ title: "Messages — D4EXAM" }],
   }),
   component: Page,
 });
@@ -35,123 +43,262 @@ type ReportRow = {
   officer_reply: string | null;
   replied_at: string | null;
   created_at: string;
+  officer_read_at?: string | null;
+  student_read_at?: string | null;
+  attachment_url?: string | null;
+  attachment_type?: string | null;
+};
+
+type Thread = {
+  key: string;
+  student_id: string | null;
+  student_user_id: string | null;
+  student_name: string | null;
+  student_matric: string | null;
+  rows: ReportRow[];
+  latestAt: string;
+  preview: string;
+  unread: number;
 };
 
 type TabKey = "inbox" | "sent" | "all";
 
-const AVATAR_COLORS = [
-  "bg-blue-600",
-  "bg-violet-600",
-  "bg-emerald-600",
-  "bg-rose-500",
-  "bg-amber-600",
-  "bg-cyan-600",
-];
-
+const COLORS = ["bg-blue-600", "bg-violet-600", "bg-emerald-600", "bg-rose-500", "bg-amber-600", "bg-cyan-600"];
 function avatarColor(seed: string) {
   let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h + seed.charCodeAt(i) * 17) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[h];
+  for (let i = 0; i < seed.length; i++) h = (h + seed.charCodeAt(i) * 17) % COLORS.length;
+  return COLORS[h];
 }
-
 function initials(name: string | null) {
   const p = (name || "S").trim().split(/\s+/);
-  if (p.length >= 2) return (p[0][0] + p[1][0]).toUpperCase();
-  return (p[0]?.[0] || "S").toUpperCase();
+  return p.length >= 2 ? (p[0][0] + p[1][0]).toUpperCase() : (p[0]?.[0] || "S").toUpperCase();
 }
-
 function formatWhen(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (
-    d.getFullYear() === yesterday.getFullYear() &&
-    d.getMonth() === yesterday.getMonth() &&
-    d.getDate() === yesterday.getDate()
-  ) {
-    return "Yesterday";
-  }
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const y = new Date(now);
+  y.setDate(y.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
   return d.toLocaleDateString([], { weekday: "short" });
 }
-
 function formatTime(iso: string) {
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+function Ticks({ state }: { state: "none" | "sent" | "delivered" | "read" }) {
+  if (state === "none") return null;
+  if (state === "sent") return <Check className="inline h-3.5 w-3.5 text-blue-100" />;
+  if (state === "delivered") return <CheckCheck className="inline h-3.5 w-3.5 text-blue-100" />;
+  return <CheckCheck className="inline h-3.5 w-3.5 text-[#0b1b3a]" />;
 }
 
 function Page() {
+  const navigate = useNavigate();
   const { data: user } = useSessionUser();
   const schoolId = user?.schoolId;
+  const userId = user?.userId;
   const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>("inbox");
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [threadKey, setThreadKey] = useState<string | null>(null);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
+  const [presenceMap, setPresenceMap] = useState<Map<string, { online: boolean; typing?: boolean; recording?: boolean }>>(new Map());
+  const [recording, setRecording] = useState(false);
+  const mediaRec = useRef<MediaRecorder | null>(null);
+  const chunks = useRef<Blob[]>([]);
+  const presenceApi = useRef<ReturnType<typeof joinMessagingPresence> | null>(null);
   const sendLock = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [pendingAttach, setPendingAttach] = useState<{ url: string; type: string } | null>(null);
 
   const listQ = useQuery({
     queryKey: ["officer-student-reports", schoolId],
     enabled: Boolean(schoolId),
-    refetchInterval: 12_000,
+    refetchInterval: 8_000,
     queryFn: async () => {
       if (!schoolId) return [] as ReportRow[];
-      const { data, error } = await supabase
+      const full = await supabase
         .from("student_officer_reports")
         .select(
-          "id, school_id, student_id, student_user_id, student_name, student_matric, exam_id, exam_title, exam_titles, subject, body, status, officer_reply, replied_at, created_at",
+          "id, school_id, student_id, student_user_id, student_name, student_matric, exam_id, exam_title, exam_titles, subject, body, status, officer_reply, replied_at, created_at, officer_read_at, student_read_at, attachment_url, attachment_type",
         )
         .eq("school_id", schoolId)
-        .order("created_at", { ascending: false })
-        .limit(200);
-      if (error) {
-        console.warn("[officer-messages]", error.message);
-        return [] as ReportRow[];
+        .order("created_at", { ascending: true })
+        .limit(400);
+      if (full.error) {
+        const { data } = await supabase
+          .from("student_officer_reports")
+          .select(
+            "id, school_id, student_id, student_user_id, student_name, student_matric, exam_id, exam_title, exam_titles, subject, body, status, officer_reply, replied_at, created_at",
+          )
+          .eq("school_id", schoolId)
+          .order("created_at", { ascending: true })
+          .limit(400);
+        return (data ?? []) as ReportRow[];
       }
-      return (data ?? []) as ReportRow[];
+      return (full.data ?? []) as ReportRow[];
     },
   });
 
   const rows = listQ.data ?? [];
-  const inboxCount = useMemo(
-    () => rows.filter((r) => String(r.status || "open").toLowerCase() !== "replied").length,
-    [rows],
-  );
 
-  const filtered = useMemo(() => {
-    let list = rows;
-    if (tab === "inbox") {
-      list = rows.filter((r) => String(r.status || "open").toLowerCase() !== "replied");
-    } else if (tab === "sent") {
-      list = rows.filter((r) => Boolean(r.officer_reply));
+  const threads: Thread[] = useMemo(() => {
+    const map = new Map<string, Thread>();
+    for (const r of rows) {
+      const key = r.student_id || r.student_user_id || r.student_name || r.id;
+      let t = map.get(key);
+      if (!t) {
+        t = {
+          key,
+          student_id: r.student_id,
+          student_user_id: r.student_user_id,
+          student_name: r.student_name,
+          student_matric: r.student_matric,
+          rows: [],
+          latestAt: r.created_at,
+          preview: r.body,
+          unread: 0,
+        };
+        map.set(key, t);
+      }
+      t.rows.push(r);
+      t.student_name = r.student_name || t.student_name;
+      t.student_matric = r.student_matric || t.student_matric;
+      const lastAt = r.replied_at && r.officer_reply ? r.replied_at : r.created_at;
+      if (new Date(lastAt) >= new Date(t.latestAt)) {
+        t.latestAt = lastAt;
+        t.preview = r.officer_reply || r.body;
+      }
     }
+    for (const t of map.values()) {
+      t.unread = t.rows.filter((r) => {
+        if (String(r.status || "open").toLowerCase() === "replied" && r.officer_reply) {
+          // student msg still unread for officer if never officer_read
+          return !r.officer_read_at;
+        }
+        return String(r.status || "open").toLowerCase() !== "replied";
+      }).length;
+    }
+    return [...map.values()].sort((a, b) => new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime());
+  }, [rows]);
+
+  const inboxCount = useMemo(() => threads.reduce((s, t) => s + (t.unread > 0 ? 1 : 0), 0), [threads]);
+
+  const filteredThreads = useMemo(() => {
+    let list = threads;
+    if (tab === "inbox") list = threads.filter((t) => t.unread > 0 || t.rows.some((r) => !r.officer_reply));
+    if (tab === "sent") list = threads.filter((t) => t.rows.some((r) => r.officer_reply));
     const q = search.trim().toLowerCase();
     if (!q) return list;
-    return list.filter((r) => {
-      const hay = `${r.student_name || ""} ${r.student_matric || ""} ${r.subject || ""} ${r.body || ""} ${r.exam_title || ""} ${(r.exam_titles || []).join(" ")} ${r.officer_reply || ""}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [rows, tab, search]);
+    return list.filter((t) =>
+      `${t.student_name} ${t.student_matric} ${t.preview} ${t.rows.map((r) => r.subject).join(" ")}`
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [threads, tab, search]);
 
-  const selected = rows.find((r) => r.id === selectedId) ?? null;
+  const active = threads.find((t) => t.key === threadKey) || null;
+
+  const chatMessages = useMemo(() => {
+    if (!active) return [];
+    const out: { key: string; side: "in" | "out"; text: string; at: string; subject?: string | null; attachment_url?: string | null; attachment_type?: string | null; reportId: string }[] = [];
+    for (const r of active.rows) {
+      out.push({
+        key: `${r.id}-s`,
+        side: "in",
+        text: r.body,
+        at: r.created_at,
+        subject: r.subject,
+        attachment_url: r.attachment_url,
+        attachment_type: r.attachment_type,
+        reportId: r.id,
+      });
+      if (r.officer_reply) {
+        out.push({
+          key: `${r.id}-o`,
+          side: "out",
+          text: r.officer_reply,
+          at: r.replied_at || r.created_at,
+          reportId: r.id,
+        });
+      }
+    }
+    return out;
+  }, [active]);
 
   useEffect(() => {
-    if (selectedId && chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [selectedId, selected?.officer_reply, selected?.body]);
+    if (!schoolId || !userId) return;
+    const api = joinMessagingPresence(schoolId, { userId, role: "officer" }, {
+      onPresence(map) {
+        const next = new Map<string, { online: boolean; typing?: boolean; recording?: boolean }>();
+        map.forEach((p, id) => {
+          if (p.role === "student") next.set(id, { online: p.online, typing: p.typing, recording: p.recording });
+        });
+        setPresenceMap(next);
+      },
+    });
+    presenceApi.current = api;
+    return () => api.leave();
+  }, [schoolId, userId]);
 
-  const sendReply = useCallback(async () => {
-    if (sendLock.current || !selected || !reply.trim() || !user?.userId) return;
+  // Mark officer read when open thread
+  useEffect(() => {
+    if (!active) return;
+    const now = new Date().toISOString();
+    const ids = active.rows.map((r) => r.id);
+    if (ids.length) {
+      void supabase
+        .from("student_officer_reports")
+        .update({ officer_read_at: now } as never)
+        .in("id", ids)
+        .then(() => {
+          void qc.invalidateQueries({ queryKey: ["officer-student-reports"] });
+          void qc.invalidateQueries({ queryKey: ["nav-student-reports-open"] });
+        });
+    }
+  }, [active?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (threadKey) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [threadKey, chatMessages.length]);
+
+  const studentOnline = active
+    ? Boolean(
+        (active.student_user_id && presenceMap.get(active.student_user_id)?.online) ||
+          [...presenceMap.entries()].some(([, v]) => v.online),
+      )
+    : false;
+  const studentTyping = active
+    ? Boolean(active.student_user_id && presenceMap.get(active.student_user_id)?.typing)
+    : false;
+  const studentRecording = active
+    ? Boolean(active.student_user_id && presenceMap.get(active.student_user_id)?.recording)
+    : false;
+
+  const studentReadAt = useMemo(() => {
+    if (!active) return null;
+    let m = 0;
+    for (const r of active.rows) {
+      if (r.student_read_at) m = Math.max(m, new Date(r.student_read_at).getTime());
+    }
+    return m ? new Date(m).toISOString() : null;
+  }, [active]);
+
+  async function uploadBlob(blob: Blob, kind: string) {
+    const ext = kind.startsWith("audio") ? "webm" : "bin";
+    const path = `msg/${schoolId}/${userId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from("message-media").upload(path, blob, { contentType: kind, upsert: false });
+    if (error) throw error;
+    return supabase.storage.from("message-media").getPublicUrl(path).data.publicUrl;
+  }
+
+  const sendReply = useCallback(async (text: string, attach?: { url: string; type: string } | null) => {
+    if (sendLock.current || !active || !userId) return;
+    if (!text.trim() && !attach) return;
     if (!isOnlineNow()) {
       toast.error("Internet connection is required to send messages.");
       return;
@@ -159,297 +306,279 @@ function Page() {
     sendLock.current = true;
     setSending(true);
     try {
-      const { error } = await supabase
-        .from("student_officer_reports")
-        .update({
-          officer_reply: reply.trim(),
-          replied_at: new Date().toISOString(),
-          status: "replied",
-          officer_user_id: user.userId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", selected.id);
-      if (error) throw error;
-      if (selected.student_user_id) {
+      // Prefer reply on latest student message without officer_reply
+      const openRow = [...active.rows].reverse().find((r) => !r.officer_reply);
+      const target = openRow || active.rows[active.rows.length - 1];
+      if (!target) return;
+      const payload: Record<string, unknown> = {
+        officer_reply: text.trim() || (attach ? "(attachment)" : ""),
+        replied_at: new Date().toISOString(),
+        status: "replied",
+        officer_user_id: userId,
+        updated_at: new Date().toISOString(),
+      };
+      if (attach) {
+        payload.attachment_url = attach.url;
+        payload.attachment_type = attach.type;
+      }
+      let { error } = await supabase.from("student_officer_reports").update(payload as never).eq("id", target.id);
+      if (error) {
+        const { error: e2 } = await supabase
+          .from("student_officer_reports")
+          .update({
+            officer_reply: text.trim() || "(attachment)",
+            replied_at: new Date().toISOString(),
+            status: "replied",
+            officer_user_id: userId,
+          } as never)
+          .eq("id", target.id);
+        if (e2) throw e2;
+      }
+      if (active.student_user_id) {
         try {
           await supabase.from("notifications").insert({
-            recipient_user_id: selected.student_user_id,
+            recipient_user_id: active.student_user_id,
             school_id: schoolId,
             title: "Officer replied to your message",
-            message: reply.trim().slice(0, 280),
+            message: (text.trim() || "New reply").slice(0, 280),
             type: "info",
             entity_type: "student_officer_report",
-            entity_id: selected.id,
+            entity_id: target.id,
             link: "/student/contact-officer",
           } as never);
         } catch {
           /* optional */
         }
       }
-      toast.success("Reply sent");
       setReply("");
+      setPendingAttach(null);
       await qc.invalidateQueries({ queryKey: ["officer-student-reports"] });
-      await qc.invalidateQueries({ queryKey: ["nav-student-reports-open"] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not send reply");
+      toast.error(e instanceof Error ? e.message : "Could not send");
     } finally {
       setSending(false);
-      window.setTimeout(() => {
-        sendLock.current = false;
-      }, 400);
+      sendLock.current = false;
     }
-  }, [selected, reply, user?.userId, schoolId, qc]);
+  }, [active, userId, schoolId, qc]);
 
-  const showChat = Boolean(selectedId && selected);
+  function onTyping(v: string) {
+    setReply(v);
+    presenceApi.current?.setTyping(v.trim().length > 0, active?.key);
+  }
+
+  async function startRec() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      chunks.current = [];
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunks.current.push(e.data);
+      };
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        presenceApi.current?.setRecording(false, active?.key);
+        setRecording(false);
+        const blob = new Blob(chunks.current, { type: "audio/webm" });
+        if (blob.size < 200) return;
+        try {
+          const url = await uploadBlob(blob, "audio/webm");
+          await sendReply("", { url, type: "audio" });
+        } catch {
+          toast.error("Could not upload voice note");
+        }
+      };
+      mediaRec.current = rec;
+      rec.start();
+      setRecording(true);
+      presenceApi.current?.setRecording(true, active?.key);
+    } catch {
+      toast.error("Microphone permission required");
+    }
+  }
+  function stopRec() {
+    try {
+      mediaRec.current?.stop();
+    } catch {
+      /* ignore */
+    }
+  }
 
   return (
-    <div className="-mx-3 -mt-4 flex min-h-[calc(100dvh-8rem)] flex-col bg-slate-50 sm:-mx-6 sm:-mt-6 lg:min-h-[calc(100dvh-6rem)] lg:flex-row lg:overflow-hidden lg:rounded-2xl lg:border lg:border-slate-200 lg:bg-white lg:shadow-sm">
-      {/* List */}
-      <div
-        className={cn(
-          "flex min-h-0 flex-col border-slate-200 bg-white lg:w-[380px] lg:shrink-0 lg:border-r",
-          showChat && "hidden lg:flex",
-        )}
-      >
-        <div className="shrink-0 border-b border-slate-100 px-4 pb-3 pt-4">
-          <h1 className="text-xl font-extrabold tracking-tight text-slate-900">Messages</h1>
-          <p className="mt-0.5 text-xs text-slate-500">
-            View and reply to messages from your students and other users.
-          </p>
-
-          <div className="mt-3 flex gap-1 rounded-full bg-slate-100 p-1">
-            {(
-              [
+    <div className="flex h-dvh max-h-dvh flex-col bg-white">
+      {!threadKey ? (
+        <>
+          <div className="shrink-0 border-b px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+            <div className="mb-2 flex items-center gap-2">
+              <button type="button" onClick={() => navigate({ to: "/officer" })} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100" aria-label="Back">
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+              <div>
+                <h1 className="text-lg font-extrabold">Messages</h1>
+                <p className="text-[11px] text-slate-500">Student conversations</p>
+              </div>
+            </div>
+            <div className="flex gap-1 rounded-full bg-slate-100 p-1">
+              {([
                 { k: "inbox" as const, label: "Inbox", count: inboxCount },
                 { k: "sent" as const, label: "Sent" },
                 { k: "all" as const, label: "All" },
-              ] as const
-            ).map((t) => (
-              <button
-                key={t.k}
-                type="button"
-                onClick={() => setTab(t.k)}
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-1 rounded-full py-2 text-xs font-bold transition",
-                  tab === t.k ? "bg-[#2563eb] text-white shadow-sm" : "text-slate-600 hover:bg-white",
-                )}
-              >
-                {t.label}
-                {"count" in t && t.count > 0 ? (
-                  <span
-                    className={cn(
-                      "grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px]",
-                      tab === t.k ? "bg-white/25 text-white" : "bg-red-500 text-white",
-                    )}
-                  >
-                    {t.count}
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-
-          <div className="relative mt-3">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search messages…"
-              className="h-10 rounded-xl border-slate-200 bg-slate-50 pl-9 text-sm"
-            />
-          </div>
-        </div>
-
-        <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {listQ.isLoading ? (
-            <li className="px-4 py-8 text-center text-sm text-slate-500">Loading…</li>
-          ) : filtered.length === 0 ? (
-            <li className="px-4 py-10 text-center text-sm text-slate-500">No student messages yet.</li>
-          ) : (
-            filtered.map((r) => {
-              const active = selectedId === r.id;
-              const open = String(r.status || "open").toLowerCase() !== "replied";
-              const seed = r.student_id || r.student_name || r.id;
-              const titles =
-                (r.exam_titles && r.exam_titles.length ? r.exam_titles.join(" · ") : null) ||
-                r.exam_title ||
-                "General";
-              return (
-                <li key={r.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedId(r.id);
-                      setReply(r.officer_reply || "");
-                    }}
-                    className={cn(
-                      "flex w-full items-start gap-3 border-b border-slate-50 px-4 py-3 text-left transition hover:bg-slate-50",
-                      active && "bg-blue-50/80",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "grid h-11 w-11 shrink-0 place-items-center rounded-full text-sm font-bold text-white",
-                        avatarColor(seed),
-                      )}
-                    >
-                      {initials(r.student_name)}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <p className="truncate text-sm font-bold text-slate-900">
-                          {r.student_name || "Student"}
-                        </p>
-                        <span className="shrink-0 text-[10px] text-slate-400">{formatWhen(r.created_at)}</span>
-                      </div>
-                      <p className="truncate text-xs font-medium text-slate-600">
-                        {r.subject || titles}
-                        {r.student_matric ? ` · ${r.student_matric}` : ""}
-                      </p>
-                      <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">{r.body}</p>
-                    </div>
-                    {open ? (
-                      <span className="mt-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                        1
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              );
-            })
-          )}
-        </ul>
-      </div>
-
-      {/* Chat */}
-      <div
-        className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col bg-[#f8fafc]",
-          !showChat && "hidden lg:flex",
-        )}
-      >
-        {showChat && selected ? (
-          <>
-            <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-3 py-3">
-              <button
-                type="button"
-                className="grid h-9 w-9 place-items-center rounded-full text-slate-600 hover:bg-slate-100 lg:hidden"
-                onClick={() => setSelectedId(null)}
-                aria-label="Back"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </button>
-              <span
-                className={cn(
-                  "grid h-10 w-10 place-items-center rounded-full text-sm font-bold text-white",
-                  avatarColor(selected.student_id || selected.student_name || selected.id),
-                )}
-              >
-                {initials(selected.student_name)}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-slate-900">
-                  {selected.student_name || "Student"}
-                  {selected.student_matric ? (
-                    <span className="ml-1.5 text-xs font-semibold text-slate-500">
-                      · {selected.student_matric}
-                    </span>
-                  ) : null}
-                </p>
-                <p className="truncate text-[11px] text-slate-500">
-                  {(selected.exam_titles && selected.exam_titles.length
-                    ? selected.exam_titles.join(" · ")
-                    : null) ||
-                    selected.exam_title ||
-                    "General"}
-                </p>
-              </div>
-              <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-slate-400" aria-label="More">
-                <MoreVertical className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-4 sm:px-5">
-              <p className="text-center text-[11px] font-medium text-slate-400">
-                {new Date(selected.created_at).toLocaleDateString(undefined, {
-                  weekday: "long",
-                  day: "numeric",
-                  month: "short",
-                  year: "numeric",
-                })}
-              </p>
-              {/* Student message — incoming for officer */}
-              <div className="flex justify-start gap-2">
-                <span
-                  className={cn(
-                    "mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white",
-                    avatarColor(selected.student_id || selected.student_name || selected.id),
-                  )}
+              ] as const).map((t) => (
+                <button
+                  key={t.k}
+                  type="button"
+                  onClick={() => setTab(t.k)}
+                  className={cn("flex flex-1 items-center justify-center gap-1 rounded-full py-2 text-xs font-bold", tab === t.k ? "bg-[#2563eb] text-white" : "text-slate-600")}
                 >
-                  {initials(selected.student_name)}
-                </span>
-                <div className="max-w-[85%] rounded-2xl rounded-bl-md border border-slate-100 bg-white px-3.5 py-2.5 shadow-sm">
-                  {selected.subject ? (
-                    <p className="mb-1 text-[11px] font-semibold text-slate-500">{selected.subject}</p>
+                  {t.label}
+                  {"count" in t && t.count > 0 ? (
+                    <span className="grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[10px] text-white">{t.count}</span>
                   ) : null}
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{selected.body}</p>
-                  <p className="mt-1 text-[10px] text-slate-400">{formatTime(selected.created_at)}</p>
-                </div>
-              </div>
-              {selected.officer_reply ? (
-                <div className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[#2563eb] px-3.5 py-2.5 text-white shadow-sm">
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{selected.officer_reply}</p>
-                    <p className="mt-1 text-right text-[10px] text-blue-100">
-                      {selected.replied_at ? formatTime(selected.replied_at) : ""} ✓
+                </button>
+              ))}
+            </div>
+            <div className="relative mt-3">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search messages…" className="h-10 rounded-xl bg-slate-50 pl-9" />
+            </div>
+          </div>
+          <ul className="min-h-0 flex-1 overflow-y-auto">
+            {filteredThreads.length === 0 ? (
+              <li className="px-4 py-12 text-center text-sm text-slate-500">No student messages yet.</li>
+            ) : (
+              filteredThreads.map((t) => {
+                const online = Boolean(t.student_user_id && presenceMap.get(t.student_user_id)?.online);
+                return (
+                  <li key={t.key}>
+                    <button
+                      type="button"
+                      onClick={() => setThreadKey(t.key)}
+                      className="flex w-full items-start gap-3 border-b border-slate-50 px-4 py-3 text-left hover:bg-slate-50"
+                    >
+                      <span className={cn("relative grid h-12 w-12 place-items-center rounded-full text-sm font-bold text-white", avatarColor(t.key))}>
+                        {initials(t.student_name)}
+                        <span className={cn("absolute bottom-0.5 right-0.5 h-3 w-3 rounded-full border-2 border-white", online ? "bg-emerald-400" : "bg-slate-300")} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex justify-between gap-2">
+                          <p className="truncate text-sm font-bold">{t.student_name || "Student"}</p>
+                          <span className="text-[10px] text-slate-400">{formatWhen(t.latestAt)}</span>
+                        </div>
+                        <p className="truncate text-xs text-slate-600">
+                          {t.student_matric ? `${t.student_matric} · ` : ""}
+                          {t.rows[t.rows.length - 1]?.subject || t.rows[t.rows.length - 1]?.exam_title || "Message"}
+                        </p>
+                        <p className="line-clamp-1 text-xs text-slate-500">{t.preview}</p>
+                      </div>
+                      {t.unread > 0 ? (
+                        <span className="mt-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                          {t.unread > 99 ? "99+" : t.unread}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+        </>
+      ) : active ? (
+        <>
+          <div className="flex shrink-0 items-center gap-3 border-b px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+            <button type="button" onClick={() => setThreadKey(null)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100">
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <span className={cn("relative grid h-10 w-10 place-items-center rounded-full text-sm font-bold text-white", avatarColor(active.key))}>
+              {initials(active.student_name)}
+              <span className={cn("absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white", studentOnline ? "bg-emerald-400" : "bg-slate-300")} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-bold">
+                {active.student_name || "Student"}
+                {active.student_matric ? <span className="ml-1 text-xs font-semibold text-slate-500">· {active.student_matric}</span> : null}
+              </p>
+              <p className={cn("text-[11px] font-medium", studentOnline ? "text-emerald-600" : "text-slate-400")}>
+                {studentRecording ? "Recording…" : studentTyping ? "Typing…" : studentOnline ? "Online" : "Offline"}
+              </p>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3">
+            {chatMessages.map((m) => {
+              const tick =
+                m.side === "out"
+                  ? ticksFor({ isMine: true, createdAt: m.at, peerOnline: studentOnline, peerReadAt: studentReadAt })
+                  : "none";
+              return (
+                <div key={m.key} className={cn("flex", m.side === "out" ? "justify-end" : "justify-start gap-2")}>
+                  {m.side === "in" ? (
+                    <span className={cn("mt-1 grid h-7 w-7 place-items-center rounded-full text-[10px] font-bold text-white", avatarColor(active.key))}>
+                      {initials(active.student_name)}
+                    </span>
+                  ) : null}
+                  <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white")}>
+                    {m.subject && m.side === "in" ? <p className="mb-0.5 text-[11px] font-semibold text-slate-500">{m.subject}</p> : null}
+                    {m.attachment_type === "image" && m.attachment_url ? <img src={m.attachment_url} alt="" className="mb-1 max-h-40 rounded-lg" /> : null}
+                    {m.attachment_type === "audio" && m.attachment_url ? <audio controls src={m.attachment_url} className="mb-1 max-w-full" /> : null}
+                    {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap">{m.text}</p> : null}
+                    <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
+                      {formatTime(m.at)}
+                      {m.side === "out" ? <Ticks state={tick} /> : null}
                     </p>
                   </div>
                 </div>
-              ) : null}
-              <div ref={chatEndRef} />
-            </div>
-
-            <div className="shrink-0 border-t border-slate-200 bg-white px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-              <div className="flex items-end gap-2">
-                <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-400" disabled aria-label="Attach">
-                  <Paperclip className="h-5 w-5" />
-                </button>
-                <div className="flex min-w-0 flex-1 items-end rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
-                  <textarea
-                    value={reply}
-                    onChange={(e) => setReply(e.target.value)}
-                    rows={1}
-                    placeholder="Type your message…"
-                    className="max-h-28 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm outline-none"
-                  />
-                  <button type="button" className="mb-1 text-slate-400" disabled aria-label="Emoji">
-                    <Smile className="h-5 w-5" />
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  disabled={sending || !reply.trim()}
-                  onClick={() => void sendReply()}
-                  className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#2563eb] text-white shadow-md disabled:opacity-40"
-                  aria-label="Send"
-                >
+              );
+            })}
+            {studentTyping ? <p className="text-center text-xs text-slate-500">Student is typing…</p> : null}
+            {studentRecording ? <p className="text-center text-xs text-slate-500">Student is recording…</p> : null}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="shrink-0 border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*,.pdf"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                void (async () => {
+                  try {
+                    const url = await uploadBlob(f, f.type);
+                    setPendingAttach({ url, type: f.type.startsWith("image/") ? "image" : "file" });
+                  } catch {
+                    toast.error("Upload failed — create storage bucket message-media");
+                  }
+                })();
+                e.target.value = "";
+              }}
+            />
+            <div className="flex items-end gap-1.5">
+              <button type="button" className="mb-1 grid h-9 w-9 place-items-center rounded-full text-slate-500" onClick={() => fileRef.current?.click()}>
+                <Paperclip className="h-5 w-5" />
+              </button>
+              <div className="flex min-w-0 flex-1 items-end rounded-full border bg-slate-50 px-3">
+                <textarea value={reply} onChange={(e) => onTyping(e.target.value)} rows={1} placeholder="Type your message…" className="max-h-24 min-h-[36px] w-full resize-none bg-transparent py-2 text-sm outline-none" />
+              </div>
+              {reply.trim() || pendingAttach ? (
+                <button type="button" disabled={sending} onClick={() => void sendReply(reply, pendingAttach)} className="mb-0.5 grid h-10 w-10 place-items-center rounded-full bg-[#2563eb] text-white">
                   <Send className="h-4 w-4" />
                 </button>
-              </div>
+              ) : (
+                <button
+                  type="button"
+                  className={cn("mb-0.5 grid h-10 w-10 place-items-center rounded-full text-white", recording ? "bg-red-500" : "bg-[#0b1b3a]")}
+                  onMouseDown={() => void startRec()}
+                  onMouseUp={stopRec}
+                  onTouchStart={(e) => { e.preventDefault(); void startRec(); }}
+                  onTouchEnd={(e) => { e.preventDefault(); stopRec(); }}
+                >
+                  {recording ? <X className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                </button>
+              )}
             </div>
-          </>
-        ) : (
-          <div className="hidden flex-1 flex-col items-center justify-center gap-2 p-8 text-center lg:flex">
-            <span className="grid h-16 w-16 place-items-center rounded-full bg-slate-100 text-slate-400">
-              <User className="h-8 w-8" />
-            </span>
-            <p className="text-sm font-semibold text-slate-700">Select a conversation</p>
-            <p className="max-w-xs text-xs text-slate-500">
-              Choose a student message from the inbox to read and reply.
-            </p>
+            {recording ? <p className="mt-1 text-center text-[11px] font-medium text-red-600">Recording… release to send</p> : null}
           </div>
-        )}
-      </div>
+        </>
+      ) : null}
     </div>
   );
 }
