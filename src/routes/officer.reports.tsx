@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
+import { VoiceBubble, ImageBubble, ImageLightbox } from "@/components/messaging/MessageMedia";
 
 export const Route = createFileRoute("/officer/reports")({
   head: () => ({
@@ -118,6 +119,7 @@ function Page() {
   const [chatMenuOpen, setChatMenuOpen] = useState(false);
   const [locallyReadThreads, setLocallyReadThreads] = useState<Record<string, boolean>>({});
   const [renameOpen, setRenameOpen] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [renameVal, setRenameVal] = useState("");
   const [nickMap, setNickMap] = useState<Record<string, string>>(() => {
@@ -413,7 +415,7 @@ function Page() {
   }
 
   return (
-    <div className="flex h-dvh max-h-dvh flex-col bg-white">
+    <div className="flex h-dvh max-h-dvh w-full flex-col bg-white lg:flex-row">
       {!threadKey ? (
         <>
           <div className="shrink-0 border-b px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -538,23 +540,28 @@ function Page() {
                 m.side === "out"
                   ? ticksFor({ isMine: true, createdAt: m.at, peerOnline: true, peerReadAt: studentReadAt })
                   : "none";
+              const outTick = tick === "read" ? "read" : tick === "none" ? "none" : "delivered";
               return (
-                <div key={m.key} className={cn("flex", m.side === "out" ? "justify-end" : "justify-start gap-2")}>
+                <div key={m.key} className={cn("flex w-full select-none", m.side === "out" ? "justify-end" : "justify-start gap-2")} onCopy={(e) => e.preventDefault()} onContextMenu={(e) => e.preventDefault()}>
                   {m.side === "in" ? (
-                    <span className={cn("mt-1 grid h-7 w-7 place-items-center rounded-full text-[10px] font-bold text-white", avatarColor(active.key))}>
+                    <span className={cn("mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white", avatarColor(active.key))}>
                       {initials(active.student_name)}
                     </span>
                   ) : null}
-                  <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white")}>
-                    {m.subject && m.side === "in" ? <p className="mb-0.5 text-[11px] font-semibold text-slate-500">{m.subject}</p> : null}
-                    {m.attachment_type === "image" && m.attachment_url ? <img src={m.attachment_url} alt="" className="mb-1 max-h-64 w-full max-w-[260px] rounded-xl object-contain bg-black/5" /> : null}
-                    {m.attachment_type === "audio" && m.attachment_url ? <audio controls src={m.attachment_url} className="mb-1 max-w-full" /> : null}
-                    {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap">{m.text}</p> : null}
-                    <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
-                      {formatTime(m.at)}
-                      {m.side === "out" ? <Ticks state={tick} /> : null}
-                    </p>
-                  </div>
+                  {m.attachment_type === "audio" && m.attachment_url ? (
+                    <VoiceBubble src={m.attachment_url} mine={m.side === "out"} timeLabel={formatTime(m.at)} tick={m.side === "out" ? outTick : "none"} />
+                  ) : m.attachment_type === "image" && m.attachment_url ? (
+                    <ImageBubble src={m.attachment_url} timeLabel={formatTime(m.at)} tick={m.side === "out" ? outTick : "none"} onOpen={() => setLightboxSrc(m.attachment_url!)} />
+                  ) : (
+                    <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm", m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white")}>
+                      {m.subject && m.side === "in" ? <p className="mb-0.5 text-[11px] font-semibold text-slate-500">{m.subject}</p> : null}
+                      {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : null}
+                      <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
+                        {formatTime(m.at)}
+                        {m.side === "out" ? <Ticks state={outTick === "none" ? "delivered" : outTick} /> : null}
+                      </p>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -608,6 +615,7 @@ function Page() {
         </>
       ) : null}
 
+      {lightboxSrc ? <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} /> : null}
       {renameOpen && active ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">

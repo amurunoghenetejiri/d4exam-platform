@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { isOnlineNow } from "@/lib/offline-sync";
 import { joinMessagingPresence, ticksFor } from "@/lib/messaging-presence";
 import { uploadMessageMedia } from "@/lib/message-media";
+import { VoiceBubble, ImageBubble, ImageLightbox, LongPressMenu, RecordingWave } from "@/components/messaging/MessageMedia";
 
 export const Route = createFileRoute("/student/contact-officer")({
   head: () => ({ meta: [{ title: "Messages — D4EXAM" }] }),
@@ -119,6 +120,13 @@ function Page() {
   const [renameVal, setRenameVal] = useState("");
   const [listPct, setListPct] = useState(38);
   const [locallyRead, setLocallyRead] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [menuMsg, setMenuMsg] = useState<ChatMsg | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editText, setEditText] = useState("");
+  const [pendingAudioUrl, setPendingAudioUrl] = useState<string | null>(null);
+  const [recPaused, setRecPaused] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragRef = useRef<{ startX: number; startPct: number } | null>(null);
   const mediaRec = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
@@ -408,8 +416,12 @@ function Page() {
         stream.getTracks().forEach((t) => t.stop());
         presenceApi.current?.setRecording(false, studentId || userId);
         const blob = new Blob(chunks.current, { type: "audio/webm" });
-        if (blob.size >= 200) setPendingAudio(blob);
+        if (blob.size >= 200) {
+          setPendingAudio(blob);
+          setPendingAudioUrl(URL.createObjectURL(blob));
+        }
         setRecording(false);
+        setRecPaused(false);
       };
       mediaRec.current = rec;
       rec.start();
@@ -563,7 +575,7 @@ function Page() {
   );
 
   const chatPane = inChat ? (
-    <div className="flex min-h-0 flex-1 flex-col bg-slate-50">
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col bg-slate-50">
       <div className="flex shrink-0 items-center gap-3 border-b bg-white px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:pt-3">
         <button type="button" onClick={() => setInChat(false)} className="grid h-9 w-9 place-items-center rounded-full hover:bg-slate-100 lg:hidden">
           <ArrowLeft className="h-5 w-5" />
@@ -597,59 +609,85 @@ function Page() {
               ? ticksFor({
                   isMine: true,
                   createdAt: m.at,
-                  // Delivered once saved on server (double white). Navy when officer opened chat.
                   peerOnline: true,
                   peerReadAt: maxOfficerRead,
                 })
               : "none";
+          const startLP = () => {
+            if (longPressTimer.current) clearTimeout(longPressTimer.current);
+            longPressTimer.current = setTimeout(() => setMenuMsg(m), 480);
+          };
+          const endLP = () => {
+            if (longPressTimer.current) clearTimeout(longPressTimer.current);
+          };
+          const outTick = tick === "read" ? "read" : tick === "none" ? "none" : "delivered";
           return (
             <div
               key={m.key}
-              className={cn("flex touch-pan-y", m.side === "out" ? "justify-end" : "justify-start gap-2")}
+              className={cn("flex w-full touch-pan-y select-none", m.side === "out" ? "justify-end" : "justify-start gap-2")}
+              onCopy={(e) => e.preventDefault()}
+              onContextMenu={(e) => e.preventDefault()}
               onTouchStart={(e) => {
                 swipeRef.current = { id: m.reportId, x: e.touches[0]?.clientX ?? 0 };
+                startLP();
               }}
+              onTouchMove={endLP}
               onTouchEnd={(e) => {
+                endLP();
                 const s = swipeRef.current;
                 swipeRef.current = null;
                 if (!s) return;
                 const x = e.changedTouches[0]?.clientX ?? 0;
                 if (x - s.x > 56) {
-                  setReplyTo({ id: m.reportId, text: m.text.slice(0, 120) });
+                  setReplyTo({
+                    id: m.reportId,
+                    text: (m.text && m.text !== "(attachment)" ? m.text : m.attachment_type || "Attachment").slice(0, 120),
+                  });
                 }
               }}
+              onMouseDown={startLP}
+              onMouseUp={endLP}
+              onMouseLeave={endLP}
             >
               {m.side === "in" ? (
-                <span className="mt-1 grid h-7 w-7 place-items-center rounded-full bg-[#0b1b3a] text-white">
+                <span className="mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#0b1b3a] text-white">
                   <User className="h-3.5 w-3.5" />
                 </span>
               ) : null}
-              <div
-                className={cn(
-                  "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm",
-                  m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white text-slate-800",
-                )}
-              >
-                {m.replyPreview ? (
-                  <div className={cn("mb-1.5 rounded-lg border-l-2 px-2 py-1 text-[11px]", m.side === "out" ? "border-white/50 bg-white/15 text-blue-50" : "border-blue-400 bg-slate-50 text-slate-600")}>
-                    {m.replyPreview.slice(0, 100)}
-                  </div>
-                ) : null}
-                {m.attachment_type === "image" && m.attachment_url ? (
-                  <img src={m.attachment_url} alt="" className="mb-1 max-h-64 w-full max-w-[260px] rounded-xl object-contain bg-black/5" />
-                ) : null}
-                {m.attachment_type === "audio" && m.attachment_url ? <audio controls src={m.attachment_url} className="mb-1 max-w-full" /> : null}
-                {m.attachment_type === "file" && m.attachment_url ? (
-                  <a href={m.attachment_url} target="_blank" rel="noreferrer" className="mb-1 block underline">
-                    Attachment
-                  </a>
-                ) : null}
-                {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap">{m.text}</p> : null}
-                <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
-                  {formatTime(m.at)}
-                  {m.side === "out" ? <Ticks state={tick === "read" ? "read" : "delivered"} /> : null}
-                </p>
-              </div>
+              {m.attachment_type === "audio" && m.attachment_url ? (
+                <VoiceBubble src={m.attachment_url} mine={m.side === "out"} timeLabel={formatTime(m.at)} tick={m.side === "out" ? outTick : "none"} />
+              ) : m.attachment_type === "image" && m.attachment_url ? (
+                <ImageBubble
+                  src={m.attachment_url}
+                  mine={m.side === "out"}
+                  timeLabel={formatTime(m.at)}
+                  tick={m.side === "out" ? outTick : "none"}
+                  onOpen={() => setLightboxSrc(m.attachment_url!)}
+                />
+              ) : (
+                <div
+                  className={cn(
+                    "max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm",
+                    m.side === "out" ? "rounded-br-md bg-[#2563eb] text-white" : "rounded-bl-md border bg-white text-slate-800",
+                  )}
+                >
+                  {m.replyPreview ? (
+                    <div className={cn("mb-1.5 rounded-lg border-l-2 px-2 py-1 text-[11px]", m.side === "out" ? "border-white/50 bg-white/15 text-blue-50" : "border-blue-400 bg-slate-50 text-slate-600")}>
+                      {m.replyPreview.slice(0, 100)}
+                    </div>
+                  ) : null}
+                  {m.attachment_type === "file" && m.attachment_url ? (
+                    <button type="button" className="mb-1 block text-left underline" onClick={() => setLightboxSrc(m.attachment_url!)}>
+                      Open attachment
+                    </button>
+                  ) : null}
+                  {m.text && m.text !== "(attachment)" ? <p className="whitespace-pre-wrap break-words">{m.text}</p> : null}
+                  <p className={cn("mt-1 flex items-center justify-end gap-1 text-[10px]", m.side === "out" ? "text-blue-100" : "text-slate-400")}>
+                    {formatTime(m.at)}
+                    {m.side === "out" ? <Ticks state={outTick === "none" ? "delivered" : outTick} /> : null}
+                  </p>
+                </div>
+              )}
             </div>
           );
         })}
@@ -659,8 +697,11 @@ function Page() {
       <div className="shrink-0 border-t bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         {replyTo ? (
           <div className="mb-2 flex items-start gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
+            <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#0b1b3a] text-white">
+              <User className="h-4 w-4" />
+            </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-bold uppercase text-blue-700">Replying</p>
+              <p className="text-[11px] font-bold text-blue-800">{officerNickname}</p>
               <p className="line-clamp-2 text-xs text-slate-700">{replyTo.text}</p>
             </div>
             <button type="button" onClick={() => setReplyTo(null)} className="text-slate-400" aria-label="Cancel reply">
@@ -677,17 +718,41 @@ function Page() {
           </div>
         ) : null}
         {recording || pendingAudio ? (
-          <div className="mb-2 flex items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2">
-            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
-            <p className="flex-1 text-sm font-semibold text-red-700">
-              {recording ? `Recording… ${recSecs}s` : "Voice note ready"}
-            </p>
-            <button type="button" onClick={cancelRec} className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-700 shadow-sm">
-              Cancel
-            </button>
-            <button type="button" onClick={() => void sendPendingAudio()} className="rounded-full bg-[#2563eb] px-3 py-1 text-xs font-bold text-white">
-              Send
-            </button>
+          <div className="mb-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <RecordingWave active={recording && !recPaused} />
+              <p className="flex-1 text-sm font-semibold text-red-700">
+                {recording ? (recPaused ? "Paused" : `Recording ${recSecs}s`) : "Voice note ready"}
+              </p>
+            </div>
+            {pendingAudioUrl ? (
+              <audio controls src={pendingAudioUrl} className="mt-2 w-full" />
+            ) : null}
+            <div className="mt-2 flex flex-wrap gap-2">
+              {recording ? (
+                <button type="button" onClick={() => {
+                  try {
+                    if (recPaused) { mediaRec.current?.resume(); setRecPaused(false); }
+                    else { mediaRec.current?.pause(); setRecPaused(true); }
+                  } catch { /* ignore */ }
+                }} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm">
+                  {recPaused ? "Resume" : "Pause"}
+                </button>
+              ) : null}
+              {recording ? (
+                <button type="button" onClick={stopRecKeep} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm">
+                  Done
+                </button>
+              ) : null}
+              <button type="button" onClick={() => { cancelRec(); if (pendingAudioUrl) { URL.revokeObjectURL(pendingAudioUrl); setPendingAudioUrl(null); } }} className="rounded-full bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm">
+                Cancel
+              </button>
+              {!recording && pendingAudio ? (
+                <button type="button" onClick={() => void sendPendingAudio()} className="rounded-full bg-[#2563eb] px-3 py-1.5 text-xs font-bold text-white">
+                  Send
+                </button>
+              ) : null}
+            </div>
           </div>
         ) : null}
         <input ref={fileRef} type="file" accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.target.value = ""; }} />
@@ -725,11 +790,10 @@ function Page() {
       {/* List — full on mobile when not in chat; left column on desktop */}
       <div
         className={cn(
-          "flex min-h-0 flex-col border-slate-200 lg:border-r",
+          "flex h-full min-h-0 w-full flex-1 flex-col bg-white lg:w-[var(--list-pct)] lg:max-w-[55%] lg:flex-none lg:border-r lg:border-slate-200",
           (inChat || composeOpen) && "hidden lg:flex",
-          "lg:h-full",
         )}
-        style={{ flexBasis: `${listPct}%`, flexGrow: 0, flexShrink: 0, maxWidth: "55%", minWidth: 260 }}
+        style={{ ["--list-pct"]: `${listPct}%`, width: "100%" } as Record<string, string>}
       >
         {listPane}
       </div>
@@ -756,7 +820,7 @@ function Page() {
         </div>
       </div>
 
-      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", !inChat && !composeOpen && "hidden lg:flex")}>
+      <div className={cn("flex h-full min-h-0 w-full min-w-0 flex-1 flex-col", !inChat && !composeOpen && "hidden lg:flex")}>
         {composeOpen ? (
           <div className="flex min-h-0 flex-1 flex-col bg-white">
             <div className="flex items-center gap-2 border-b px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -832,6 +896,61 @@ function Page() {
         </div>
       ) : null}
 
+      {lightboxSrc ? <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} /> : null}
+      <LongPressMenu
+        open={Boolean(menuMsg)}
+        onClose={() => setMenuMsg(null)}
+        items={
+          menuMsg
+            ? [
+                ...(menuMsg.side === "out" && menuMsg.text && menuMsg.text !== "(attachment)"
+                  ? [{ label: "Edit message", icon: "edit" as const, onClick: () => { setEditText(menuMsg.text); setEditOpen(true); } }]
+                  : []),
+                ...(menuMsg.attachment_url
+                  ? [{
+                      label: menuMsg.attachment_type === "audio" ? "Save voice note" : "Save media",
+                      icon: "download" as const,
+                      onClick: () => {
+                        const a = document.createElement("a");
+                        a.href = menuMsg.attachment_url!;
+                        a.download = menuMsg.attachment_type === "audio" ? "voice-note.webm" : "photo.jpg";
+                        a.rel = "noopener";
+                        a.click();
+                      },
+                    }]
+                  : []),
+                {
+                  label: "Delete",
+                  icon: "delete" as const,
+                  danger: true,
+                  onClick: () => {
+                    void supabase.from("student_officer_reports").delete().eq("id", menuMsg.reportId).then(() =>
+                      qc.invalidateQueries({ queryKey: ["student-my-reports"] }),
+                    );
+                  },
+                },
+              ]
+            : []
+        }
+      />
+      {editOpen && menuMsg ? (
+        <div className="fixed inset-0 z-[86] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-extrabold">Edit message</h3>
+            <textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="mt-3 min-h-[100px] w-full rounded-xl border p-3 text-sm" />
+            <div className="mt-3 flex gap-2">
+              <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setEditOpen(false)}>Cancel</Button>
+              <Button className="flex-1 rounded-xl bg-[#2563eb] font-bold" onClick={() => {
+                void supabase.from("student_officer_reports").update({ body: editText.trim() } as never).eq("id", menuMsg.reportId).then(() => {
+                  setEditOpen(false);
+                  setMenuMsg(null);
+                  void qc.invalidateQueries({ queryKey: ["student-my-reports"] });
+                });
+              }}>Save</Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {clearOpen ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
