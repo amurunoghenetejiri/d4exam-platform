@@ -592,17 +592,26 @@ function Page() {
 
   async function sendPendingAudio() {
     if (sendLock.current) return;
-    if (!pendingAudio && !recording) return;
-    sendLock.current = true;
-    const wasRecording = recording;
-    // Collapse recorder UI immediately
+    if (!pendingAudio && !recording && !(mediaRec.current && mediaRec.current.state !== "inactive")) return;
+    const wasRecording = recording || Boolean(mediaRec.current && mediaRec.current.state !== "inactive");
     setRecording(false);
     setRecPaused(false);
     presenceApi.current?.setRecording(false, studentId || userId);
     try {
-      if (wasRecording) {
-        stopRecKeep();
-        await new Promise((r) => setTimeout(r, 200));
+      if (wasRecording && mediaRec.current && mediaRec.current.state !== "inactive") {
+        await new Promise<void>((resolve) => {
+          const rec = mediaRec.current!;
+          const prev = rec.onstop;
+          rec.onstop = (ev) => {
+            try {
+              if (typeof prev === "function") (prev as (this: MediaRecorder, ev: Event) => void).call(rec, ev);
+            } finally {
+              resolve();
+            }
+          };
+          try { rec.stop(); } catch { resolve(); }
+        });
+        await new Promise((r) => setTimeout(r, 80));
       }
       const blob =
         pendingAudio ||
@@ -616,12 +625,12 @@ function Page() {
         if (prev) URL.revokeObjectURL(prev);
         return null;
       });
+      mediaRec.current = null;
+      chunks.current = [];
       const up = await uploadMessageMedia(blob, "audio/webm", `msg/${schoolId}/${userId}`);
       await sendMessage("", { url: up.url, type: "audio" });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not send voice note");
-    } finally {
-      sendLock.current = false;
     }
   }
 
@@ -1071,7 +1080,7 @@ function Page() {
               <Send className="h-4 w-4" />
             </button>
           ) : (
-            <button type="button" className={cn("mb-0.5 grid h-10 w-10 place-items-center rounded-full text-white", recording ? "bg-red-500" : "bg-[#0b1b3a]")} onClick={() => (recording ? stopRecKeep() : void startRec())} aria-label="Record voice">
+            <button type="button" className={cn("mb-0.5 grid h-10 w-10 place-items-center rounded-full text-white", recording ? "bg-red-500" : "bg-[#0b1b3a]")} onClick={() => (recording || pendingAudio || pendingAudioUrl ? void sendPendingAudio() : void startRec())} aria-label="Record voice">
               <Mic className="h-4 w-4" />
             </button>
           )}
