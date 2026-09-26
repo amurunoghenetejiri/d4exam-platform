@@ -157,6 +157,49 @@ export function FingerprintLockGate() {
   }, [native]);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [locked, setLocked] = useState(false);
+
+  // Prevent password keystrokes from reaching focused inputs under the lock overlay
+  useEffect(() => {
+    if (!locked) {
+      try {
+        document.documentElement.removeAttribute("data-d4-unlock-inert");
+        document.getElementById("root")?.removeAttribute("inert");
+        document.getElementById("app")?.removeAttribute("inert");
+        const main = document.querySelector("main");
+        main?.removeAttribute("inert");
+      } catch { /* ignore */ }
+      return;
+    }
+    try {
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && typeof ae.blur === "function" && ae !== document.body) {
+        // blur everything except elements inside the lock portal
+        const inLock = ae.closest?.("[data-d4-lock-gate]");
+        if (!inLock) ae.blur();
+      }
+      document.documentElement.setAttribute("data-d4-unlock-inert", "1");
+      // Mark app shell inert so inputs under the overlay cannot receive focus/input
+      const root = document.getElementById("root") || document.getElementById("app");
+      if (root) root.setAttribute("inert", "");
+      document.querySelectorAll("main, [data-d4-shell]").forEach((el) => {
+        try { el.setAttribute("inert", ""); } catch { /* ignore */ }
+      });
+    } catch { /* ignore */ }
+    return () => {
+      try {
+        document.documentElement.removeAttribute("data-d4-unlock-inert");
+        document.getElementById("root")?.removeAttribute("inert");
+        document.getElementById("app")?.removeAttribute("inert");
+        document.querySelectorAll("[inert]").forEach((el) => {
+          // only clear ones we likely set - if lock portal is not parent
+          if (!(el as HTMLElement).closest?.("[data-d4-lock-gate]")) {
+            try { el.removeAttribute("inert"); } catch { /* ignore */ }
+          }
+        });
+      } catch { /* ignore */ }
+    };
+  }, [locked]);
+
   const [failedMsg, setFailedMsg] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "scanning" | "success" | "failed">("idle");
   const [pageReady, setPageReady] = useState(false);
@@ -717,7 +760,24 @@ export function FingerprintLockGate() {
 
   return createPortal(
     <div
+      data-d4-lock-gate=""
       className="d4-fp-lock-overlay"
+      onMouseDown={(e) => {
+        const el = e.target as HTMLElement | null;
+        if (el && el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && el.tagName !== "BUTTON") {
+          const input = e.currentTarget.querySelector<HTMLInputElement>('input[data-d4-lock-input]');
+          input?.focus();
+        }
+      }}
+      onKeyDownCapture={(e) => {
+        const ae = document.activeElement as HTMLElement | null;
+        if (ae && !ae.closest?.("[data-d4-lock-gate]")) {
+          e.preventDefault();
+          e.stopPropagation();
+          const input = (e.currentTarget as HTMLElement).querySelector<HTMLInputElement>("input[data-d4-lock-input]");
+          input?.focus();
+        }
+      }}
       style={{
         position: "fixed",
         top: 0,
@@ -816,6 +876,7 @@ export function FingerprintLockGate() {
             <h2 className="text-lg font-bold text-white sm:text-xl md:text-2xl">Unlock D4EXAM</h2>
             <p className="mt-1 text-center text-sm text-slate-400 md:text-base">Enter your app password</p>
             <input
+              data-d4-lock-input=""
               type="password"
               name="d4-app-unlock"
               autoComplete="off"

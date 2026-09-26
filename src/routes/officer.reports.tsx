@@ -114,6 +114,14 @@ function Page() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [pendingAttach, setPendingAttach] = useState<{ url: string; type: string } | null>(null);
+  const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const [nickMap, setNickMap] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("d4exam.msg.nick.students") || "{}") as Record<string, string>;
+    } catch {
+      return {};
+    }
+  });
 
   const listQ = useQuery({
     queryKey: ["officer-student-reports", schoolId],
@@ -460,7 +468,7 @@ function Page() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="flex justify-between gap-2">
-                          <p className="truncate text-sm font-bold">{t.student_name || "Student"}</p>
+                          <p className="truncate text-sm font-bold">{nickMap[t.key] || t.student_name || "Student"}</p>
                           <span className="text-[10px] text-slate-400">{formatWhen(t.latestAt)}</span>
                         </div>
                         <p className="truncate text-xs text-slate-600">
@@ -493,12 +501,40 @@ function Page() {
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-bold">
-                {active.student_name || "Student"}
+                {nickMap[active.key] || active.student_name || "Student"}
                 {active.student_matric ? <span className="ml-1 text-xs font-semibold text-slate-500">· {active.student_matric}</span> : null}
               </p>
               <p className={cn("text-[11px] font-medium", studentOnline ? "text-emerald-600" : "text-slate-400")}>
                 {studentRecording ? "Recording…" : studentTyping ? "Typing…" : studentOnline ? "Online" : "Offline"}
               </p>
+            </div>
+            <div className="relative">
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100" onClick={() => setChatMenuOpen((v) => !v)} aria-label="Chat actions">
+                <span className="text-lg leading-none">⋮</span>
+              </button>
+              {chatMenuOpen ? (
+                <div className="absolute right-0 z-20 mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                  <button type="button" className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50" onClick={() => {
+                    const cur = nickMap[active.key] || active.student_name || "Student";
+                    const n = window.prompt("Nickname for this student", cur);
+                    if (n && n.trim()) {
+                      const next = { ...nickMap, [active.key]: n.trim() };
+                      setNickMap(next);
+                      try { localStorage.setItem("d4exam.msg.nick.students", JSON.stringify(next)); } catch { /* ignore */ }
+                    }
+                    setChatMenuOpen(false);
+                  }}>Rename contact</button>
+                  <button type="button" className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50" onClick={() => {
+                    setChatMenuOpen(false);
+                    void qc.invalidateQueries({ queryKey: ["officer-student-reports"] });
+                  }}>Refresh chat</button>
+                  <button type="button" className="block w-full px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => {
+                    if (!window.confirm("Hide this conversation from your open view? (Does not delete school records.)")) return;
+                    setThreadKey(null);
+                    setChatMenuOpen(false);
+                  }}>Close conversation</button>
+                </div>
+              ) : null}
             </div>
           </div>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3">

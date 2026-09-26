@@ -119,6 +119,14 @@ function Page() {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [pendingAttach, setPendingAttach] = useState<{ url: string; type: string } | null>(null);
+  const [chatMenuOpen, setChatMenuOpen] = useState(false);
+  const [officerNickname, setOfficerNickname] = useState(() => {
+    try {
+      return localStorage.getItem("d4exam.msg.nick.officer") || "Departmental Officer";
+    } catch {
+      return "Departmental Officer";
+    }
+  });
 
   const examsQ = useQuery({
     queryKey: ["student-contact-exams", schoolId, studentId],
@@ -548,7 +556,7 @@ function Page() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex justify-between gap-2">
-                      <p className="truncate text-sm font-bold">Departmental Officer</p>
+                      <p className="truncate text-sm font-bold">{officerNickname}</p>
                       <span className="text-[10px] text-slate-400">{formatWhen(listPreview.at)}</span>
                     </div>
                     <p className="line-clamp-1 text-xs text-slate-500">{listPreview.preview}</p>
@@ -658,10 +666,32 @@ function Page() {
               <span className={cn("absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-2 border-white", officerOnline ? "bg-emerald-400" : "bg-slate-300")} />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold">Departmental Officer</p>
+              <p className="truncate text-sm font-bold">{officerNickname}</p>
               <p className={cn("text-[11px] font-medium", officerOnline ? "text-emerald-600" : "text-slate-400")}>
                 {officerRecording ? "Recording…" : officerTyping ? "Typing…" : officerOnline ? "Online" : "Offline"}
               </p>
+            </div>
+            <div className="relative">
+              <button type="button" className="grid h-9 w-9 place-items-center rounded-full text-slate-500 hover:bg-slate-100" onClick={() => setChatMenuOpen((v) => !v)} aria-label="Chat actions">
+                <span className="text-lg leading-none">⋮</span>
+              </button>
+              {chatMenuOpen ? (
+                <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
+                  <button type="button" className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50" onClick={() => {
+                    const n = window.prompt("Nickname for this officer", officerNickname);
+                    if (n && n.trim()) {
+                      setOfficerNickname(n.trim());
+                      try { localStorage.setItem("d4exam.msg.nick.officer", n.trim()); } catch { /* ignore */ }
+                    }
+                    setChatMenuOpen(false);
+                  }}>Rename chat</button>
+                  <button type="button" className="block w-full px-3 py-2.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => {
+                    if (!window.confirm("Clear this conversation from your list view? Messages stay on the server for the officer.")) return;
+                    setInChat(false);
+                    setChatMenuOpen(false);
+                  }}>Close chat</button>
+                </div>
+              ) : null}
             </div>
           </div>
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3">

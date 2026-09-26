@@ -127,9 +127,6 @@ function NavLinks({
   badges?: Record<string, { dot?: "green" | "blue" | "red"; live?: boolean; count?: number }>;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const immersiveMessaging =
-    pathname.includes("/contact-officer") ||
-    pathname.includes("/officer/reports");
   const t = useT();
   const translateNav = (label: string) => translateNavLabel(label, t);
   return (
@@ -317,6 +314,9 @@ export function AppShell({
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const immersiveMessaging =
+    pathname.includes("/contact-officer") ||
+    pathname.includes("/officer/reports");
   const t = useT();
   const { data: session } = useSessionUser();
   const { data: school } = useSchoolIdentity(session?.schoolId);

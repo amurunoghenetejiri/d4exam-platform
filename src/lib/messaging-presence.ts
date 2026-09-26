@@ -1,5 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export type PresencePayload = {
   userId: string;
@@ -21,7 +20,7 @@ export function joinMessagingPresence(
   schoolId: string,
   self: Omit<PresencePayload, "at" | "online"> & { online?: boolean },
   handlers: Handlers,
-): { channel: RealtimeChannel; setTyping: (v: boolean, conversationKey?: string) => void; setRecording: (v: boolean, conversationKey?: string) => void; leave: () => void } {
+): { channel: { untrack: () => void }; setTyping: (v: boolean, conversationKey?: string) => void; setRecording: (v: boolean, conversationKey?: string) => void; leave: () => void } {
   const channel = supabase.channel(`d4-msg:${schoolId}`, {
     config: { presence: { key: self.userId } },
   });
