@@ -82,46 +82,6 @@ function WaveBars({
   );
 }
 
-function SeekBar({
-  value,
-  max,
-  light,
-  onSeek,
-}: {
-  value: number;
-  max: number;
-  light?: boolean;
-  onSeek: (t: number) => void;
-}) {
-  const trackRef = useRef<HTMLDivElement>(null);
-  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
-  const seekFromClientX = (clientX: number) => {
-    const el = trackRef.current;
-    if (!el || max <= 0) return;
-    const rect = el.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    onSeek(ratio * max);
-  };
-  return (
-    <div
-      ref={trackRef}
-      className={cn("relative h-5 flex-1 cursor-pointer touch-none")}
-      onPointerDown={(e) => {
-        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-        seekFromClientX(e.clientX);
-      }}
-      onPointerMove={(e) => {
-        if (e.buttons !== 1) return;
-        seekFromClientX(e.clientX);
-      }}
-    >
-      <div className={cn("absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full", light ? "bg-white/30" : "bg-slate-200")} />
-      <div className={cn("absolute left-0 top-1/2 h-1 -translate-y-1/2 rounded-full", light ? "bg-white" : "bg-[#2563eb]")} style={{ width: `${pct}%` }} />
-      <div className={cn("absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow", light ? "bg-white" : "bg-[#2563eb]")} style={{ left: `${pct}%` }} />
-    </div>
-  );
-}
-
 export function VoiceBubble({
   src,
   mine,
@@ -178,6 +138,8 @@ export function VoiceBubble({
   };
 
   const own = mine;
+  const timeShown = playing ? fmtDur(cur) : fmtDur(dur > 0 ? dur : 0);
+
   return (
     <div
       id={id}
@@ -219,9 +181,7 @@ export function VoiceBubble({
             }}
           />
           <div className={cn("mt-1 flex items-center gap-1 text-[10px] font-medium tabular-nums", own ? "text-slate-400" : "text-white/80")}>
-            <span>{fmtDur(playing ? cur : 0)}</span>
-            <span className="opacity-50">/</span>
-            <span className="opacity-80">{fmtDur(dur)}</span>
+            <span>{timeShown}</span>
           </div>
         </div>
         <div className="relative shrink-0">
@@ -298,10 +258,10 @@ export function VoiceRecorderBar({
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
   return (
-    <div className="mb-2 select-none rounded-2xl border border-red-100 bg-gradient-to-b from-red-50 to-white px-3 py-3 shadow-sm">
+    <div className="mb-0 select-none rounded-2xl border border-blue-200/80 bg-gradient-to-b from-[#eff6ff] to-white px-3 py-3 shadow-sm">
       <div className="mb-3 flex flex-col items-center gap-1">
         <WaveBars active={recording && !paused} />
-        <p className="text-sm font-bold tabular-nums text-slate-700">{mm}:{ss}</p>
+        <p className="text-sm font-bold tabular-nums text-slate-800">{mm}:{ss}</p>
         <p className="text-[11px] font-medium text-slate-500">
           {recording && !paused ? "Recording…" : paused ? "Paused — play to preview or continue" : "Voice note"}
         </p>
@@ -322,7 +282,7 @@ export function VoiceRecorderBar({
               <span className="text-[10px] font-semibold">Play</span>
             </button>
             <button type="button" onClick={onContinue} className="flex flex-col items-center gap-1">
-              <span className="grid h-14 w-14 place-items-center rounded-full bg-red-500 text-white shadow-md">
+              <span className="grid h-14 w-14 place-items-center rounded-full bg-[#2563eb] text-white shadow-md">
                 <Mic className="h-6 w-6" />
               </span>
               <span className="text-[10px] font-semibold text-slate-600">Continue</span>
@@ -445,9 +405,18 @@ export function ImageLightbox({
 }) {
   const list = urls && urls.length ? urls : src ? [src] : [];
   const [i, setI] = useState(index);
+  const touchRef = useRef<{ x: number } | null>(null);
   useEffect(() => setI(index), [index]);
   if (!list.length) return null;
   const cur = list[Math.min(i, list.length - 1)];
+  const go = (dir: -1 | 1) => {
+    setI((prev) => {
+      const next = prev + dir;
+      if (next < 0) return list.length - 1;
+      if (next >= list.length) return 0;
+      return next;
+    });
+  };
   return (
     <div className="fixed inset-0 z-[90] flex flex-col bg-black">
       <div className="flex items-center justify-between px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -457,9 +426,29 @@ export function ImageLightbox({
         <p className="text-sm font-semibold text-white">{list.length > 1 ? `${i + 1} / ${list.length}` : "Photo"}</p>
         <span className="w-10" />
       </div>
-      <div className="flex min-h-0 flex-1 items-center justify-center">
-        <img src={cur} alt="" className="max-h-full max-w-full object-contain" />
+      <div
+        className="flex min-h-0 flex-1 items-center justify-center touch-pan-y"
+        onTouchStart={(e) => {
+          touchRef.current = { x: e.touches[0]?.clientX ?? 0 };
+        }}
+        onTouchEnd={(e) => {
+          const s = touchRef.current;
+          touchRef.current = null;
+          if (!s || list.length < 2) return;
+          const x = e.changedTouches[0]?.clientX ?? 0;
+          const dx = x - s.x;
+          if (dx < -48) go(1);
+          else if (dx > 48) go(-1);
+        }}
+      >
+        <img src={cur} alt="" className="max-h-full max-w-full object-contain select-none" draggable={false} />
       </div>
+      {list.length > 1 ? (
+        <div className="flex items-center justify-center gap-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <button type="button" className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold text-white" onClick={() => go(-1)}>Prev</button>
+          <button type="button" className="rounded-full bg-white/15 px-4 py-2 text-sm font-semibold text-white" onClick={() => go(1)}>Next</button>
+        </div>
+      ) : null}
     </div>
   );
 }
