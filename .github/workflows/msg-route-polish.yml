@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - .github/workflows/msg-route-polish.yml
+permissions:
+  contents: write
 jobs:
   polish:
     runs-on: ubuntu-latest
@@ -15,65 +17,49 @@ jobs:
           from pathlib import Path
           import re
 
-          def patch_student(p: Path):
-              t = p.read_text()
-              t = t.replace(
-                  'const [replyTo, setReplyTo] = useState<{ id: string; text: string } | null>(null);',
-                  'const [replyTo, setReplyTo] = useState<{ id: string; text: string; fromSelf?: boolean } | null>(null);',
+          p = Path('src/routes/student.contact-officer.tsx')
+          t = p.read_text()
+          t2 = t.replace(
+              'const [replyTo, setReplyTo] = useState<{ id: string; text: string } | null>(null);',
+              'const [replyTo, setReplyTo] = useState<{ id: string; text: string; fromSelf?: boolean } | null>(null);',
+          )
+          t2 = t2.replace(
+              '<Mic className="h-7 w-7 stroke-[2.5]" />',
+              '<Mic className="h-5 w-5 stroke-[2.5]" />',
+          )
+          if 'fromSelf: m.side' not in t2:
+              t2 = re.sub(
+                  r'setReplyTo\(\{\s*id: m\.reportId,\s*text: \(m\.text && m\.text !== "\(attachment\)" \? m\.text : m\.attachment_type \|\| "Attachment"\)\.slice\(0, 120\),\s*\}\);',
+                  'setReplyTo({\n                      id: m.reportId,\n                      text: (m.text && m.text !== "(attachment)" ? m.text : attachmentLabel(m.attachment_type, m.attachment_url)).slice(0, 120),\n                      fromSelf: m.side === "out",\n                    });',
+                  t2,
+                  count=1,
               )
-              t = t.replace(
+          if 'replyTo.fromSelf' not in t2 and 'replyTo?.fromSelf' not in t2:
+              t2 = t2.replace(
+                  '<p className="text-[11px] font-bold text-blue-800">{officerNickname}</p>',
+                  '<p className="text-[11px] font-bold text-blue-800">{replyTo.fromSelf ? "You" : officerNickname}</p>',
+              )
+          p.write_text(t2)
+          print('student changed', t != t2)
+
+          op = Path('src/routes/officer.reports.tsx')
+          if op.exists():
+              ot = op.read_text()
+              ot2 = ot.replace(
                   '<Mic className="h-7 w-7 stroke-[2.5]" />',
                   '<Mic className="h-5 w-5 stroke-[2.5]" />',
               )
-              # setReplyTo with fromSelf on swipe
-              if 'fromSelf: m.side' not in t:
-                  t = t.replace(
-                      'setReplyTo({\n                      id: m.reportId,\n                      text: (m.text && m.text !== "(attachment)" ? m.text : m.attachment_type || "Attachment").slice(0, 120),\n                    });',
-                      'setReplyTo({\n                      id: m.reportId,\n                      text: (m.text && m.text !== "(attachment)" ? m.text : attachmentLabel(m.attachment_type, m.attachment_url)).slice(0, 120),\n                      fromSelf: m.side === "out",\n                    });',
-                  )
-                  # alternate formatting
-                  t = re.sub(
-                      r'setReplyTo\(\{\s*id: m\.reportId,\s*text: \(m\.text && m\.text !== "\(attachment\)" \? m\.text : m\.attachment_type \|\| "Attachment"\)\.slice\(0, 120\),\s*\}\);',
-                      'setReplyTo({\n                      id: m.reportId,\n                      text: (m.text && m.text !== "(attachment)" ? m.text : attachmentLabel(m.attachment_type, m.attachment_url)).slice(0, 120),\n                      fromSelf: m.side === "out",\n                    });',
-                      t,
-                      count=1,
-                  )
-              # reply preview header
-              if 'replyTo.fromSelf' not in t:
-                  # common patterns for reply bar title
-                  t = t.replace(
-                      '{officerNickname}</p>',
-                      '{replyTo?.fromSelf ? "You" : officerNickname}</p>',
-                      1,
-                  )
-                  # more specific if reply bar exists
-                  t = re.sub(
-                      r'(replyTo \?[\s\S]{0,400}?<p className="text-\[11px\] font-bold text-blue-800">)\{?officerNickname\}?\s*</p>',
-                      r'\1{replyTo.fromSelf ? "You" : officerNickname}</p>',
-                      t,
-                      count=1,
-                  )
-              p.write_text(t)
-              print('student patched', 'fromSelf' in t, 'h-5 w-5 stroke' in t)
-
-          def patch_officer(p: Path):
-              if not p.exists():
-                  return
-              t = p.read_text()
-              t = t.replace(
-                  '<Mic className="h-7 w-7 stroke-[2.5]" />',
-                  '<Mic className="h-5 w-5 stroke-[2.5]" />',
-              )
-              p.write_text(t)
-              print('officer patched')
-
-          patch_student(Path('src/routes/student.contact-officer.tsx'))
-          patch_officer(Path('src/routes/officer.reports.tsx'))
+              op.write_text(ot2)
+              print('officer changed', ot != ot2)
           PY
       - name: Commit
         run: |
           git config user.name d4exam-bot
           git config user.email bot@d4exam.local
-          git add -A
-          git diff --cached --quiet || git commit -m "fix(messaging): smaller mic + reply You label"
-          git push
+          git add src/routes/student.contact-officer.tsx src/routes/officer.reports.tsx || true
+          if git diff --cached --quiet; then
+            echo "No route changes"
+          else
+            git commit -m "fix(messaging): smaller mic + reply You label"
+            git push
+          fi
